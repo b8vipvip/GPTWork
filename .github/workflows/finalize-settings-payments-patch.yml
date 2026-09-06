@@ -1,0 +1,57 @@
+name: Finalize settings and payments patch
+
+on:
+  push:
+    branches:
+      - feat/settings-payments-ui-20260906
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/settings-payments-ui-20260906
+      - name: Apply final targeted edits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:100]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'license-server/public/admin-settings.html',
+              '  <link rel="stylesheet" href="/admin.css">\n',
+              '  <link rel="stylesheet" href="/admin.css">\n  <link rel="stylesheet" href="/admin-settings.css">\n',
+          )
+
+          replace_once(
+              'license-server/account-system.mjs',
+              "  function publicPaymentMethods() {\n    return db.prepare('SELECT * FROM payment_methods WHERE enabled=1 ORDER BY code').all().map((row) => ({\n      code: row.code,\n      name: row.name,\n      payUrl: normalizeHttpsUrl(row.pay_url) || '',\n      instructions: row.instructions,\n    }));\n  }",
+              "  function publicPaymentMethods() {\n    if (paymentSystem?.list) return paymentSystem.list(true);\n    return db.prepare('SELECT * FROM payment_methods WHERE enabled=1 ORDER BY code').all().map((row) => ({\n      code: row.code,\n      name: row.name,\n      payUrl: normalizeHttpsUrl(row.pay_url) || '',\n      instructions: row.instructions,\n    }));\n  }",
+          )
+
+          replace_once(
+              'license-server/official-payment-system.mjs',
+              "  db.exec(`\n    CREATE TABLE IF NOT EXISTS official_payment_orders (",
+              "  db.exec(`\n    CREATE TABLE IF NOT EXISTS secure_settings (\n      key TEXT PRIMARY KEY,\n      ciphertext TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    ) STRICT;\n    CREATE TABLE IF NOT EXISTS official_payment_orders (",
+          )
+          PY
+      - name: Commit and remove helper workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add license-server/public/admin-settings.html license-server/account-system.mjs license-server/official-payment-system.mjs
+          git rm .github/workflows/finalize-settings-payments-patch.yml
+          git commit -m 'fix: finalize official payment integration'
+          git push origin HEAD:feat/settings-payments-ui-20260906
