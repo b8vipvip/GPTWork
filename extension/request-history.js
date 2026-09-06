@@ -4,6 +4,11 @@ function safeTabId(value) {
   return Number.isInteger(value) ? value : null;
 }
 
+function requestKey(tabId, requestId) {
+  if (tabId === null || requestId === null || requestId === undefined || requestId === '') return null;
+  return `${tabId}:${String(requestId)}`;
+}
+
 function isoTimestamp(value) {
   if (typeof value !== 'string' || !value) return null;
   return Number.isFinite(Date.parse(value)) ? value : null;
@@ -28,7 +33,9 @@ function finalizePending(record) {
 export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMIT } = {}) {
   const logs = Array.isArray(entries) ? entries : [];
   const records = [];
+  const pendingRewriteByRequest = new Map();
   const pendingRewriteByTab = new Map();
+  const activeRecordByRequest = new Map();
   const activeRecordByTab = new Map();
 
   for (const entry of logs) {
@@ -40,7 +47,8 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
       entry?.component === 'lock'
       && (entry?.event === 'request_lock_rewritten' || entry?.event === 'request_lock_checked')
     ) {
-      pendingRewriteByTab.set(tabId, {
+      const rewrite = {
+        requestId: details.requestId ?? null,
         timestamp: isoTimestamp(entry.timestamp),
         changed: Boolean(details.changed),
         reason: details.reason ?? null,
@@ -50,21 +58,28 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
         transportModelAfter: details.transportModelAfter ?? null,
         reasoningBefore: details.reasoningBefore ?? null,
         reasoningAfter: details.reasoningAfter ?? null,
-      });
+      };
+      const key = requestKey(tabId, rewrite.requestId);
+      if (key) pendingRewriteByRequest.set(key, rewrite);
+      pendingRewriteByTab.set(tabId, rewrite);
       continue;
     }
 
     if (entry?.component === 'network' && entry?.event === 'formal_conversation_request_detected') {
+      const requestId = details.requestId ?? null;
+      const key = requestKey(tabId, requestId);
       const previous = activeRecordByTab.get(tabId);
       finalizePending(previous);
 
-      const rewrite = pendingRewriteByTab.get(tabId) ?? null;
-      pendingRewriteByTab.delete(tabId);
+      const rewrite = (key ? pendingRewriteByRequest.get(key) : null) ?? pendingRewriteByTab.get(tabId) ?? null;
+      if (key) pendingRewriteByRequest.delete(key);
+      if (pendingRewriteByTab.get(tabId) === rewrite) pendingRewriteByTab.delete(tabId);
       const requestModel = details.model ?? null;
       const discoveredModel = rewrite?.modelBefore ?? requestModel;
       const record = {
         id: typeof entry.id === 'string' && entry.id ? entry.id : `request:${tabId}:${entry.timestamp ?? records.length}`,
         tabId,
+        requestId,
         capturedAt: isoTimestamp(entry.timestamp),
         discoveredModel,
         discoveredTransportModel: rewrite?.transportModelBefore ?? null,
@@ -81,12 +96,14 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
         completedAt: null,
       };
       records.push(record);
+      if (key) activeRecordByRequest.set(key, record);
       activeRecordByTab.set(tabId, record);
       continue;
     }
 
     if (entry?.component === 'verification' && entry?.event === 'response_evaluated') {
-      const record = activeRecordByTab.get(tabId);
+      const key = requestKey(tabId, details.requestId ?? null);
+      const record = (key ? activeRecordByRequest.get(key) : null) ?? activeRecordByTab.get(tabId);
       if (!record) continue;
       record.finalModel = details.model ?? record.finalModel;
       record.finalReasoning = details.reasoning ?? record.finalReasoning;
@@ -98,7 +115,8 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
     }
 
     if (entry?.component === 'verification' && entry?.event === 'response_evaluation_failed') {
-      const record = activeRecordByTab.get(tabId);
+      const key = requestKey(tabId, details.requestId ?? null);
+      const record = (key ? activeRecordByRequest.get(key) : null) ?? activeRecordByTab.get(tabId);
       if (!record) continue;
       record.status = 'error';
       record.statusReason = details.error ?? 'response_evaluation_failed';
