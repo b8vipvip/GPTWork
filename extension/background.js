@@ -499,6 +499,7 @@ async function applyNetworkEvidence(tabId, evidence) {
     state.phase = result.verdict;
     logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'verification', 'response_evaluated', {
       tabId,
+      requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       verdict: result.verdict,
       decision: result.decision,
       reason: result.reason,
@@ -515,6 +516,7 @@ async function applyNetworkEvidence(tabId, evidence) {
     state.lastError = errorText(error);
     logRuntime('error', 'verification', 'response_evaluation_failed', {
       tabId,
+      requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       error: state.lastError,
       diagnostics: evidence.diagnostics ?? null,
     });
@@ -550,6 +552,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     state.lastRewrite = {
       capturedAt: new Date().toISOString(),
       endpoint: rewrite.endpoint ?? null,
+      requestId: rewrite.requestId ?? null,
       changed: Boolean(rewrite.changed),
       reason: rewrite.reason ?? null,
       modelBefore: rewrite.modelBefore ?? null,
@@ -587,6 +590,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     state.lastEvidenceDiagnostics = null;
     logRuntime('info', 'network', 'formal_conversation_request_detected', {
       tabId,
+      requestId: request.requestId,
       model: request.model,
       reasoning: request.reasoning,
       conflicts: request.conflicts,
