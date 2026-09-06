@@ -35,6 +35,13 @@ test('shared admin navigation contains the complete canonical menu', () => {
   }
 });
 
+test('system settings stylesheet is linked and served by the control-plane server', () => {
+  const html = readFileSync(join(PUBLIC, 'admin-settings.html'), 'utf8');
+  const serverSource = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  assert.match(html, /href="\/admin-settings\.css"/, 'system settings should load its dedicated stylesheet');
+  assert.match(serverSource, /url\.pathname === '\/admin-settings\.css'/, 'server should expose the dedicated system settings stylesheet');
+});
+
 test('website CMS uses isolated per-field saves while retaining an explicit save-all fallback', () => {
   const html = readFileSync(join(PUBLIC, 'admin-website.html'), 'utf8');
   const source = readFileSync(join(PUBLIC, 'admin-website.js'), 'utf8');
