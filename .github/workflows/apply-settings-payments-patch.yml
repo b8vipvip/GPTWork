@@ -1,0 +1,115 @@
+name: Apply settings and payments patch
+
+on:
+  push:
+    branches:
+      - feat/settings-payments-ui-20260906
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/settings-payments-ui-20260906
+      - name: Apply integration edits
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          # Compose the existing ZPAY/OKX/manual implementation with the new official providers.
+          replace_once(
+              'license-server/server.mjs',
+              "import { createPaymentSystem } from './payment-system.mjs';\n",
+              "import { createPaymentSystem } from './payment-system.mjs';\nimport { createOfficialPaymentSystem } from './official-payment-system.mjs';\nimport { composePaymentSystems } from './composite-payment-system.mjs';\n",
+          )
+          replace_once(
+              'license-server/server.mjs',
+              "const paymentSystem = createPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, secret: SECRET, env });\nconst accountSystem = createAccountSystem({ db, env, secret: SECRET, publicOrigin: PUBLIC_ORIGIN, allowedExtensionIds: ALLOWED_EXTENSION_IDS, windowTtlSeconds: WINDOW_TTL_SECONDS, json, bodyJson, clientIp, paymentSystem });",
+              "const legacyPaymentSystem = createPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, secret: SECRET, env });\nconst officialPaymentSystem = createOfficialPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, secret: SECRET, env });\nconst paymentSystem = composePaymentSystems(legacyPaymentSystem, officialPaymentSystem);\nconst accountSystem = createAccountSystem({ db, env, secret: SECRET, publicOrigin: PUBLIC_ORIGIN, allowedExtensionIds: ALLOWED_EXTENSION_IDS, windowTtlSeconds: WINDOW_TTL_SECONDS, json, bodyJson, clientIp, paymentSystem });",
+          )
+          replace_once(
+              'license-server/account-system.mjs',
+              "if (paymentSystem) order = paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });",
+              "if (paymentSystem) order = await paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });",
+          )
+          replace_once(
+              'license-server/site-account.mjs',
+              "order = paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });",
+              "order = await paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });",
+          )
+
+          # Client settings: remove detail noise and evidence-only UI requested by the product owner.
+          p = Path('extension/settings-v0521.html')
+          text = p.read_text(encoding='utf-8')
+          removals = [
+              '          <p class="help">从 GitHub 正式 Release 检查版本；Windows 支持校验 SHA-256 后静默安装，并在本页显示下载、校验、安装、重连全过程。</p>\n',
+              '      <p class="permission-note">正式聊天 POST 发出前会再次检查顶层 <code>model</code>。Astra 的网页内部 transport slug 可能随 OpenAI 变化；GPTWork 会把可信的 Astra family slug 统一识别为 <code>gpt-6-astra</code>，但保留 ChatGPT 自己发送的实际 slug。所有勾选与取消都会即时同步，无需再点击页面底部保存按钮。</p>\n',
+              '      <p class="permission-note"><code>auto</code> 是 ChatGPT 自动路由标识，不代表具体模型，不会加入自动识别或锁定策略；自定义模型必须填写实际传输 model ID。</p>\n',
+              '        <div><dt>证据来源 / Evidence</dt><dd id="evidenceStatus">暂无 / None</dd></div>\n',
+              '      <p class="boundary">“自动验证”会自动尝试页面对齐，然后在当前 ChatGPT 对话中写入并发送一条可见测试消息；无需人工再点击发送。正式聊天只拦截两个 conversation POST 端点，prepare/init 不再被当作正式聊天请求。本地核心在扩展启动时自动连接，断线后自动重试，无需手动重连。</p>\n',
+              '      <p class="boundary en">Auto verify sends one visible test message itself. Only the two formal conversation POST endpoints are request-locked; prepare/init remain auxiliary traffic. Native Core connection and retry are automatic.</p>\n',
+              '      <p class="permission-note request-history-note">“发现模型”优先来自正式请求进入锁定器时已有的 model；“请求模型”是锁定处理后的正式 POST model；“最终模型”只有响应证据实际暴露模型时才显示。无法确认时明确显示未确认，不用页面文字补猜。</p>\n',
+              '              <th>证据</th>\n',
+          ]
+          for old in removals:
+              if old not in text:
+                  raise SystemExit(f'extension/settings-v0521.html missing removal anchor: {old[:100]!r}')
+              text = text.replace(old, '', 1)
+          p.write_text(text, encoding='utf-8')
+
+          # Keep status rendering null-safe after the Evidence element is removed.
+          replace_once(
+              'extension/options.js',
+              "    elements.evidenceStatus.textContent = '暂无 / None';",
+              "    if (elements.evidenceStatus) elements.evidenceStatus.textContent = '暂无 / None';",
+          )
+          replace_once(
+              'extension/options.js',
+              "  elements.evidenceStatus.textContent = `${verification.evidenceSource} · ${verification.confidence}`;",
+              "  if (elements.evidenceStatus) elements.evidenceStatus.textContent = `${verification.evidenceSource} · ${verification.confidence}`;",
+          )
+
+          # Website: present official-provider labels and return-state notices.
+          replace_once(
+              'license-server/public/site.js',
+              "  const zpayReturn = new URLSearchParams(location.search).get('zpay');",
+              "  const returnParams = new URLSearchParams(location.search);\n  const zpayReturn = returnParams.get('zpay');\n  const paypalReturn = returnParams.get('paypal');\n  const alipayReturn = returnParams.get('alipay');",
+          )
+          replace_once(
+              'license-server/public/site.js',
+              "      if (zpayReturn) {\n        const box = document.getElementById('paymentBox');\n        notice(box, zpayReturn === 'success' ? 'ZPAY 已返回支付成功，会员权益已刷新。' : '已从 ZPAY 返回；如果刚完成付款，请稍候几秒等待异步回调并自动刷新。', zpayReturn === 'success' ? 'good' : '');\n        history.replaceState(null, '', location.pathname);\n      }",
+              "      if (zpayReturn || paypalReturn || alipayReturn) {\n        const box = document.getElementById('paymentBox');\n        if (paypalReturn) notice(box, paypalReturn === 'success' ? 'PayPal 官方支付已完成，会员权益已刷新。' : paypalReturn === 'cancelled' ? 'PayPal 支付已取消。' : 'PayPal 支付未完成，请重新发起订单。', paypalReturn === 'success' ? 'good' : '');\n        else if (alipayReturn) notice(box, '已从支付宝返回；系统将以支付宝官方异步通知验签结果为准，到账后自动刷新会员权益。');\n        else notice(box, zpayReturn === 'success' ? 'ZPAY 已返回支付成功，会员权益已刷新。' : '已从 ZPAY 返回；如果刚完成付款，请稍候几秒等待异步回调并自动刷新。', zpayReturn === 'success' ? 'good' : '');\n        history.replaceState(null, '', location.pathname);\n      }",
+          )
+          replace_once(
+              'license-server/public/site.js',
+              "function paymentMethodLabel(method) {\n  if (method.code === 'wechat') return method.provider === 'zpay' ? '微信支付（ZPAY）' : '微信支付';\n  if (method.code === 'alipay') return method.provider === 'zpay' ? '支付宝（ZPAY）' : '支付宝';\n  if (method.code === 'usdt') return 'USDT';\n  return method.name || method.code;\n}",
+              "function paymentMethodLabel(method) {\n  if (method.code === 'wechat') return method.provider === 'zpay' ? '微信支付（ZPAY）' : method.provider === 'wechat_official' ? '微信支付（官方 API）' : '微信支付';\n  if (method.code === 'alipay') return method.provider === 'zpay' ? '支付宝（ZPAY）' : method.provider === 'alipay_official' ? '支付宝（官方 API）' : '支付宝';\n  if (method.code === 'paypal') return 'PayPal（官方 API）';\n  if (method.code === 'usdt') return 'USDT';\n  return method.name || method.code;\n}",
+          )
+          replace_once(
+              'license-server/public/site.js',
+              "  } else if (method.provider === 'zpay') {\n    box.append(node('small', '', '点击“打开支付页面”后将进入 ZPAY 收银台。只有服务端验证 ZPAY 回调签名、商户号、订单号、金额与支付渠道全部一致后，才会自动确认订单并开通会员。'));\n  } else {",
+              "  } else if (method.provider === 'zpay') {\n    box.append(node('small', '', '点击“打开支付页面”后将进入 ZPAY 收银台。只有服务端验证 ZPAY 回调签名、商户号、订单号、金额与支付渠道全部一致后，才会自动确认订单并开通会员。'));\n  } else if (['wechat_official', 'alipay_official', 'paypal_official'].includes(method.provider)) {\n    box.append(node('small', '', '该订单使用官方支付接口。服务端只在官方回调或服务器端 Capture 校验订单号、金额、币种与支付状态一致后自动开通会员。'));\n  } else {",
+          )
+          PY
+
+      - name: Commit integration patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add license-server/server.mjs license-server/account-system.mjs license-server/site-account.mjs license-server/public/site.js extension/settings-v0521.html extension/options.js
+          git diff --cached --exit-code && exit 0 || true
+          git commit -m 'feat: integrate official payment providers and simplify client settings'
+          git push origin HEAD:feat/settings-payments-ui-20260906
