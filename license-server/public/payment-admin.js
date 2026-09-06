@@ -3,6 +3,7 @@ const app = $('app');
 const message = $('paymentSettingsMessage');
 let loaded = false;
 let planRows = [];
+let officialState = { wechat: {}, alipay: {}, paypal: {} };
 
 function setMessage(value, tone = '') {
   if (!message) return;
@@ -28,7 +29,9 @@ async function api(path, options = {}) {
 }
 
 function byCode(rows, code) {
-  return (rows || []).find((row) => row.code === code) || { code, enabled: false, payUrl: '', instructions: '', qrConfigured: false, crypto: null };
+  return (rows || []).find((row) => row.code === code) || {
+    code, enabled: false, payUrl: '', instructions: '', qrConfigured: false, crypto: null,
+  };
 }
 
 function renderQrState(code, method) {
@@ -78,7 +81,87 @@ function okxStatusText(okx = {}) {
   return parts.join(' · ');
 }
 
-function render(data) {
+function officialStatusText(code, config = {}) {
+  const parts = [config.configured ? '凭据已配置' : '凭据未配置'];
+  if (code === 'wechat') {
+    if (config.appId) parts.push(`AppID ${config.appId}`);
+    if (config.mchIdHint) parts.push(`MchID ${config.mchIdHint}`);
+    if (config.merchantSerialNo) parts.push(`商户证书 ${config.merchantSerialNo}`);
+    if (config.platformSerialNo) parts.push(`平台序列号 ${config.platformSerialNo}`);
+  } else if (code === 'alipay') {
+    if (config.appId) parts.push(`AppID ${config.appId}`);
+    parts.push(config.sandbox ? '沙箱环境' : '正式环境');
+  } else if (code === 'paypal') {
+    if (config.clientIdHint) parts.push(`Client ID ${config.clientIdHint}`);
+    parts.push(config.sandbox ? 'Sandbox' : 'Live');
+    if (config.currency) parts.push(config.currency);
+  }
+  if (config.lastTestAt) parts.push(`最近测试 ${new Date(config.lastTestAt).toLocaleString()}`);
+  if (config.lastError) parts.push(`错误：${config.lastError}`);
+  return parts.join(' · ');
+}
+
+function setOfficialBadge(code, config = {}) {
+  const badge = $(`${code}OfficialBadge`);
+  if (!badge) return;
+  badge.className = `provider-badge${config.configured ? ' good' : config.lastError ? ' bad' : ''}`;
+  badge.textContent = config.configured ? '已配置' : config.lastError ? '配置异常' : '未配置';
+}
+
+function syncProviderFields(code) {
+  if (!['wechat', 'alipay'].includes(code)) return;
+  const provider = $(`${code}Provider`)?.value || 'manual';
+  const official = document.querySelector(`[data-provider-fields="${code}_official"]`);
+  const legacy = document.querySelector(`[data-provider-fields="${code}_legacy"]`);
+  if (official) official.hidden = provider !== `${code}_official`;
+  if (legacy) legacy.hidden = provider !== 'manual';
+}
+
+function renderOfficial(configs = {}) {
+  officialState = {
+    wechat: configs.wechat || {},
+    alipay: configs.alipay || {},
+    paypal: configs.paypal || {},
+  };
+
+  const wechat = officialState.wechat;
+  if ($('wechatOfficialAppId')) $('wechatOfficialAppId').value = wechat.appId || '';
+  if ($('wechatOfficialMchId')) $('wechatOfficialMchId').value = '';
+  if ($('wechatOfficialMchId')) $('wechatOfficialMchId').placeholder = wechat.mchIdHint ? `已保存 ${wechat.mchIdHint}；填写可替换` : '190000....';
+  if ($('wechatOfficialMerchantSerial')) $('wechatOfficialMerchantSerial').value = wechat.merchantSerialNo || '';
+  if ($('wechatOfficialPlatformSerial')) $('wechatOfficialPlatformSerial').value = wechat.platformSerialNo || '';
+  if ($('wechatOfficialPrivateKey')) $('wechatOfficialPrivateKey').value = '';
+  if ($('wechatOfficialApiV3Key')) $('wechatOfficialApiV3Key').value = '';
+  if ($('wechatOfficialPlatformKey')) $('wechatOfficialPlatformKey').value = '';
+  if ($('wechatOfficialState')) $('wechatOfficialState').textContent = officialStatusText('wechat', wechat);
+  setOfficialBadge('wechat', wechat);
+
+  const alipay = officialState.alipay;
+  if ($('alipayOfficialAppId')) $('alipayOfficialAppId').value = alipay.appId || '';
+  if ($('alipayOfficialSandbox')) $('alipayOfficialSandbox').checked = Boolean(alipay.sandbox);
+  if ($('alipayOfficialPrivateKey')) $('alipayOfficialPrivateKey').value = '';
+  if ($('alipayOfficialPublicKey')) $('alipayOfficialPublicKey').value = '';
+  if ($('alipayOfficialState')) $('alipayOfficialState').textContent = officialStatusText('alipay', alipay);
+  setOfficialBadge('alipay', alipay);
+
+  const paypal = officialState.paypal;
+  if ($('paypalOfficialEnvironment')) $('paypalOfficialEnvironment').value = paypal.sandbox === false ? 'live' : 'sandbox';
+  if ($('paypalOfficialCurrency')) $('paypalOfficialCurrency').value = paypal.currency || 'CNY';
+  if ($('paypalOfficialClientId')) {
+    $('paypalOfficialClientId').value = '';
+    $('paypalOfficialClientId').placeholder = paypal.clientIdHint ? `已保存 ${paypal.clientIdHint}；填写可替换` : 'PayPal Client ID';
+  }
+  if ($('paypalOfficialClientSecret')) $('paypalOfficialClientSecret').value = '';
+  if ($('paypalOfficialState')) $('paypalOfficialState').textContent = officialStatusText('paypal', paypal);
+  setOfficialBadge('paypal', paypal);
+
+  if ($('wechatProvider') && wechat.provider) $('wechatProvider').value = wechat.provider;
+  if ($('alipayProvider') && alipay.provider) $('alipayProvider').value = alipay.provider;
+  syncProviderFields('wechat');
+  syncProviderFields('alipay');
+}
+
+function render(data, official = {}) {
   const rows = data.paymentMethods || [];
   for (const code of ['wechat', 'alipay', 'usdt']) {
     const method = byCode(rows, code);
@@ -88,14 +171,21 @@ function render(data) {
     if (enabled) enabled.checked = Boolean(method.enabled);
     if (url) url.value = method.payUrl || '';
     if (instructions) instructions.value = method.instructions || '';
-    if (code !== 'usdt' && $(`${code}Provider`)) $(`${code}Provider`).value = method.provider === 'zpay' ? 'zpay' : 'manual';
+    if (code !== 'usdt' && $(`${code}Provider`)) {
+      const officialProvider = official?.[code]?.provider;
+      $(`${code}Provider`).value = officialProvider || (method.provider === 'zpay' ? 'zpay' : 'manual');
+    }
     renderQrState(code, method);
     if (code === 'usdt') {
-      $('usdtNetwork').value = method.crypto?.network || '';
-      $('usdtAddress').value = method.crypto?.address || '';
-      $('usdtMemo').value = method.crypto?.memo || '';
+      if ($('usdtNetwork')) $('usdtNetwork').value = method.crypto?.network || '';
+      if ($('usdtAddress')) $('usdtAddress').value = method.crypto?.address || '';
+      if ($('usdtMemo')) $('usdtMemo').value = method.crypto?.memo || '';
     }
   }
+  const paypalMethod = byCode(rows, 'paypal');
+  if ($('paypalEnabled')) $('paypalEnabled').checked = Boolean(paypalMethod.enabled);
+  if ($('paypalInstructions')) $('paypalInstructions').value = paypalMethod.instructions || $('paypalInstructions').value || '';
+
   renderPlanPrices(data.usdtPlanPrices || byCode(rows, 'usdt').planPrices || {});
   const okx = data.okx || {};
   if ($('okxAutoEnabled')) $('okxAutoEnabled').checked = Boolean(okx.enabled);
@@ -106,6 +196,7 @@ function render(data) {
   if ($('okxSecretKey')) $('okxSecretKey').value = '';
   if ($('okxPassphrase')) $('okxPassphrase').value = '';
   if ($('okxState')) $('okxState').textContent = okxStatusText(okx);
+
   const zpay = data.zpay || {};
   if ($('zpayEnabled')) $('zpayEnabled').checked = Boolean(zpay.enabled);
   if ($('zpayPid')) $('zpayPid').value = '';
@@ -118,29 +209,32 @@ function render(data) {
     if (zpay.lastError) parts.push(`错误：${zpay.lastError}`);
     $('zpayState').textContent = parts.join(' · ');
   }
+  renderOfficial(official);
 }
 
 async function loadPayments(force = false) {
   if (loaded && !force) return;
   try {
-    const [data, plans] = await Promise.all([
+    const [data, official, plans] = await Promise.all([
       api('/admin/api/payments'),
+      api('/admin/api/official-payments'),
       api('/admin/api/account/plans'),
     ]);
     planRows = plans.plans || [];
     loaded = true;
-    render(data);
+    render(data, official);
   } catch (error) {
     if (!app?.hidden) setMessage(`支付配置读取失败：${error.message}`, 'bad');
   }
 }
 
 async function saveMethod(code) {
+  const provider = code !== 'usdt' ? ($(`${code}Provider`)?.value || 'manual') : '';
   const body = {
     enabled: Boolean($(`${code}Enabled`)?.checked),
     payUrl: $(`${code}Url`)?.value.trim() || '',
     instructions: $(`${code}Instructions`)?.value.trim() || '',
-    ...(code !== 'usdt' ? { provider: $(`${code}Provider`)?.value || 'manual' } : {}),
+    ...(code !== 'usdt' && ['manual', 'zpay'].includes(provider) ? { provider } : {}),
   };
   if (code === 'usdt') {
     body.crypto = {
@@ -162,25 +256,125 @@ function collectUsdtPrices() {
 }
 
 async function savePayments() {
-  const button = $('saveAdvancedPayments');
-  button.disabled = true;
-  setMessage('正在保存支付配置与 USDT 套餐价格…');
+  const action = $('saveAdvancedPayments');
+  if (!action) return;
+  action.disabled = true;
+  setMessage('正在保存通用支付配置与 USDT 套餐价格…');
   try {
     await Promise.all(['wechat', 'alipay', 'usdt'].map(saveMethod));
     await api('/admin/api/payments/usdt/prices', { method: 'PUT', body: JSON.stringify({ prices: collectUsdtPrices() }) });
     loaded = false;
     await loadPayments(true);
-    setMessage('支付配置与 USDT 套餐价格已保存。新订单将冻结对应支付参数。', 'good');
+    setMessage('通用支付配置已保存。官方接口凭据请在各支付卡片中单独保存。', 'good');
   } catch (error) {
     setMessage(`保存失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
+  }
+}
+
+function optionalSecret(id, key, transform = (value) => value) {
+  const value = $(id)?.value || '';
+  return value ? { [key]: transform(value) } : {};
+}
+
+async function saveOfficial(code) {
+  const action = $(`save${code[0].toUpperCase()}${code.slice(1)}Official`);
+  if (!action) return;
+  action.disabled = true;
+  setMessage(`正在加密保存${code === 'wechat' ? '微信支付' : code === 'alipay' ? '支付宝' : 'PayPal'}官方接口配置…`);
+  try {
+    let body;
+    if (code === 'wechat') {
+      body = {
+        enabled: Boolean($('wechatEnabled')?.checked),
+        provider: 'wechat_official',
+        instructions: $('wechatInstructions')?.value.trim() || '',
+        appId: $('wechatOfficialAppId')?.value.trim() || '',
+        ...( $('wechatOfficialMchId')?.value.trim() ? { mchId: $('wechatOfficialMchId').value.trim() } : {}),
+        merchantSerialNo: $('wechatOfficialMerchantSerial')?.value.trim() || '',
+        platformSerialNo: $('wechatOfficialPlatformSerial')?.value.trim() || '',
+        ...optionalSecret('wechatOfficialPrivateKey', 'merchantPrivateKeyPem'),
+        ...optionalSecret('wechatOfficialApiV3Key', 'apiV3Key'),
+        ...optionalSecret('wechatOfficialPlatformKey', 'platformPublicKeyPem'),
+      };
+    } else if (code === 'alipay') {
+      body = {
+        enabled: Boolean($('alipayEnabled')?.checked),
+        provider: 'alipay_official',
+        instructions: $('alipayInstructions')?.value.trim() || '',
+        appId: $('alipayOfficialAppId')?.value.trim() || '',
+        sandbox: Boolean($('alipayOfficialSandbox')?.checked),
+        ...optionalSecret('alipayOfficialPrivateKey', 'appPrivateKeyPem'),
+        ...optionalSecret('alipayOfficialPublicKey', 'alipayPublicKeyPem'),
+      };
+    } else {
+      body = {
+        enabled: Boolean($('paypalEnabled')?.checked),
+        instructions: $('paypalInstructions')?.value.trim() || '',
+        sandbox: $('paypalOfficialEnvironment')?.value !== 'live',
+        currency: ($('paypalOfficialCurrency')?.value.trim() || 'CNY').toUpperCase(),
+        ...optionalSecret('paypalOfficialClientId', 'clientId', (value) => value.trim()),
+        ...optionalSecret('paypalOfficialClientSecret', 'clientSecret'),
+      };
+    }
+    const data = await api(`/admin/api/official-payments/${code}`, { method: 'PUT', body: JSON.stringify(body) });
+    officialState[code] = data.config || {};
+    loaded = false;
+    await loadPayments(true);
+    setMessage(`${code === 'wechat' ? '微信支付' : code === 'alipay' ? '支付宝' : 'PayPal'}官方接口配置已保存。`, data.config?.configured ? 'good' : '');
+  } catch (error) {
+    setMessage(`官方接口配置保存失败：${error.message}`, 'bad');
+  } finally {
+    action.disabled = false;
+  }
+}
+
+async function testOfficial(code) {
+  const action = $(`test${code[0].toUpperCase()}${code.slice(1)}Official`);
+  if (!action) return;
+  action.disabled = true;
+  setMessage(code === 'alipay' ? '正在验证支付宝 RSA2 密钥配置…' : `正在测试 ${code === 'wechat' ? '微信支付' : 'PayPal'} 官方接口连接…`);
+  try {
+    const data = await api(`/admin/api/official-payments/${code}/test`, { method: 'POST', body: '{}' });
+    officialState[code] = data.config || officialState[code];
+    renderOfficial(officialState);
+    setMessage(code === 'alipay' ? '支付宝 RSA2 配置验证通过。' : `${code === 'wechat' ? '微信支付' : 'PayPal'}官方接口连接成功。`, 'good');
+  } catch (error) {
+    loaded = false;
+    await loadPayments(true).catch(() => {});
+    setMessage(`官方接口测试失败：${error.message}`, 'bad');
+  } finally {
+    action.disabled = false;
+  }
+}
+
+async function clearOfficial(code) {
+  const label = code === 'wechat' ? '微信支付' : code === 'alipay' ? '支付宝' : 'PayPal';
+  if (!window.confirm(`清除服务端保存的${label}官方接口凭据并关闭该支付方式？`)) return;
+  const action = $(`clear${code[0].toUpperCase()}${code.slice(1)}Official`);
+  if (!action) return;
+  action.disabled = true;
+  try {
+    const body = {
+      clearCredentials: true,
+      enabled: false,
+      ...(code === 'wechat' ? { provider: 'manual' } : code === 'alipay' ? { provider: 'manual' } : {}),
+    };
+    await api(`/admin/api/official-payments/${code}`, { method: 'PUT', body: JSON.stringify(body) });
+    loaded = false;
+    await loadPayments(true);
+    setMessage(`${label}官方接口凭据已清除。`, 'good');
+  } catch (error) {
+    setMessage(`清除失败：${error.message}`, 'bad');
+  } finally {
+    action.disabled = false;
   }
 }
 
 async function saveZpaySettings() {
-  const button = $('saveZpaySettings');
-  button.disabled = true;
+  const action = $('saveZpaySettings');
+  action.disabled = true;
   setMessage('正在加密保存 ZPAY 配置…');
   try {
     const body = {
@@ -195,14 +389,14 @@ async function saveZpaySettings() {
     $('zpayKey').value = '';
     loaded = false;
     await loadPayments(true);
-    setMessage(data.zpay?.configured ? 'ZPAY 配置已保存。现在可把支付宝/微信的“收款模式”切换为 ZPAY。' : 'ZPAY 基础设置已保存，但商户 ID / 密钥尚未配置完整。', data.zpay?.configured ? 'good' : '');
+    setMessage(data.zpay?.configured ? 'ZPAY 配置已保存。现在可把支付宝/微信的调用方式切换为 ZPAY。' : 'ZPAY 基础设置已保存，但商户 ID / 密钥尚未配置完整。', data.zpay?.configured ? 'good' : '');
   } catch (error) { setMessage(`ZPAY 配置保存失败：${error.message}`, 'bad'); }
-  finally { button.disabled = false; }
+  finally { action.disabled = false; }
 }
 
 async function testZpayConnection() {
-  const button = $('testZpayConnection');
-  button.disabled = true;
+  const action = $('testZpayConnection');
+  action.disabled = true;
   setMessage('正在读取 ZPAY 商户余额以验证 API 凭据…');
   try {
     const data = await api('/admin/api/payments/zpay/test', { method: 'POST', body: '{}' });
@@ -210,25 +404,25 @@ async function testZpayConnection() {
     await loadPayments(true);
     setMessage(`ZPAY API 连接成功${data.balance !== '' ? `，账户余额 ${data.balance}` : ''}。`, 'good');
   } catch (error) { setMessage(`ZPAY API 测试失败：${error.message}`, 'bad'); }
-  finally { button.disabled = false; }
+  finally { action.disabled = false; }
 }
 
 async function clearZpayCredentials() {
   if (!window.confirm('清除服务端保存的 ZPAY 商户 ID 与商户密钥，并关闭 ZPAY 网关？')) return;
-  const button = $('clearZpayCredentials');
-  button.disabled = true;
+  const action = $('clearZpayCredentials');
+  action.disabled = true;
   try {
     await api('/admin/api/payments/zpay', { method: 'PUT', body: JSON.stringify({ clearCredentials: true }) });
     loaded = false;
     await loadPayments(true);
     setMessage('ZPAY 凭据已清除，网关已关闭。', 'good');
   } catch (error) { setMessage(`清除 ZPAY 凭据失败：${error.message}`, 'bad'); }
-  finally { button.disabled = false; }
+  finally { action.disabled = false; }
 }
 
 async function saveOkxSettings() {
-  const button = $('saveOkxSettings');
-  button.disabled = true;
+  const action = $('saveOkxSettings');
+  action.disabled = true;
   setMessage('正在加密保存 OKX 只读 API 配置…');
   try {
     const body = {
@@ -249,13 +443,13 @@ async function saveOkxSettings() {
   } catch (error) {
     setMessage(`OKX 配置保存失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
   }
 }
 
 async function testOkxConnection() {
-  const button = $('testOkxConnection');
-  button.disabled = true;
+  const action = $('testOkxConnection');
+  action.disabled = true;
   setMessage('正在通过只读 API 读取一条 USDT 充值记录…');
   try {
     const data = await api('/admin/api/payments/usdt/okx/test', { method: 'POST', body: '{}' });
@@ -264,13 +458,13 @@ async function testOkxConnection() {
   } catch (error) {
     setMessage(`OKX API 测试失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
   }
 }
 
 async function checkOkxNow() {
-  const button = $('checkOkxNow');
-  button.disabled = true;
+  const action = $('checkOkxNow');
+  action.disabled = true;
   setMessage('正在立即核对待支付 USDT 订单…');
   try {
     const data = await api('/admin/api/payments/usdt/okx/check', { method: 'POST', body: '{}' });
@@ -280,14 +474,14 @@ async function checkOkxNow() {
   } catch (error) {
     setMessage(`立即检查失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
   }
 }
 
 async function clearOkxCredentials() {
   if (!window.confirm('清除服务端已保存的 OKX API Key、Secret Key 与 Passphrase？自动核对将同时关闭。')) return;
-  const button = $('clearOkxCredentials');
-  button.disabled = true;
+  const action = $('clearOkxCredentials');
+  action.disabled = true;
   try {
     const data = await api('/admin/api/payments/usdt/okx', { method: 'PUT', body: JSON.stringify({ clearCredentials: true, enabled: false }) });
     $('okxAutoEnabled').checked = false;
@@ -296,7 +490,7 @@ async function clearOkxCredentials() {
   } catch (error) {
     setMessage(`清除失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
   }
 }
 
@@ -313,8 +507,8 @@ function fileAsDataUrl(file) {
 }
 
 async function uploadQr(code) {
-  const button = $(`${code}QrUpload`);
-  button.disabled = true;
+  const action = $(`${code}QrUpload`);
+  action.disabled = true;
   setMessage('正在上传二维码…');
   try {
     const dataUrl = await fileAsDataUrl($(`${code}QrFile`)?.files?.[0]);
@@ -326,14 +520,14 @@ async function uploadQr(code) {
   } catch (error) {
     setMessage(`二维码上传失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
   }
 }
 
 async function deleteQr(code) {
   if (!window.confirm('删除这个支付方式的收款二维码？')) return;
-  const button = $(`${code}QrDelete`);
-  button.disabled = true;
+  const action = $(`${code}QrDelete`);
+  action.disabled = true;
   try {
     await api(`/admin/api/payments/${code}/qr`, { method: 'DELETE', body: '{}' });
     loaded = false;
@@ -342,7 +536,7 @@ async function deleteQr(code) {
   } catch (error) {
     setMessage(`删除失败：${error.message}`, 'bad');
   } finally {
-    button.disabled = false;
+    action.disabled = false;
   }
 }
 
@@ -357,6 +551,14 @@ $('clearOkxCredentials')?.addEventListener('click', () => void clearOkxCredentia
 for (const code of ['wechat', 'alipay', 'usdt']) {
   $(`${code}QrUpload`)?.addEventListener('click', () => void uploadQr(code));
   $(`${code}QrDelete`)?.addEventListener('click', () => void deleteQr(code));
+}
+for (const code of ['wechat', 'alipay', 'paypal']) {
+  $(`save${code[0].toUpperCase()}${code.slice(1)}Official`)?.addEventListener('click', () => void saveOfficial(code));
+  $(`test${code[0].toUpperCase()}${code.slice(1)}Official`)?.addEventListener('click', () => void testOfficial(code));
+  $(`clear${code[0].toUpperCase()}${code.slice(1)}Official`)?.addEventListener('click', () => void clearOfficial(code));
+}
+for (const code of ['wechat', 'alipay']) {
+  $(`${code}Provider`)?.addEventListener('change', () => syncProviderFields(code));
 }
 
 if (app) {
