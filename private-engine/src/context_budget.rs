@@ -202,7 +202,8 @@ pub fn evaluate_context_budget(input: &ContextBudgetInput) -> Result<ContextBudg
     let base_safe_limit_tokens = base_safe_limit_for_model(input.model.as_deref());
     let adaptive_safe_limit_tokens = clamp_metric(input.profile.adaptive_safe_limit_tokens);
     let confirmed_lower_bound_tokens = clamp_metric(input.profile.confirmed_conversation_tokens);
-    let stored_hard_limit_upper_bound_tokens = clamp_metric(input.profile.hard_limit_upper_bound_tokens);
+    let stored_hard_limit_upper_bound_tokens =
+        clamp_metric(input.profile.hard_limit_upper_bound_tokens);
 
     let history_tokens = input.history.iter().fold(0_u64, |total, part| {
         total.saturating_add(part_tokens(part, true))
@@ -347,7 +348,10 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        assert_eq!(hard_limit_sanity_floor_for_model(Some("gpt-5.6-sol")), 231_000);
+        assert_eq!(
+            hard_limit_sanity_floor_for_model(Some("gpt-5.6-sol")),
+            231_000
+        );
         assert_eq!(result.hard_limit_upper_bound_tokens, 0);
         assert_eq!(result.safe_limit_tokens, 924_000);
         assert!(!result.hard_limit_active);
