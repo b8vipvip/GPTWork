@@ -20,7 +20,7 @@ test('popup exposes only the four user-facing actions and keeps reconnect/log co
   assert.match(css, /grid-template-columns:\s*repeat\(4,/);
 });
 
-test('settings page owns the real-time updater and no longer exposes reconnect or runtime-log controls', async () => {
+test('settings page owns the real-time updater without verbose reconnect or release help copy', async () => {
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   const settingsHtml = new URL(`../${manifest.options_ui.page}`, import.meta.url);
   const [html, js] = await Promise.all([readFile(settingsHtml, 'utf8'), readFile(optionsUpdate, 'utf8')]);
@@ -30,7 +30,9 @@ test('settings page owns the real-time updater and no longer exposes reconnect o
   assert.match(html, /id="updateLog"/);
   assert.doesNotMatch(html, /<button id="reconnect"/);
   assert.doesNotMatch(html, /<button id="logs"/);
-  assert.match(html, /断线后自动重试/);
+  assert.doesNotMatch(html, /断线后自动重试/);
+  assert.doesNotMatch(html, /从 GitHub 正式 Release 检查版本/);
+  assert.doesNotMatch(html, /校验 SHA-256 后静默安装/);
   assert.match(html, /options-update\.js/);
   assert.match(js, /#updates-auto/);
   assert.match(js, /fetchLatestRelease/);
