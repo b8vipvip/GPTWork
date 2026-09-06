@@ -1,0 +1,97 @@
+.request-history-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.request-history-heading h2 { margin-bottom: 5px; }
+.request-history-heading .help { margin: 0; }
+.request-history-count {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #e8efff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.request-history-note { margin-top: 10px; }
+.request-history-table-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.request-history-table {
+  width: 100%;
+  min-width: 840px;
+  border-collapse: collapse;
+  background: #fff;
+  font-size: 13px;
+}
+.request-history-table th,
+.request-history-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #edf1f6;
+  text-align: left;
+  vertical-align: top;
+}
+.request-history-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #526076;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.request-history-table tbody tr:last-child td { border-bottom: 0; }
+.request-history-table td strong,
+.request-history-table td code,
+.request-history-table td small {
+  display: block;
+}
+.request-history-table td strong { color: #172033; }
+.request-history-table td code {
+  margin-top: 3px;
+  color: #475569;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.request-history-table td small {
+  margin-top: 4px;
+  color: #718096;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.request-history-time { white-space: nowrap; color: #526076; }
+.request-history-evidence { color: #526076; overflow-wrap: anywhere; }
+.request-model-muted { color: #94a3b8; }
+.request-history-status {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.request-history-status.good { color: #166534; background: #dcfce7; }
+.request-history-status.bad { color: #991b1b; background: #fee2e2; }
+.request-history-status.warn { color: #92400e; background: #fef3c7; }
+.request-history-status.running { color: #1d4ed8; background: #dbeafe; }
+.request-history-status.neutral { color: #475569; background: #e2e8f0; }
+.request-history-empty {
+  margin: 12px 0 0;
+  padding: 16px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+}
+
+@media (max-width: 620px) {
+  .request-history-heading { flex-direction: column; }
+}
