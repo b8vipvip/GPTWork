@@ -67,8 +67,13 @@ pub fn evaluate_context_profile(
     // not survive merely because it was persisted by an older build.
     let sanity_floor = hard_limit_sanity_floor_for_model(input.model.as_deref());
     let previous_hard_upper = clamp_metric(input.previous.hard_limit_upper_bound_tokens);
-    let previous_hard_valid = previous_hard_upper >= sanity_floor && previous_hard_upper > confirmed;
-    let mut hard_upper = if previous_hard_valid { previous_hard_upper } else { 0 };
+    let previous_hard_valid =
+        previous_hard_upper >= sanity_floor && previous_hard_upper > confirmed;
+    let mut hard_upper = if previous_hard_valid {
+        previous_hard_upper
+    } else {
+        0
+    };
     let mut hard_count = if previous_hard_valid {
         input.previous.hard_limit_observed_count.unwrap_or_default()
     } else {
@@ -102,9 +107,8 @@ pub fn evaluate_context_profile(
         }
         "hard_limit" => {
             let observed = clamp_metric(input.observed_conversation_tokens);
-            let usable = input.measurement_reliable
-                && observed > confirmed
-                && observed >= sanity_floor;
+            let usable =
+                input.measurement_reliable && observed > confirmed && observed >= sanity_floor;
             if usable {
                 let next_upper = if hard_upper > confirmed {
                     hard_upper.min(observed)
