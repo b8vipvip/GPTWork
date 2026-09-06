@@ -106,8 +106,6 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
     }
   }
 
-  for (const record of activeRecordByTab.values()) finalizePending(record);
-
   const boundedLimit = Math.max(1, Number(limit) || REQUEST_HISTORY_LIMIT);
   return records.slice(-boundedLimit).reverse();
 }
