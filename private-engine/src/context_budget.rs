@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONTEXT_WINDOW_TOKENS: u64 = 128_000;
 const SAFETY_BUDGET_RATIO: f64 = 0.88;
+const HARD_LIMIT_SANITY_RATIO: f64 = 0.25;
+const HARD_LIMIT_SANITY_MIN_TOKENS: u64 = 32_000;
 const WARNING_PERCENT: f64 = 80.0;
 const MAX_DISPLAY_PERCENT: f64 = 999.0;
 const MESSAGE_OVERHEAD_TOKENS: u64 = 14;
@@ -82,7 +84,7 @@ fn normalize_model(value: Option<&str>) -> Option<String> {
         return None;
     }
     Some(match value.as_str() {
-        "gpt-5.6-sol-wm" | "gpt-5-6" => "gpt-5.6-sol".to_string(),
+        "gpt-5.6-sol-wm" | "gpt-5-6" | "gpt-5-6-thinking" => "gpt-5.6-sol".to_string(),
         _ => value,
     })
 }
@@ -115,6 +117,11 @@ fn model_window(model: Option<&str>) -> (u64, &'static str) {
 pub(crate) fn base_safe_limit_for_model(model: Option<&str>) -> u64 {
     let (nominal, _) = model_window(model);
     (nominal.max(16_000) as f64 * SAFETY_BUDGET_RATIO).floor() as u64
+}
+
+pub(crate) fn hard_limit_sanity_floor_for_model(model: Option<&str>) -> u64 {
+    ((base_safe_limit_for_model(model) as f64 * HARD_LIMIT_SANITY_RATIO).floor() as u64)
+        .max(HARD_LIMIT_SANITY_MIN_TOKENS)
 }
 
 fn estimate_text_tokens(value: &str) -> u64 {
@@ -195,8 +202,27 @@ pub fn evaluate_context_budget(input: &ContextBudgetInput) -> Result<ContextBudg
     let base_safe_limit_tokens = base_safe_limit_for_model(input.model.as_deref());
     let adaptive_safe_limit_tokens = clamp_metric(input.profile.adaptive_safe_limit_tokens);
     let confirmed_lower_bound_tokens = clamp_metric(input.profile.confirmed_conversation_tokens);
-    let hard_limit_upper_bound_tokens = clamp_metric(input.profile.hard_limit_upper_bound_tokens);
-    let hard_limit_usable = hard_limit_upper_bound_tokens > confirmed_lower_bound_tokens;
+    let stored_hard_limit_upper_bound_tokens =
+        clamp_metric(input.profile.hard_limit_upper_bound_tokens);
+
+    let history_tokens = input.history.iter().fold(0_u64, |total, part| {
+        total.saturating_add(part_tokens(part, true))
+    });
+    let draft_tokens = part_tokens(&input.draft, !input.draft.text.trim().is_empty());
+    let used_tokens = history_tokens.saturating_add(draft_tokens);
+
+    let hard_limit_floor = hard_limit_sanity_floor_for_model(input.model.as_deref());
+    let hard_limit_usable = stored_hard_limit_upper_bound_tokens > confirmed_lower_bound_tokens
+        && stored_hard_limit_upper_bound_tokens >= hard_limit_floor
+        // Existing conversation history beyond the learned upper bound is direct
+        // evidence that the stored upper bound was stale or falsely learned.
+        && history_tokens <= stored_hard_limit_upper_bound_tokens;
+    let hard_limit_upper_bound_tokens = if hard_limit_usable {
+        stored_hard_limit_upper_bound_tokens
+    } else {
+        0
+    };
+
     let unconstrained_safe_limit_tokens = base_safe_limit_tokens.max(adaptive_safe_limit_tokens);
     let safe_limit_tokens = if hard_limit_usable {
         unconstrained_safe_limit_tokens
@@ -213,11 +239,6 @@ pub fn evaluate_context_budget(input: &ContextBudgetInput) -> Result<ContextBudg
     };
     let reserve_tokens = reserve_tokens(reserve_basis);
 
-    let history_tokens = input.history.iter().fold(0_u64, |total, part| {
-        total.saturating_add(part_tokens(part, true))
-    });
-    let draft_tokens = part_tokens(&input.draft, !input.draft.text.trim().is_empty());
-    let used_tokens = history_tokens.saturating_add(draft_tokens);
     let projected_tokens = used_tokens.saturating_add(reserve_tokens);
     let remaining_tokens = safe_limit_tokens.saturating_sub(used_tokens);
     let percent_used =
@@ -278,6 +299,17 @@ mod tests {
     }
 
     #[test]
+    fn web_thinking_alias_uses_the_same_gpt_56_window() {
+        let result = evaluate_context_budget(&ContextBudgetInput {
+            model: Some("gpt-5-6-thinking".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(result.nominal_limit_tokens, 1_050_000);
+        assert_eq!(result.base_safe_limit_tokens, 924_000);
+    }
+
+    #[test]
     fn narrower_model_family_matching_does_not_capture_lookalike_prefixes() {
         let result = evaluate_context_budget(&ContextBudgetInput {
             model: Some("gpt-5.4-minimum".to_string()),
@@ -301,7 +333,49 @@ mod tests {
         })
         .unwrap();
         assert_eq!(result.safe_limit_tokens, 950_000);
+        assert_eq!(result.hard_limit_upper_bound_tokens, 950_000);
         assert!(result.hard_limit_active);
+    }
+
+    #[test]
+    fn implausibly_small_persisted_hard_limit_self_heals() {
+        let result = evaluate_context_budget(&ContextBudgetInput {
+            model: Some("gpt-5.6-sol".to_string()),
+            profile: ContextBudgetProfile {
+                hard_limit_upper_bound_tokens: Some(9_654),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            hard_limit_sanity_floor_for_model(Some("gpt-5.6-sol")),
+            231_000
+        );
+        assert_eq!(result.hard_limit_upper_bound_tokens, 0);
+        assert_eq!(result.safe_limit_tokens, 924_000);
+        assert!(!result.hard_limit_active);
+    }
+
+    #[test]
+    fn learned_upper_bound_is_ignored_after_history_proves_it_wrong() {
+        let result = evaluate_context_budget(&ContextBudgetInput {
+            model: Some("gpt-5.6-sol".to_string()),
+            history: vec![ContextTextPart {
+                text: "x".repeat(1_100_000),
+                ..Default::default()
+            }],
+            profile: ContextBudgetProfile {
+                hard_limit_upper_bound_tokens: Some(250_000),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(result.history_tokens > 250_000);
+        assert_eq!(result.hard_limit_upper_bound_tokens, 0);
+        assert_eq!(result.safe_limit_tokens, 924_000);
+        assert!(!result.hard_limit_active);
     }
 
     #[test]

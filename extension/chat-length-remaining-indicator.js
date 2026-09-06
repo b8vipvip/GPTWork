@@ -2,9 +2,6 @@
   const KEY = '__GPTLOCK_CHAT_LENGTH_REMAINING_INDICATOR__';
   if (globalThis[KEY]) return;
 
-  // Chat-length remaining is a public UI/estimation feature. Keep the verified
-  // v0.5.27 estimator here instead of coupling the indicator to the private
-  // send-budget authority.
   const MODEL_CONTEXT_WINDOWS = Object.freeze([
     { pattern: /^gpt-5\.6(?:-|$)/, tokens: 1_050_000, source: 'openai-api-model-window' },
     { pattern: /^gpt-5\.5(?:-|$)/, tokens: 1_050_000, source: 'openai-api-model-window' },
@@ -13,6 +10,8 @@
   ]);
   const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
   const SAFETY_BUDGET_RATIO = 0.88;
+  const HARD_LIMIT_SANITY_RATIO = 0.25;
+  const HARD_LIMIT_SANITY_MIN_TOKENS = 32_000;
   const MESSAGE_OVERHEAD_TOKENS = 14;
   const IMAGE_TOKEN_ESTIMATE = 1_200;
   const ATTACHMENT_TOKEN_ESTIMATE = 4_000;
@@ -42,7 +41,11 @@
   function normalizeModelId(value) {
     const model = String(value ?? '').trim().toLowerCase();
     if (!model) return null;
-    if (model === 'gpt-5.6-sol-wm' || model === 'gpt-5-6') return 'gpt-5.6-sol';
+    if (
+      model === 'gpt-5.6-sol-wm'
+      || model === 'gpt-5-6'
+      || model === 'gpt-5-6-thinking'
+    ) return 'gpt-5.6-sol';
     return /^[a-z0-9._:-]{1,128}$/.test(model) ? model : null;
   }
 
@@ -119,6 +122,25 @@
     return Math.min(64_000, Math.max(8_192, Math.round(contextLimitTokens * 0.04)));
   }
 
+  function hardLimitSanityFloor(contextLimitTokens = DEFAULT_CONTEXT_WINDOW_TOKENS) {
+    const nominalLimit = Math.max(16_000, Number(contextLimitTokens) || DEFAULT_CONTEXT_WINDOW_TOKENS);
+    const baseSafeLimit = Math.floor(nominalLimit * SAFETY_BUDGET_RATIO);
+    return Math.max(HARD_LIMIT_SANITY_MIN_TOKENS, Math.floor(baseSafeLimit * HARD_LIMIT_SANITY_RATIO));
+  }
+
+  function credibleHardLimitUpperBound({ profile = null, contextLimitTokens, currentTokens = 0 } = {}) {
+    if (!profile || profile.hardLimitTokenCapUsable !== true) return 0;
+    if (String(profile.hardLimitConfidence || '') !== 'measured-upper-bound') return 0;
+    const upper = clampAdaptiveLimit(profile.hardLimitUpperBoundTokens);
+    const lower = clampAdaptiveLimit(profile.confirmedConversationTokens);
+    if (upper <= lower) return 0;
+    if (upper < hardLimitSanityFloor(contextLimitTokens)) return 0;
+    // If this very conversation has already continued beyond a learned upper bound,
+    // that stored upper bound is contradicted by live evidence and must self-heal.
+    if (Math.max(0, Number(currentTokens) || 0) > upper) return 0;
+    return upper;
+  }
+
   function computeLocalBudget({
     historyTokens = 0,
     draftTokens = 0,
@@ -171,6 +193,24 @@
     return `ctx-${hash.toString(16).padStart(8, '0')}`;
   }
 
+  function calculateRemainingPercent({ snapshot = null, hardLimitVisible = false, localBudget = null } = {}) {
+    // Only a currently visible, independently detected ChatGPT system notice may force 0%.
+    // A stale snapshot flag from an older DOM state is deliberately ignored.
+    if (hardLimitVisible) {
+      return { percent: 0, source: 'chatgpt-visible-hard-limit', metricCount: 0 };
+    }
+    if (localBudget?.safeLimitTokens > 0) {
+      return {
+        percent: clampPercent((localBudget.remainingTokens / localBudget.safeLimitTokens) * 100),
+        source: localBudget.learnedHardLimitActive
+          ? 'learned-chatgpt-thread-boundary'
+          : 'local-operational-budget',
+        metricCount: 1,
+      };
+    }
+    return { percent: 0, source: 'unknown', metricCount: 0 };
+  }
+
   function buildDiagnosticDetails(snapshot, localBudget, result) {
     return {
       conversationHash: diagnosticConversationHash(snapshot?.conversationKey),
@@ -188,51 +228,10 @@
       checkpointMatched: snapshot?.checkpointMatched === true,
       checkpointRestored: snapshot?.checkpointRestored === true,
       hardLimitObservedCount: Math.max(0, Math.floor(Number(snapshot?.hardLimitObservedCount) || 0)),
+      hardLimitConfidence: String(localBudget?.hardLimitConfidence || snapshot?.hardLimitConfidence || ''),
+      learnedHardLimitActive: localBudget?.learnedHardLimitActive === true,
+      learnedHardLimitContradicted: localBudget?.learnedHardLimitContradicted === true,
     };
-  }
-
-  function calculateRemainingPercent({ snapshot = null, profile = null, hardLimitVisible = false, localBudget = null } = {}) {
-    if (hardLimitVisible || snapshot?.hardLimitVisible) {
-      return { percent: 0, source: 'chatgpt-visible-hard-limit', metricCount: 0 };
-    }
-
-    const observedCount = Math.max(0, Number(profile?.hardLimitObservedCount) || 0);
-    if (observedCount > 0) {
-      const currentTokens = Math.max(
-        Number(localBudget?.cumulativeTokens) || 0,
-        Number(snapshot?.cumulativeConversationTokens) || 0,
-      );
-      const currentCharacters = Math.max(
-        Number(localBudget?.cumulativeCharacters) || 0,
-        Number(snapshot?.cumulativeConversationCharacters) || 0,
-      );
-      const currentMessages = Math.max(
-        Number(localBudget?.cumulativeMessages) || 0,
-        Number(snapshot?.cumulativeMessageCount) || 0,
-      );
-      const learnedCandidates = [
-        remainingForMetric(currentTokens, profile?.hardLimitObservedTokens),
-        remainingForMetric(currentCharacters, profile?.hardLimitObservedCharacters),
-        remainingForMetric(currentMessages, profile?.hardLimitObservedMessages),
-      ].filter((value) => value !== null);
-      if (learnedCandidates.length) {
-        return {
-          percent: Math.min(...learnedCandidates),
-          source: 'learned-chatgpt-thread-boundary',
-          metricCount: learnedCandidates.length,
-        };
-      }
-    }
-
-    if (localBudget?.safeLimitTokens > 0) {
-      return {
-        percent: clampPercent((localBudget.remainingTokens / localBudget.safeLimitTokens) * 100),
-        source: 'local-operational-budget',
-        metricCount: 1,
-      };
-    }
-
-    return { percent: 0, source: 'unknown', metricCount: 0 };
   }
 
   const api = Object.freeze({
@@ -244,6 +243,8 @@
     estimatePartTokens,
     computeLocalBudget,
     remainingForMetric,
+    hardLimitSanityFloor,
+    credibleHardLimitUpperBound,
     calculateRemainingPercent,
     diagnosticConversationHash,
     buildDiagnosticDetails,
@@ -353,24 +354,38 @@
       ? estimatePartTokens({ text: draft, ...draftMedia })
       : 0;
     const windowProfile = contextWindowForModel(snapshot?.model);
+    const cumulativeTokens = Math.max(measured.tokens, Number(snapshot?.cumulativeConversationTokens) || 0);
+    const rawHardUpper = clampAdaptiveLimit(profile?.hardLimitUpperBoundTokens);
+    const credibleHardUpper = credibleHardLimitUpperBound({
+      profile,
+      contextLimitTokens: windowProfile.tokens,
+      currentTokens: cumulativeTokens,
+    });
+    const learnedHardLimitContradicted = rawHardUpper > 0
+      && Math.max(0, cumulativeTokens) > rawHardUpper;
     const budget = computeLocalBudget({
       historyTokens: measured.tokens,
       draftTokens,
       contextLimitTokens: windowProfile.tokens,
       adaptiveSafeLimitTokens: profile?.adaptiveSafeLimitTokens,
-      hardLimitUpperBoundTokens: profile?.hardLimitUpperBoundTokens,
+      hardLimitUpperBoundTokens: credibleHardUpper,
       confirmedLowerBoundTokens: profile?.confirmedConversationTokens,
     });
     return {
       ...budget,
       model: windowProfile.model,
       contextWindowSource: windowProfile.source,
+      contextLimitTokens: windowProfile.tokens,
       measurementSource: measured.source,
       historyCharacters: measured.characters,
       historyMessages: measured.messages,
-      cumulativeTokens: Math.max(measured.tokens, Number(snapshot?.cumulativeConversationTokens) || 0),
+      cumulativeTokens,
       cumulativeCharacters: Math.max(measured.characters, Number(snapshot?.cumulativeConversationCharacters) || 0),
       cumulativeMessages: Math.max(measured.messages, Number(snapshot?.cumulativeMessageCount) || 0),
+      learnedHardLimitActive: credibleHardUpper > 0,
+      learnedHardLimitUpperBoundTokens: credibleHardUpper,
+      learnedHardLimitContradicted,
+      hardLimitConfidence: profile?.hardLimitConfidence || null,
     };
   }
 
@@ -381,6 +396,8 @@
     for (const element of candidates) {
       if (element.closest('#gptlock-context-warning-host,#gptlock-context-learning-toast,#gptlock-context-hard-limit-toast')) continue;
       if (!classifier(elementText(element).replace(/\s+/g, ' ').trim())) continue;
+      // Quoted/repeated limit text inside a normal conversation turn is content, not ChatGPT chrome.
+      if (element.closest('[data-message-author-role],article[data-testid^="conversation-turn-"]')) continue;
       const semanticNotice = ['alert', 'status'].includes(String(element.getAttribute('role') || '').toLowerCase());
       let hasNewChatAction = false;
       let container = element;
@@ -389,8 +406,7 @@
           .some((candidate) => visible(candidate) && HARD_LIMIT_ACTION_PATTERN.test(elementText(candidate)));
         if (hasNewChatAction) break;
       }
-      const insideConversationTurn = Boolean(element.closest('[data-message-author-role],article[data-testid^="conversation-turn-"]'));
-      if (semanticNotice || hasNewChatAction || !insideConversationTurn) return true;
+      if (semanticNotice || hasNewChatAction) return true;
     }
     return false;
   }
@@ -404,9 +420,9 @@
       details.measurementSource,
       details.historyTokens,
       details.cumulativeTokens,
-      details.cumulativeCharacters,
-      details.cumulativeMessages,
       details.checkpointMatched,
+      details.learnedHardLimitActive,
+      details.learnedHardLimitContradicted,
     ].join(':');
     if (fingerprint === lastDiagnosticFingerprint) return;
     const now = Date.now();
@@ -422,14 +438,17 @@
   function detailText(result, localBudget, snapshot) {
     const scope = `\n统计范围：仅当前对话（${diagnosticConversationHash(snapshot?.conversationKey)}）`;
     if (result.source === 'chatgpt-visible-hard-limit') {
-      return `聊天长度剩余：0%\nChatGPT 已明确提示当前对话达到长度上限，因此当前聊天剩余长度直接记为 0%。${scope}`;
+      return `聊天长度剩余：0%\n当前页面检测到 ChatGPT 自身、位于聊天消息之外的“对话长度上限”系统提示，因此本聊天此刻记为 0%。${scope}`;
     }
     if (result.source === 'learned-chatgpt-thread-boundary') {
-      return `聊天长度剩余：${formatPercent(result.percent)}\n沿用已验证逻辑：基于该账户/模型此前真实“对话长度上限”样本，按当前对话自己的累计 token/字符/消息规模取最保守剩余比例。${scope}`;
+      return `聊天长度剩余：${formatPercent(result.percent)}\n仅使用可信的实测 token 上界参与学习；字符数和消息数不再作为硬上限。若当前聊天成功超过旧上界，旧样本会自动失效。${scope}`;
     }
     if (result.source === 'local-operational-budget') {
       const source = localBudget?.measurementSource === 'conversation-tree' ? '完整活动分支' : '页面消息';
-      return `聊天长度剩余：${formatPercent(result.percent)}\n沿用已验证的本地上下文估算逻辑；当前按${source}和模型安全预算计算，不依赖私有核心返回 remainingPercent。${scope}`;
+      const selfHeal = localBudget?.learnedHardLimitContradicted
+        ? '\n自愈：检测到当前聊天已超过旧的学习上界，已忽略该旧样本。'
+        : '';
+      return `聊天长度剩余：${formatPercent(result.percent)}\n按${source}和当前模型安全预算持续估算；不会因历史消息条数/字符数样本直接归零。${selfHeal}${scope}`;
     }
     return `聊天长度剩余：未知\n当前页面尚没有足够聊天内容用于估算。${scope}`;
   }
@@ -463,7 +482,7 @@
     const profile = budgetApi?.learningProfile?.() || null;
     const localBudget = currentLocalBudget(snapshot, profile, budgetApi);
     const hardLimitVisible = hasVisibleConversationHardLimit(budgetApi);
-    const result = calculateRemainingPercent({ snapshot, profile, hardLimitVisible, localBudget });
+    const result = calculateRemainingPercent({ snapshot, hardLimitVisible, localBudget });
     const diagnosticDetails = buildDiagnosticDetails(snapshot, localBudget, result);
     maybeLogDiagnostic(diagnosticDetails);
 
@@ -507,6 +526,7 @@
 
   window.addEventListener('gptlock:context-budget', scheduleRefresh);
   window.addEventListener('gptlock:context-hard-limit-learned', scheduleRefresh);
+  window.addEventListener('gptlock:context-limit-learned', scheduleRefresh);
   window.addEventListener('popstate', scheduleRefresh);
   window.addEventListener('hashchange', scheduleRefresh);
   new MutationObserver(scheduleRefresh).observe(document.documentElement, {
