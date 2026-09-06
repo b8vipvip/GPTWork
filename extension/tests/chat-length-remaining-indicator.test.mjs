@@ -94,6 +94,7 @@ test('credible measured token upper bound can still drive learned remaining disp
   const budget = indicator.computeLocalBudget({
     historyTokens: 900_000,
     contextLimitTokens: 1_050_000,
+    adaptiveSafeLimitTokens: 1_200_000,
     hardLimitUpperBoundTokens: upper,
     confirmedLowerBoundTokens: 900_000,
   });
@@ -101,6 +102,7 @@ test('credible measured token upper bound can still drive learned remaining disp
     hardLimitVisible: false,
     localBudget: { ...budget, learnedHardLimitActive: true },
   });
+  assert.equal(budget.safeLimitTokens, 950_000);
   assert.equal(result.source, 'learned-chatgpt-thread-boundary');
   assert.equal(result.metricCount, 1);
   assert.ok(result.percent > 5 && result.percent < 6);
