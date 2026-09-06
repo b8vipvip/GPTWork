@@ -16,7 +16,7 @@ function modelLabel(model) {
   return knownLabels.get(model) || model;
 }
 
-function appendModelCell(row, model, transportModel = null, pendingText = null) {
+function appendModelCell(row, model, pendingText = null) {
   const cell = document.createElement('td');
   if (!model) {
     cell.className = 'request-model-muted';
@@ -26,14 +26,7 @@ function appendModelCell(row, model, transportModel = null, pendingText = null) 
   }
   const strong = document.createElement('strong');
   strong.textContent = modelLabel(model);
-  const code = document.createElement('code');
-  code.textContent = model;
-  cell.append(strong, code);
-  if (transportModel && transportModel !== model) {
-    const transport = document.createElement('small');
-    transport.textContent = `transport: ${transportModel}`;
-    cell.append(transport);
-  }
+  cell.append(strong);
   row.append(cell);
 }
 
@@ -83,12 +76,11 @@ function renderHistory(logs) {
     time.textContent = formatTime(record.capturedAt);
     row.append(time);
 
-    appendModelCell(row, record.discoveredModel, record.discoveredTransportModel);
-    appendModelCell(row, record.requestModel, record.requestTransportModel);
+    appendModelCell(row, record.discoveredModel);
+    appendModelCell(row, record.requestModel);
     appendModelCell(
       row,
       record.finalModel,
-      null,
       record.status === 'waiting' ? '等待响应 / Waiting' : '未确认 / Unknown',
     );
 
@@ -98,17 +90,7 @@ function renderHistory(logs) {
     badge.className = `request-history-status ${tone}`;
     badge.textContent = label;
     statusCell.append(badge);
-    if (record.statusReason) {
-      const reason = document.createElement('small');
-      reason.textContent = String(record.statusReason);
-      statusCell.append(reason);
-    }
     row.append(statusCell);
-
-    const evidence = document.createElement('td');
-    evidence.className = 'request-history-evidence';
-    evidence.textContent = record.evidenceSource || '—';
-    row.append(evidence);
 
     elements.body.append(row);
   }

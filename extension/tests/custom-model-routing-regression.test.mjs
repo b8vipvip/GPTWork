@@ -35,11 +35,12 @@ test('auto remains observable as request metadata but is never a concrete lock t
   assert.deepEqual(fallback.lockedModels, ['gpt-5.6-sol']);
 });
 
-test('settings expose an immediate custom model Add action', () => {
+test('settings expose an immediate custom model Add action without verbose routing copy', () => {
   assert.match(optionsHtml, /id="saveCustomModels"/);
   assert.match(optionsHtml, />添加 \/ Add<\/button>/);
   assert.doesNotMatch(optionsHtml, /添加并保存/);
-  assert.match(optionsHtml, /auto<\/code> 是 ChatGPT 自动路由标识/);
+  assert.doesNotMatch(optionsHtml, /auto<\/code> 是 ChatGPT 自动路由标识/);
+  assert.doesNotMatch(optionsHtml, /正式聊天 POST 发出前会再次检查/);
   assert.match(optionsJs, /async function addCustomModels\(\)/);
   assert.match(optionsJs, /renderCustomChoice\(model, true\)/);
   assert.match(optionsJs, /normalizeConcreteModelId/);

@@ -30,7 +30,6 @@
       <div class="update-heading">
         <div>
           <h2 id="updateHeading">版本更新 <span>Update center</span></h2>
-          <p class="help">从 GitHub 正式 Release 检查版本；Windows 支持校验 SHA-256 后静默安装，并在本页显示下载、校验、安装、重连全过程。</p>
         </div>
         <span id="updateStatusBadge" class="update-badge idle">待检查</span>
       </div>
@@ -56,8 +55,6 @@
     <section class="card" aria-labelledby="modelHeading">
       <h2 id="modelHeading">锁定模型 <span>Locked models</span></h2>
       <p class="help">默认优先 GPT-6 Astra，其次 GPT-5.6 Sol。GPTWork 会先尽力把 ChatGPT 页面切到 Astra；如果当前账号或当前模式尚未开放 Astra，而正式请求已经是允许列表中的 Sol，则保留 Sol，不会为了显示“已锁定”而伪造一个 Astra transport ID。</p>
-      <p class="permission-note">正式聊天 POST 发出前会再次检查顶层 <code>model</code>。Astra 的网页内部 transport slug 可能随 OpenAI 变化；GPTWork 会把可信的 Astra family slug 统一识别为 <code>gpt-6-astra</code>，但保留 ChatGPT 自己发送的实际 slug。所有勾选与取消都会即时同步，无需再点击页面底部保存按钮。</p>
-      <p class="permission-note"><code>auto</code> 是 ChatGPT 自动路由标识，不代表具体模型，不会加入自动识别或锁定策略；自定义模型必须填写实际传输 model ID。</p>
       <div id="modelChoices" class="choices"></div>
       <label class="field" for="customModels">
         <span>自定义模型标识（逗号分隔）</span>
@@ -121,15 +118,12 @@
       <dl>
         <div><dt>Native Core</dt><dd id="nativeStatus">检查中 / Checking…</dd></div>
         <div><dt>最近确认 / Last verification</dt><dd id="verificationStatus">暂无 / None</dd></div>
-        <div><dt>证据来源 / Evidence</dt><dd id="evidenceStatus">暂无 / None</dd></div>
       </dl>
       <div id="installHelp" class="core-help" hidden>
         <strong id="installTitle">尚未安装本地核心 / Local Core is not installed</strong>
         <p id="installDetail"></p>
         <button id="installCore" class="secondary" type="button">下载安装器 / Download installer</button>
       </div>
-      <p class="boundary">“自动验证”会自动尝试页面对齐，然后在当前 ChatGPT 对话中写入并发送一条可见测试消息；无需人工再点击发送。正式聊天只拦截两个 conversation POST 端点，prepare/init 不再被当作正式聊天请求。本地核心在扩展启动时自动连接，断线后自动重试，无需手动重连。</p>
-      <p class="boundary en">Auto verify sends one visible test message itself. Only the two formal conversation POST endpoints are request-locked; prepare/init remain auxiliary traffic. Native Core connection and retry are automatic.</p>
     </section>
 
     <section class="card request-history-card" aria-labelledby="requestHistoryHeading">
@@ -140,7 +134,6 @@
         </div>
         <span id="requestHistoryCount" class="request-history-count">最近 0 / 100</span>
       </div>
-      <p class="permission-note request-history-note">“发现模型”优先来自正式请求进入锁定器时已有的 model；“请求模型”是锁定处理后的正式 POST model；“最终模型”只有响应证据实际暴露模型时才显示。无法确认时明确显示未确认，不用页面文字补猜。</p>
       <div class="request-history-table-wrap">
         <table class="request-history-table">
           <thead>
@@ -150,7 +143,6 @@
               <th>请求模型</th>
               <th>最终模型</th>
               <th>状态</th>
-              <th>证据</th>
             </tr>
           </thead>
           <tbody id="requestHistoryBody"></tbody>

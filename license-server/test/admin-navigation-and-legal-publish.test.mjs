@@ -35,6 +35,17 @@ test('shared admin navigation contains the complete canonical menu', () => {
   }
 });
 
+test('system settings stylesheet is linked, served and contains the official-payment layout', () => {
+  const html = readFileSync(join(PUBLIC, 'admin-settings.html'), 'utf8');
+  const css = readFileSync(join(PUBLIC, 'admin-settings.css'), 'utf8');
+  const serverSource = readFileSync(join(ROOT, 'server.mjs'), 'utf8');
+  assert.match(html, /href="\/admin-settings\.css"/, 'system settings should load its dedicated stylesheet');
+  assert.match(serverSource, /url\.pathname === '\/admin-settings\.css'/, 'server should expose the dedicated system settings stylesheet');
+  assert.match(css, /\.settings-subnav\{/i, 'system settings should include the sticky section navigation styling');
+  assert.match(css, /\.official-payment-grid\{/i, 'system settings should include the official payment provider grid styling');
+  assert.match(css, /@media\(max-width:820px\)/i, 'system settings payment layout should remain responsive on narrow screens');
+});
+
 test('website CMS uses isolated per-field saves while retaining an explicit save-all fallback', () => {
   const html = readFileSync(join(PUBLIC, 'admin-website.html'), 'utf8');
   const source = readFileSync(join(PUBLIC, 'admin-website.js'), 'utf8');

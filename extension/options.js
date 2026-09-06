@@ -218,7 +218,7 @@ function renderStatus(nativeStatus = {}) {
   const verification = nativeStatus.lastVerification;
   if (!verification) {
     elements.verificationStatus.textContent = '暂无 / None';
-    elements.evidenceStatus.textContent = '暂无 / None';
+    if (elements.evidenceStatus) elements.evidenceStatus.textContent = '暂无 / None';
     return;
   }
   const verdicts = {
@@ -227,7 +227,7 @@ function renderStatus(nativeStatus = {}) {
     unverified: '未验证 / Unverified',
   };
   elements.verificationStatus.textContent = `${verdicts[verification.verdict] || verification.verdict} · ${verification.decision}`;
-  elements.evidenceStatus.textContent = `${verification.evidenceSource} · ${verification.confidence}`;
+  if (elements.evidenceStatus) elements.evidenceStatus.textContent = `${verification.evidenceSource} · ${verification.confidence}`;
 }
 
 async function applyState(state) {

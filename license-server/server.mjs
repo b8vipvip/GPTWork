@@ -9,6 +9,8 @@ import { createUpdateManager } from './update-manager.mjs';
 import { createAccountSystem } from './account-system.mjs';
 import { createClientRuntimeLogManager } from './client-runtime-logs.mjs';
 import { createPaymentSystem } from './payment-system.mjs';
+import { createOfficialPaymentSystem } from './official-payment-system.mjs';
+import { composePaymentSystems } from './composite-payment-system.mjs';
 import { createSiteAccountSystem } from './site-account.mjs';
 import { createSiteReleaseFeed } from './site-releases.mjs';
 import { createIssuesSystem } from './issues-system.mjs';
@@ -143,7 +145,9 @@ async function bodyJson(req) { let size = 0; const chunks = []; for await (const
 function corsHeaders(req) { const origin = String(req.headers.origin || ''); const extensionId = extensionIdFromOrigin(origin); if (!extensionId || !ALLOWED_EXTENSION_IDS.has(extensionId)) return {}; return { 'access-control-allow-origin': origin, 'access-control-allow-headers': 'authorization,content-type', 'access-control-allow-methods': 'POST,GET,OPTIONS', vary: 'Origin' }; }
 function staticFile(res, path) { const map = { '.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml' }; try { const content = readFileSync(path); res.writeHead(200, { 'content-type': map[extname(path)] || 'application/octet-stream', 'content-length': content.length, 'cache-control':'no-store', 'content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'", 'referrer-policy':'strict-origin-when-cross-origin', 'x-frame-options':'DENY', 'x-content-type-options':'nosniff' }); res.end(content); } catch { res.writeHead(404).end('Not found'); } }
 
-const paymentSystem = createPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, secret: SECRET, env });
+const legacyPaymentSystem = createPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, secret: SECRET, env });
+const officialPaymentSystem = createOfficialPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, secret: SECRET, env });
+const paymentSystem = composePaymentSystems(legacyPaymentSystem, officialPaymentSystem);
 const accountSystem = createAccountSystem({ db, env, secret: SECRET, publicOrigin: PUBLIC_ORIGIN, allowedExtensionIds: ALLOWED_EXTENSION_IDS, windowTtlSeconds: WINDOW_TTL_SECONDS, json, bodyJson, clientIp, paymentSystem });
 paymentSystem.attachSettlement((orderId, context) => accountSystem.markOrderPaidById(orderId, context));
 const siteAccounts = createSiteAccountSystem({ db, env, publicOrigin: PUBLIC_ORIGIN, json, bodyJson, clientIp, accountSummary: accountSystem.accountSummary, paymentSystem });
@@ -231,6 +235,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/admin-issues.js') return staticFile(res, join(PUBLIC,'admin-issues.js'));
     if (url.pathname === '/admin-website.js') return staticFile(res, join(PUBLIC,'admin-website.js'));
     if (url.pathname === '/admin-website.css') return staticFile(res, join(PUBLIC,'admin-website.css'));
+    if (url.pathname === '/admin-settings.css') return staticFile(res, join(PUBLIC,'admin-settings.css'));
     if (url.pathname === '/payment-admin.js') return staticFile(res, join(PUBLIC,'payment-admin.js'));
     if (url.pathname === '/admin-release-mirror.js') return staticFile(res, join(PUBLIC,'admin-release-mirror.js'));
     if (url.pathname === '/client-runtime-admin.js') return staticFile(res, join(PUBLIC,'client-runtime-admin.js'));

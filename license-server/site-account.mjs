@@ -343,7 +343,7 @@ export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson,
             method.pay_url || '', nowIso(), expiresAt, JSON.stringify(snapshot));
         let order = db.prepare('SELECT * FROM membership_orders WHERE id=?').get(Number(result.lastInsertRowid));
         if (usdtQuote) paymentSystem.attachUsdtOrder(order.id, usdtQuote);
-        order = paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });
+        order = await paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });
         return json(res, 201, { ok: true, order: orderPublic(order), instructions: method.instructions || '' }), true;
       }
       const orderMatch = url.pathname.match(/^\/site\/api\/account\/orders\/(\d+)$/);
