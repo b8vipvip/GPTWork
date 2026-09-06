@@ -633,6 +633,7 @@ export function createAccountSystem({
     });
   }
   function publicPaymentMethods() {
+    if (paymentSystem?.list) return paymentSystem.list(true);
     return db.prepare('SELECT * FROM payment_methods WHERE enabled=1 ORDER BY code').all().map((row) => ({
       code: row.code,
       name: row.name,

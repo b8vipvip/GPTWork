@@ -88,6 +88,11 @@ function ensurePaypalPaymentMethod(db) {
 export function createOfficialPaymentSystem({ db, publicOrigin, secret = '', fetchImpl = globalThis.fetch, logger = console }) {
   ensurePaypalPaymentMethod(db);
   db.exec(`
+    CREATE TABLE IF NOT EXISTS secure_settings (
+      key TEXT PRIMARY KEY,
+      ciphertext TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS official_payment_orders (
       order_id INTEGER PRIMARY KEY REFERENCES membership_orders(id) ON DELETE CASCADE,
       provider TEXT NOT NULL CHECK(provider IN ('wechat_official','alipay_official','paypal_official')),
