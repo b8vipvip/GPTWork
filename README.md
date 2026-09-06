@@ -26,6 +26,12 @@ GPTWork 不使用 OpenAI API，也不会绕过 ChatGPT 套餐、额度、区域�
 
 详细步骤见 [安装说明](docs/INSTALL.md) 和 [使用说明](docs/USAGE.md)。
 
+## 未来兼容路线 / Compatibility roadmap
+
+Windows 版 ChatGPT 桌面客户端支持已经列入正式路线，但**当前尚未实现，也不属于现有稳定版支持范围**。后续开发将从只读探测开始，在取得稳定、可重复的正式请求/响应证据后，再决定 Desktop Adapter 的锁定与验证实现。
+
+完整方案、阶段计划、测试矩阵、回退原则和完成定义见 [Windows ChatGPT 桌面客户端兼容路线](docs/WINDOWS_CHATGPT_DESKTOP_ROADMAP.md)。
+
 ## 官网
 
 - 产品首页：https://gptlock.mv3.cn/
@@ -56,5 +62,7 @@ GPTWork 正在迁移到 public/private split-source 架构。实现敏感的判�
 ## English
 
 GPTWork manages model and reasoning preferences for official ChatGPT web chats on Windows and Linux. It provides a browser extension, account/device management, diagnostics, and signed/packaged release workflows without using the OpenAI API or bypassing ChatGPT account limits.
+
+Windows ChatGPT desktop support is on the product roadmap but is not currently implemented or advertised as supported. Future work starts with read-only desktop reconnaissance and evidence validation before any request-locking behavior is considered. See `docs/WINDOWS_CHATGPT_DESKTOP_ROADMAP.md`.
 
 This repository is the public distribution surface. Proprietary implementation-sensitive behavior is moving to a private core and is exposed to public components only through stable compatibility contracts and released artifacts. Legacy v0.5.x core source that remains here is frozen for migration compatibility and is not the location for new proprietary development.
