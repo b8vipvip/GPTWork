@@ -107,7 +107,10 @@ async function initAccount() {
   const dashboard = document.getElementById('accountDashboard');
   const loginCard = document.getElementById('loginCard');
   let config = { plans: [], paymentMethods: [] };
-  const zpayReturn = new URLSearchParams(location.search).get('zpay');
+  const returnParams = new URLSearchParams(location.search);
+  const zpayReturn = returnParams.get('zpay');
+  const paypalReturn = returnParams.get('paypal');
+  const alipayReturn = returnParams.get('alipay');
   try { config = await api('/site/api/account/config'); } catch {}
   try {
     const paymentConfig = await api('/site/api/payments');
@@ -120,9 +123,11 @@ async function initAccount() {
       const data = await api('/site/api/account/me');
       loading.classList.add('hidden'); guest.classList.add('hidden'); dashboard.classList.remove('hidden'); loginCard.classList.add('hidden');
       renderAccount(data, config, refresh);
-      if (zpayReturn) {
+      if (zpayReturn || paypalReturn || alipayReturn) {
         const box = document.getElementById('paymentBox');
-        notice(box, zpayReturn === 'success' ? 'ZPAY 已返回支付成功，会员权益已刷新。' : '已从 ZPAY 返回；如果刚完成付款，请稍候几秒等待异步回调并自动刷新。', zpayReturn === 'success' ? 'good' : '');
+        if (paypalReturn) notice(box, paypalReturn === 'success' ? 'PayPal 官方支付已完成，会员权益已刷新。' : paypalReturn === 'cancelled' ? 'PayPal 支付已取消。' : 'PayPal 支付未完成，请重新发起订单。', paypalReturn === 'success' ? 'good' : '');
+        else if (alipayReturn) notice(box, '已从支付宝返回；系统将以支付宝官方异步通知验签结果为准，到账后自动刷新会员权益。');
+        else notice(box, zpayReturn === 'success' ? 'ZPAY 已返回支付成功，会员权益已刷新。' : '已从 ZPAY 返回；如果刚完成付款，请稍候几秒等待异步回调并自动刷新。', zpayReturn === 'success' ? 'good' : '');
         history.replaceState(null, '', location.pathname);
       }
       return true;
@@ -187,8 +192,9 @@ async function initAccount() {
 }
 
 function paymentMethodLabel(method) {
-  if (method.code === 'wechat') return method.provider === 'zpay' ? '微信支付（ZPAY）' : '微信支付';
-  if (method.code === 'alipay') return method.provider === 'zpay' ? '支付宝（ZPAY）' : '支付宝';
+  if (method.code === 'wechat') return method.provider === 'zpay' ? '微信支付（ZPAY）' : method.provider === 'wechat_official' ? '微信支付（官方 API）' : '微信支付';
+  if (method.code === 'alipay') return method.provider === 'zpay' ? '支付宝（ZPAY）' : method.provider === 'alipay_official' ? '支付宝（官方 API）' : '支付宝';
+  if (method.code === 'paypal') return 'PayPal（官方 API）';
   if (method.code === 'usdt') return 'USDT';
   return method.name || method.code;
 }
@@ -237,6 +243,8 @@ function renderPaymentBox(result, method) {
       : '当前尚未启用 OKX 自动到账核对；付款后需要管理员确认到账才能开通会员。'));
   } else if (method.provider === 'zpay') {
     box.append(node('small', '', '点击“打开支付页面”后将进入 ZPAY 收银台。只有服务端验证 ZPAY 回调签名、商户号、订单号、金额与支付渠道全部一致后，才会自动确认订单并开通会员。'));
+  } else if (['wechat_official', 'alipay_official', 'paypal_official'].includes(method.provider)) {
+    box.append(node('small', '', '该订单使用官方支付接口。服务端只在官方回调或服务器端 Capture 校验订单号、金额、币种与支付状态一致后自动开通会员。'));
   } else {
     box.append(node('small', '', '微信/支付宝静态收款码没有可信服务器回调：付款后订单保持待支付，由管理员核对实际到账并确认后开通会员。'));
   }

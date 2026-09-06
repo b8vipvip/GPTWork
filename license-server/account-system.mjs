@@ -1074,7 +1074,7 @@ export function createAccountSystem({
         const result = db.prepare(`INSERT INTO membership_orders(user_id,plan_code,payment_method,amount_cents,status,pay_url,created_at,expires_at,plan_snapshot_json)
           VALUES(?,?,?,?, 'pending',?,?,?,?)`).run(session.user_id, plan.code, method.code, plan.price_cents, payUrl, nowIso(), expiresAt, JSON.stringify(frozenTerms));
         let order = db.prepare('SELECT * FROM membership_orders WHERE id=?').get(Number(result.lastInsertRowid));
-        if (paymentSystem) order = paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });
+        if (paymentSystem) order = await paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });
         audit('order_created', session.user_id, { orderId: order.id, planCode: plan.code, paymentMethod: method.code, amountCents: plan.price_cents });
         return json(res, 201, { ok: true, order: orderPublic(order), instructions: method.instructions }, cors), true;
       }
