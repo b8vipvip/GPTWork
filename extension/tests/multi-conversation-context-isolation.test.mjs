@@ -15,20 +15,26 @@ test('two conversations keep independent persistent checkpoint keys', () => {
   assert.notEqual(a, b);
 });
 
-test('two conversations calculate remaining percentage from their own cumulative usage', () => {
-  const profile = { hardLimitObservedCount: 1, hardLimitObservedTokens: 1000 };
+test('two conversations calculate remaining percentage from their own token usage', () => {
+  const aBudget = indicator.computeLocalBudget({
+    historyTokens: 766_920,
+    contextLimitTokens: 1_050_000,
+  });
+  const bBudget = indicator.computeLocalBudget({
+    historyTokens: 194_040,
+    contextLimitTokens: 1_050_000,
+  });
   const a = indicator.calculateRemainingPercent({
-    snapshot: { cumulativeConversationTokens: 830 },
-    profile,
-    localBudget: { cumulativeTokens: 830, cumulativeCharacters: 0, cumulativeMessages: 0 },
+    hardLimitVisible: false,
+    localBudget: { ...aBudget, learnedHardLimitActive: false },
   });
   const b = indicator.calculateRemainingPercent({
-    snapshot: { cumulativeConversationTokens: 210 },
-    profile,
-    localBudget: { cumulativeTokens: 210, cumulativeCharacters: 0, cumulativeMessages: 0 },
+    hardLimitVisible: false,
+    localBudget: { ...bBudget, learnedHardLimitActive: false },
   });
   assert.equal(indicator.formatPercent(a.percent), '17.0%');
   assert.equal(indicator.formatPercent(b.percent), '79.0%');
+  assert.notEqual(a.percent, b.percent);
 });
 
 test('SPA navigation and in-flight history requests are conversation-key aware', () => {
