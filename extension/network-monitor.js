@@ -317,6 +317,7 @@ export class ChatGptNetworkMonitor {
       await this.continuePaused(tabId, requestId, rewrite.changed ? rewrite.postData : null);
       this.onRewrite?.(tabId, {
         endpoint,
+        requestId: params.networkId ? String(params.networkId) : null,
         changed: rewrite.changed,
         reason: rewrite.reason,
         modelBefore: rewrite.modelBefore,
@@ -331,6 +332,7 @@ export class ChatGptNetworkMonitor {
       const detail = safeError(error);
       this.onRewrite?.(tabId, {
         endpoint,
+        requestId: params.networkId ? String(params.networkId) : null,
         changed: false,
         reason: 'rewrite_failed_open',
         modelBefore: rewrite?.modelBefore ?? null,
