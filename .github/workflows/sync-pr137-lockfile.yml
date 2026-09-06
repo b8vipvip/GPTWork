@@ -1,0 +1,39 @@
+name: Sync PR137 lockfile
+
+on:
+  push:
+    branches:
+      - feat/request-model-history-20260906
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/request-model-history-20260906
+      - name: Synchronize root package version only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('native-core/Cargo.lock')
+          text = path.read_text(encoding='utf-8')
+          old = 'name = "gptwork-core"\nversion = "0.5.43"'
+          new = 'name = "gptwork-core"\nversion = "0.5.44"'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one root package version marker, found {count}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit lockfile
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add native-core/Cargo.lock
+          git diff --cached --exit-code && exit 0 || true
+          git commit -m 'chore: sync native lockfile to 0.5.44'
+          git push origin HEAD:feat/request-model-history-20260906
