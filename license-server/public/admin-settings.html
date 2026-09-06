@@ -13,111 +13,167 @@
     <nav><a href="/admin/overview" data-page="overview">总览</a><a href="/admin/users" data-page="users">用户</a><a href="/admin/plans" data-page="plans">会员</a><a href="/admin/orders" data-page="orders">订单</a><a href="/admin/issues" data-page="issues">Issues 讨论区</a><a href="/admin/website" data-page="website">官网管理</a><a href="/admin/settings" data-page="settings" class="active" aria-current="page">系统配置</a><a href="/admin/client-logs" data-page="client-logs">客户端运行日志</a><a href="/admin/server-logs" data-page="server-logs">服务端日志</a><a href="/admin/update" data-page="update">更新</a></nav>
     <button id="logout" class="ghost" hidden>退出管理员</button>
   </aside>
-  <main class="workspace">
-    <header class="topbar"><div><p>GPTWORK ADMIN · SETTINGS</p><h1>系统配置</h1></div><span class="security-pill">Account Control</span></header>
+  <main class="workspace settings-workspace">
+    <header class="topbar"><div><p>GPTWORK ADMIN · SETTINGS</p><h1>系统配置</h1><div class="settings-lead">按功能分区管理账号、邮件与支付。敏感支付密钥只在服务端加密保存，读取时仅返回配置状态。</div></div><span class="security-pill">Secure Config</span></header>
     <section id="login" class="card login-card">
       <h2>管理员登录</h2><p class="muted">后台仅使用独立管理员密码。建议通过 HTTPS + WAF / IP 白名单访问。</p>
       <div class="inline"><input id="password" type="password" autocomplete="current-password" placeholder="管理员密码"><button id="loginButton" class="primary">登录</button></div>
       <p id="loginMessage" class="message"></p>
     </section>
     <div id="app" hidden>
-      <section id="settings" class="card">
-        <div class="section-title"><div><h2>账号系统配置</h2><p class="muted">免费权益、会话时长、SMTP 邮箱，以及微信、支付宝、USDT 收款。</p></div><button id="saveSettings" class="primary">保存配置</button></div>
-        <h3>免费用户</h3>
-        <div class="grid four">
-          <label>免费天数<input id="freeDays" type="number" min="0"></label>
-          <label>设备上限<input id="freeDevices" type="number" min="1"></label>
-          <label>登录会话天数<input id="sessionDays" type="number" min="1"></label>
-        </div>
-        <h3>邮箱 / SMTP</h3>
-        <label class="check"><input id="emailVerificationRequired" type="checkbox"> 新用户注册必须验证邮箱</label>
-        <p class="muted">关闭后，新注册账号无需邮箱验证码即可激活并登录；之后重新开启时，已按免验证模式注册的账号不会被反向锁定。找回密码仍需要邮箱验证码。</p>
-        <div class="grid three">
-          <label>SMTP 主机<input id="smtpHost" placeholder="smtp.example.com"></label>
-          <label>端口<input id="smtpPort" type="number" min="1" max="65535"></label>
-          <label class="check"><input id="smtpSecure" type="checkbox"> SSL/TLS 直连（常用 465）</label>
-          <label>用户名<input id="smtpUsername" autocomplete="off"></label>
-          <label>SMTP 密码/授权码<input id="smtpPassword" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
-          <label>发件邮箱<input id="smtpFromEmail" type="email"></label>
-          <label>发件名称<input id="smtpFromName" value="GPTWork"></label>
-          <label>测试收件邮箱<input id="testEmail" type="email"></label>
-          <button id="sendTestEmail" type="button">发送测试邮件</button>
-        </div>
-        <p id="smtpState" class="muted"></p>
+      <nav class="settings-subnav" aria-label="系统配置分区">
+        <a href="#account-settings">账号</a><a href="#mail-settings">邮件</a><a href="#official-payments">官方支付</a><a href="#other-payments">其他支付</a>
+      </nav>
 
-        <div class="section-title"><div><h3>支付方式</h3><p class="muted">微信/支付宝继续使用人工确认到账。USDT 可使用欧易收款链接，并通过只读 OKX API 自动核对到账与开通会员。</p></div><button id="saveAdvancedPayments" type="button">保存支付配置</button></div>
-        <div class="payment-grid">
-          <article>
-            <label class="check"><input id="wechatEnabled" type="checkbox"> 启用微信支付</label>
-            <label>收款模式<select id="wechatProvider"><option value="manual">静态收款码 / 人工确认</option><option value="zpay">ZPAY · 自动回调确认</option></select></label>
-            <label>HTTPS 支付页 / 二维码地址<input id="wechatUrl" type="url" placeholder="静态模式使用；上传二维码后可自动生成"></label>
-            <label>付款说明<textarea id="wechatInstructions" rows="3"></textarea></label>
-            <label>收款二维码<input id="wechatQrFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
-            <div class="inline"><button id="wechatQrUpload" type="button">上传/替换二维码</button><button id="wechatQrDelete" type="button">删除二维码</button></div>
-            <p id="wechatQrState" class="muted">未检查二维码</p>
-          </article>
-          <article>
-            <label class="check"><input id="alipayEnabled" type="checkbox"> 启用支付宝</label>
-            <label>收款模式<select id="alipayProvider"><option value="manual">静态收款码 / 人工确认</option><option value="zpay">ZPAY · 自动回调确认</option></select></label>
-            <label>HTTPS 支付页 / 二维码地址<input id="alipayUrl" type="url" placeholder="静态模式使用；上传二维码后可自动生成"></label>
-            <label>付款说明<textarea id="alipayInstructions" rows="3"></textarea></label>
-            <label>收款二维码<input id="alipayQrFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
-            <div class="inline"><button id="alipayQrUpload" type="button">上传/替换二维码</button><button id="alipayQrDelete" type="button">删除二维码</button></div>
-            <p id="alipayQrState" class="muted">未检查二维码</p>
-          </article>
-          <article>
-            <label class="check"><input id="usdtEnabled" type="checkbox"> 启用 USDT</label>
-            <label>欧易收款链接 / HTTPS 支付链接<input id="usdtUrl" type="url" placeholder="https://..."></label>
-            <label>网络 / Chain<input id="usdtNetwork" placeholder="例如 USDT-TRC20"></label>
-            <label>收款地址（链上收款时建议填写）<input id="usdtAddress" autocomplete="off" placeholder="链上地址"></label>
-            <label>Memo / Tag（如需要）<input id="usdtMemo" autocomplete="off"></label>
-            <label>付款说明<textarea id="usdtInstructions" rows="3"></textarea></label>
-            <label>收款二维码（可选）<input id="usdtQrFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
-            <div class="inline"><button id="usdtQrUpload" type="button">上传/替换二维码</button><button id="usdtQrDelete" type="button">删除二维码</button></div>
-            <p id="usdtQrState" class="muted">未检查二维码</p>
-          </article>
-        </div>
+      <section id="settings" class="settings-stack">
+        <section id="account-settings" class="card settings-card">
+          <div class="section-title"><div><span class="settings-kicker">ACCOUNT</span><h2>账号与权益</h2><p class="muted">控制新用户免费权益、设备上限和登录会话有效期。</p></div><button id="saveSettings" class="primary">保存基础配置</button></div>
+          <div class="settings-field-grid three-col">
+            <label>免费天数<input id="freeDays" type="number" min="0"></label>
+            <label>设备上限<input id="freeDevices" type="number" min="1"></label>
+            <label>登录会话天数<input id="sessionDays" type="number" min="1"></label>
+          </div>
+          <label class="check settings-toggle"><input id="emailVerificationRequired" type="checkbox"><span><strong>新用户注册必须验证邮箱</strong><small>关闭后新注册账号可直接激活；找回密码仍使用邮箱验证码。</small></span></label>
+          <p id="settingsMessage" class="message"></p>
+        </section>
 
-        <div class="section-title"><div><h3>ZPAY 自动收款</h3><p class="muted">兼容易支付协议。商户密钥仅加密保存在服务端；用户创建订单后由 GPTWork 生成订单级签名并 POST 到 ZPAY，异步回调必须通过 MD5 签名、商户 ID、金额、渠道和订单号校验后才自动开通会员。</p></div></div>
-        <div class="grid three">
-          <label class="check"><input id="zpayEnabled" type="checkbox"> 启用 ZPAY 网关</label>
-          <label>ZPAY 商户 ID / PID<input id="zpayPid" autocomplete="off" placeholder="支付渠道 → API安全"></label>
-          <label>ZPAY 商户密钥 / KEY<input id="zpayKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
-          <label>支付宝渠道 ID / CID（可选）<input id="zpayAlipayCid" autocomplete="off" placeholder="多个用英文逗号分隔；留空随机渠道"></label>
-          <label>微信渠道 ID / CID（可选）<input id="zpayWechatCid" autocomplete="off" placeholder="多个用英文逗号分隔；留空随机渠道"></label>
-        </div>
-        <div class="inline">
-          <button id="saveZpaySettings" type="button" class="primary">保存 ZPAY 配置</button>
-          <button id="testZpayConnection" type="button">测试 ZPAY API</button>
-          <button id="clearZpayCredentials" type="button" class="danger">清除 ZPAY 凭据</button>
-        </div>
-        <p id="zpayState" class="muted">尚未读取 ZPAY 状态</p>
+        <section id="mail-settings" class="card settings-card">
+          <div class="section-title"><div><span class="settings-kicker">MAIL</span><h2>邮件服务 / SMTP</h2><p class="muted">用于邮箱验证、找回密码和系统测试邮件。</p></div><span id="smtpState" class="config-state">尚未读取 SMTP 状态</span></div>
+          <div class="settings-field-grid three-col">
+            <label>SMTP 主机<input id="smtpHost" placeholder="smtp.example.com"></label>
+            <label>端口<input id="smtpPort" type="number" min="1" max="65535"></label>
+            <label class="check settings-toggle compact"><input id="smtpSecure" type="checkbox"><span><strong>SSL/TLS 直连</strong><small>通常使用 465 端口</small></span></label>
+            <label>用户名<input id="smtpUsername" autocomplete="off"></label>
+            <label>SMTP 密码 / 授权码<input id="smtpPassword" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+            <label>发件邮箱<input id="smtpFromEmail" type="email"></label>
+            <label>发件名称<input id="smtpFromName" value="GPTWork"></label>
+            <label>测试收件邮箱<input id="testEmail" type="email"></label>
+            <div class="field-action"><button id="sendTestEmail" type="button">发送测试邮件</button></div>
+          </div>
+        </section>
 
-        <h3>USDT 套餐价格</h3>
-        <p class="muted">为每个会员套餐设置基础 USDT 价格。创建订单时服务端会冻结金额，并可加入不超过 0.000999 USDT 的订单识别尾数，避免多个相同套餐订单同时付款时误匹配。</p>
-        <div id="usdtPlanPrices" class="grid three"></div>
+        <section id="official-payments" class="card settings-card official-payment-section">
+          <div class="section-title"><div><span class="settings-kicker">OFFICIAL PAYMENT APIs</span><h2>官方支付接口</h2><p class="muted">微信支付、支付宝和 PayPal 分别使用各自官方商户接口。启用前先保存凭据并执行连接/签名测试。</p></div></div>
+          <div class="official-payment-grid">
+            <article class="provider-card provider-wechat">
+              <div class="provider-head"><div><span class="provider-mark">微</span><div><h3>微信支付</h3><p>官方 API v3 · H5 收银台</p></div></div><span id="wechatOfficialBadge" class="provider-badge">未配置</span></div>
+              <label class="check settings-toggle"><input id="wechatEnabled" type="checkbox"><span><strong>启用微信支付</strong><small>用户结算页显示微信支付</small></span></label>
+              <label>调用方式<select id="wechatProvider"><option value="wechat_official">微信支付官方 API</option><option value="manual">静态收款码 / 人工确认</option><option value="zpay">ZPAY / 自动回调</option></select></label>
+              <div class="official-fields" data-provider-fields="wechat_official">
+                <div class="settings-field-grid two-col">
+                  <label>AppID<input id="wechatOfficialAppId" autocomplete="off" placeholder="wx..."></label>
+                  <label>商户号 MchID<input id="wechatOfficialMchId" autocomplete="off" placeholder="190000...."></label>
+                  <label>商户证书序列号<input id="wechatOfficialMerchantSerial" autocomplete="off"></label>
+                  <label>平台公钥 / 证书序列号<input id="wechatOfficialPlatformSerial" autocomplete="off"></label>
+                </div>
+                <label>商户 API 私钥 PEM<textarea id="wechatOfficialPrivateKey" rows="4" spellcheck="false" placeholder="留空表示不修改；-----BEGIN PRIVATE KEY-----"></textarea></label>
+                <div class="settings-field-grid two-col">
+                  <label>APIv3 Key<input id="wechatOfficialApiV3Key" type="password" autocomplete="new-password" placeholder="32 个字符，留空表示不修改"></label>
+                  <label>微信支付平台公钥 PEM<textarea id="wechatOfficialPlatformKey" rows="3" spellcheck="false" placeholder="留空表示不修改"></textarea></label>
+                </div>
+                <p class="provider-note">下单使用 H5 支付接口；异步通知必须通过平台签名验证并使用 APIv3 Key 解密，订单号、商户身份、金额和币种全部一致后才自动开通。</p>
+                <div class="provider-actions"><button id="saveWechatOfficial" type="button" class="primary">保存微信官方配置</button><button id="testWechatOfficial" type="button">测试 API</button><button id="clearWechatOfficial" type="button" class="danger">清除凭据</button></div>
+                <p id="wechatOfficialState" class="config-state">尚未读取官方接口状态</p>
+              </div>
+              <div class="legacy-provider-fields" data-provider-fields="wechat_legacy">
+                <label>HTTPS 支付页 / 二维码地址<input id="wechatUrl" type="url" placeholder="静态模式使用；上传二维码后可自动生成"></label>
+                <label>付款说明<textarea id="wechatInstructions" rows="2"></textarea></label>
+                <label>收款二维码<input id="wechatQrFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <div class="provider-actions"><button id="wechatQrUpload" type="button">上传 / 替换二维码</button><button id="wechatQrDelete" type="button">删除二维码</button></div>
+                <p id="wechatQrState" class="config-state">未检查二维码</p>
+              </div>
+            </article>
 
-        <div class="section-title"><div><h3>OKX 自动到账</h3><p class="muted">只使用“读取”权限 API Key。不要授予交易或提币权限。密钥会使用服务端主密钥加密保存，不会返回到浏览器。</p></div></div>
-        <div class="grid three">
-          <label class="check"><input id="okxAutoEnabled" type="checkbox"> 启用 USDT 自动核对并开通</label>
-          <label>检查间隔（秒）<input id="okxPollSeconds" type="number" min="10" max="300" value="15"></label>
-          <label>USDT 付款窗口（分钟）<input id="usdtOrderTtlMinutes" type="number" min="30" max="720" value="120"></label>
-          <label>OKX API Key<input id="okxApiKey" autocomplete="off" placeholder="留空表示不修改"></label>
-          <label>OKX Secret Key<input id="okxSecretKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
-          <label>OKX Passphrase<input id="okxPassphrase" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
-          <label class="check"><input id="okxAllowInternalTransfers" type="checkbox" checked> 允许识别欧易内部转账/收款链接到账</label>
-        </div>
-        <div class="inline">
-          <button id="saveOkxSettings" type="button" class="primary">保存 OKX 配置</button>
-          <button id="testOkxConnection" type="button">测试只读 API</button>
-          <button id="checkOkxNow" type="button">立即检查到账</button>
-          <button id="clearOkxCredentials" type="button" class="danger">清除 OKX 凭据</button>
-        </div>
-        <p id="okxState" class="muted">尚未读取 OKX 状态</p>
-        <p class="muted">自动流程只在金额、USDT 币种、订单时间窗口以及可用的网络/地址条件匹配，并且 OKX 充值状态达到最终成功时执行。存在多个候选订单时会停止自动开通并要求人工核对。</p>
-        <p class="muted">微信/支付宝选择“静态收款码”时仍保持人工确认；选择 ZPAY 时只有服务端验证 ZPAY 官方回调签名、商户号、订单号、金额和渠道全部一致后才自动开通。</p>
-        <p id="paymentSettingsMessage" class="message"></p>
-        <p id="settingsMessage" class="message"></p>
+            <article class="provider-card provider-alipay">
+              <div class="provider-head"><div><span class="provider-mark">支</span><div><h3>支付宝</h3><p>开放平台 · 电脑网站支付</p></div></div><span id="alipayOfficialBadge" class="provider-badge">未配置</span></div>
+              <label class="check settings-toggle"><input id="alipayEnabled" type="checkbox"><span><strong>启用支付宝</strong><small>用户结算页显示支付宝</small></span></label>
+              <label>调用方式<select id="alipayProvider"><option value="alipay_official">支付宝官方 API</option><option value="manual">静态收款码 / 人工确认</option><option value="zpay">ZPAY / 自动回调</option></select></label>
+              <div class="official-fields" data-provider-fields="alipay_official">
+                <div class="settings-field-grid two-col">
+                  <label>应用 AppID<input id="alipayOfficialAppId" autocomplete="off"></label>
+                  <label class="check settings-toggle compact"><input id="alipayOfficialSandbox" type="checkbox"><span><strong>沙箱环境</strong><small>测试完成后关闭并切换正式环境</small></span></label>
+                </div>
+                <label>应用 RSA2 私钥 PEM<textarea id="alipayOfficialPrivateKey" rows="4" spellcheck="false" placeholder="留空表示不修改"></textarea></label>
+                <label>支付宝公钥 PEM<textarea id="alipayOfficialPublicKey" rows="4" spellcheck="false" placeholder="留空表示不修改"></textarea></label>
+                <p class="provider-note">调用 alipay.trade.page.pay 跳转官方收银台；异步通知使用支付宝公钥 RSA2 验签，随后核对 AppID、订单号、金额与交易状态。</p>
+                <div class="provider-actions"><button id="saveAlipayOfficial" type="button" class="primary">保存支付宝官方配置</button><button id="testAlipayOfficial" type="button">验证 RSA2 配置</button><button id="clearAlipayOfficial" type="button" class="danger">清除凭据</button></div>
+                <p id="alipayOfficialState" class="config-state">尚未读取官方接口状态</p>
+              </div>
+              <div class="legacy-provider-fields" data-provider-fields="alipay_legacy">
+                <label>HTTPS 支付页 / 二维码地址<input id="alipayUrl" type="url" placeholder="静态模式使用；上传二维码后可自动生成"></label>
+                <label>付款说明<textarea id="alipayInstructions" rows="2"></textarea></label>
+                <label>收款二维码<input id="alipayQrFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <div class="provider-actions"><button id="alipayQrUpload" type="button">上传 / 替换二维码</button><button id="alipayQrDelete" type="button">删除二维码</button></div>
+                <p id="alipayQrState" class="config-state">未检查二维码</p>
+              </div>
+            </article>
+
+            <article class="provider-card provider-paypal">
+              <div class="provider-head"><div><span class="provider-mark">P</span><div><h3>PayPal</h3><p>REST API · Checkout Orders v2</p></div></div><span id="paypalOfficialBadge" class="provider-badge">未配置</span></div>
+              <label class="check settings-toggle"><input id="paypalEnabled" type="checkbox"><span><strong>启用 PayPal</strong><small>使用 PayPal 官方 Checkout</small></span></label>
+              <div class="settings-field-grid two-col">
+                <label>环境<select id="paypalOfficialEnvironment"><option value="sandbox">Sandbox 沙箱</option><option value="live">Live 正式</option></select></label>
+                <label>结算币种<input id="paypalOfficialCurrency" value="CNY" maxlength="3" placeholder="CNY"></label>
+              </div>
+              <label>Client ID<input id="paypalOfficialClientId" autocomplete="off" placeholder="留空表示不修改已保存 Client ID"></label>
+              <label>Client Secret<input id="paypalOfficialClientSecret" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+              <label>付款说明<textarea id="paypalInstructions" rows="2">通过 PayPal 官方 Checkout 完成付款，支付成功后系统自动确认并开通会员。</textarea></label>
+              <p class="provider-note">服务端先通过 OAuth2 获取访问令牌，再创建 Orders v2 订单；买家批准后由服务端调用 Capture，并核对 reference_id、Capture 状态、币种和金额。</p>
+              <div class="provider-actions"><button id="savePaypalOfficial" type="button" class="primary">保存 PayPal 配置</button><button id="testPaypalOfficial" type="button">测试 OAuth2</button><button id="clearPaypalOfficial" type="button" class="danger">清除凭据</button></div>
+              <p id="paypalOfficialState" class="config-state">尚未读取官方接口状态</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="other-payments" class="card settings-card">
+          <div class="section-title"><div><span class="settings-kicker">OTHER CHANNELS</span><h2>其他支付渠道</h2><p class="muted">保留静态二维码、ZPAY 和 USDT / OKX。它们与上面的官方接口分开配置，不再混成一整页字段。</p></div><button id="saveAdvancedPayments" type="button">保存通用支付配置</button></div>
+
+          <details class="settings-disclosure" open>
+            <summary><span>ZPAY 自动收款</span><small>微信 / 支付宝可选择 ZPAY 作为调用方式</small></summary>
+            <div class="settings-disclosure-body">
+              <div class="settings-field-grid three-col">
+                <label class="check settings-toggle compact"><input id="zpayEnabled" type="checkbox"><span><strong>启用 ZPAY 网关</strong></span></label>
+                <label>ZPAY 商户 ID / PID<input id="zpayPid" autocomplete="off"></label>
+                <label>ZPAY 商户密钥 / KEY<input id="zpayKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+                <label>支付宝渠道 ID / CID<input id="zpayAlipayCid" autocomplete="off" placeholder="可选，多个用英文逗号分隔"></label>
+                <label>微信渠道 ID / CID<input id="zpayWechatCid" autocomplete="off" placeholder="可选，多个用英文逗号分隔"></label>
+              </div>
+              <div class="provider-actions"><button id="saveZpaySettings" type="button" class="primary">保存 ZPAY</button><button id="testZpayConnection" type="button">测试 API</button><button id="clearZpayCredentials" type="button" class="danger">清除凭据</button></div>
+              <p id="zpayState" class="config-state">尚未读取 ZPAY 状态</p>
+            </div>
+          </details>
+
+          <details class="settings-disclosure">
+            <summary><span>USDT / OKX 自动到账</span><small>独立 USDT 套餐价格、收款参数和只读到账核对</small></summary>
+            <div class="settings-disclosure-body">
+              <div class="settings-field-grid three-col">
+                <label class="check settings-toggle compact"><input id="usdtEnabled" type="checkbox"><span><strong>启用 USDT</strong></span></label>
+                <label>欧易收款链接 / HTTPS<input id="usdtUrl" type="url" placeholder="https://..."></label>
+                <label>网络 / Chain<input id="usdtNetwork" placeholder="例如 USDT-TRC20"></label>
+                <label>收款地址<input id="usdtAddress" autocomplete="off"></label>
+                <label>Memo / Tag<input id="usdtMemo" autocomplete="off"></label>
+                <label>付款说明<textarea id="usdtInstructions" rows="2"></textarea></label>
+                <label>收款二维码<input id="usdtQrFile" type="file" accept="image/png,image/jpeg,image/webp"></label>
+                <div class="provider-actions"><button id="usdtQrUpload" type="button">上传 / 替换二维码</button><button id="usdtQrDelete" type="button">删除二维码</button></div>
+              </div>
+              <p id="usdtQrState" class="config-state">未检查二维码</p>
+              <h3>套餐 USDT 价格</h3><div id="usdtPlanPrices" class="settings-field-grid three-col"></div>
+              <div class="settings-divider"></div>
+              <div class="settings-field-grid three-col">
+                <label class="check settings-toggle compact"><input id="okxAutoEnabled" type="checkbox"><span><strong>自动核对并开通</strong></span></label>
+                <label>检查间隔（秒）<input id="okxPollSeconds" type="number" min="10" max="300" value="15"></label>
+                <label>付款窗口（分钟）<input id="usdtOrderTtlMinutes" type="number" min="30" max="720" value="120"></label>
+                <label>OKX API Key<input id="okxApiKey" autocomplete="off" placeholder="留空表示不修改"></label>
+                <label>OKX Secret Key<input id="okxSecretKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+                <label>OKX Passphrase<input id="okxPassphrase" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+                <label class="check settings-toggle compact"><input id="okxAllowInternalTransfers" type="checkbox" checked><span><strong>识别欧易内部转账</strong></span></label>
+              </div>
+              <div class="provider-actions"><button id="saveOkxSettings" type="button" class="primary">保存 OKX</button><button id="testOkxConnection" type="button">测试只读 API</button><button id="checkOkxNow" type="button">立即检查到账</button><button id="clearOkxCredentials" type="button" class="danger">清除凭据</button></div>
+              <p id="okxState" class="config-state">尚未读取 OKX 状态</p>
+            </div>
+          </details>
+          <p id="paymentSettingsMessage" class="message settings-global-message"></p>
+        </section>
       </section>
     </div>
   </main>
