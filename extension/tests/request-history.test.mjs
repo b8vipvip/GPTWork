@@ -11,6 +11,7 @@ test('request history shows discovered, sent and final response models from one 
   const rows = buildRequestModelHistory([
     log('2026-09-06T10:00:00.000Z', 'lock', 'request_lock_rewritten', {
       tabId: 7,
+      requestId: 'cdp-1',
       changed: true,
       reason: 'model_rewritten',
       modelBefore: 'gpt-5.5',
@@ -20,12 +21,14 @@ test('request history shows discovered, sent and final response models from one 
     }),
     log('2026-09-06T10:00:00.100Z', 'network', 'formal_conversation_request_detected', {
       tabId: 7,
+      requestId: 'cdp-1',
       model: 'gpt-5.6-sol',
       reasoning: 'high',
       responseVerificationEnabled: true,
     }, 'request-row-1'),
     log('2026-09-06T10:00:03.000Z', 'verification', 'response_evaluated', {
       tabId: 7,
+      requestId: 'cdp-1',
       verdict: 'verified',
       model: 'gpt-5.6-sol',
       reasoning: 'high',
@@ -35,6 +38,7 @@ test('request history shows discovered, sent and final response models from one 
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].id, 'request-row-1');
+  assert.equal(rows[0].requestId, 'cdp-1');
   assert.equal(rows[0].discoveredModel, 'gpt-5.5');
   assert.equal(rows[0].requestModel, 'gpt-5.6-sol');
   assert.equal(rows[0].finalModel, 'gpt-5.6-sol');
@@ -46,11 +50,13 @@ test('latest request stays waiting while an older unresolved request becomes unc
   const rows = buildRequestModelHistory([
     log('2026-09-06T10:00:00.000Z', 'network', 'formal_conversation_request_detected', {
       tabId: 3,
+      requestId: 'older-request',
       model: 'gpt-5.6-sol',
       responseVerificationEnabled: true,
     }, 'older'),
     log('2026-09-06T10:00:02.000Z', 'network', 'formal_conversation_request_detected', {
       tabId: 3,
+      requestId: 'latest-request',
       model: 'gpt-6-astra',
       responseVerificationEnabled: true,
     }, 'latest'),
@@ -62,20 +68,61 @@ test('latest request stays waiting while an older unresolved request becomes unc
   assert.equal(rows[1].status, 'unconfirmed');
 });
 
+test('responses are correlated by request id even when same-tab responses arrive out of order', () => {
+  const rows = buildRequestModelHistory([
+    log('2026-09-06T10:00:00.000Z', 'network', 'formal_conversation_request_detected', {
+      tabId: 5,
+      requestId: 'request-a',
+      model: 'gpt-5.6-sol',
+      responseVerificationEnabled: true,
+    }, 'row-a'),
+    log('2026-09-06T10:00:00.100Z', 'network', 'formal_conversation_request_detected', {
+      tabId: 5,
+      requestId: 'request-b',
+      model: 'gpt-6-astra',
+      responseVerificationEnabled: true,
+    }, 'row-b'),
+    log('2026-09-06T10:00:02.000Z', 'verification', 'response_evaluated', {
+      tabId: 5,
+      requestId: 'request-a',
+      verdict: 'verified',
+      model: 'gpt-5.6-sol',
+      evidenceSource: 'network_response_metadata',
+    }),
+    log('2026-09-06T10:00:03.000Z', 'verification', 'response_evaluated', {
+      tabId: 5,
+      requestId: 'request-b',
+      verdict: 'verified',
+      model: 'gpt-6-astra',
+      evidenceSource: 'network_response_metadata',
+    }),
+  ]);
+
+  const a = rows.find((row) => row.id === 'row-a');
+  const b = rows.find((row) => row.id === 'row-b');
+  assert.equal(a.finalModel, 'gpt-5.6-sol');
+  assert.equal(a.status, 'verified');
+  assert.equal(b.finalModel, 'gpt-6-astra');
+  assert.equal(b.status, 'verified');
+});
+
 test('tabs are projected independently and response model is never guessed when absent', () => {
   const rows = buildRequestModelHistory([
     log('2026-09-06T10:00:00.000Z', 'network', 'formal_conversation_request_detected', {
       tabId: 1,
+      requestId: 'tab-1-request',
       model: 'gpt-5.6-sol',
       responseVerificationEnabled: true,
     }, 'tab-1'),
     log('2026-09-06T10:00:00.100Z', 'network', 'formal_conversation_request_detected', {
       tabId: 2,
+      requestId: 'tab-2-request',
       model: 'gpt-6-astra',
       responseVerificationEnabled: true,
     }, 'tab-2'),
     log('2026-09-06T10:00:02.000Z', 'verification', 'response_evaluated', {
       tabId: 1,
+      requestId: 'tab-1-request',
       verdict: 'unverified',
       model: null,
       evidenceSource: 'network_response_metadata',
@@ -83,6 +130,7 @@ test('tabs are projected independently and response model is never guessed when 
     }),
     log('2026-09-06T10:00:02.100Z', 'verification', 'response_evaluated', {
       tabId: 2,
+      requestId: 'tab-2-request',
       verdict: 'verified',
       model: 'gpt-6-astra',
       evidenceSource: 'network_response_metadata',
@@ -102,6 +150,7 @@ test('history is newest-first and bounded', () => {
   for (let index = 0; index < 8; index += 1) {
     logs.push(log(`2026-09-06T10:00:0${index}.000Z`, 'network', 'formal_conversation_request_detected', {
       tabId: 9,
+      requestId: `request-${index}`,
       model: `gpt-test-${index}`,
       responseVerificationEnabled: false,
     }, `row-${index}`));
