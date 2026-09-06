@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { buildRequestModelHistory } from '../request-history.js';
+
+const settingsHtml = await readFile(new URL('../settings-v0521.html', import.meta.url), 'utf8');
+const backgroundSource = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+const networkMonitorSource = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
 
 function log(timestamp, component, event, details = {}, id = null) {
   return { id: id || `${component}:${event}:${timestamp}`, timestamp, component, event, details };
@@ -158,4 +163,15 @@ test('history is newest-first and bounded', () => {
   const rows = buildRequestModelHistory(logs, { limit: 3 });
   assert.deepEqual(rows.map((row) => row.id), ['row-7', 'row-6', 'row-5']);
   assert(rows.every((row) => row.status === 'request_only'));
+});
+
+test('settings UI exposes request history and existing telemetry carries the correlation id', () => {
+  assert.match(settingsHtml, /id="requestHistoryBody"/);
+  assert.match(settingsHtml, /发现模型/);
+  assert.match(settingsHtml, /请求模型/);
+  assert.match(settingsHtml, /最终模型/);
+  assert.match(settingsHtml, /request-history-options\.js/);
+  assert.match(networkMonitorSource, /requestId: params\.networkId \? String\(params\.networkId\) : null/);
+  assert.match(backgroundSource, /requestId: request\.requestId/);
+  assert.match(backgroundSource, /requestId: evidence\?\.streamContext\?\.initialRequestId \?\? evidence\.requestId \?\? null/);
 });
