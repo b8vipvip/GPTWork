@@ -7,6 +7,7 @@ const websiteCommerce = await readFile(new URL('../public/account-commerce.js', 
 const extensionCommerce = await readFile(new URL('../../extension/account-commerce.js', import.meta.url), 'utf8');
 const paymentSystem = await readFile(new URL('../payment-system.mjs', import.meta.url), 'utf8');
 const accountSystem = await readFile(new URL('../account-system.mjs', import.meta.url), 'utf8');
+const zpayClient = await readFile(new URL('../zpay-client.mjs', import.meta.url), 'utf8');
 const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
 
 test('promotion expires back to original price without fake urgency', () => {
@@ -33,6 +34,8 @@ test('website and extension expose the same checkout UX contract', () => {
 });
 
 test('direct ZPAY QR metadata is produced server-side and exposed to extension account API', () => {
+  assert.match(zpayClient, /mapi\.php/);
+  assert.match(zpayClient, /FormData/);
   assert.match(paymentSystem, /createPayment\(params\)/);
   assert.match(paymentSystem, /qr_image_url/);
   assert.match(paymentSystem, /qrPayload/);
