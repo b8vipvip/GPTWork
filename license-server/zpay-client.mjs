@@ -72,6 +72,19 @@ function makeProbeTradeNo() {
   return `99${timestamp}${suffix}`.padEnd(32, '0').slice(0, 32);
 }
 
+function parsePossiblyWrappedJson(text) {
+  if (!text) return null;
+  let value;
+  try { value = JSON.parse(text); } catch { return null; }
+  if (typeof value === 'string') {
+    const nested = value.trim();
+    if (nested.startsWith('{') || nested.startsWith('[')) {
+      try { value = JSON.parse(nested); } catch {}
+    }
+  }
+  return value;
+}
+
 export function createZpayClient({ pid, key, fetchImpl = globalThis.fetch }) {
   const merchantId = String(pid || '').trim();
   const merchantKey = String(key || '');
@@ -91,8 +104,7 @@ export function createZpayClient({ pid, key, fetchImpl = globalThis.fetch }) {
     }
 
     const text = await response.text().catch(() => '');
-    let body = null;
-    try { body = text ? JSON.parse(text) : null; } catch {}
+    const body = parsePossiblyWrappedJson(text);
 
     if (!response.ok) {
       const detail = compactText(body?.msg || body?.message || text);
@@ -125,10 +137,6 @@ export function createZpayClient({ pid, key, fetchImpl = globalThis.fetch }) {
     const authFailure = authFailureMessage(body);
     if (authFailure) throw createApiError(`ZPAY 商户凭据校验失败：${authFailure}`, 'ZPAY_AUTH_ERROR');
 
-    // ZPAY's published API documents act=order, but not act=balance. A deliberately
-    // nonexistent numeric order exercises the documented authenticated endpoint without
-    // creating a payment. Any structured non-auth business response proves the gateway
-    // and merchant API are reachable; callers can surface the upstream message for diagnostics.
     return {
       code: 1,
       msg: compactText(body?.msg) || `ZPAY API 已响应（upstream code=${String(body.code ?? '')}）`,
@@ -141,8 +149,6 @@ export function createZpayClient({ pid, key, fetchImpl = globalThis.fetch }) {
 
   return {
     probeCredentials,
-    // Backward-compatible name used by the admin route. ZPAY does not publish an act=balance API;
-    // keep this method so older callers continue to work while using the documented order probe.
     queryBalance: probeCredentials,
     queryOrder(outTradeNo) { return request({ act: 'order', pid: merchantId, key: merchantKey, out_trade_no: String(outTradeNo) }); },
   };
