@@ -464,12 +464,12 @@ export function createPaymentTestSystem({ db, publicOrigin, secret = '', env = p
         if (!input || input.status !== 'awaiting') throw Object.assign(new Error('支付测试订单已失效或不存在'), { status: 404, code: 'PAYMENT_TEST_NOT_PAYABLE' });
         if (input.provider.startsWith('zpay_')) {
           const html = zpayCheckout(input);
-          writeHtml(res, 200, html, `default-src 'none'; script-src 'unsafe-inline'; form-action ${new URL(ZPAY_SUBMIT_URL).origin}; base-uri 'none'; frame-ancestors 'none'`);
+          writeHtml(res, 200, html, `default-src 'none'; script-src 'unsafe-inline'; form-action https:; base-uri 'none'; frame-ancestors 'none'`);
           return true;
         }
         if (input.provider === 'alipay_official') {
           const page = alipayCheckout(input);
-          writeHtml(res, 200, page.html, `default-src 'none'; script-src 'unsafe-inline'; form-action ${page.origin}; base-uri 'none'; frame-ancestors 'none'`);
+          writeHtml(res, 200, page.html, `default-src 'none'; script-src 'unsafe-inline'; form-action https:; base-uri 'none'; frame-ancestors 'none'`);
           return true;
         }
         if (input.provider === 'okx_usdt') {

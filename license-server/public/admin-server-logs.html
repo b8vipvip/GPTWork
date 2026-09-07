@@ -22,7 +22,22 @@
     </section>
     <div id="app" hidden>
       <section id="logs" class="card">
-        <div class="section-title"><div><h2>服务端运行日志</h2><p class="muted">敏感密码、验证码、会话令牌不会写入运行日志。</p></div><div class="section-actions"><button id="refreshRuntime">刷新</button><button id="exportRuntime">导出</button></div></div>
+        <div class="section-title">
+          <div><h2>服务端运行日志</h2><p class="muted">敏感密码、验证码、会话令牌不会写入运行日志。导出范围按最新日志向前截取；“全部”导出当前服务端仍保留的全部日志。</p></div>
+          <div class="section-actions">
+            <button id="refreshRuntime">刷新</button>
+            <label>导出最近
+              <select id="runtimeExportLimit" aria-label="服务端日志导出范围">
+                <option value="200">200 行</option>
+                <option value="500" selected>500 行</option>
+                <option value="1000">1000 行</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+            <button id="exportRuntimeScoped">导出</button>
+          </div>
+        </div>
+        <p id="runtimeExportMessage" class="message"></p>
         <pre id="runtimeLog" class="logbox">暂无日志</pre>
         <h3>账户审计</h3><pre id="audit" class="logbox">暂无审计</pre>
       </section>
@@ -31,5 +46,6 @@
 </div>
 <script src="/page-cms.js" defer></script>
 <script type="module" src="/admin.js"></script>
+<script type="module" src="/client-runtime-admin.js"></script>
 </body>
 </html>
