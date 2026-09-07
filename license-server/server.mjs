@@ -243,6 +243,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/payment-admin.js') return staticFile(res, join(PUBLIC,'payment-admin-entry.js'));
     if (url.pathname === '/payment-admin-core.js') return staticFile(res, join(PUBLIC,'payment-admin.js'));
     if (url.pathname === '/payment-test-admin.js') return staticFile(res, join(PUBLIC,'payment-test-admin.js'));
+    if (url.pathname === '/payment-method-save.js') return staticFile(res, join(PUBLIC,'payment-method-save.js'));
     if (url.pathname === '/admin-release-mirror.js') return staticFile(res, join(PUBLIC,'admin-release-mirror.js'));
     if (url.pathname === '/client-runtime-admin.js') return staticFile(res, join(PUBLIC,'client-runtime-admin.js'));
     if (url.pathname === '/admin.css') return staticFile(res, join(PUBLIC,'admin.css'));
