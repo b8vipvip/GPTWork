@@ -51,6 +51,19 @@ test('ZPAY admin probe uses the documented act=order API instead of an undocumen
   assert.equal(result.credentialStatus, 'api_reachable');
 });
 
+test('ZPAY admin probe accepts JSON that the gateway wraps inside a JSON string', async () => {
+  const client = createZpayClient({
+    pid: '2026090409043752',
+    key: 'merchant-secret',
+    fetchImpl: async () => jsonResponse(JSON.stringify({ code: 0, msg: '订单编号不存在' })),
+  });
+
+  const result = await client.probeCredentials();
+  assert.equal(result.code, 1);
+  assert.equal(result.credentialStatus, 'api_reachable');
+  assert.equal(result.msg, '订单编号不存在');
+});
+
 test('ZPAY admin probe reports merchant credential failures instead of converting them to a generic HTTP 200 error', async () => {
   const client = createZpayClient({
     pid: 'bad-pid',
