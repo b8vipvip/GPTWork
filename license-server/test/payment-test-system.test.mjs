@@ -74,6 +74,10 @@ test('ZPAY real test order creates a 0.01 checkout and settles only the test ord
   );
   assert.equal(handled, true);
   assert.equal(checkoutRes.status, 200);
+  assert.equal(
+    checkoutRes.headers['content-security-policy'],
+    "default-src 'none'; script-src 'unsafe-inline'; form-action https:; base-uri 'none'; frame-ancestors 'none'",
+  );
   assert.match(checkoutRes.body, /https:\/\/zpayz\.cn\/submit\.php/);
   assert.match(checkoutRes.body, /name="money" value="0\.01"/);
   assert.match(checkoutRes.body, /name="cid" value="23533"/);
