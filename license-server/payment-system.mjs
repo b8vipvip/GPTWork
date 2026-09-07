@@ -830,8 +830,8 @@ export function createPaymentSystem({ db, publicOrigin, json, secret = '', env =
         const payload = Buffer.from(html, 'utf8');
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8', 'content-length': payload.length, 'cache-control': 'no-store',
-          'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'none'; form-action https://zpayz.cn; base-uri 'none'; frame-ancestors 'none'`,
-          'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff',
+          'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'none'; form-action https:; base-uri 'none'; frame-ancestors 'self'`,
+          'referrer-policy': 'no-referrer', 'x-frame-options': 'SAMEORIGIN', 'x-content-type-options': 'nosniff',
         });
         res.end(payload);
       } catch (error) { writePlain(res, error.status || 500, error.status ? error.message : 'ZPAY checkout failed'); }

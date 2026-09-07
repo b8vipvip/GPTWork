@@ -329,7 +329,10 @@ function planCard(plan) {
     const input = document.createElement('input'); input.type = 'number'; input.min = String(min); input.value = String(value);
     label.append(input); grid.append(label); return input;
   };
-  const price = makeField('价格（元）', (plan.priceCents / 100).toFixed(2), 0); price.step = '0.01';
+  const originalPrice = makeField('原价（元）', ((plan.originalPriceCents ?? plan.priceCents) / 100).toFixed(2), 0); originalPrice.step = '0.01';
+  const promoPrice = makeField('促销价（元，可选）', plan.promoPriceCents === null || plan.promoPriceCents === undefined ? '' : (plan.promoPriceCents / 100).toFixed(2), 0); promoPrice.step = '0.01';
+  const promoEndLabel = document.createElement('label'); promoEndLabel.textContent = '促销结束时间（可选）';
+  const promoEnd = document.createElement('input'); promoEnd.type = 'datetime-local'; promoEnd.value = localDateInput(plan.promoEndsAt); promoEndLabel.append(promoEnd); grid.append(promoEndLabel);
   const days = makeField('有效天数', plan.durationDays, 1);
   const devices = makeField('设备上限', plan.limits.devices, 1);
   const benefitsLabel = document.createElement('label'); benefitsLabel.className = 'benefit-field'; benefitsLabel.textContent = '权益说明（每行一条）';
@@ -337,11 +340,16 @@ function planCard(plan) {
   const save = button('保存套餐', async () => {
     save.disabled = true;
     try {
-      const priceCents = Math.round(Number(price.value) * 100);
+      const originalPriceCents = Math.round(Number(originalPrice.value) * 100);
+      const promoPriceCents = promoPrice.value.trim() === '' ? null : Math.round(Number(promoPrice.value) * 100);
+      const promoEndsAt = promoEnd.value ? new Date(promoEnd.value).toISOString() : null;
+      if (!Number.isInteger(originalPriceCents) || originalPriceCents < 0) throw new Error('原价格式无效');
+      if (promoPriceCents !== null && (!Number.isInteger(promoPriceCents) || promoPriceCents < 0 || promoPriceCents >= originalPriceCents)) throw new Error('促销价必须低于原价');
+      if (promoPriceCents !== null && (!promoEndsAt || Date.parse(promoEndsAt) <= Date.now())) throw new Error('促销结束时间必须晚于当前时间');
       await api(`/admin/api/account/plans/${encodeURIComponent(plan.code)}`, {
         method: 'PUT',
         body: JSON.stringify({
-          name: name.value.trim(), priceCents, durationDays: Number(days.value), maxDevices: Number(devices.value), maxWindows: plan.limits.windows,
+          name: name.value.trim(), priceCents: originalPriceCents, originalPriceCents, promoPriceCents, promoEndsAt, durationDays: Number(days.value), maxDevices: Number(devices.value), maxWindows: plan.limits.windows,
           benefits: benefits.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), enabled: enabled.checked,
         }),
       });
