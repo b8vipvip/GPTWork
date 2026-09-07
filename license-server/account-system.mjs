@@ -10,6 +10,7 @@ import {
 } from 'node:crypto';
 import { promisify } from 'node:util';
 import { sendSmtpMail } from './smtp-client.mjs';
+import { normalizePlanPricing } from './plan-pricing.mjs';
 
 const scryptAsync = promisify(scrypt);
 
@@ -246,6 +247,10 @@ export function createAccountSystem({
   ensureColumn('users', 'email_verification_exempt', 'email_verification_exempt INTEGER NOT NULL DEFAULT 0 CHECK(email_verification_exempt IN (0,1))');
   ensureColumn('memberships', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_orders', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn('membership_plans', 'original_price_cents', 'original_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(original_price_cents >= 0)');
+  ensureColumn('membership_plans', 'promo_price_cents', 'promo_price_cents INTEGER CHECK(promo_price_cents IS NULL OR promo_price_cents >= 0)');
+  ensureColumn('membership_plans', 'promo_ends_at', 'promo_ends_at TEXT');
+  db.prepare('UPDATE membership_plans SET original_price_cents=price_cents WHERE original_price_cents=0 AND price_cents>0').run();
 
   const insertPlan = db.prepare(`INSERT OR IGNORE INTO membership_plans
     (code,name,price_cents,duration_days,max_devices,max_windows,benefits_json,enabled,sort_order,updated_at)
@@ -625,7 +630,7 @@ export function createAccountSystem({
       return {
         code: row.code,
         name: row.name,
-        priceCents: row.price_cents,
+        ...normalizePlanPricing(row),
         durationDays: row.duration_days,
         limits: { devices: row.max_devices, windows: row.max_windows },
         benefits,
@@ -799,6 +804,7 @@ export function createAccountSystem({
       paidAt: row.paid_at,
       membershipId: row.membership_id,
       planSnapshot: normalizePlanSnapshot(row.plan_snapshot_json, db.prepare('SELECT * FROM membership_plans WHERE code=?').get(row.plan_code)),
+      payment: paymentSystem ? (row.payment_method === 'usdt' ? paymentSystem.orderPaymentDetails(row.id) : paymentSystem.zpayOrderDetails(row.id)) : null,
     };
   }
   function markOrderPaid(row, { allowExpiredPending = false } = {}) {
@@ -1071,12 +1077,13 @@ export function createAccountSystem({
         if (!method) fail(400, 'PAYMENT_METHOD_UNAVAILABLE', '支付方式未启用');
         const payUrl = normalizeHttpsUrl(method.pay_url) || '';
         const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-        const frozenTerms = planSnapshotFromRow(plan);
+        const pricing = normalizePlanPricing(plan);
+        const frozenTerms = planSnapshotFromRow({ ...plan, price_cents: pricing.priceCents });
         const result = db.prepare(`INSERT INTO membership_orders(user_id,plan_code,payment_method,amount_cents,status,pay_url,created_at,expires_at,plan_snapshot_json)
-          VALUES(?,?,?,?, 'pending',?,?,?,?)`).run(session.user_id, plan.code, method.code, plan.price_cents, payUrl, nowIso(), expiresAt, JSON.stringify(frozenTerms));
+          VALUES(?,?,?,?, 'pending',?,?,?,?)`).run(session.user_id, plan.code, method.code, pricing.priceCents, payUrl, nowIso(), expiresAt, JSON.stringify(frozenTerms));
         let order = db.prepare('SELECT * FROM membership_orders WHERE id=?').get(Number(result.lastInsertRowid));
         if (paymentSystem) order = await paymentSystem.prepareOrder(order, { clientIp: clientIp(req), userAgent: req.headers['user-agent'] || '' });
-        audit('order_created', session.user_id, { orderId: order.id, planCode: plan.code, paymentMethod: method.code, amountCents: plan.price_cents });
+        audit('order_created', session.user_id, { orderId: order.id, planCode: plan.code, paymentMethod: method.code, amountCents: pricing.priceCents });
         return json(res, 201, { ok: true, order: orderPublic(order), instructions: method.instructions }, cors), true;
       }
 
@@ -1326,7 +1333,7 @@ export function createAccountSystem({
         const plans = db.prepare('SELECT * FROM membership_plans ORDER BY sort_order,code').all().map((row) => {
           let benefits = [];
           try { benefits = JSON.parse(row.benefits_json || '[]'); } catch {}
-          return { code: row.code, name: row.name, priceCents: row.price_cents, durationDays: row.duration_days,
+          return { code: row.code, name: row.name, ...normalizePlanPricing(row), durationDays: row.duration_days,
             limits: { devices: row.max_devices, windows: row.max_windows }, benefits, enabled: Boolean(row.enabled), sortOrder: row.sort_order };
         });
         return json(res, 200, { ok: true, plans }), true;
@@ -1337,15 +1344,24 @@ export function createAccountSystem({
         if (!plan) fail(404, 'PLAN_NOT_FOUND', '会员套餐不存在');
         const input = await bodyJson(req);
         const name = String(input.name || plan.name).slice(0, 120);
-        const priceCents = clampInt(input.priceCents, 0, 100000000, plan.price_cents);
+        const currentPricing = normalizePlanPricing(plan);
+        const originalPriceCents = clampInt(input.originalPriceCents ?? input.priceCents, 0, 100000000, currentPricing.originalPriceCents);
+        let promoPriceCents = input.promoPriceCents;
+        promoPriceCents = promoPriceCents === null || promoPriceCents === undefined || promoPriceCents === '' ? null : Number(promoPriceCents);
+        if (promoPriceCents !== null && (!Number.isInteger(promoPriceCents) || promoPriceCents < 0 || promoPriceCents > 100000000)) fail(400, 'INVALID_PROMO_PRICE', '促销价必须是有效金额');
+        const promoEndsAt = input.promoEndsAt ? parseIso(input.promoEndsAt) : null;
+        if (promoPriceCents !== null) {
+          if (promoPriceCents >= originalPriceCents) fail(400, 'INVALID_PROMO_PRICE', '促销价必须低于原价');
+          if (!promoEndsAt || Date.parse(promoEndsAt) <= Date.now()) fail(400, 'INVALID_PROMO_END', '促销结束时间必须晚于当前时间');
+        }
         const durationDays = clampInt(input.durationDays, 1, 3650, plan.duration_days);
         const maxDevices = clampInt(input.maxDevices, 1, 1000, plan.max_devices);
         const maxWindows = clampInt(input.maxWindows, 1, 1000, plan.max_windows);
         const benefits = Array.isArray(input.benefits) ? input.benefits.map((item) => String(item).slice(0, 160)).slice(0, 20) : JSON.parse(plan.benefits_json || '[]');
         const enabled = input.enabled === undefined ? plan.enabled : (input.enabled ? 1 : 0);
-        db.prepare(`UPDATE membership_plans SET name=?,price_cents=?,duration_days=?,max_devices=?,max_windows=?,benefits_json=?,enabled=?,updated_at=? WHERE code=?`)
-          .run(name, priceCents, durationDays, maxDevices, maxWindows, JSON.stringify(benefits), enabled, nowIso(), plan.code);
-        audit('admin_plan_updated', null, { planCode: plan.code, priceCents, durationDays, maxDevices, maxWindows, enabled: Boolean(enabled) });
+        db.prepare(`UPDATE membership_plans SET name=?,price_cents=?,original_price_cents=?,promo_price_cents=?,promo_ends_at=?,duration_days=?,max_devices=?,max_windows=?,benefits_json=?,enabled=?,updated_at=? WHERE code=?`)
+          .run(name, originalPriceCents, originalPriceCents, promoPriceCents, promoPriceCents === null ? null : promoEndsAt, durationDays, maxDevices, maxWindows, JSON.stringify(benefits), enabled, nowIso(), plan.code);
+        audit('admin_plan_updated', null, { planCode: plan.code, originalPriceCents, promoPriceCents, promoEndsAt, durationDays, maxDevices, maxWindows, enabled: Boolean(enabled) });
         return json(res, 200, { ok: true }), true;
       }
 

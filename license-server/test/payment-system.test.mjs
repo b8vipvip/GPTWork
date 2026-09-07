@@ -241,7 +241,13 @@ test('freezes unique USDT amounts and settles only final successful exact OKX de
 
 test('ZPAY checkout signs order-specific POST and settles only an exact verified callback', async () => {
   const db = paymentRuntimeDb();
-  const payments = createPaymentSystem({ db, publicOrigin: 'https://gptlock.example', json, secret: 'test-secret-at-least-thirty-two-characters-long', logger: { warn() {} } });
+  const payments = createPaymentSystem({
+    db, publicOrigin: 'https://gptlock.example', json, secret: 'test-secret-at-least-thirty-two-characters-long', logger: { warn() {} },
+    fetchImpl: async (url) => {
+      assert.equal(String(url), 'https://zpayz.cn/mapi.php');
+      return new Response(JSON.stringify({ code: 1, msg: 'success', O_id: 'ZPAY-ORDER-1', trade_no: 'PREPAY-1', payurl: 'https://pay.example/zpay/checkout', qrcode: 'alipays://platformapi/startapp', img: 'https://pay.example/zpay/qr.png' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
   createRuntimeSchema(db);
   db.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL) STRICT; INSERT INTO users(id,email) VALUES(1,'buyer@example.com');`);
 
@@ -260,18 +266,14 @@ test('ZPAY checkout signs order-specific POST and settles only an exact verified
   const result = db.prepare(`INSERT INTO membership_orders(user_id,plan_code,payment_method,amount_cents,status,pay_url,created_at,expires_at,plan_snapshot_json)
     VALUES(1,'monthly','alipay',2900,'pending','',?,?,?)`).run(createdAt, expiresAt, JSON.stringify({ code: 'monthly', name: '月卡' }));
   let order = db.prepare('SELECT * FROM membership_orders WHERE id=?').get(Number(result.lastInsertRowid));
-  order = payments.prepareOrder(order, { clientIp: '203.0.113.8', userAgent: 'test' });
-  assert.match(order.pay_url, /\/site\/api\/zpay\/checkout\//);
-
-  const checkoutRes = responseCapture();
-  await payments.handleSite(request('GET'), checkoutRes, new URL(order.pay_url));
-  assert.equal(checkoutRes.status, 200);
-  const checkoutHtml = checkoutRes.body.toString('utf8');
-  assert.match(checkoutHtml, /action="https:\/\/zpayz\.cn\/submit\.php"/);
-  assert.match(checkoutHtml, /name="money" value="29\.00"/);
-  assert.match(checkoutHtml, /name="cid" value="1234"/);
+  order = await payments.prepareOrder(order, { clientIp: '203.0.113.8', userAgent: 'test' });
+  assert.equal(order.pay_url, 'https://pay.example/zpay/checkout');
 
   const detail = payments.zpayOrderDetails(order.id);
+  assert.equal(detail.orderNo, 'ZPAY-ORDER-1');
+  assert.equal(detail.payUrl, 'https://pay.example/zpay/checkout');
+  assert.equal(detail.qrImageUrl, 'https://pay.example/zpay/qr.png');
+  assert.equal(detail.qrPayload, 'alipays://platformapi/startapp');
   const settled = [];
   payments.attachSettlement((orderId, context) => {
     settled.push({ orderId, context });

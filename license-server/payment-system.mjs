@@ -192,6 +192,10 @@ export function createPaymentSystem({ db, publicOrigin, json, secret = '', env =
         client_ip TEXT NOT NULL DEFAULT '',
         user_agent TEXT NOT NULL DEFAULT '',
         zpay_trade_no TEXT NOT NULL DEFAULT '',
+        zpay_order_no TEXT NOT NULL DEFAULT '',
+        checkout_url TEXT NOT NULL DEFAULT '',
+        qr_image_url TEXT NOT NULL DEFAULT '',
+        qr_payload TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'awaiting' CHECK(status IN ('awaiting','settled','error')),
         paid_at TEXT,
         last_error TEXT NOT NULL DEFAULT '',
@@ -199,6 +203,15 @@ export function createPaymentSystem({ db, publicOrigin, json, secret = '', env =
       ) STRICT;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_zpay_trade_no ON zpay_order_payments(zpay_trade_no) WHERE zpay_trade_no<>'';
     `);
+    const zpayColumns = new Set(db.prepare('PRAGMA table_info(zpay_order_payments)').all().map((row) => row.name));
+    for (const [column, definition] of [
+      ['zpay_order_no', "zpay_order_no TEXT NOT NULL DEFAULT ''"],
+      ['checkout_url', "checkout_url TEXT NOT NULL DEFAULT ''"],
+      ['qr_image_url', "qr_image_url TEXT NOT NULL DEFAULT ''"],
+      ['qr_payload', "qr_payload TEXT NOT NULL DEFAULT ''"],
+    ]) {
+      if (!zpayColumns.has(column)) db.exec(`ALTER TABLE zpay_order_payments ADD COLUMN ${definition}`);
+    }
     runtimeReady = true;
   }
 
@@ -305,10 +318,12 @@ export function createPaymentSystem({ db, publicOrigin, json, secret = '', env =
     if (!row) return null;
     return {
       provider: 'zpay', merchantTradeNo: row.merchant_trade_no, tradeNo: row.zpay_trade_no || '',
-      channel: row.channel, status: row.status, paidAt: row.paid_at, lastError: row.last_error || '',
+      orderNo: row.zpay_order_no || '', channel: row.channel, status: row.status, paidAt: row.paid_at,
+      payUrl: normalizeHttpsUrl(row.checkout_url) || '', qrImageUrl: normalizeHttpsUrl(row.qr_image_url) || '',
+      qrPayload: cleanText(row.qr_payload, 2048), lastError: row.last_error || '',
     };
   }
-  function prepareOrder(order, context = {}) {
+  async function prepareOrder(order, context = {}) {
     if (!order || !['wechat', 'alipay'].includes(order.payment_method) || paymentProvider(order.payment_method) !== 'zpay') return order;
     ensureRuntimeTables();
     if (!zpayAvailableForPayment(order.payment_method)) {
@@ -324,7 +339,38 @@ export function createPaymentSystem({ db, publicOrigin, json, secret = '', env =
       db.prepare(`INSERT INTO zpay_order_payments(order_id,merchant_trade_no,channel,amount_cents,client_ip,user_agent,updated_at)
         VALUES(?,?,?,?,?,?,?)`).run(order.id, tradeNo, channel, Number(order.amount_cents), cleanText(context.clientIp, 64), cleanText(context.userAgent, 240), nowIso());
     }
-    const payUrl = `${publicOrigin}/site/api/zpay/checkout/${order.id}`;
+    const detail = db.prepare('SELECT * FROM zpay_order_payments WHERE order_id=?').get(order.id);
+    let directPayUrl = normalizeHttpsUrl(detail?.checkout_url) || '';
+    if (!directPayUrl && !normalizeHttpsUrl(detail?.qr_image_url) && !cleanText(detail?.qr_payload, 2048)) {
+      try {
+        const config = zpayConfig();
+        let snapshot = {};
+        try { snapshot = JSON.parse(order.plan_snapshot_json || '{}'); } catch {}
+        const params = {
+          pid: config.pid,
+          type: detail.channel,
+          out_trade_no: detail.merchant_trade_no,
+          notify_url: `${publicOrigin}/site/api/zpay/notify`,
+          name: `GPTWork ${cleanText(snapshot.name || order.plan_code || '会员', 72)} 会员服务`.slice(0, 100),
+          money: zpayMoneyFromCents(detail.amount_cents),
+          clientip: cleanText(detail.client_ip || context.clientIp || '127.0.0.1', 64),
+          param: `order-${order.id}`,
+        };
+        const cid = detail.channel === 'alipay' ? config.alipayCid : config.wechatCid;
+        if (cid) params.cid = cid;
+        params.sign = zpaySign(params, config.key);
+        params.sign_type = 'MD5';
+        const created = await createZpayClient({ pid: config.pid, key: config.key, fetchImpl }).createPayment(params);
+        directPayUrl = created.payUrl || created.payUrl2 || '';
+        db.prepare(`UPDATE zpay_order_payments SET zpay_order_no=?,checkout_url=?,qr_image_url=?,qr_payload=?,last_error='',updated_at=? WHERE order_id=?`)
+          .run(cleanText(created.orderId, 128), directPayUrl, normalizeHttpsUrl(created.qrImageUrl) || '', cleanText(created.qrCode, 2048), nowIso(), order.id);
+      } catch (error) {
+        const message = cleanText(error?.message || error, 500);
+        db.prepare('UPDATE zpay_order_payments SET last_error=?,updated_at=? WHERE order_id=?').run(message, nowIso(), order.id);
+        logger?.warn?.('ZPAY direct QR creation failed; using checkout handoff fallback', { orderId: order.id, error: message });
+      }
+    }
+    const payUrl = directPayUrl || `${publicOrigin}/site/api/zpay/checkout/${order.id}`;
     db.prepare('UPDATE membership_orders SET pay_url=? WHERE id=?').run(payUrl, order.id);
     return db.prepare('SELECT * FROM membership_orders WHERE id=?').get(order.id);
   }
@@ -830,8 +876,8 @@ export function createPaymentSystem({ db, publicOrigin, json, secret = '', env =
         const payload = Buffer.from(html, 'utf8');
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8', 'content-length': payload.length, 'cache-control': 'no-store',
-          'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'none'; form-action https://zpayz.cn; base-uri 'none'; frame-ancestors 'none'`,
-          'referrer-policy': 'no-referrer', 'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff',
+          'content-security-policy': `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'none'; form-action https:; base-uri 'none'; frame-ancestors 'self'`,
+          'referrer-policy': 'no-referrer', 'x-frame-options': 'SAMEORIGIN', 'x-content-type-options': 'nosniff',
         });
         res.end(payload);
       } catch (error) { writePlain(res, error.status || 500, error.status ? error.message : 'ZPAY checkout failed'); }

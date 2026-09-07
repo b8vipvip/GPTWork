@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
+import { normalizePlanPricing } from './plan-pricing.mjs';
 import { promisify } from 'node:util';
 
 const scryptAsync = promisify(scrypt);
@@ -179,7 +180,7 @@ export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson,
     return db.prepare('SELECT * FROM membership_plans WHERE enabled=1 ORDER BY sort_order,code').all().map((row) => {
       let benefits = [];
       try { benefits = JSON.parse(row.benefits_json || '[]'); } catch {}
-      return { code: row.code, name: row.name, priceCents: row.price_cents, durationDays: row.duration_days,
+      return { code: row.code, name: row.name, ...normalizePlanPricing(row), durationDays: row.duration_days,
         limits: { devices: row.max_devices }, benefits };
     });
   }
@@ -333,13 +334,14 @@ export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson,
         if (!method) fail(400, 'PAYMENT_METHOD_UNAVAILABLE', '支付方式未启用');
         let benefits = [];
         try { benefits = JSON.parse(plan.benefits_json || '[]'); } catch {}
-        const snapshot = { code: plan.code, name: plan.name, priceCents: plan.price_cents, durationDays: plan.duration_days,
+        const pricing = normalizePlanPricing(plan);
+        const snapshot = { code: plan.code, name: plan.name, priceCents: pricing.priceCents, originalPriceCents: pricing.originalPriceCents, promoPriceCents: pricing.promoPriceCents, promoEndsAt: pricing.promoEndsAt, durationDays: plan.duration_days,
           maxDevices: plan.max_devices, maxWindows: plan.max_windows, benefits };
         const usdtQuote = method.code === 'usdt' ? paymentSystem.usdtQuote(plan.code) : null;
         const ttlMs = method.code === 'usdt' ? paymentSystem.usdtOrderTtlMs() : 30 * 60 * 1000;
         const expiresAt = new Date(Date.now() + ttlMs).toISOString();
         const result = db.prepare(`INSERT INTO membership_orders(user_id,plan_code,payment_method,amount_cents,status,pay_url,created_at,expires_at,plan_snapshot_json)
-          VALUES(?,?,?,?, 'pending',?,?,?,?)`).run(session.user_id, plan.code, method.code, plan.price_cents,
+          VALUES(?,?,?,?, 'pending',?,?,?,?)`).run(session.user_id, plan.code, method.code, pricing.priceCents,
             method.pay_url || '', nowIso(), expiresAt, JSON.stringify(snapshot));
         let order = db.prepare('SELECT * FROM membership_orders WHERE id=?').get(Number(result.lastInsertRowid));
         if (usdtQuote) paymentSystem.attachUsdtOrder(order.id, usdtQuote);
