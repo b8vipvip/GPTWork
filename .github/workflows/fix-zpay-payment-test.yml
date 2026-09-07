@@ -1,0 +1,38 @@
+name: Fix ZPAY Payment Test
+
+on:
+  push:
+    branches:
+      - feat/account-commerce-v2-20260907
+    paths:
+      - scripts/fix-zpay-payment-test.mjs
+      - .github/workflows/fix-zpay-payment-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[zpay-test-fixed]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply test fix
+        run: node scripts/fix-zpay-payment-test.mjs
+      - name: Run payment regressions
+        run: |
+          cd license-server
+          node --test test/payment-system.test.mjs test/zpay-client.test.mjs test/account-commerce-parity.test.mjs
+      - name: Commit product test fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'test: cover direct ZPAY checkout flow [zpay-test-fixed]'
+          git push origin HEAD:${GITHUB_REF_NAME}
