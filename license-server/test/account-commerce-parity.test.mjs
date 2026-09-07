@@ -6,6 +6,7 @@ import { normalizePlanPricing } from '../plan-pricing.mjs';
 const websiteCommerce = await readFile(new URL('../public/account-commerce.js', import.meta.url), 'utf8');
 const extensionCommerce = await readFile(new URL('../../extension/account-commerce.js', import.meta.url), 'utf8');
 const paymentSystem = await readFile(new URL('../payment-system.mjs', import.meta.url), 'utf8');
+const accountSystem = await readFile(new URL('../account-system.mjs', import.meta.url), 'utf8');
 const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
 
 test('promotion expires back to original price without fake urgency', () => {
@@ -31,7 +32,14 @@ test('website and extension expose the same checkout UX contract', () => {
   }
 });
 
-test('production ZPAY checkout allows redirect chain and modal embedding', () => {
+test('direct ZPAY QR metadata is produced server-side and exposed to extension account API', () => {
+  assert.match(paymentSystem, /createPayment\(params\)/);
+  assert.match(paymentSystem, /qr_image_url/);
+  assert.match(paymentSystem, /qrPayload/);
+  assert.match(accountSystem, /paymentSystem\.zpayOrderDetails\(row\.id\)/);
+});
+
+test('production ZPAY checkout keeps HTTPS handoff fallback while allowing direct QR images', () => {
   assert.match(paymentSystem, /form-action https:/);
   assert.match(paymentSystem, /frame-ancestors 'self'/);
   assert.match(paymentSystem, /x-frame-options': 'SAMEORIGIN'/);
