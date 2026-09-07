@@ -11,6 +11,7 @@ import { createClientRuntimeLogManager } from './client-runtime-logs.mjs';
 import { createPaymentSystem } from './payment-system.mjs';
 import { createOfficialPaymentSystem } from './official-payment-system.mjs';
 import { composePaymentSystems } from './composite-payment-system.mjs';
+import { createPaymentTestSystem } from './payment-test-system.mjs';
 import { createSiteAccountSystem } from './site-account.mjs';
 import { createSiteReleaseFeed } from './site-releases.mjs';
 import { createIssuesSystem } from './issues-system.mjs';
@@ -148,6 +149,7 @@ function staticFile(res, path) { const map = { '.html':'text/html; charset=utf-8
 const legacyPaymentSystem = createPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, secret: SECRET, env });
 const officialPaymentSystem = createOfficialPaymentSystem({ db, publicOrigin: PUBLIC_ORIGIN, secret: SECRET, env });
 const paymentSystem = composePaymentSystems(legacyPaymentSystem, officialPaymentSystem);
+const paymentTestSystem = createPaymentTestSystem({ db, publicOrigin: PUBLIC_ORIGIN, secret: SECRET, env, clientIp });
 const accountSystem = createAccountSystem({ db, env, secret: SECRET, publicOrigin: PUBLIC_ORIGIN, allowedExtensionIds: ALLOWED_EXTENSION_IDS, windowTtlSeconds: WINDOW_TTL_SECONDS, json, bodyJson, clientIp, paymentSystem });
 paymentSystem.attachSettlement((orderId, context) => accountSystem.markOrderPaidById(orderId, context));
 const siteAccounts = createSiteAccountSystem({ db, env, publicOrigin: PUBLIC_ORIGIN, json, bodyJson, clientIp, accountSummary: accountSystem.accountSummary, paymentSystem });
@@ -173,6 +175,7 @@ async function handleSiteApi(req, res, url) {
   if (url.pathname === '/site/api/releases/notifications' && req.method === 'GET') { const waitMs = clampInt(url.searchParams.get('wait'), 0, 25_000, 20_000); const result = await siteReleases.waitForChange(url.searchParams.get('since'), waitMs); return json(res, 200, siteReleases.notificationPayload(result)); }
   const websiteHandled = await websiteSystem.handleSite(req, res, url); if (websiteHandled) return;
   const issuesHandled = await issuesSystem.handleSite(req, res, url); if (issuesHandled) return;
+  const paymentTestHandled = await paymentTestSystem.handleSite(req, res, url); if (paymentTestHandled) return;
   const paymentHandled = await paymentSystem.handleSite(req, res, url); if (paymentHandled) return;
   const handled = await siteAccounts.handle(req, res, url); if (handled) return;
   return apiError(res, 404, 'NOT_FOUND', 'Not found');
@@ -192,6 +195,7 @@ async function handleAdmin(req, res, url) {
   if (!['GET', 'HEAD'].includes(req.method || '') && !adminMutationOriginAllowed(req)) return apiError(res, 403, 'ADMIN_ORIGIN_MISMATCH', '后台写操作来源校验失败');
   const websiteAdminHandled = await websiteSystem.handleAdmin(req, res, url, bodyJson); if (websiteAdminHandled) return;
   const issuesAdminHandled = await issuesSystem.handleAdmin(req, res, url); if (issuesAdminHandled) return;
+  const paymentTestAdminHandled = await paymentTestSystem.handleAdmin(req, res, url); if (paymentTestAdminHandled) return;
   const paymentAdminHandled = await paymentSystem.handleAdmin(req, res, url); if (paymentAdminHandled) return;
   const accountAdminHandled = await accountSystem.handleAdmin(req, res, url); if (accountAdminHandled) return;
   const clientLogAdminHandled = await clientRuntimeLogs.handleAdmin(req, res, url); if (clientLogAdminHandled) return;
@@ -236,7 +240,9 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/admin-website.js') return staticFile(res, join(PUBLIC,'admin-website.js'));
     if (url.pathname === '/admin-website.css') return staticFile(res, join(PUBLIC,'admin-website.css'));
     if (url.pathname === '/admin-settings.css') return staticFile(res, join(PUBLIC,'admin-settings.css'));
-    if (url.pathname === '/payment-admin.js') return staticFile(res, join(PUBLIC,'payment-admin.js'));
+    if (url.pathname === '/payment-admin.js') return staticFile(res, join(PUBLIC,'payment-admin-entry.js'));
+    if (url.pathname === '/payment-admin-core.js') return staticFile(res, join(PUBLIC,'payment-admin.js'));
+    if (url.pathname === '/payment-test-admin.js') return staticFile(res, join(PUBLIC,'payment-test-admin.js'));
     if (url.pathname === '/admin-release-mirror.js') return staticFile(res, join(PUBLIC,'admin-release-mirror.js'));
     if (url.pathname === '/client-runtime-admin.js') return staticFile(res, join(PUBLIC,'client-runtime-admin.js'));
     if (url.pathname === '/admin.css') return staticFile(res, join(PUBLIC,'admin.css'));
