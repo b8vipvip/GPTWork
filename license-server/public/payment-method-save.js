@@ -61,6 +61,18 @@ function statusText(code, state) {
   return `${label}已保存，但当前支付提供方尚未达到官网发布条件`;
 }
 
+async function refreshMethodState(code) {
+  const config = METHOD_CONFIG[code];
+  const stateNode = document.getElementById(config.stateId);
+  if (!stateNode) return;
+  try {
+    const persisted = await readPersistedState(code);
+    setState(stateNode, statusText(code, persisted), persisted.enabled && persisted.published ? 'good' : persisted.enabled ? 'warn' : '');
+  } catch (error) {
+    if (error.status !== 401) setState(stateNode, `读取保存状态失败：${error.message}`, 'bad');
+  }
+}
+
 function mountMethodSave(code) {
   const config = METHOD_CONFIG[code];
   const provider = document.getElementById(config.providerId);
@@ -81,7 +93,7 @@ function mountMethodSave(code) {
   const state = document.createElement('p');
   state.id = config.stateId;
   state.className = 'config-state';
-  state.textContent = '正在读取已保存的支付方式…';
+  state.textContent = '修改“启用”和“调用方式”后，请点击上方按钮保存。';
 
   const providerLabelNode = provider.closest('label');
   if (providerLabelNode) providerLabelNode.after(actions, state);
@@ -117,23 +129,25 @@ function mountMethodSave(code) {
       save.textContent = original;
     }
   });
-
-  void readPersistedState(code)
-    .then((persisted) => setState(state, statusText(code, persisted), persisted.enabled && persisted.published ? 'good' : persisted.enabled ? 'warn' : ''))
-    .catch((error) => {
-      if (error.status !== 401) setState(state, `读取保存状态失败：${error.message}`, 'bad');
-    });
 }
 
 function mount() {
   for (const code of Object.keys(METHOD_CONFIG)) mountMethodSave(code);
 }
 
+function refreshAll() {
+  for (const code of Object.keys(METHOD_CONFIG)) void refreshMethodState(code);
+}
+
 mount();
 const app = document.getElementById('app');
 if (app) {
+  if (!app.hidden) refreshAll();
   const observer = new MutationObserver(() => {
-    if (!app.hidden) mount();
+    if (!app.hidden) {
+      mount();
+      refreshAll();
+    }
   });
   observer.observe(app, { attributes: true, attributeFilter: ['hidden'] });
 }
