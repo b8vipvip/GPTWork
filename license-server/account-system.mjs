@@ -804,6 +804,7 @@ export function createAccountSystem({
       paidAt: row.paid_at,
       membershipId: row.membership_id,
       planSnapshot: normalizePlanSnapshot(row.plan_snapshot_json, db.prepare('SELECT * FROM membership_plans WHERE code=?').get(row.plan_code)),
+      payment: paymentSystem ? (row.payment_method === 'usdt' ? paymentSystem.orderPaymentDetails(row.id) : paymentSystem.zpayOrderDetails(row.id)) : null,
     };
   }
   function markOrderPaid(row, { allowExpiredPending = false } = {}) {

@@ -2,6 +2,7 @@ import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
 
 export const ZPAY_ORIGIN = 'https://zpayz.cn';
 export const ZPAY_SUBMIT_URL = `${ZPAY_ORIGIN}/submit.php`;
+export const ZPAY_MAPI_URL = `${ZPAY_ORIGIN}/mapi.php`;
 export const ZPAY_API_URL = `${ZPAY_ORIGIN}/api.php`;
 
 function cleanEntries(input) {
@@ -43,6 +44,14 @@ export function zpayMoneyFromCents(value) {
 
 function compactText(value, max = 240) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+function normalizeHttps(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return '';
+    url.hash = '';
+    return url.toString();
+  } catch { return ''; }
 }
 
 function createApiError(message, code = 'ZPAY_API_ERROR') {
@@ -147,8 +156,51 @@ export function createZpayClient({ pid, key, fetchImpl = globalThis.fetch }) {
     };
   }
 
+  async function createPayment(params = {}) {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(params || {})) {
+      if (value === null || value === undefined || String(value) === '') continue;
+      form.set(String(name), String(value));
+    }
+    form.set('pid', merchantId);
+
+    let response;
+    try {
+      response = await fetchImpl(ZPAY_MAPI_URL, { method: 'POST', body: form, headers: { accept: 'application/json' } });
+    } catch (cause) {
+      const detail = compactText(cause?.message || cause || 'network error');
+      throw createApiError(`ZPAY 支付接口网络连接失败：${detail}`, 'ZPAY_NETWORK_ERROR');
+    }
+    const text = await response.text().catch(() => '');
+    const body = parsePossiblyWrappedJson(text);
+    if (!response.ok) {
+      const detail = compactText(body?.msg || body?.message || text);
+      throw createApiError(detail ? `ZPAY 支付接口 HTTP ${response.status}：${detail}` : `ZPAY 支付接口 HTTP ${response.status}`);
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      const preview = compactText(text);
+      throw createApiError(preview ? `ZPAY 支付接口返回了非 JSON 响应：${preview}` : 'ZPAY 支付接口返回了空响应', 'ZPAY_INVALID_RESPONSE');
+    }
+    if (Number(body.code) !== 1) {
+      const authFailure = authFailureMessage(body);
+      if (authFailure) throw createApiError(`ZPAY 商户凭据校验失败：${authFailure}`, 'ZPAY_AUTH_ERROR');
+      throw createApiError(compactText(body?.msg) || `ZPAY 支付接口返回错误 code=${String(body.code ?? '')}`);
+    }
+    return {
+      code: 1,
+      msg: compactText(body.msg || ''),
+      orderId: compactText(body.O_id || '', 128),
+      tradeNo: compactText(body.trade_no || '', 128),
+      payUrl: normalizeHttps(body.payurl),
+      payUrl2: normalizeHttps(body.payurl2),
+      qrCode: compactText(body.qrcode || '', 2048),
+      qrImageUrl: normalizeHttps(body.img),
+    };
+  }
+
   return {
     probeCredentials,
+    createPayment,
     queryBalance: probeCredentials,
     queryOrder(outTradeNo) { return request({ act: 'order', pid: merchantId, key: merchantKey, out_trade_no: String(outTradeNo) }); },
   };

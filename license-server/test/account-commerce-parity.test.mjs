@@ -26,6 +26,8 @@ test('website and extension expose the same checkout UX contract', () => {
     assert.match(source, /微信支付/);
     assert.doesNotMatch(source, /微信支付（ZPAY）|支付宝（ZPAY）/);
     assert.match(source, /GET_ORDER|site\/api\/account\/orders/);
+    assert.match(source, /qrImageUrl/);
+    assert.match(source, /扫码完成支付/);
   }
 });
 
@@ -34,4 +36,5 @@ test('production ZPAY checkout allows redirect chain and modal embedding', () =>
   assert.match(paymentSystem, /frame-ancestors 'self'/);
   assert.match(paymentSystem, /x-frame-options': 'SAMEORIGIN'/);
   assert.match(server, /frame-src 'self' https:/);
+  assert.match(server, /img-src 'self' data: https:/);
 });

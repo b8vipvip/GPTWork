@@ -51,7 +51,12 @@ function openModal(result, method, plan) {
   styles(status, { margin: '0 18px 10px', padding: '9px 11px', borderRadius: '10px', background: '#f0fdf4', color: '#166534', fontSize: '12px', fontWeight: '700' });
   const frameWrap = document.createElement('div'); styles(frameWrap, { minHeight: '0', background: '#f8fafc', borderTop: '1px solid #eef2f7', borderBottom: '1px solid #eef2f7' });
   const foot = document.createElement('div'); styles(foot, { padding: '10px 18px 14px', fontSize: '12px', color: '#64748b' });
-  if (order.payUrl) {
+  const qrUrl = String(order.payment?.qrImageUrl || '');
+  if (qrUrl.startsWith('https://')) {
+    const img = document.createElement('img'); img.src = qrUrl; img.alt = `${paymentLabel(method.code)}支付二维码`;
+    styles(img, { display: 'block', width: '280px', maxWidth: '80%', margin: '28px auto 14px', borderRadius: '14px' }); frameWrap.append(img);
+    const hint = document.createElement('div'); hint.textContent = `请使用${paymentLabel(method.code)}扫码完成支付`; styles(hint, { textAlign: 'center', color: '#475569', fontSize: '13px', fontWeight: '700', paddingBottom: '20px' }); frameWrap.append(hint);
+  } else if (order.payUrl) {
     const iframe = document.createElement('iframe'); iframe.src = order.payUrl; iframe.title = '安全支付收银台'; iframe.setAttribute('allow', 'payment *');
     styles(iframe, { width: '100%', height: '100%', minHeight: '430px', border: '0', background: '#fff' }); frameWrap.append(iframe);
     const fallback = document.createElement('button'); fallback.textContent = '支付二维码未显示？在新窗口打开'; fallback.addEventListener('click', () => chrome.tabs.create({ url: order.payUrl })); foot.append(fallback);

@@ -101,3 +101,24 @@ test('ZPAY non-JSON upstream responses include a useful diagnostic instead of ZP
     (error) => error?.code === 'ZPAY_INVALID_RESPONSE' && /非 JSON 响应/.test(error.message) && /gateway page/.test(error.message),
   );
 });
+
+
+test('ZPAY MAPI creates a direct checkout and exposes QR metadata', async () => {
+  let requestedUrl = ''; let requestedInit = null;
+  const client = createZpayClient({
+    pid: '10001', key: 'merchant-secret',
+    fetchImpl: async (url, init) => {
+      requestedUrl = String(url); requestedInit = init;
+      return jsonResponse({ code: 1, msg: 'success', O_id: '10009', trade_no: 'T20260907', payurl: 'https://pay.example/checkout', payurl2: 'https://pay.example/alt', qrcode: 'weixin://wxpay/example', img: 'https://pay.example/qr.png' });
+    },
+  });
+  const result = await client.createPayment({ type: 'wxpay', out_trade_no: '123', money: '19.00', sign: 'abc', sign_type: 'MD5' });
+  assert.equal(requestedUrl, 'https://zpayz.cn/mapi.php');
+  assert.equal(requestedInit.method, 'POST');
+  assert.equal(requestedInit.body.get('pid'), '10001');
+  assert.equal(requestedInit.body.get('type'), 'wxpay');
+  assert.equal(result.orderId, '10009');
+  assert.equal(result.payUrl, 'https://pay.example/checkout');
+  assert.equal(result.qrCode, 'weixin://wxpay/example');
+  assert.equal(result.qrImageUrl, 'https://pay.example/qr.png');
+});

@@ -134,10 +134,11 @@ function openPaymentModal(result, method, plan) {
   const title = `${paymentLabel(method?.code || order.paymentMethod)} · ${plan?.name || order.planSnapshot?.name || '会员开通'}`;
   const amount = order.paymentMethod === 'usdt' && order.payment?.amount ? `${order.payment.amount} USDT` : money(order.amountCents);
   const modal = modalShell(title, amount);
-  const payUrl = String(order.payUrl || ''); const qrUrl = String(method?.qrUrl || '');
+  const payUrl = String(order.payUrl || ''); const qrUrl = String(order.payment?.qrImageUrl || method?.qrUrl || '');
   if (qrUrl.startsWith('https://')) {
     const img = document.createElement('img'); img.src = qrUrl; img.alt = `${paymentLabel(method.code)}支付二维码`;
-    setStyles(img, { display: 'block', width: '280px', maxWidth: '80%', margin: '28px auto', borderRadius: '14px' }); modal.frameWrap.append(img);
+    setStyles(img, { display: 'block', width: '280px', maxWidth: '80%', margin: '28px auto 14px', borderRadius: '14px' }); modal.frameWrap.append(img);
+    const hint = document.createElement('div'); hint.textContent = `请使用${paymentLabel(method.code)}扫码完成支付`; setStyles(hint, { textAlign: 'center', color: '#475569', fontSize: '13px', fontWeight: '700', paddingBottom: '20px' }); modal.frameWrap.append(hint);
   } else if (payUrl.startsWith('https://')) {
     const iframe = document.createElement('iframe'); iframe.src = payUrl; iframe.title = '安全支付收银台'; iframe.setAttribute('allow', 'payment *');
     setStyles(iframe, { width: '100%', height: '100%', minHeight: '430px', border: '0', background: '#fff' }); modal.frameWrap.append(iframe);
@@ -172,7 +173,8 @@ document.addEventListener('click', (event) => {
   const pending = event.target.closest?.('#orderList a');
   if (pending && /继续/.test(pending.textContent || '')) {
     event.preventDefault(); event.stopImmediatePropagation();
-    const match = String(pending.href || '').match(/\/checkout\/(\d+)/);
+    const row = pending.closest('.list-row');
+    const match = String(row?.querySelector('.list-main b')?.textContent || '').match(/^#(\d+)/);
     if (match) void api(`/site/api/account/orders/${match[1]}`).then((data) => {
       const order = data.order; const method = (state.config?.paymentMethods || []).find((item) => item.code === order.paymentMethod) || { code: order.paymentMethod };
       const plan = (state.config?.plans || []).find((item) => item.code === order.planCode);
