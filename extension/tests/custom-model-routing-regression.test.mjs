@@ -51,7 +51,7 @@ test('model discovery schema v3 removes routing aliases before persistence or au
   assert.match(catalog, /DISCOVERY_SCHEMA_VERSION = 3/);
   assert.match(catalog, /NON_CONCRETE_MODEL_IDS = new Set\(\['auto'\]\)/);
   assert.match(catalog, /const model = normalizeConcreteModelId\(value\)/);
-  assert.match(catalog, /stored\[STORAGE_KEY\]\.map\(normalizeConcreteModelId\)/);
+  assert.match(catalog, /const legacy = [^;]*\.map\(normalizeConcreteModelId\)\.filter\(Boolean\)/);
 
   assert.match(catalogOptions, /DISCOVERY_SCHEMA_VERSION = 3/);
   assert.match(catalogOptions, /NON_CONCRETE_MODEL_IDS = new Set\(\['auto'\]\)/);
