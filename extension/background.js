@@ -28,11 +28,13 @@ const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
 const DIAGNOSTIC_SSE_STORAGE_KEY = 'autoVerificationSseCapture';
 const ACCOUNT_REFRESH_ALARM = 'gptlock-account-refresh';
+const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 
 let nativePort = null;
 let requestSequence = 0;
 let currentPolicy = DEFAULT_POLICY;
 let currentSettings = DEFAULT_SETTINGS;
+let localEnabledOverride = null;
 let coreConnection = { connected: false, error: null };
 const pendingRequests = new Map();
 const tabStates = new Map();
@@ -286,12 +288,22 @@ async function broadcastTabState(tabId) {
 }
 
 async function ensureConfiguration() {
-  const stored = await chrome.storage.sync.get(['policy', 'settings']);
+  const [stored, localStored] = await Promise.all([
+    chrome.storage.sync.get(['policy', 'settings']),
+    chrome.storage.local.get(LOCAL_ENABLED_KEY),
+  ]);
   currentPolicy = normalizePolicy(stored.policy ?? DEFAULT_POLICY);
-  currentSettings = normalizeSettings(stored.settings ?? DEFAULT_SETTINGS);
+  const syncedSettings = normalizeSettings(stored.settings ?? DEFAULT_SETTINGS);
+  localEnabledOverride = typeof localStored?.[LOCAL_ENABLED_KEY] === 'boolean'
+    ? localStored[LOCAL_ENABLED_KEY]
+    : syncedSettings.enabled;
+  currentSettings = normalizeSettings({ ...syncedSettings, enabled: localEnabledOverride });
+  if (typeof localStored?.[LOCAL_ENABLED_KEY] !== 'boolean') {
+    await chrome.storage.local.set({ [LOCAL_ENABLED_KEY]: localEnabledOverride });
+  }
   const patch = {};
   if (!stored.policy || JSON.stringify(stored.policy) !== JSON.stringify(currentPolicy)) patch.policy = currentPolicy;
-  if (!stored.settings || JSON.stringify(stored.settings) !== JSON.stringify(currentSettings)) patch.settings = currentSettings;
+  if (!stored.settings || JSON.stringify(stored.settings) !== JSON.stringify(syncedSettings)) patch.settings = syncedSettings;
   if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
   return { policy: currentPolicy, settings: currentSettings };
 }
@@ -1232,38 +1244,60 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (networkMonitor.isAttached(tabId)) void networkMonitor.detach(tabId);
 });
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'sync') return;
-  if (changes.policy) currentPolicy = normalizePolicy(changes.policy.newValue);
-  if (changes.settings) currentSettings = normalizeSettings(changes.settings.newValue);
-  if (changes.policy) {
+function applyConfigurationChange({ policyChanged = false, settingsChanged = false, localEnabledChanged = false } = {}) {
+  if (policyChanged) {
     void syncPolicy().catch(async (error) => {
       await writeNativeStatus({ connected: false, lastError: errorText(error) });
     });
   }
-  if (changes.policy || changes.settings) {
-    logRuntime('info', 'settings', 'configuration_changed', {
-      policyChanged: Boolean(changes.policy),
-      settingsChanged: Boolean(changes.settings),
-      enabled: currentSettings.enabled,
-      responseVerificationEnabled: currentSettings.networkVerificationEnabled,
-      strictMode: currentPolicy.strictMode,
-    });
-    for (const state of tabStates.values()) {
-      state.phase = 'initial';
-      state.probeUsed = false;
-      state.probeArmed = false;
-      state.lastRewrite = null;
-      state.lastVerification = null;
-      state.lastEvidenceDiagnostics = null;
-      state.streamTracking = null;
-      state.evidenceIssue = null;
-      state.lastError = null;
-      state.autoVerification = null;
-      void broadcastTabState(state.tabId);
-    }
-    void configureOpenTabs();
+  if (!policyChanged && !settingsChanged && !localEnabledChanged) return;
+  logRuntime('info', 'settings', 'configuration_changed', {
+    policyChanged,
+    settingsChanged,
+    localEnabledChanged,
+    enabled: currentSettings.enabled,
+    responseVerificationEnabled: currentSettings.networkVerificationEnabled,
+    strictMode: currentPolicy.strictMode,
+  });
+  for (const state of tabStates.values()) {
+    state.phase = 'initial';
+    state.probeUsed = false;
+    state.probeArmed = false;
+    state.lastRewrite = null;
+    state.lastVerification = null;
+    state.lastEvidenceDiagnostics = null;
+    state.streamTracking = null;
+    state.evidenceIssue = null;
+    state.lastError = null;
+    state.autoVerification = null;
+    void broadcastTabState(state.tabId);
   }
+  void configureOpenTabs();
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes[LOCAL_ENABLED_KEY]) {
+    const next = typeof changes[LOCAL_ENABLED_KEY].newValue === 'boolean'
+      ? changes[LOCAL_ENABLED_KEY].newValue
+      : currentSettings.enabled;
+    const changed = Boolean(currentSettings.enabled) !== next;
+    localEnabledOverride = next;
+    currentSettings = normalizeSettings({ ...currentSettings, enabled: next });
+    if (changed) applyConfigurationChange({ localEnabledChanged: true });
+    return;
+  }
+  if (areaName !== 'sync') return;
+  const policyChanged = Boolean(changes.policy);
+  const settingsChanged = Boolean(changes.settings);
+  if (policyChanged) currentPolicy = normalizePolicy(changes.policy.newValue);
+  if (settingsChanged) {
+    const syncedSettings = normalizeSettings(changes.settings.newValue);
+    currentSettings = normalizeSettings({
+      ...syncedSettings,
+      enabled: typeof localEnabledOverride === 'boolean' ? localEnabledOverride : syncedSettings.enabled,
+    });
+  }
+  applyConfigurationChange({ policyChanged, settingsChanged });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1375,13 +1409,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const state = tabId === null ? null : tabStates.get(tabId);
           if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
         }
+        const desired = Boolean(message.enabled);
+        localEnabledOverride = desired;
         currentSettings = normalizeSettings({
           ...currentSettings,
-          enabled: Boolean(message.enabled),
+          enabled: desired,
         });
-        await chrome.storage.sync.set({ settings: currentSettings });
+        await chrome.storage.local.set({ [LOCAL_ENABLED_KEY]: desired });
         logRuntime('info', 'settings', 'global_enabled_changed', {
           enabled: currentSettings.enabled,
+          persistence: 'local',
         });
         await configureOpenTabs();
         return { settings: currentSettings };
