@@ -36,6 +36,11 @@
     </section>
 
     <section class="card">
+      <div class="section-title"><div><h2>最近订单</h2><p class="muted">显示本插件创建的最近会员订单；待支付订单使用服务端 expiresAt 秒级倒计时，并自动核对最终状态。</p></div></div>
+      <div id="recentOrders"></div>
+    </section>
+
+    <section class="card">
       <div class="section-title"><div><h2>设备与登录会话</h2><p class="muted">释放不用的设备可立即腾出设备额度；注销其它会话不会删除设备绑定。</p></div><button id="revokeOtherSessions" type="button">退出其它会话</button></div>
       <h3 class="subheading">已绑定设备</h3>
       <div id="devices" class="security-list"></div>
