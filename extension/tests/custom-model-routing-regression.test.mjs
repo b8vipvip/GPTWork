@@ -51,6 +51,7 @@ test('model discovery schema v3 removes routing aliases before persistence or au
   assert.match(catalog, /DISCOVERY_SCHEMA_VERSION = 3/);
   assert.match(catalog, /NON_CONCRETE_MODEL_IDS = new Set\(\['auto'\]\)/);
   assert.match(catalog, /const model = normalizeConcreteModelId\(value\)/);
+  // Keep this semantic so a harmless local alias for the stored array does not weaken the invariant.
   assert.match(catalog, /const legacy = [^;]*\.map\(normalizeConcreteModelId\)\.filter\(Boolean\)/);
 
   assert.match(catalogOptions, /DISCOVERY_SCHEMA_VERSION = 3/);
