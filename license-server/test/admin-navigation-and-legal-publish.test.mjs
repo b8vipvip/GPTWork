@@ -46,27 +46,50 @@ test('system settings stylesheet is linked, served and contains the official-pay
   assert.match(css, /@media\(max-width:820px\)/i, 'system settings payment layout should remain responsive on narrow screens');
 });
 
-test('website CMS uses isolated per-field saves while retaining an explicit save-all fallback', () => {
+test('website CMS publishes fields directly without a global save-all action', () => {
   const html = readFileSync(join(PUBLIC, 'admin-website.html'), 'utf8');
   const source = readFileSync(join(PUBLIC, 'admin-website.js'), 'utf8');
   const css = readFileSync(join(PUBLIC, 'admin-website.css'), 'utf8');
-  assert.match(html, />全部保存并发布</, 'website toolbar should make the save-all action explicit');
+
+  assert.doesNotMatch(html, /id="saveWebsite"/, 'global save-all action should be removed');
+  assert.doesNotMatch(html, />全部保存并发布</, 'save-all wording should be removed');
   assert.match(source, /persisted:\s*null/, 'website editor should retain a last-published snapshot');
-  assert.match(source, /async function persistPath\(/, 'website editor should support path-scoped saves');
+  assert.match(source, /async function persistPaths\(/, 'website editor should support path-scoped saves');
   assert.match(source, /const next = clone\(state\.persisted\)/, 'field save should begin from the published snapshot, not all local edits');
-  assert.match(source, /cms-field-save/, 'website fields should render their own save controls');
-  assert.match(css, /\.cms-field-footer/, 'field save controls should have an explicit bottom-right layout');
+  assert.match(source, /verifyPublicPaths/, 'admin saves should verify the public website API reflects the persisted field');
+  assert.match(source, /scheduleAutoPersist/, 'style selections should be auto-persisted');
+  assert.match(source, /cms-field-save/, 'website text fields should render their own save controls');
+  assert.match(css, /\.cms-field-footer/, 'field save controls should have an explicit non-overlapping layout');
+});
+
+test('website CMS separates global, home and per-page editors behind top navigation', () => {
+  const html = readFileSync(join(PUBLIC, 'admin-website.html'), 'utf8');
+  const source = readFileSync(join(PUBLIC, 'admin-website.js'), 'utf8');
+  for (const view of ['global','home','guide','releases','issues','support','account','legal']) {
+    assert.match(html, new RegExp(`data-cms-view="${view}"`), `website manager should expose ${view} view`);
+  }
+  assert.match(html, /id="websiteGlobalView"/);
+  assert.match(html, /id="websiteHomeView"[^>]*hidden/);
+  assert.match(html, /id="websitePageView"[^>]*hidden/);
+  assert.match(html, /id="websiteLegalView"[^>]*hidden/);
+  assert.match(source, /OPERATIONAL_VIEWS = \['guide', 'releases', 'issues', 'support', 'account'\]/);
+  assert.match(source, /renderCurrentPage\(\)/);
+  assert.doesNotMatch(source, /for \(const \[key, page\] of Object\.entries\(state\.config\.pages/);
 });
 
 test('legal CMS removes the old draft action row and publishes individual fields directly', () => {
   const html = readFileSync(join(PUBLIC, 'admin-website.html'), 'utf8');
   const source = readFileSync(join(PUBLIC, 'page-cms.js'), 'utf8');
-  for (const legacyId of ['saveLegalDraft', 'compareLegal', 'restoreLegalDraft', 'publishLegal']) assert.doesNotMatch(html, new RegExp(`id="${legacyId}"`), `${legacyId} should be removed from Legal CMS`);
+  for (const legacyId of ['saveLegalDraft', 'compareLegal', 'restoreLegalDraft', 'publishLegal']) {
+    assert.doesNotMatch(html, new RegExp(`id="${legacyId}"`), `${legacyId} should be removed from Legal CMS`);
+  }
   assert.match(source, /async function saveLegalField\(/, 'Legal CMS should have field-scoped save/publish behavior');
   assert.match(source, /const next = \{ \.\.\.item\.published\.document, \[field\]: pending\[field\] \}/, 'legal save should start from the published document and replace only one field');
   assert.match(source, /\/publish`, \{ method: 'POST'/, 'legal field save should publish immediately');
   assert.match(source, /\/restore`, \{ method: 'POST'/, 'failed legal publish should restore the server draft');
-  for (const field of ['browserTitle','description','eyebrow','title','subtitle','content']) assert.ok(source.includes(`${field}:`), `Legal CMS should expose a save control mapping for ${field}`);
+  for (const field of ['browserTitle','description','eyebrow','title','subtitle','content']) {
+    assert.ok(source.includes(`${field}:`), `Legal CMS should expose a save control mapping for ${field}`);
+  }
 });
 
 test('Issues admin UI exposes first-class administrator post creation and improved editing', () => {
