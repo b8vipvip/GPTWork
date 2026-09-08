@@ -5,10 +5,12 @@ import { readFile } from 'node:fs/promises';
 const accountHtml = await readFile(new URL('../../extension/account.html', import.meta.url), 'utf8');
 const commerce = await readFile(new URL('../../extension/account-commerce.js', import.meta.url), 'utf8');
 
-test('extension account center exposes recent membership orders', () => {
+test('extension account center exposes account-wide recent membership orders', () => {
   assert.match(accountHtml, /<h2>最近订单<\/h2>/);
   assert.match(accountHtml, /id="recentOrders"/);
-  assert.match(commerce, /gptworkRecentMembershipOrderIds/);
+  assert.match(commerce, /\/api\/v1\/account\/orders\?limit=/);
+  assert.match(commerce, /gptlockAccountSessionToken/);
+  assert.doesNotMatch(commerce, /gptworkRecentMembershipOrderIds/);
   assert.match(commerce, /GPTLOCK_ACCOUNT_GET_ORDER/);
   assert.match(commerce, /order\.expiresAt/);
   assert.match(commerce, /剩余/);
