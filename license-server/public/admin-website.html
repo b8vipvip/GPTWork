@@ -1,18 +1,53 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GPTWork 管理 · 官网</title><link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="/admin-website.css"></head>
 <body data-admin-page="website"><div class="shell"><aside class="sidebar"><div class="brand"><span>G</span><div><strong>GPTWork</strong><small>Control Center</small></div></div><nav><a href="/admin/overview" data-page="overview">总览</a><a href="/admin/users" data-page="users">用户</a><a href="/admin/plans" data-page="plans">会员</a><a href="/admin/orders" data-page="orders">订单</a><a href="/admin/issues" data-page="issues">Issues 讨论区</a><a href="/admin/website" data-page="website" class="active" aria-current="page">官网管理</a><a href="/admin/settings" data-page="settings">系统配置</a><a href="/admin/client-logs" data-page="client-logs">客户端运行日志</a><a href="/admin/server-logs" data-page="server-logs">服务端日志</a><a href="/admin/update" data-page="update">更新</a></nav><button id="logout" class="ghost" hidden>退出管理员</button></aside>
-<main class="workspace"><header class="topbar"><div><p>GPTWORK ADMIN · WEBSITE</p><h1>官网管理</h1></div><span class="security-pill">Module CMS + Legal CMS</span></header>
-<section id="login" class="card login-card"><h2>管理员登录</h2><p class="muted">使用现有 GPTWork 管理员密码。普通官网内容使用结构化字段；法律文档使用受限 Markdown，前台只通过安全 DOM 渲染，不执行管理员输入的 HTML/脚本。</p><div class="inline"><input id="password" type="password" autocomplete="current-password" placeholder="管理员密码"><button id="loginButton" class="primary">登录</button></div><p id="loginMessage" class="message"></p></section>
+<main class="workspace"><header class="topbar"><div><p>GPTWORK ADMIN · WEBSITE</p><h1>官网管理</h1></div><span class="security-pill">Live CMS</span></header>
+<section id="login" class="card login-card"><h2>管理员登录</h2><p class="muted">使用现有 GPTWork 管理员密码。官网配置采用字段级保存；文本点击“保存”后立即公开生效，开关和文本样式选择会自动保存。</p><div class="inline"><input id="password" type="password" autocomplete="current-password" placeholder="管理员密码"><button id="loginButton" class="primary">登录</button></div><p id="loginMessage" class="message"></p></section>
 <div id="app" hidden>
-<section class="card website-toolbar"><div><h2>模块化官网</h2><p class="muted">所有前台可见文本字段都带简易样式工具栏，可设置字体、字号、文字颜色、背景色、加粗、斜体和下划线；样式作用于当前字段整段文本。单行输入框的绿色“保存”位于输入框右侧，多行输入框的绿色“保存”位于输入框内部右下角。点击只保存该字段及其样式并立即生效，其它未保存编辑不会一起发布。</p><p id="websiteUpdated" class="muted"></p></div><div class="section-actions"><a class="button-link" href="/" target="_blank" rel="noopener noreferrer">预览官网 ↗</a><button id="resetWebsite" class="danger" type="button">恢复默认</button><button id="saveWebsite" class="primary" type="button">全部保存并发布</button></div></section>
+<section class="card website-toolbar"><div><h2>官网内容管理</h2><p class="muted">不再需要“全部保存并发布”。文本字段点击绿色“保存”后立即写入公开配置；显示开关、字体、字号、颜色和格式选择会自动保存。已打开的官网页面会自动检测配置变化并刷新。</p><p id="websiteUpdated" class="muted"></p></div><div class="section-actions"><a id="websitePreview" class="button-link" href="/" target="_blank" rel="noopener noreferrer">预览当前页面 ↗</a><button id="resetWebsite" class="danger" type="button">恢复默认</button></div></section>
+<nav id="websiteViewTabs" class="website-view-tabs" aria-label="官网页面编辑">
+<a href="/admin/website" data-cms-view="global">全站设置</a>
+<a href="/admin/website?view=home" data-cms-view="home">官网首页</a>
+<a href="/admin/website?view=guide" data-cms-view="guide">使用教程</a>
+<a href="/admin/website?view=releases" data-cms-view="releases">版本发布</a>
+<a href="/admin/website?view=issues" data-cms-view="issues">Issues</a>
+<a href="/admin/website?view=support" data-cms-view="support">支持中心</a>
+<a href="/admin/website?view=account" data-cms-view="account">账户中心</a>
+<a href="/admin/website?view=legal" data-cms-view="legal">法律与合规</a>
+</nav>
 <p id="websiteMessage" class="message"></p>
-<section class="card"><div class="section-title"><div><h2>全站设置</h2><p class="muted">单行输入框根据内容长度收窄，保存按钮紧邻输入框右侧；SEO 等多行输入框的保存按钮位于输入框内部右下角。</p></div></div><div class="grid two website-site-grid"><label>品牌名<input id="siteBrandName" maxlength="80"></label><label>首页浏览器标题<input id="siteTitle" maxlength="160"></label><label class="span-2">首页 SEO 描述<textarea id="siteDescription" rows="3" maxlength="500"></textarea></label><label class="span-2">页脚文字<input id="siteFooterText" maxlength="160"></label></div></section>
-<section class="card"><div class="section-title"><div><h2>顶部导航</h2><p class="muted">名称、链接和顺序都支持字段级保存；显示开关切换后会自动立即生效。链接仅允许站内路径或 HTTPS。</p></div><button id="addNav" type="button">添加导航</button></div><div id="navigationEditor" class="module-list"></div></section>
-<section class="card"><div class="section-title"><div><h2>首页模块</h2><p class="muted">前台文本字段可直接设置字体、字号、颜色、背景色、加粗、斜体和下划线，并使用各字段自己的绿色保存按钮立即发布；模块启停、添加和删除会自动保存。</p></div><button id="addCustomModule" class="primary" type="button">新增自定义模块</button></div><div id="homeModulesEditor" class="module-list"></div></section>
-<section class="card"><div class="section-title"><div><h2>运营页面</h2><p class="muted">使用教程、版本发布、Issues、支持和账户中心。页面主标题/说明可单字段保存；功能模块标记为“受保护”，只允许启停和安全排序。</p></div></div><div id="pagesEditor" class="module-list"></div></section>
-<section class="card legal-cms-card"><div class="section-title"><div><h2>法律与合规页面 · Legal CMS</h2><p class="muted">隐私政策、服务条款和数据删除说明的前台可见字段同样带安全文本样式工具栏；保存后直接生成新的法律版本并公开生效。浏览器标题和 SEO 描述保持纯文本。版本历史与安全回滚仍保留。</p></div><div id="legalTabs" class="module-controls"></div></div><p id="legalMessage" class="message"></p>
+
+<div id="websiteGlobalView" class="website-view">
+<section class="card"><div class="section-title"><div><h2>全站设置</h2><p class="muted">这里只管理全站品牌、首页 SEO 与页脚。每个字段独立保存，不会把其它尚未保存的编辑一起发布。</p></div></div><div class="grid two website-site-grid">
+<label><span class="cms-field-label">品牌名</span><input id="siteBrandName" maxlength="80"></label>
+<label><span class="cms-field-label">首页浏览器标题</span><input id="siteTitle" maxlength="160"></label>
+<label class="span-2"><span class="cms-field-label">首页 SEO 描述</span><textarea id="siteDescription" rows="3" maxlength="500"></textarea></label>
+<label class="span-2"><span class="cms-field-label">页脚文字</span><input id="siteFooterText" maxlength="160"></label>
+</div></section>
+<section class="card"><div class="section-title"><div><h2>顶部导航</h2><p class="muted">显示开关切换后自动生效；名称、链接、顺序分别保存。链接仅允许站内路径或 HTTPS。</p></div><button id="addNav" type="button">添加导航</button></div><div id="navigationEditor" class="module-list"></div></section>
+</div>
+
+<div id="websiteHomeView" class="website-view" hidden>
+<section class="card"><div class="section-title"><div><h2>官网首页</h2><p class="muted">只显示首页模块的编辑与配置。文本字段独立保存，样式选择与启停自动生效。</p></div><button id="addCustomModule" class="primary" type="button">新增自定义模块</button></div><div id="homeModulesEditor" class="module-list"></div></section>
+</div>
+
+<div id="websitePageView" class="website-view" hidden>
+<section class="card"><div class="section-title"><div><h2 id="pageViewTitle">页面配置</h2><p id="pageViewDescription" class="muted">页面主标题、说明和可配置模块。</p></div></div><div id="pagesEditor" class="module-list"></div></section>
+</div>
+
+<div id="websiteLegalView" class="website-view" hidden>
+<section class="card legal-cms-card"><div class="section-title"><div><h2>法律与合规页面 · Legal CMS</h2><p class="muted">隐私政策、服务条款和数据删除说明按字段保存并直接生成公开版本。文本样式选择也会自动触发当前字段保存。</p></div><div id="legalTabs" class="module-controls"></div></div><p id="legalMessage" class="message"></p>
 <div class="legal-editor-head"><div><strong id="legalName"></strong><small id="legalState"></small></div><a id="legalPreview" class="button-link" target="_blank" rel="noopener noreferrer">预览已发布页面 ↗</a></div>
-<div class="module-grid legal-fields"><label>浏览器标题<input id="legalBrowserTitle" maxlength="180"></label><label>顶部短标题<input id="legalEyebrow" maxlength="180"></label><label class="wide">SEO 描述<textarea id="legalDescription" rows="2" maxlength="600"></textarea></label><label>主标题<input id="legalTitle" maxlength="180"></label><label>英文/副标题<input id="legalSubtitle" maxlength="180"></label><label>已发布 Last updated<input id="legalLastUpdated" readonly><small class="website-help">由系统在每次字段发布时自动更新。</small></label><label class="wide">正文（受限 Markdown）<textarea id="legalContent" class="legal-content" rows="28" maxlength="45000" spellcheck="false"></textarea><small class="website-help">支持：## 二级标题、- 列表、1. 有序列表、**加粗**、`代码`、[链接](/path)、&gt; [!NOTE] 与 &gt; [!DANGER]。HTML 不会执行。</small></label></div>
+<div class="module-grid legal-fields">
+<label><span class="cms-field-label">浏览器标题</span><input id="legalBrowserTitle" maxlength="180"></label>
+<label><span class="cms-field-label">顶部短标题</span><input id="legalEyebrow" maxlength="180"></label>
+<label class="wide"><span class="cms-field-label">SEO 描述</span><textarea id="legalDescription" rows="2" maxlength="600"></textarea></label>
+<label><span class="cms-field-label">主标题</span><input id="legalTitle" maxlength="180"></label>
+<label><span class="cms-field-label">英文/副标题</span><input id="legalSubtitle" maxlength="180"></label>
+<label><span class="cms-field-label">已发布 Last updated</span><input id="legalLastUpdated" readonly><small class="website-help">由系统在每次字段发布时自动更新。</small></label>
+<label class="wide"><span class="cms-field-label">正文（受限 Markdown）</span><textarea id="legalContent" class="legal-content" rows="28" maxlength="45000" spellcheck="false"></textarea><small class="website-help">支持：## 二级标题、- 列表、1. 有序列表、**加粗**、`代码`、[链接](/path)、&gt; [!NOTE] 与 &gt; [!DANGER]。HTML 不会执行。</small></label>
+</div>
 <div class="legal-split"><div><h3>当前编辑差异</h3><div id="legalDiff" class="legal-diff"></div></div><div><h3>发布历史</h3><div id="legalHistory" class="legal-history"></div></div></div>
 </section>
+</div>
 </div></main></div><script type="module" src="/admin-website.js"></script><script src="/page-cms.js" defer></script></body></html>
