@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createRuntimeLogger } from './runtime-log.mjs';
 import { createUpdateManager } from './update-manager.mjs';
 import { createAccountSystem } from './account-system.mjs';
+import { createAccountOrdersApi } from './account-orders.mjs';
 import { createClientRuntimeLogManager } from './client-runtime-logs.mjs';
 import { createPaymentSystem } from './payment-system.mjs';
 import { createOfficialPaymentSystem } from './official-payment-system.mjs';
@@ -151,6 +152,7 @@ const officialPaymentSystem = createOfficialPaymentSystem({ db, publicOrigin: PU
 const paymentSystem = composePaymentSystems(legacyPaymentSystem, officialPaymentSystem);
 const paymentTestSystem = createPaymentTestSystem({ db, publicOrigin: PUBLIC_ORIGIN, secret: SECRET, env, clientIp });
 const accountSystem = createAccountSystem({ db, env, secret: SECRET, publicOrigin: PUBLIC_ORIGIN, allowedExtensionIds: ALLOWED_EXTENSION_IDS, windowTtlSeconds: WINDOW_TTL_SECONDS, json, bodyJson, clientIp, paymentSystem });
+const accountOrdersApi = createAccountOrdersApi({ db, json, paymentSystem });
 paymentSystem.attachSettlement((orderId, context) => accountSystem.markOrderPaidById(orderId, context));
 const siteAccounts = createSiteAccountSystem({ db, env, publicOrigin: PUBLIC_ORIGIN, json, bodyJson, clientIp, accountSummary: accountSystem.accountSummary, paymentSystem });
 const issuesSystem = createIssuesSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, bodyJson });
@@ -164,6 +166,7 @@ async function handleApi(req, res, url) {
   if (req.method === 'OPTIONS') { res.writeHead(204, { ...cors, 'access-control-max-age': '600' }); return res.end(); }
   if (url.pathname === '/api/v1/health' && req.method === 'GET') return json(res, 200, { ok: true, service: 'gptlock-license', time: nowIso() }, cors);
   if (url.pathname === '/api/v1/config' && req.method === 'GET') return json(res, 200, { ok: true, accountRequired: true, licenseRequired: false }, cors);
+  const accountOrdersHandled = await accountOrdersApi.handleApi(req, res, url, cors); if (accountOrdersHandled) return;
   const accountHandled = await accountSystem.handleApi(req, res, url, cors); if (accountHandled) return;
   const clientLogHandled = await clientRuntimeLogs.handleApi(req, res, url, cors); if (clientLogHandled) return;
   if (url.pathname.startsWith('/api/v1/licenses/')) return apiError(res, 410, 'LICENSE_API_REMOVED', '授权码验证已停用，请使用 GPTWork 账号登录');
