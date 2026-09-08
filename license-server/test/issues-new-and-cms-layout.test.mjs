@@ -35,15 +35,17 @@ test('server exposes the dedicated composer page and script', () => {
   assert.match(server, /url\.pathname === '\/issues-new\.js'/);
 });
 
-test('website CMS save controls use compact single-line layout and inset multiline green buttons', () => {
+test('website CMS save controls use explicit non-overlapping field layout', () => {
   const css = read('admin-website.css');
   const html = read('admin-website.html');
   assert.match(css, /\.cms-field-save\{[^}]*background:#16a34a!important[^}]*color:#fff!important/);
-  assert.match(css, /\.cms-field:not\(:has\(textarea\)\)[^{]*\{[^}]*grid-template-columns:max-content max-content/);
-  assert.match(css, /\.cms-field:not\(:has\(textarea\)\)>\.cms-field-footer\{[^}]*grid-column:2[^}]*grid-row:2/);
-  assert.match(css, /\.cms-field:has\(textarea\)>\.cms-field-footer\{[^}]*position:absolute[^}]*right:8px[^}]*bottom:8px/);
-  assert.match(css, /input\[type=number\]\{width:96px\}/);
-  assert.match(css, /#saveWebsite\{[^}]*background:#16a34a!important[^}]*color:#fff!important/);
-  assert.match(html, /单行输入框的绿色“保存”位于输入框右侧/);
-  assert.match(html, /多行输入框的绿色“保存”位于输入框内部右下角/);
+  assert.match(css, /\.cms-field\{[^}]*grid-template-columns:minmax\(0,1fr\) auto[^}]*grid-template-areas:"label label" "toolbar toolbar" "control footer" "help help"/);
+  assert.match(css, /\.cms-field-footer\{[^}]*position:static!important/);
+  assert.match(css, /\.cms-field>textarea\{[^}]*resize:vertical/);
+  assert.match(css, /\.cms-field>input\[type=number\]\{[^}]*max-width:130px!important/);
+  assert.doesNotMatch(css, /\.cms-field:has\(textarea\)>\.cms-field-footer\{[^}]*position:absolute/);
+  assert.doesNotMatch(css, /#saveWebsite\{/);
+  assert.doesNotMatch(html, /id="saveWebsite"/);
+  assert.match(html, /文本字段点击绿色“保存”后立即写入公开配置/);
+  assert.match(html, /开关和文本样式选择会自动保存/);
 });
