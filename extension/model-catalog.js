@@ -27,6 +27,9 @@
   let currentPolicy = null;
   let localPageObservation = null;
   let writeQueue = Promise.resolve();
+  let lastRememberedFingerprint = '';
+  let pendingRememberedFingerprint = '';
+  let modelDiscoveryRetryAt = 0;
   let stateRefreshInFlight = false;
   let pageRefreshTimer = null;
   let positionFrame = null;
@@ -233,21 +236,33 @@
   }
 
   function rememberModels(candidates) {
-    if (!candidates.length) return;
+    if (!candidates.length || Date.now() < modelDiscoveryRetryAt) return;
+    const fingerprint = candidates
+      .map((candidate) => `${normalizeConcreteModelId(candidate?.model) || ''}:${String(candidate?.source || '')}`)
+      .filter((value) => !value.startsWith(':'))
+      .sort()
+      .join('|');
+    if (!fingerprint || fingerprint === lastRememberedFingerprint || fingerprint === pendingRememberedFingerprint) return;
+    pendingRememberedFingerprint = fingerprint;
+
     writeQueue = writeQueue.then(async () => {
       const stored = await chrome.storage.sync.get([
         STORAGE_KEY,
         EVIDENCE_STORAGE_KEY,
         DISCOVERY_SCHEMA_KEY,
       ]);
-      const legacy = Array.isArray(stored[STORAGE_KEY])
-        ? stored[STORAGE_KEY].map(normalizeConcreteModelId).filter(Boolean)
-        : [];
-      const evidence = stored[EVIDENCE_STORAGE_KEY] && typeof stored[EVIDENCE_STORAGE_KEY] === 'object'
-        ? { ...stored[EVIDENCE_STORAGE_KEY] }
+      const storedModels = Array.isArray(stored[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];
+      const legacy = storedModels.map(normalizeConcreteModelId).filter(Boolean);
+      const storedEvidence = stored[EVIDENCE_STORAGE_KEY] && typeof stored[EVIDENCE_STORAGE_KEY] === 'object'
+        ? stored[EVIDENCE_STORAGE_KEY]
         : {};
+      const evidence = { ...storedEvidence };
+      let changed = Number(stored[DISCOVERY_SCHEMA_KEY] || 0) < DISCOVERY_SCHEMA_VERSION;
       for (const key of Object.keys(evidence)) {
-        if (!normalizeConcreteModelId(key)) delete evidence[key];
+        if (!normalizeConcreteModelId(key)) {
+          delete evidence[key];
+          changed = true;
+        }
       }
       const now = new Date().toISOString();
 
@@ -256,21 +271,28 @@
       if (Number(stored[DISCOVERY_SCHEMA_KEY] || 0) < DISCOVERY_SCHEMA_VERSION) {
         for (const model of legacy) {
           if (legacySuspiciousModel(model)) continue;
-          evidence[model] ||= { confirmed: true, sources: ['legacy-v1'], firstSeenAt: now, lastSeenAt: now };
+          if (!evidence[model]) {
+            evidence[model] = { confirmed: true, sources: ['legacy-v1'], firstSeenAt: now, lastSeenAt: now };
+            changed = true;
+          }
         }
       }
 
       for (const candidate of candidates) {
         const model = normalizeConcreteModelId(candidate?.model);
-        if (!model || legacySuspiciousModel(model) && candidate?.source?.startsWith?.('page_')) continue;
+        const source = String(candidate?.source || '');
+        if (!model || !source || legacySuspiciousModel(model) && source.startsWith('page_')) continue;
         const previous = evidence[model] && typeof evidence[model] === 'object' ? evidence[model] : {};
-        const sources = [...new Set([...(Array.isArray(previous.sources) ? previous.sources : []), candidate.source])];
+        const previousSources = Array.isArray(previous.sources) ? previous.sources : [];
+        if (previous.confirmed === true && previousSources.includes(source)) continue;
+        const sources = [...new Set([...previousSources, source])];
         evidence[model] = {
           confirmed: true,
           sources,
           firstSeenAt: previous.firstSeenAt || now,
           lastSeenAt: now,
         };
+        changed = true;
       }
 
       const entries = Object.entries(evidence)
@@ -280,12 +302,26 @@
         .slice(-MAX_DISCOVERED_MODELS);
       const nextEvidence = Object.fromEntries(entries);
       const next = entries.map(([model]) => model);
-      await chrome.storage.sync.set({
-        [STORAGE_KEY]: next,
-        [EVIDENCE_STORAGE_KEY]: nextEvidence,
-        [DISCOVERY_SCHEMA_KEY]: DISCOVERY_SCHEMA_VERSION,
-      });
-    }).catch(() => {});
+      if (JSON.stringify(next) !== JSON.stringify(legacy)) changed = true;
+      if (JSON.stringify(nextEvidence) !== JSON.stringify(evidence)) changed = true;
+
+      if (changed) {
+        await chrome.storage.sync.set({
+          [STORAGE_KEY]: next,
+          [EVIDENCE_STORAGE_KEY]: nextEvidence,
+          [DISCOVERY_SCHEMA_KEY]: DISCOVERY_SCHEMA_VERSION,
+        });
+      }
+      lastRememberedFingerprint = fingerprint;
+      modelDiscoveryRetryAt = 0;
+    }).catch(() => {
+      // Do not hammer chrome.storage.sync when the browser has already exhausted
+      // MAX_WRITE_OPERATIONS_PER_HOUR. The trusted state remains in memory and a
+      // later refresh can retry after a quiet period.
+      modelDiscoveryRetryAt = Date.now() + 60_000;
+    }).finally(() => {
+      if (pendingRememberedFingerprint === fingerprint) pendingRememberedFingerprint = '';
+    });
   }
 
   function statusAnchorRect() {
