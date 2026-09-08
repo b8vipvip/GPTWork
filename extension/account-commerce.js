@@ -1,5 +1,6 @@
-const ORDER_HISTORY_KEY = 'gptworkRecentMembershipOrderIds';
-const state = { config: null, poll: null, countdown: null, orderRefresh: null, observer: null, orderIds: [], orders: [] };
+const API_BASE = 'https://gptlock.mv3.cn';
+const SESSION_KEY = 'gptlockAccountSessionToken';
+const state = { config: null, poll: null, countdown: null, orderRefresh: null, observer: null, orders: [] };
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -52,46 +53,53 @@ function styles(node, values) { Object.assign(node.style, values); return node; 
 function stopPoll() { if (state.poll) clearInterval(state.poll); state.poll = null; }
 function closeModal() { stopPoll(); document.getElementById('gptworkExtPaymentOverlay')?.remove(); }
 
-async function persistOrderIds() {
-  await chrome.storage.local.set({ [ORDER_HISTORY_KEY]: state.orderIds.slice(0, 20) });
-}
-async function rememberOrder(order) {
+function rememberOrder(order) {
   const id = Number(order?.id);
   if (!Number.isInteger(id) || id <= 0) return;
-  state.orderIds = [id, ...state.orderIds.filter((item) => item !== id)].slice(0, 20);
   const index = state.orders.findIndex((item) => Number(item.id) === id);
   if (index >= 0) state.orders.splice(index, 1);
   state.orders.unshift(order);
-  await persistOrderIds();
+  state.orders = state.orders.slice(0, 20);
   renderOrders();
 }
-async function loadOrderIds() {
-  const stored = await chrome.storage.local.get(ORDER_HISTORY_KEY);
-  const values = Array.isArray(stored[ORDER_HISTORY_KEY]) ? stored[ORDER_HISTORY_KEY] : [];
-  state.orderIds = [...new Set(values.map(Number).filter((id) => Number.isInteger(id) && id > 0))].slice(0, 20);
+
+async function fetchAccountOrders(limit = 20) {
+  const stored = await chrome.storage.local.get(SESSION_KEY);
+  const token = typeof stored[SESSION_KEY] === 'string' ? stored[SESSION_KEY] : '';
+  if (!token) return { orders: [] };
+  const response = await fetch(`${API_BASE}/api/v1/account/orders?limit=${Math.max(1, Math.min(50, Number(limit) || 20))}`, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${token}` },
+    cache: 'no-store',
+    credentials: 'omit',
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    const error = new Error(data.error?.message || `HTTP ${response.status}`);
+    error.status = response.status;
+    error.code = data.error?.code || `HTTP_${response.status}`;
+    throw error;
+  }
+  return data;
 }
+
 async function refreshOrders() {
-  if (!state.orderIds.length) { state.orders = []; renderOrders(); return; }
-  const orders = [];
-  const retained = [];
-  for (const id of state.orderIds) {
-    try {
-      const data = await sendMessage({ type: 'GPTLOCK_ACCOUNT_GET_ORDER', orderId: id });
-      if (data?.order) { orders.push(data.order); retained.push(id); }
-    } catch (error) {
-      if (![401, 403, 404].includes(Number(error?.status))) retained.push(id);
+  try {
+    const data = await fetchAccountOrders(20);
+    state.orders = Array.isArray(data.orders) ? data.orders : [];
+    renderOrders();
+  } catch (error) {
+    if (Number(error?.status) === 401) {
+      state.orders = [];
+      renderOrders();
     }
   }
-  state.orderIds = retained.slice(0, 20);
-  state.orders = orders.sort((a, b) => Number(b.id) - Number(a.id));
-  await persistOrderIds();
-  renderOrders();
 }
 
 function openModal(result, method, plan) {
   closeModal();
   const order = result.order || result;
-  void rememberOrder(order);
+  rememberOrder(order);
   const overlay = document.createElement('div'); overlay.id = 'gptworkExtPaymentOverlay';
   styles(overlay, { position: 'fixed', inset: '0', zIndex: '2147483000', background: 'rgba(15,23,42,.58)', display: 'grid', placeItems: 'center', padding: '18px' });
   const panel = document.createElement('section');
@@ -122,7 +130,7 @@ function openModal(result, method, plan) {
   const tick = async () => {
     try {
       const data = await sendMessage({ type: 'GPTLOCK_ACCOUNT_GET_ORDER', orderId: order.id });
-      if (data.order) await rememberOrder(data.order);
+      if (data.order) rememberOrder(data.order);
       if (data.order?.status === 'paid') {
         stopPoll(); status.textContent = '支付成功，会员权益已自动开通。正在刷新…';
         setTimeout(async () => { closeModal(); await sendMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }).catch(() => {}); await refreshOrders(); location.reload(); }, 850);
@@ -139,7 +147,7 @@ async function createOrder(plan, method, button) {
   const old = button.textContent; button.disabled = true; button.textContent = '正在打开…';
   try {
     const result = await sendMessage({ type: 'GPTLOCK_ACCOUNT_CREATE_ORDER', planCode: plan.code, paymentMethod: method.code });
-    await rememberOrder(result.order);
+    rememberOrder(result.order);
     openModal(result, method, plan);
   } catch (error) {
     const message = document.getElementById('orderMessage'); if (message) { message.textContent = `开通失败：${error.message}`; message.className = 'message bad'; }
@@ -236,7 +244,6 @@ function decorate() {
 async function boot() {
   try {
     state.config = await sendMessage({ type: 'GPTLOCK_ACCOUNT_CONFIG' });
-    await loadOrderIds();
     decorate();
     renderOrders();
     void refreshOrders();
