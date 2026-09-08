@@ -9,7 +9,8 @@ const contentSource = await readFile(new URL('../content.js', import.meta.url), 
 test('settings page no longer depends on a bottom Save & sync action', () => {
   assert.doesNotMatch(settingsHtml, /id="save"/);
   assert.doesNotMatch(settingsHtml, /保存并同步\s*\/\s*Save &amp; sync/);
-  assert.match(settingsHtml, /所有配置均为即时保存与同步/);
+  assert.match(settingsHtml, /总开关使用本机可靠状态/);
+  assert.match(settingsHtml, /其余配置均为即时保存与同步/);
 });
 
 test('custom model button is Add-only and custom models are rendered in the choice list', () => {
