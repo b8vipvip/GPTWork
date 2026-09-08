@@ -41,6 +41,7 @@
         "content.js",
         "model-status-history.js",
         "model-catalog.js",
+        "work-mode-controller.js",
         "model-status-continuity.js",
         "model-auto-lock.js",
         "multi-window-lock-sync.js",

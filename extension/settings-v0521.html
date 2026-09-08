@@ -22,7 +22,7 @@
       <h2 id="globalHeading">总开关 <span>Global switch</span></h2>
       <label class="check-row wide">
         <input id="enabled" type="checkbox">
-        <span><strong>启用 GPTWork 请求锁定</strong><small>选择后立即生效并同步。关闭后请求拦截与响应确认立即暂停 / Changes apply and sync immediately.</small></span>
+        <span><strong>启用 GPTWork 请求锁定</strong><small>选择后立即生效；总开关保存在本机，不受 Chrome 同步写入配额影响。关闭后请求拦截与响应确认立即暂停 / Applies immediately and remains locally controllable even when sync quota is exhausted.</small></span>
       </label>
     </section>
 
@@ -153,10 +153,11 @@
 
     <footer>
       <p id="formMessage" role="status" aria-live="polite"></p>
-      <p class="permission-note">所有配置均为即时保存与同步 / All configuration changes are saved and synced immediately.</p>
+      <p class="permission-note">除总开关使用本机可靠状态外，其余配置均为即时保存与同步 / The master switch is device-local for reliability; other configuration changes save and sync immediately.</p>
     </footer>
   </main>
   <script src="settings-enabled-guard.js"></script>
+  <script src="enabled-toggle-controller.js"></script>
   <script src="settings-shell.js"></script>
   <script type="module" src="options.js"></script>
   <script type="module" src="request-history-options.js"></script>
