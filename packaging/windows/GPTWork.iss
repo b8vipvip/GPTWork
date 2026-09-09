@@ -5,6 +5,12 @@
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
 #endif
+#ifndef ChromeStoreExtensionId
+  #define ChromeStoreExtensionId ""
+#endif
+#ifndef EdgeStoreExtensionId
+  #define EdgeStoreExtensionId ""
+#endif
 #define MyAppPublisher "GPTWork Maintainers"
 #define MyAppURL "https://github.com/b8vipvip/GPTLock"
 #define ExtensionId "bhchcpeodphgjfjoookncemnamdbfcof"
@@ -69,7 +75,7 @@ Name: "{group}\修复 GPTWork 浏览器连接"; Filename: "{sys}\WindowsPowerShe
 Name: "{group}\卸载 GPTWork"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"" -Browser {code:SelectedBrowserArgument}"; Description: "验证所选浏览器连接 / Verify selected browser connection"; Flags: postinstall runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"" -Browser {code:SelectedBrowserArgument} -ChromeStoreExtensionId ""{#ChromeStoreExtensionId}"" -EdgeStoreExtensionId ""{#EdgeStoreExtensionId}"""; Description: "验证所选浏览器连接 / Verify selected browser connection"; Flags: postinstall runhidden waituntilterminated
 
 [Code]
 var
@@ -183,18 +189,22 @@ begin
   end;
 end;
 
-procedure WriteNativeManifest(FileName: String);
+procedure WriteNativeManifest(FileName: String; StoreExtensionId: String);
 var
   Json: String;
   BinaryPath: String;
+  AllowedOrigins: String;
 begin
   BinaryPath := JsonEscape(ExpandConstant('{app}\bin\gptwork-core.exe'));
+  AllowedOrigins := '"chrome-extension://{#ExtensionId}/"';
+  if (StoreExtensionId <> '') and (StoreExtensionId <> '{#ExtensionId}') then
+    AllowedOrigins := AllowedOrigins + ', "chrome-extension://' + StoreExtensionId + '/"';
   Json := '{' + #13#10 +
     '  "name": "com.gptlock.core",' + #13#10 +
     '  "description": "GPTWork Local Verification Core",' + #13#10 +
     '  "path": "' + BinaryPath + '",' + #13#10 +
     '  "type": "stdio",' + #13#10 +
-    '  "allowed_origins": ["chrome-extension://{#ExtensionId}/"]' + #13#10 +
+    '  "allowed_origins": [' + AllowedOrigins + ']' + #13#10 +
     '}' + #13#10;
   if not SaveStringToFile(FileName, UTF8Encode(Json), False) then
     RaiseException('无法写入 Native Messaging 清单 / Cannot write Native Messaging manifest');
@@ -220,8 +230,8 @@ begin
   begin
     RemoveUnselectedBrowserRegistration;
     if ChromeSelected() then
-      WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'));
+      WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'), '{#ChromeStoreExtensionId}');
     if EdgeSelected() then
-      WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'));
+      WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'), '{#EdgeStoreExtensionId}');
   end;
 end;

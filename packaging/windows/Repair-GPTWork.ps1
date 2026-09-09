@@ -5,6 +5,12 @@ param(
     [string]$ExtensionId = 'bhchcpeodphgjfjoookncemnamdbfcof',
 
     [Parameter(Mandatory = $false)]
+    [string]$ChromeStoreExtensionId = '',
+
+    [Parameter(Mandatory = $false)]
+    [string]$EdgeStoreExtensionId = '',
+
+    [Parameter(Mandatory = $false)]
     [ValidateSet('All', 'Chrome', 'Edge')]
     [string]$Browser = 'All'
 )
@@ -15,11 +21,28 @@ $installRoot = Split-Path -Parent $scriptDirectory
 $binaryPath = Join-Path $installRoot 'bin\gptwork-core.exe'
 $manifestDirectory = Join-Path $installRoot 'native-messaging'
 
+foreach ($candidate in @($ChromeStoreExtensionId, $EdgeStoreExtensionId)) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and $candidate -notmatch '^[a-p]{32}$') {
+        throw "商店扩展 ID 无效 / Invalid store extension id: $candidate"
+    }
+}
+
 if (-not (Test-Path -LiteralPath $binaryPath -PathType Leaf)) {
     throw "本地核心不存在 / Local Core not found: $binaryPath"
 }
 
 New-Item -ItemType Directory -Force -Path $manifestDirectory | Out-Null
+
+function Get-AllowedOrigins {
+    param([string]$StoreExtensionId = '')
+
+    $ids = New-Object System.Collections.Generic.List[string]
+    $ids.Add($ExtensionId)
+    if (-not [string]::IsNullOrWhiteSpace($StoreExtensionId) -and $StoreExtensionId -ne $ExtensionId) {
+        $ids.Add($StoreExtensionId)
+    }
+    return @($ids | ForEach-Object { "chrome-extension://$_/" })
+}
 
 function Read-ExactBytes {
     param(
@@ -105,7 +128,8 @@ function Test-NativeMessagingRoundTrip {
 function Repair-NativeManifest {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$RegistryPath
+        [Parameter(Mandatory = $true)][string]$RegistryPath,
+        [Parameter(Mandatory = $true)][string[]]$AllowedOrigins
     )
 
     $manifestPath = Join-Path $manifestDirectory "$Name.json"
@@ -114,7 +138,7 @@ function Repair-NativeManifest {
         description = 'GPTWork 本地验证核心 / GPTWork Local Verification Core'
         path = $binaryPath
         type = 'stdio'
-        allowed_origins = @("chrome-extension://$ExtensionId/")
+        allowed_origins = @($AllowedOrigins)
     }
     $manifestJson = $manifest | ConvertTo-Json -Depth 4
     $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
@@ -127,16 +151,17 @@ function Repair-NativeManifest {
         throw "浏览器注册验证失败 / Browser registration check failed: $RegistryPath"
     }
     $savedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($savedManifest.path -ne $binaryPath -or @($savedManifest.allowed_origins)[0] -ne "chrome-extension://$ExtensionId/") {
+    $savedOrigins = @($savedManifest.allowed_origins)
+    if ($savedManifest.path -ne $binaryPath -or (Compare-Object -ReferenceObject $AllowedOrigins -DifferenceObject $savedOrigins)) {
         throw "Native Messaging 清单验证失败 / Manifest verification failed: $manifestPath"
     }
 }
 
 if ($Browser -in @('All', 'Chrome')) {
-    Repair-NativeManifest -Name 'chrome' -RegistryPath 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core'
+    Repair-NativeManifest -Name 'chrome' -RegistryPath 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core' -AllowedOrigins (Get-AllowedOrigins -StoreExtensionId $ChromeStoreExtensionId)
 }
 if ($Browser -in @('All', 'Edge')) {
-    Repair-NativeManifest -Name 'edge' -RegistryPath 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.core'
+    Repair-NativeManifest -Name 'edge' -RegistryPath 'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.core' -AllowedOrigins (Get-AllowedOrigins -StoreExtensionId $EdgeStoreExtensionId)
 }
 
 & $binaryPath doctor | Out-Null
