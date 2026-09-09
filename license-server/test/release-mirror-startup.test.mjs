@@ -81,11 +81,13 @@ test('system updater provisions writable mirror storage and records service diag
   const updateScript = readFileSync(updater, 'utf8');
   const installScript = readFileSync(installer, 'utf8');
 
-  assert.match(updateScript, /RELEASE_MIRROR_DIR="\$\{GPTLOCK_RELEASE_MIRROR_DIR:-\$DATA_DIR\/releases\}"/);
+  assert.match(updateScript, /RELEASE_CONFIG="\$\{GPTLOCK_RELEASE_MIRROR_DIR:-\$DATA_DIR\/releases\}"/);
+  assert.match(updateScript, /RELEASE_MIRROR_DIR="\$\(resolve_from "\$SERVICE_CWD" "\$RELEASE_CONFIG"\)"/);
   assert.match(updateScript, /chown "\$RUNTIME_USER:\$RUNTIME_GROUP" "\$RELEASE_MIRROR_DIR"/);
   assert.match(updateScript, /systemctl status "\$SERVICE" --no-pager -l/);
   assert.match(updateScript, /journalctl -u "\$SERVICE" -n 100 --no-pager/);
 
-  assert.match(installScript, /RELEASE_MIRROR_DIR="\$\{GPTLOCK_RELEASE_MIRROR_DIR:-\$DATA_DIR\/releases\}"/);
+  assert.match(installScript, /RELEASE_CONFIG="\$\{GPTLOCK_RELEASE_MIRROR_DIR:-\$DATA_DIR\/releases\}"/);
+  assert.match(installScript, /RELEASE_MIRROR_DIR="\$\(resolve_from/);
   assert.match(installScript, /chown "\$RUNTIME_USER:\$RUNTIME_GROUP" "\$DATA_DIR" "\$RELEASE_MIRROR_DIR"/);
 });
