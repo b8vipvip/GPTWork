@@ -34,6 +34,8 @@ test('website config keeps required modules, sanitizes links, and migrates opera
   assert.equal(config.homeModules.find((item) => item.id === 'custom-one').buttonHref, '/');
   for (const required of ['hero', 'features', 'workflow', 'callout']) assert.ok(config.homeModules.some((item) => item.id === required));
   for (const page of ['guide', 'releases', 'issues', 'support', 'account']) assert.ok(config.pages[page]);
+  assert.equal(config.pages.guide.modules.find((item) => item.id === 'guide-steps').type, 'guide-steps');
+  assert.equal(config.pages.guide.modules.find((item) => item.id === 'guide-steps').items.length, 7);
   assert.equal(config.pages.issues.modules.find((item) => item.id === 'issues-detail').type, 'protected');
   assert.equal(config.pages.account.modules.find((item) => item.id === 'account-dashboard').type, 'protected');
 });
@@ -50,7 +52,10 @@ test('protected page module identity and type cannot be rewritten by stored conf
         ],
       },
       guide: {
-        modules: [{ id: 'guide-callout', type: 'callout', enabled: true, buttonHref: 'javascript:alert(1)' }],
+        modules: [
+          { id: 'guide-steps', type: 'protected', enabled: true, items: [{ title: '自定义第一步', body: '自定义说明' }] },
+          { id: 'guide-callout', type: 'callout', enabled: true, buttonHref: 'javascript:alert(1)' },
+        ],
       },
     },
   });
@@ -60,6 +65,10 @@ test('protected page module identity and type cannot be rewritten by stored conf
   assert.equal(login.enabled, false);
   assert.equal(login.order, 99);
   assert.equal(config.pages.account.modules.some((item) => item.id === 'evil-extra'), false);
+  const guideSteps = config.pages.guide.modules.find((item) => item.id === 'guide-steps');
+  assert.equal(guideSteps.type, 'guide-steps');
+  assert.equal(guideSteps.items[0].title, '自定义第一步');
+  assert.equal(guideSteps.items[0].body, '自定义说明');
   assert.equal(config.pages.guide.modules.find((item) => item.id === 'guide-callout').buttonHref, '/releases');
 });
 
@@ -78,12 +87,14 @@ test('website system seeds defaults, persists page updates, and can reset', asyn
   input.site.brandName = 'GPTWork Pro';
   input.homeModules[1].enabled = false;
   input.pages.guide.hero.title = '新的教程标题';
+  input.pages.guide.modules.find((item) => item.id === 'guide-steps').items[0].title = '管理员编辑后的安装步骤';
   input.pages.issues.modules.find((item) => item.id === 'issues-new').enabled = false;
   await system.handleAdmin({ method: 'PUT' }, res, new URL('https://example.test/admin/api/website'), async () => ({ config: input }));
   assert.equal(res.status, 200);
   assert.equal(system.read().config.site.brandName, 'GPTWork Pro');
   assert.equal(system.read().config.homeModules.find((item) => item.id === 'features').enabled, false);
   assert.equal(system.read().config.pages.guide.hero.title, '新的教程标题');
+  assert.equal(system.read().config.pages.guide.modules.find((item) => item.id === 'guide-steps').items[0].title, '管理员编辑后的安装步骤');
   assert.equal(system.read().config.pages.issues.modules.find((item) => item.id === 'issues-new').enabled, false);
 
   const auditDetail = JSON.parse(db.prepare("SELECT detail FROM audit_log WHERE event='website_config_updated' ORDER BY id DESC LIMIT 1").get().detail);
@@ -94,6 +105,7 @@ test('website system seeds defaults, persists page updates, and can reset', asyn
   assert.equal(resetRes.status, 200);
   assert.equal(system.read().config.site.brandName, 'GPTWork');
   assert.equal(system.read().config.homeModules.find((item) => item.id === 'features').enabled, true);
+  assert.equal(system.read().config.pages.guide.modules.find((item) => item.id === 'guide-steps').items[0].title, '安装 GPTWork');
   assert.equal(system.read().config.pages.issues.modules.find((item) => item.id === 'issues-new').enabled, true);
   const events = db.prepare('SELECT event FROM audit_log ORDER BY id').all().map((row) => row.event);
   assert.deepEqual(events, ['website_config_initialized', 'website_config_updated', 'website_config_reset']);
