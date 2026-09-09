@@ -46,7 +46,11 @@ function shellQuote(value) {
 }
 
 export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
-  const dataDir = env.GPTLOCK_UPDATE_DATA_DIR || dirname(dbPath);
+  // dbPath may come from a legacy relative GPTLOCK_LICENSE_DB. Resolve it in the
+  // running server process before deriving updater files so the web process and
+  // root updater always point at the same persistent data directory.
+  const absoluteDbPath = resolve(dbPath);
+  const dataDir = resolve(env.GPTLOCK_UPDATE_DATA_DIR || dirname(absoluteDbPath));
   const repoDir = resolve(env.GPTLOCK_UPDATE_REPO_DIR || join(serverRoot, '..'));
   const ref = env.GPTLOCK_UPDATE_REF || 'main';
   const requestFile = join(dataDir, 'update-request.json');
