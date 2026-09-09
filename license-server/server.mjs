@@ -8,6 +8,7 @@ import { createRuntimeLogger } from './runtime-log.mjs';
 import { createUpdateManager } from './update-manager.mjs';
 import { createAccountSystem } from './account-system.mjs';
 import { createAccountOrdersApi } from './account-orders.mjs';
+import { createClientControlSystem } from './client-control.mjs';
 import { createClientRuntimeLogManager } from './client-runtime-logs.mjs';
 import { createPaymentSystem } from './payment-system.mjs';
 import { createOfficialPaymentSystem } from './official-payment-system.mjs';
@@ -152,6 +153,7 @@ const officialPaymentSystem = createOfficialPaymentSystem({ db, publicOrigin: PU
 const paymentSystem = composePaymentSystems(legacyPaymentSystem, officialPaymentSystem);
 const paymentTestSystem = createPaymentTestSystem({ db, publicOrigin: PUBLIC_ORIGIN, secret: SECRET, env, clientIp });
 const accountSystem = createAccountSystem({ db, env, secret: SECRET, publicOrigin: PUBLIC_ORIGIN, allowedExtensionIds: ALLOWED_EXTENSION_IDS, windowTtlSeconds: WINDOW_TTL_SECONDS, json, bodyJson, clientIp, paymentSystem });
+const clientControl = createClientControlSystem({ db, json, bodyJson, windowTtlSeconds: WINDOW_TTL_SECONDS });
 const accountOrdersApi = createAccountOrdersApi({ db, json, paymentSystem });
 paymentSystem.attachSettlement((orderId, context) => accountSystem.markOrderPaidById(orderId, context));
 const siteAccounts = createSiteAccountSystem({ db, env, publicOrigin: PUBLIC_ORIGIN, json, bodyJson, clientIp, accountSummary: accountSystem.accountSummary, paymentSystem });
@@ -167,6 +169,7 @@ async function handleApi(req, res, url) {
   if (url.pathname === '/api/v1/health' && req.method === 'GET') return json(res, 200, { ok: true, service: 'gptlock-license', time: nowIso() }, cors);
   if (url.pathname === '/api/v1/config' && req.method === 'GET') return json(res, 200, { ok: true, accountRequired: true, licenseRequired: false }, cors);
   const accountOrdersHandled = await accountOrdersApi.handleApi(req, res, url, cors); if (accountOrdersHandled) return;
+  const clientControlHandled = await clientControl.handleApi(req, res, url, cors); if (clientControlHandled) return;
   const accountHandled = await accountSystem.handleApi(req, res, url, cors); if (accountHandled) return;
   const clientLogHandled = await clientRuntimeLogs.handleApi(req, res, url, cors); if (clientLogHandled) return;
   if (url.pathname.startsWith('/api/v1/licenses/')) return apiError(res, 410, 'LICENSE_API_REMOVED', '授权码验证已停用，请使用 GPTWork 账号登录');
@@ -176,6 +179,7 @@ async function handleApi(req, res, url) {
 async function handleSiteApi(req, res, url) {
   if (url.pathname === '/site/api/releases' && req.method === 'GET') return json(res, 200, await siteReleases.load());
   if (url.pathname === '/site/api/releases/notifications' && req.method === 'GET') { const waitMs = clampInt(url.searchParams.get('wait'), 0, 25_000, 20_000); const result = await siteReleases.waitForChange(url.searchParams.get('since'), waitMs); return json(res, 200, siteReleases.notificationPayload(result)); }
+  const clientControlHandled = await clientControl.handleSite(req, res, url); if (clientControlHandled) return;
   const websiteHandled = await websiteSystem.handleSite(req, res, url); if (websiteHandled) return;
   const issuesHandled = await issuesSystem.handleSite(req, res, url); if (issuesHandled) return;
   const paymentTestHandled = await paymentTestSystem.handleSite(req, res, url); if (paymentTestHandled) return;
@@ -200,6 +204,7 @@ async function handleAdmin(req, res, url) {
   const issuesAdminHandled = await issuesSystem.handleAdmin(req, res, url); if (issuesAdminHandled) return;
   const paymentTestAdminHandled = await paymentTestSystem.handleAdmin(req, res, url); if (paymentTestAdminHandled) return;
   const paymentAdminHandled = await paymentSystem.handleAdmin(req, res, url); if (paymentAdminHandled) return;
+  const clientControlHandled = await clientControl.handleAdmin(req, res, url); if (clientControlHandled) return;
   const accountAdminHandled = await accountSystem.handleAdmin(req, res, url); if (accountAdminHandled) return;
   const clientLogAdminHandled = await clientRuntimeLogs.handleAdmin(req, res, url); if (clientLogAdminHandled) return;
   if (url.pathname.startsWith('/admin/api/licenses')) return apiError(res, 410, 'LICENSE_ADMIN_REMOVED', '授权码管理已停用，请使用用户账户管理');
@@ -240,6 +245,8 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/issues.js') return staticFile(res, join(PUBLIC,'issues.js'));
     if (url.pathname === '/issues-new.js') return staticFile(res, join(PUBLIC,'issues-new.js'));
     if (url.pathname === '/admin.js') return staticFile(res, join(PUBLIC,'admin.js'));
+    if (url.pathname === '/admin-users.js') return staticFile(res, join(PUBLIC,'admin-users.js'));
+    if (url.pathname === '/admin-client-control.js') return staticFile(res, join(PUBLIC,'admin-client-control.js'));
     if (url.pathname === '/admin-issues.js') return staticFile(res, join(PUBLIC,'admin-issues.js'));
     if (url.pathname === '/admin-website.js') return staticFile(res, join(PUBLIC,'admin-website.js'));
     if (url.pathname === '/admin-website.css') return staticFile(res, join(PUBLIC,'admin-website.css'));
