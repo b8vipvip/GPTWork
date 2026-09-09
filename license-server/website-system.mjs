@@ -8,7 +8,15 @@ const PAGE_DEFAULTS = {
     name: '使用教程', browserTitle: '使用教程 · GPTWork', description: 'GPTWork 使用教程：安装、登录、模型偏好、验证与日常维护。',
     hero: { eyebrow: '从安装到日常使用', title: '按步骤设置一次，\n之后正常聊天。', body: '这份教程只保留用户需要操作的内容。安装、登录、选择偏好并开启 GPTWork 后，就可以像平时一样使用 ChatGPT。' },
     modules: [
-      { id: 'guide-steps', type: 'protected', name: '教程步骤', enabled: true, order: 10 },
+      { id: 'guide-steps', type: 'guide-steps', name: '教程步骤', enabled: true, order: 10, items: [
+        { title: '安装 GPTWork', body: 'Windows 使用正式发布的 GPTWorkSetup-x64.exe；Linux 使用对应的 deb。安装完成后按安装提示启用浏览器扩展，并完全重启浏览器。' },
+        { title: '检查安装状态', body: '打开 GPTWork。状态显示正常即可继续；如果提示组件离线或安装异常，先使用修复功能或重新安装，不需要手动判断内部原因。' },
+        { title: '登录 GPTWork 账户', body: '使用 GPTWork 账户登录。账户中心可以查看当前权益、管理已绑定设备、退出旧会话和修改密码。' },
+        { title: '选择模型与推理偏好', body: '在设置中选择首选模型和需要的推理强度。建议只选择你实际会使用的配置，日常会更清楚。' },
+        { title: '开启 GPTWork', body: '确认状态正常后开启 GPTWork，然后回到 chatgpt.com 正常输入并发送消息。无需在每轮聊天前重复设置。' },
+        { title: '遇到异常时再诊断', body: '如果页面状态、模型表现或插件状态与预期不一致，可以使用自动验证和运行日志。诊断结果可用于排查问题，不需要用户理解底层实现。' },
+        { title: '保持更新', body: '建议优先使用正式发布版本。版本发布页只展示 Windows、Linux 等用户实际需要的安装包；安装包已经包含对应版本的扩展文件。' },
+      ] },
       { id: 'guide-callout', type: 'callout', name: '底部引导', enabled: true, order: 20, title: '需要知道的只有怎么用。', body: 'GPTWork 的内部实现、判断细节和安全策略不会在公开教程中展开。用户只需要关注当前状态、自己的配置以及是否正常工作。', buttonLabel: '下载正式版本', buttonHref: '/releases' },
     ],
   },
@@ -105,6 +113,7 @@ function normalizeHomeModule(raw, fallback, index) {
 function normalizePageModule(raw, fallback) {
   const base = fallback;
   const common = { id: base.id, type: base.type, name: base.name, enabled: bool(raw?.enabled, base.enabled), order: numericOrder(raw?.order, base.order), lockedOrder: Boolean(base.lockedOrder) };
+  if (base.type === 'guide-steps') return { ...common, items: normalizeItems(raw?.items, base.items, 7) };
   if (base.type === 'callout') return { ...common, title: text(raw?.title, base.title, 300), body: text(raw?.body, base.body, 1600), buttonLabel: text(raw?.buttonLabel, base.buttonLabel, 80), buttonHref: safeHref(raw?.buttonHref, base.buttonHref), styles: normalizeTextStyles(raw?.styles, ['title','body','buttonLabel']) };
   return common;
 }
