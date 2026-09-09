@@ -8,11 +8,17 @@ import {
 import { appendRuntimeLog } from './runtime-log.js';
 
 export const RELEASE_NOTIFICATION_URL = 'https://gptlock.mv3.cn/site/api/releases/notifications';
+export const CLIENT_UPDATE_POLICY_URL = 'https://gptlock.mv3.cn/site/api/client-update/config';
+export const CLIENT_CONTROL_URL = 'https://gptlock.mv3.cn/api/v1/client/control';
 export const RELEASE_CHECK_ALARM = 'gptlock-release-check';
 export const RELEASE_GENERATION_KEY = 'gptlockReleaseGeneration';
 export const AUTO_UPDATE_ATTEMPT_KEY = 'gptlockAutoUpdateAttempt';
+export const ADMIN_UPDATE_GENERATION_KEY = 'gptworkAdminUpdateGeneration';
+export const ACCOUNT_SYNC_GENERATION_KEY = 'gptworkAccountSyncGeneration';
+export const ACCOUNT_SESSION_KEY = 'gptlockAccountSessionToken';
 export const AUTO_UPDATE_ALARM_MINUTES = 1;
 export const NOTIFICATION_WAIT_MS = 20_000;
+export const CLIENT_CONTROL_WAIT_MS = 20_000;
 export const FAILED_RETRY_MS = 15 * 60 * 1000;
 
 const NATIVE_HOST = 'com.gptlock.core';
@@ -25,6 +31,7 @@ const LONG_POLL_ROUNDS = 3;
 
 let updateTask = null;
 let notificationTask = null;
+let clientControlTask = null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -46,6 +53,14 @@ export function releaseNotificationUrl(generation = '', waitMs = NOTIFICATION_WA
   return url.toString();
 }
 
+export function clientControlUrl({ sinceUpdate = 0, sinceAccount = 0, waitMs = CLIENT_CONTROL_WAIT_MS } = {}) {
+  const url = new URL(CLIENT_CONTROL_URL);
+  url.searchParams.set('sinceUpdate', String(Math.max(0, Number(sinceUpdate) || 0)));
+  url.searchParams.set('sinceAccount', String(Math.max(0, Number(sinceAccount) || 0)));
+  url.searchParams.set('wait', String(Math.max(0, Math.min(25_000, Number(waitMs) || 0))));
+  return url.toString();
+}
+
 export function shouldAutoInstall({ platformOs, nativeConnected, nativeVersion }) {
   return platformOs === 'win'
     && Boolean(nativeConnected)
@@ -54,6 +69,17 @@ export function shouldAutoInstall({ platformOs, nativeConnected, nativeVersion }
 
 function getPlatformInfo(chromeApi = globalThis.chrome) {
   return new Promise((resolve) => chromeApi.runtime.getPlatformInfo((info) => resolve(info ?? {})));
+}
+
+function runtimeMessage(message, chromeApi = globalThis.chrome) {
+  return new Promise((resolve, reject) => {
+    chromeApi.runtime.sendMessage(message, (response) => {
+      const error = chromeApi.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else if (response?.ok === false) reject(new Error(response?.error || 'Extension request failed'));
+      else resolve(response?.data ?? response);
+    });
+  });
 }
 
 function nativeRequest(type, payload = {}, chromeApi = globalThis.chrome, timeoutMs = NATIVE_TIMEOUT_MS) {
@@ -189,6 +215,19 @@ async function recordAttempt(version, outcome, details = {}, chromeApi = globalT
   });
 }
 
+export async function fetchManagedUpdatePolicy(fetchImpl = fetch) {
+  const response = await fetchImpl(CLIENT_UPDATE_POLICY_URL, {
+    cache: 'no-store', credentials: 'omit', headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`client update policy service failed (${response.status})`);
+  const payload = await response.json();
+  return {
+    enabled: payload?.autoUpdateEnabled !== false,
+    syncGeneration: Number(payload?.syncGeneration || 0),
+    updatedAt: payload?.updatedAt || null,
+  };
+}
+
 async function autoInstallWindows(release, nativeStatus, chromeApi = globalThis.chrome) {
   const targetVersion = release.latestVersion;
   await recordAttempt(targetVersion, 'running', {}, chromeApi);
@@ -256,11 +295,24 @@ async function autoInstallWindows(release, nativeStatus, chromeApi = globalThis.
   chromeApi.runtime.reload();
 }
 
-async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis.chrome) {
+export async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis.chrome, { force = false } = {}) {
   if (updateTask) return updateTask;
   updateTask = (async () => {
     const currentVersion = chromeApi.runtime.getManifest().version;
     try {
+      if (!force) {
+        const policy = await fetchManagedUpdatePolicy();
+        if (!policy.enabled) {
+          await setActionUpdateState({ available: false }, chromeApi);
+          await setUpdateStatus({
+            phase: 'managed_disabled', percent: 0, targetVersion: null,
+            message: '服务端已停用新版本通知与自动更新。',
+          }, chromeApi);
+          logUpdate('info', 'managed_auto_update_disabled', { reason, syncGeneration: policy.syncGeneration });
+          return { managedDisabled: true, currentVersion };
+        }
+      }
+
       const release = await fetchLatestRelease(currentVersion);
       if (!release.updateAvailable) {
         await setActionUpdateState({ available: false }, chromeApi);
@@ -277,6 +329,7 @@ async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis
         reason,
         currentVersion,
         latestVersion: release.latestVersion,
+        forcedByAdmin: force,
       });
 
       const platform = await getPlatformInfo(chromeApi);
@@ -299,7 +352,7 @@ async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis
         return release;
       }
 
-      if (await recentFailedAttempt(release.latestVersion, chromeApi)) return release;
+      if (!force && await recentFailedAttempt(release.latestVersion, chromeApi)) return release;
       await autoInstallWindows(release, nativeStatus, chromeApi);
       return release;
     } catch (error) {
@@ -313,7 +366,7 @@ async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis
         error: errorText(error),
         failedAt: new Date().toISOString(),
       }, chromeApi).catch(() => {});
-      logUpdate('error', 'background_auto_update_failed', { reason, targetVersion, error: errorText(error) });
+      logUpdate('error', 'background_auto_update_failed', { reason, targetVersion, error: errorText(error), forcedByAdmin: force });
       throw error;
     }
   })().finally(() => { updateTask = null; });
@@ -321,6 +374,8 @@ async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis
 }
 
 async function notificationRound(chromeApi = globalThis.chrome) {
+  const policy = await fetchManagedUpdatePolicy();
+  if (!policy.enabled) return { disabled: true, generation: policy.syncGeneration };
   const stored = await chromeApi.storage.local.get(RELEASE_GENERATION_KEY);
   const generation = String(stored[RELEASE_GENERATION_KEY] || '');
   const response = await fetch(releaseNotificationUrl(generation), {
@@ -340,7 +395,8 @@ async function runNotificationLoop(chromeApi = globalThis.chrome) {
   notificationTask = (async () => {
     for (let round = 0; round < LONG_POLL_ROUNDS; round += 1) {
       try {
-        await notificationRound(chromeApi);
+        const result = await notificationRound(chromeApi);
+        if (result?.disabled) break;
       } catch (error) {
         logUpdate('warn', 'release_notification_channel_error', { error: errorText(error) });
         break;
@@ -351,9 +407,66 @@ async function runNotificationLoop(chromeApi = globalThis.chrome) {
   return notificationTask;
 }
 
+async function clientControlRound(chromeApi = globalThis.chrome) {
+  const stored = await chromeApi.storage.local.get([
+    ACCOUNT_SESSION_KEY,
+    ADMIN_UPDATE_GENERATION_KEY,
+    ACCOUNT_SYNC_GENERATION_KEY,
+  ]);
+  const token = String(stored[ACCOUNT_SESSION_KEY] || '');
+  if (!token) return { authenticated: false };
+  const sinceUpdate = Math.max(0, Number(stored[ADMIN_UPDATE_GENERATION_KEY] || 0));
+  const sinceAccount = Math.max(0, Number(stored[ACCOUNT_SYNC_GENERATION_KEY] || 0));
+  const response = await fetch(clientControlUrl({ sinceUpdate, sinceAccount }), {
+    cache: 'no-store', credentials: 'omit',
+    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+  });
+  if (response.status === 401) return { authenticated: false };
+  if (!response.ok) throw new Error(`client control service failed (${response.status})`);
+  const payload = await response.json();
+  const control = payload?.control || {};
+
+  if (control.accountSync && Number(control.accountSyncGeneration || 0) > sinceAccount) {
+    await runtimeMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }, chromeApi);
+    await chromeApi.storage.local.set({ [ACCOUNT_SYNC_GENERATION_KEY]: Number(control.accountSyncGeneration) });
+    logUpdate('info', 'admin_account_sync_applied', { generation: Number(control.accountSyncGeneration) });
+  }
+
+  if (control.forceUpdate && Number(control.updateGeneration || 0) > sinceUpdate) {
+    const generation = Number(control.updateGeneration);
+    await chromeApi.storage.local.set({ [ADMIN_UPDATE_GENERATION_KEY]: generation });
+    try {
+      await checkAndMaybeInstall('admin_sync', chromeApi, { force: true });
+      logUpdate('info', 'admin_update_command_applied', { generation });
+    } catch (error) {
+      await chromeApi.storage.local.set({ [ADMIN_UPDATE_GENERATION_KEY]: sinceUpdate }).catch(() => {});
+      throw error;
+    }
+  }
+  return control;
+}
+
+async function runClientControlLoop(chromeApi = globalThis.chrome) {
+  if (clientControlTask) return clientControlTask;
+  clientControlTask = (async () => {
+    for (let round = 0; round < LONG_POLL_ROUNDS; round += 1) {
+      try {
+        const result = await clientControlRound(chromeApi);
+        if (result?.authenticated === false) break;
+      } catch (error) {
+        logUpdate('warn', 'client_control_channel_error', { error: errorText(error) });
+        break;
+      }
+      if (round + 1 < LONG_POLL_ROUNDS) await sleep(500);
+    }
+  })().finally(() => { clientControlTask = null; });
+  return clientControlTask;
+}
+
 export async function initializeBackgroundUpdater(chromeApi = globalThis.chrome) {
   if (!chromeApi?.runtime?.getManifest || !chromeApi?.alarms || !chromeApi?.storage?.local) return;
   await chromeApi.alarms.create(RELEASE_CHECK_ALARM, { periodInMinutes: AUTO_UPDATE_ALARM_MINUTES });
+  void runClientControlLoop(chromeApi);
   void checkAndMaybeInstall('startup', chromeApi).catch(() => {});
   void runNotificationLoop(chromeApi);
 }
@@ -363,6 +476,7 @@ if (globalThis.chrome?.runtime?.onInstalled && globalThis.chrome?.runtime?.onSta
   chrome.runtime.onStartup.addListener(() => void initializeBackgroundUpdater());
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm?.name !== RELEASE_CHECK_ALARM) return;
+    void runClientControlLoop();
     void checkAndMaybeInstall('alarm').catch(() => {});
     void runNotificationLoop();
   });
