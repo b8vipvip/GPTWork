@@ -197,5 +197,99 @@ syncButton?.addEventListener('click', async () => {
   }
 });
 
-void refresh();
-setInterval(() => void refresh(), 2000);
+if (latestVersion) {
+  void refresh();
+  setInterval(() => void refresh(), 2000);
+}
+
+function guideNode(tag, className = '', text = '') {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text !== '') element.textContent = text;
+  return element;
+}
+
+async function installGuideStepsEditor() {
+  if (document.body.dataset.adminPage !== 'website') return;
+  if (new URLSearchParams(location.search).get('view') !== 'guide') return;
+  const host = document.getElementById('pagesEditor');
+  if (!host) return;
+
+  const mount = async () => {
+    const cards = [...host.querySelectorAll('.module-editor')];
+    const card = cards.find((entry) => entry.querySelector('.module-title small')?.textContent?.includes('guide-steps'));
+    if (!card || card.dataset.guideStepEditor === '1') return false;
+    let data;
+    try { data = await api('/admin/api/website'); } catch { return false; }
+    const module = data.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps');
+    if (!module || !Array.isArray(module.items)) return false;
+
+    card.dataset.guideStepEditor = '1';
+    const oldHint = [...card.children].find((entry) => entry.classList?.contains('muted'));
+    oldHint?.remove();
+    const intro = guideNode('p', 'muted', '教程步骤的编号与页面结构由系统保护；下面的步骤标题和说明可以直接编辑并保存。');
+    const wrap = guideNode('div', 'nested-items');
+
+    module.items.forEach((item, index) => {
+      const row = guideNode('div', 'nested-item');
+      const titleLabel = guideNode('label');
+      titleLabel.append(guideNode('span', 'cms-field-label', `步骤 ${String(index + 1).padStart(2, '0')} 标题`));
+      const titleInput = document.createElement('input');
+      titleInput.maxLength = 160;
+      titleInput.value = item.title || '';
+      titleLabel.append(titleInput);
+
+      const bodyLabel = guideNode('label', 'wide');
+      bodyLabel.append(guideNode('span', 'cms-field-label', '步骤说明'));
+      const bodyInput = document.createElement('textarea');
+      bodyInput.rows = 3;
+      bodyInput.maxLength = 1200;
+      bodyInput.value = item.body || '';
+      bodyLabel.append(bodyInput);
+
+      const status = guideNode('small', 'cms-field-status');
+      const save = guideNode('button', 'cms-field-save', '保存');
+      save.type = 'button';
+      save.addEventListener('click', async () => {
+        const original = save.textContent;
+        save.disabled = true;
+        save.textContent = '保存中…';
+        status.textContent = '正在保存';
+        try {
+          const latest = await api('/admin/api/website');
+          const guideModule = latest.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps');
+          if (!guideModule?.items?.[index]) throw new Error('教程步骤配置不存在，请刷新页面重试');
+          guideModule.items[index].title = titleInput.value;
+          guideModule.items[index].body = bodyInput.value;
+          const saved = await api('/admin/api/website', { method: 'PUT', body: JSON.stringify({ config: latest.config }) });
+          const savedItem = saved.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps')?.items?.[index];
+          if (!savedItem) throw new Error('保存后未读取到教程步骤');
+          titleInput.value = savedItem.title || '';
+          bodyInput.value = savedItem.body || '';
+          status.textContent = '已保存并实时同步到官网';
+          const globalMessage = document.getElementById('websiteMessage');
+          if (globalMessage) { globalMessage.textContent = `教程步骤 ${index + 1} 已保存并实时生效。`; globalMessage.className = 'message good'; }
+        } catch (error) {
+          status.textContent = '保存失败';
+          const globalMessage = document.getElementById('websiteMessage');
+          if (globalMessage) { globalMessage.textContent = error.message; globalMessage.className = 'message bad'; }
+        } finally {
+          save.disabled = false;
+          save.textContent = original;
+        }
+      });
+      const footer = guideNode('span', 'cms-field-footer');
+      footer.append(status, save);
+      row.append(titleLabel, bodyLabel, footer);
+      wrap.append(row);
+    });
+    card.append(intro, wrap);
+    return true;
+  };
+
+  if (await mount()) return;
+  const observer = new MutationObserver(() => { void mount().then((done) => { if (done) observer.disconnect(); }); });
+  observer.observe(host, { childList: true, subtree: true });
+}
+
+void installGuideStepsEditor();
