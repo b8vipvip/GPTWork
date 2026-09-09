@@ -3,6 +3,7 @@ const orderCountdownState = {
   observer: null,
   inflight: new Set(),
 };
+const guideTextStylePromise = import('/rich-text-style.js').catch(() => null);
 
 function orderIdFromRow(row) {
   const title = String(row?.querySelector('.list-main b')?.textContent || '');
@@ -127,7 +128,10 @@ window.addEventListener('pagehide', () => {
 async function renderGuideStepsFromCms() {
   if (document.body.dataset.page !== 'guide') return;
   try {
-    const response = await fetch('/site/api/website', { credentials: 'same-origin', cache: 'no-store' });
+    const [response, textStyles] = await Promise.all([
+      fetch('/site/api/website', { credentials: 'same-origin', cache: 'no-store' }),
+      guideTextStylePromise,
+    ]);
     if (!response.ok) return;
     const data = await response.json().catch(() => null);
     const module = data?.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps');
@@ -138,8 +142,14 @@ async function renderGuideStepsFromCms() {
       if (!step) return;
       const title = step.querySelector('h3');
       const body = step.querySelector('p');
-      if (title) title.textContent = String(item?.title || '');
-      if (body) body.textContent = String(item?.body || '');
+      if (title) {
+        title.textContent = String(item?.title || '');
+        textStyles?.applyTextStyle?.(title, item?.styles?.title || {});
+      }
+      if (body) {
+        body.textContent = String(item?.body || '');
+        textStyles?.applyTextStyle?.(body, item?.styles?.body || {});
+      }
     });
   } catch {
     // Static tutorial content remains usable if the CMS endpoint is temporarily unavailable.
