@@ -61,3 +61,17 @@ test('store package can be built before official store ids exist', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Windows native messaging registration accepts separate Chrome and Edge store ids', () => {
+  const repair = readFileSync(new URL('../../packaging/windows/Repair-GPTWork.ps1', import.meta.url), 'utf8');
+  const setup = readFileSync(new URL('../../packaging/windows/GPTWork.iss', import.meta.url), 'utf8');
+
+  assert.match(repair, /ChromeStoreExtensionId/);
+  assert.match(repair, /EdgeStoreExtensionId/);
+  assert.match(repair, /Get-AllowedOrigins/);
+  assert.match(repair, /allowed_origins = @\(\$AllowedOrigins\)/);
+  assert.match(setup, /#ifndef ChromeStoreExtensionId/);
+  assert.match(setup, /#ifndef EdgeStoreExtensionId/);
+  assert.match(setup, /WriteNativeManifest\(ExpandConstant\('\{app\}\\native-messaging\\chrome\.json'\), '\{#ChromeStoreExtensionId\}'\)/);
+  assert.match(setup, /WriteNativeManifest\(ExpandConstant\('\{app\}\\native-messaging\\edge\.json'\), '\{#EdgeStoreExtensionId\}'\)/);
+});
