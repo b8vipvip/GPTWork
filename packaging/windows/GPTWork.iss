@@ -59,8 +59,8 @@ Source: "Repair-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Name: "{app}\native-messaging"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core"; ValueType: string; ValueName: ""; ValueData: "{app}\native-messaging\chrome.json"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.core"; ValueType: string; ValueName: ""; ValueData: "{app}\native-messaging\edge.json"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core"; ValueType: string; ValueName: ""; ValueData: "{app}\native-messaging\chrome.json"; Flags: uninsdeletekey; Check: ChromeSelected
+Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.core"; ValueType: string; ValueName: ""; ValueData: "{app}\native-messaging\edge.json"; Flags: uninsdeletekey; Check: EdgeSelected
 
 [Icons]
 Name: "{group}\GPTWork 扩展目录"; Filename: "{sys}\explorer.exe"; Parameters: """{app}\extension"""
@@ -69,9 +69,12 @@ Name: "{group}\修复 GPTWork 浏览器连接"; Filename: "{sys}\WindowsPowerShe
 Name: "{group}\卸载 GPTWork"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"""; Description: "验证浏览器连接 / Verify browser connection"; Flags: postinstall runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"" -Browser {code:SelectedBrowserArgument}"; Description: "验证所选浏览器连接 / Verify selected browser connection"; Flags: postinstall runhidden waituntilterminated
 
 [Code]
+var
+  BrowserPage: TInputOptionWizardPage;
+
 function JsonEscape(Value: String): String;
 begin
   Result := Value;
@@ -83,6 +86,51 @@ function PowerShellSingleQuote(Value: String): String;
 begin
   Result := Value;
   StringChangeEx(Result, '''', '''''', True);
+end;
+
+procedure InitializeWizard;
+var
+  RequestedBrowser: String;
+begin
+  BrowserPage := CreateInputOptionPage(
+    wpSelectDir,
+    '选择浏览器扩展',
+    '请选择要为 GPTWork 配置的浏览器',
+    '安装器会部署 GPTWork 扩展文件，并只为你选择的浏览器注册本地连接。普通 Chrome / Edge 仍可能要求在浏览器界面确认启用扩展。',
+    True,
+    False
+  );
+  BrowserPage.Add('仅安装到 Chrome / Chrome only');
+  BrowserPage.Add('仅安装到 Edge / Edge only');
+  BrowserPage.Add('全部安装：Chrome + Edge / Install for both');
+
+  RequestedBrowser := Lowercase(ExpandConstant('{param:Browser|All}'));
+  if RequestedBrowser = 'chrome' then
+    BrowserPage.SelectedValueIndex := 0
+  else if RequestedBrowser = 'edge' then
+    BrowserPage.SelectedValueIndex := 1
+  else
+    BrowserPage.SelectedValueIndex := 2;
+end;
+
+function ChromeSelected(): Boolean;
+begin
+  Result := (BrowserPage = nil) or (BrowserPage.SelectedValueIndex = 0) or (BrowserPage.SelectedValueIndex = 2);
+end;
+
+function EdgeSelected(): Boolean;
+begin
+  Result := (BrowserPage = nil) or (BrowserPage.SelectedValueIndex = 1) or (BrowserPage.SelectedValueIndex = 2);
+end;
+
+function SelectedBrowserArgument(Param: String): String;
+begin
+  if ChromeSelected() and EdgeSelected() then
+    Result := 'All'
+  else if ChromeSelected() then
+    Result := 'Chrome'
+  else
+    Result := 'Edge';
 end;
 
 function StopInstalledCoreProcesses(): Boolean;
@@ -152,11 +200,28 @@ begin
     RaiseException('无法写入 Native Messaging 清单 / Cannot write Native Messaging manifest');
 end;
 
+procedure RemoveUnselectedBrowserRegistration;
+begin
+  if not ChromeSelected() then
+  begin
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core');
+    DeleteFile(ExpandConstant('{app}\native-messaging\chrome.json'));
+  end;
+  if not EdgeSelected() then
+  begin
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.core');
+    DeleteFile(ExpandConstant('{app}\native-messaging\edge.json'));
+  end;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
-    WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'));
-    WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'));
+    RemoveUnselectedBrowserRegistration;
+    if ChromeSelected() then
+      WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'));
+    if EdgeSelected() then
+      WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'));
   end;
 end;
