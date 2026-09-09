@@ -4,9 +4,10 @@
 
   const OWN_NOTICE_SELECTOR = '#gptlock-context-warning-host,#gptlock-context-learning-toast,#gptlock-context-hard-limit-toast';
   const CONVERSATION_TURN_SELECTOR = '[data-message-author-role],article[data-testid^="conversation-turn-"]';
-  const HARD_LIMIT_CANDIDATE_SELECTOR = 'p,div,span,[role="alert"],[role="status"],[data-gptlock-hard-limit-semantic]';
+  const SEMANTIC_CANDIDATE_SELECTOR = 'p,[role="alert"],[role="status"],[data-gptlock-hard-limit-semantic]';
+  const HARD_LIMIT_ACTION_PATTERN = /开始新(?:对话|聊天)|新建(?:对话|聊天)|start (?:a )?new chat|new chat/i;
   const MAX_NOTICE_TEXT = 1_500;
-  const REFRESH_MS = 300;
+  const REFRESH_MS = 750;
 
   function normalizeText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
@@ -70,24 +71,35 @@
     return String(element?.innerText || element?.textContent || '');
   }
 
+  function candidateMatches(element, classifier) {
+    if (!element || !visible(element)) return false;
+    return shouldTreatAsHardLimit({
+      text: elementText(element),
+      classifier,
+      ownNotice: Boolean(element.closest(OWN_NOTICE_SELECTOR)),
+      insideConversation: Boolean(element.closest(CONVERSATION_TURN_SELECTOR)),
+      containsConversation: Boolean(element.querySelector?.(CONVERSATION_TURN_SELECTOR)),
+    });
+  }
+
   function findVisibleHardLimit(budgetApi) {
     const classifier = budgetApi?.classifyConversationLengthLimitText;
     if (typeof classifier !== 'function') return null;
 
-    const candidates = document.querySelectorAll(HARD_LIMIT_CANDIDATE_SELECTOR);
-    for (const element of candidates) {
-      if (!visible(element)) continue;
-      const ownNotice = Boolean(element.closest(OWN_NOTICE_SELECTOR));
-      const insideConversation = Boolean(element.closest(CONVERSATION_TURN_SELECTOR));
-      const containsConversation = Boolean(element.querySelector?.(CONVERSATION_TURN_SELECTOR));
-      if (!shouldTreatAsHardLimit({
-        text: elementText(element),
-        classifier,
-        ownNotice,
-        insideConversation,
-        containsConversation,
-      })) continue;
-      return element;
+    // Fast path: normal paragraph/status chrome and nodes normalized by the semantic bridge.
+    for (const element of document.querySelectorAll(SEMANTIC_CANDIDATE_SELECTOR)) {
+      if (candidateMatches(element, classifier)) return element;
+    }
+
+    // ChatGPT can render the notice itself as a plain div/span. In the real terminal UI it is
+    // paired with a “开始新对话 / New chat” action, so walk upward from that small action set
+    // instead of repeatedly scanning every div/span in the page.
+    for (const action of document.querySelectorAll('button,a')) {
+      if (!visible(action) || !HARD_LIMIT_ACTION_PATTERN.test(normalizeText(elementText(action)))) continue;
+      let container = action.parentElement;
+      for (let depth = 0; depth < 7 && container; depth += 1, container = container.parentElement) {
+        if (candidateMatches(container, classifier)) return container;
+      }
     }
     return null;
   }
@@ -170,11 +182,8 @@
         fullHistoryAvailable: fullHistoryAvailable(budgetApi),
       });
 
-      if (decision) {
-        applyDecision(row, decision, snapshot);
-      } else {
-        releaseOverride(row);
-      }
+      if (decision) applyDecision(row, decision, snapshot);
+      else releaseOverride(row);
     } finally {
       overriding = false;
     }
