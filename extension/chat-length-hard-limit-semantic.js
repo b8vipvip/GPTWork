@@ -4,7 +4,8 @@
 
   const OWN_NOTICE_SELECTOR = '#gptlock-context-warning-host,#gptlock-context-learning-toast,#gptlock-context-hard-limit-toast';
   const CONVERSATION_TURN_SELECTOR = '[data-message-author-role],article[data-testid^="conversation-turn-"]';
-  const CANDIDATE_SELECTOR = 'p,div,span,[role="alert"],[role="status"],[data-gptlock-hard-limit-semantic]';
+  const PRIMARY_SELECTOR = 'p,[role="alert"],[role="status"],[data-gptlock-hard-limit-semantic]';
+  const HARD_LIMIT_ACTION_PATTERN = /开始新(?:对话|聊天)|新建(?:对话|聊天)|start (?:a )?new chat|new chat/i;
   const MARKER = 'data-gptlock-hard-limit-semantic';
   const MAX_NOTICE_TEXT = 1_500;
 
@@ -39,36 +40,53 @@
     return String(element?.innerText || element?.textContent || '');
   }
 
+  function candidateMatches(element, classify) {
+    if (!element) return false;
+    return shouldNormalizeCandidate({
+      text: elementText(element),
+      classifier: classify,
+      insideConversation: Boolean(element.closest(CONVERSATION_TURN_SELECTOR)),
+      containsConversation: Boolean(element.querySelector?.(CONVERSATION_TURN_SELECTOR)),
+      ownNotice: Boolean(element.closest(OWN_NOTICE_SELECTOR)),
+    });
+  }
+
   function reconcile() {
     const classify = classifier();
     if (!classify) return;
+    const matched = new Set();
 
-    for (const element of document.querySelectorAll(CANDIDATE_SELECTOR)) {
-      const ownNotice = Boolean(element.closest(OWN_NOTICE_SELECTOR));
-      const insideConversation = Boolean(element.closest(CONVERSATION_TURN_SELECTOR));
-      const containsConversation = Boolean(element.querySelector?.(CONVERSATION_TURN_SELECTOR));
-      const matches = shouldNormalizeCandidate({
-        text: elementText(element),
-        classifier: classify,
-        insideConversation,
-        containsConversation,
-        ownNotice,
-      });
+    for (const element of document.querySelectorAll(PRIMARY_SELECTOR)) {
+      if (candidateMatches(element, classify)) matched.add(element);
+    }
 
-      if (matches) {
-        // ChatGPT may render the terminal conversation-length notice as a plain p/div/span.
-        // Mark only compact system chrome that is completely outside normal conversation turns.
-        if (!element.getAttribute('role')) {
-          element.setAttribute('role', 'status');
-          element.setAttribute(MARKER, 'role-added');
-        } else {
-          element.setAttribute(MARKER, 'matched');
+    // Current ChatGPT can put the text in a plain div/span beside a “New chat” action.
+    // Walk upward from that action rather than scanning every generic container in the page.
+    for (const action of document.querySelectorAll('button,a')) {
+      if (!HARD_LIMIT_ACTION_PATTERN.test(normalizeText(elementText(action)))) continue;
+      let container = action.parentElement;
+      for (let depth = 0; depth < 7 && container; depth += 1, container = container.parentElement) {
+        if (candidateMatches(container, classify)) {
+          matched.add(container);
+          break;
         }
-      } else if (element.getAttribute(MARKER)) {
-        const marker = element.getAttribute(MARKER);
-        element.removeAttribute(MARKER);
-        if (marker === 'role-added' && element.getAttribute('role') === 'status') element.removeAttribute('role');
       }
+    }
+
+    for (const element of matched) {
+      if (!element.getAttribute('role')) {
+        element.setAttribute('role', 'status');
+        element.setAttribute(MARKER, 'role-added');
+      } else if (!element.getAttribute(MARKER)) {
+        element.setAttribute(MARKER, 'matched');
+      }
+    }
+
+    for (const element of document.querySelectorAll(`[${MARKER}]`)) {
+      if (matched.has(element)) continue;
+      const marker = element.getAttribute(MARKER);
+      element.removeAttribute(MARKER);
+      if (marker === 'role-added' && element.getAttribute('role') === 'status') element.removeAttribute('role');
     }
   }
 
