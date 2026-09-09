@@ -52,6 +52,22 @@ test('guide steps size the exact title input smaller and the exact detail textar
   assert.match(siteHelper, /applyTextStyle\?\.\(body, item\?\.styles\?\.body/);
 });
 
+test('guide download button resolves the latest mirrored installer for Windows or Linux', () => {
+  const guide = read('../public/guide.html');
+  const helper = read('../public/order-countdown.js');
+  assert.match(guide, /id="guideLatestDownload"/);
+  assert.match(guide, />下载 GPTWork<\/a>/);
+  assert.match(guide, /Chrome \/ Edge<\/span><a id="guideLatestDownload"/);
+  assert.match(helper, /function currentDownloadPlatform/);
+  assert.match(helper, /function installerAssetForPlatform/);
+  assert.match(helper, /GPTWorkSetup-x64\\\.exe/);
+  assert.match(helper, /GPTWork_\.\*_amd64\\\.deb/);
+  assert.match(helper, /fetch\('\/site\/api\/releases'/);
+  assert.match(helper, /data\?\.releases\?\.\[0\]/);
+  assert.match(helper, /link\.setAttribute\('download', String\(asset\.name\)\)/);
+  assert.match(helper, /void wireGuideLatestDownload\(\)/);
+});
+
 test('Windows installation docs state that Setup bundles extension files but browser confirmation remains required', () => {
   const install = read('../../docs/INSTALL.md');
   assert.match(install, /安装器已经包含与该版本配套的 GPTWork 浏览器扩展文件/);
