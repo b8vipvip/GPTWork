@@ -20,8 +20,8 @@ test('homepage and both account centers surface the GPTWork disclaimer', () => {
 test('release page loads installer-only filter and hides non-installer artifacts by policy', () => {
   const page = read('../public/releases.html');
   const helper = read('../public/order-countdown.js');
+  assert.match(page, /仅展示用户需要安装的正式安装包/);
   assert.match(page, /order-countdown\.js/);
-  assert.match(page, /只展示用户需要安装的正式安装包/);
   assert.match(helper, /function isInstallerAssetLabel/);
   assert.match(helper, /\.exe\|\\\.msi\|\\\.deb/);
   assert.match(helper, /if \(!isInstallerAssetLabel\(link\.textContent\)\) link\.remove\(\)/);
