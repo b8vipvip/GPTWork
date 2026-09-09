@@ -203,4 +203,168 @@ function installPublicCmsLiveReload() {
   window.addEventListener('pagehide', () => clearInterval(timer), { once: true });
 }
 
+function guideAdminStyle() {
+  if (document.getElementById('gptwork-guide-editor-style')) return;
+  const style = document.createElement('style');
+  style.id = 'gptwork-guide-editor-style';
+  style.textContent = `
+    .guide-step-editor-list{display:grid;gap:14px;margin-top:14px}
+    .guide-step-editor-row{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr) 118px;gap:18px;align-items:start;padding:16px;border:1px solid #dbe3ef;border-radius:14px;background:#fbfdff}
+    .guide-step-title-field,.guide-step-body-field{display:flex!important;flex-direction:column;gap:7px;min-width:0;margin:0!important}
+    .guide-step-title-field input{width:100%!important;max-width:300px!important;min-height:42px}
+    .guide-step-body-field textarea{width:100%!important;min-height:156px!important;resize:vertical;line-height:1.65;padding:12px 13px}
+    .guide-step-body-field .cms-style-toolbar{margin:0 0 2px;width:100%;box-sizing:border-box}
+    .guide-step-actions{display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end;gap:8px;min-height:206px;padding-top:26px}
+    .guide-step-actions .cms-field-save{width:100%;min-height:40px!important}
+    .guide-step-actions .cms-field-status{max-width:none;white-space:normal;text-align:center;line-height:1.45}
+    .guide-step-number{display:inline-flex;align-items:center;justify-content:center;width:34px;height:24px;margin-right:7px;border-radius:999px;background:#17201d;color:#fff;font-size:11px;font-weight:800;vertical-align:middle}
+    .guide-step-editor-note{margin:10px 0 0;color:#64748b;font-size:12px;line-height:1.55}
+    @media(max-width:1100px){.guide-step-editor-row{grid-template-columns:minmax(190px,260px) minmax(0,1fr)}.guide-step-actions{grid-column:1/-1;min-height:0;padding-top:0;flex-direction:row;align-items:center;justify-content:flex-end}.guide-step-actions .cms-field-save{width:auto;min-width:92px}.guide-step-actions .cms-field-status{text-align:right}}
+    @media(max-width:760px){.guide-step-editor-row{grid-template-columns:1fr}.guide-step-title-field input{max-width:none!important}.guide-step-actions{grid-column:auto;justify-content:flex-start}.guide-step-actions .cms-field-status{text-align:left}.guide-step-body-field .cms-style-toolbar{overflow-x:auto;flex-wrap:nowrap}.guide-step-body-field .cms-style-toolbar>*{flex:0 0 auto}}
+  `;
+  document.head.append(style);
+}
+
+async function guideAdminApi(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'content-type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.ok === false) throw new Error(body.error?.message || `HTTP ${response.status}`);
+  return body;
+}
+
+function guideAdminNode(tag, className = '', text = '') {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function installGuideStepsAdminEnhancer() {
+  if (typeof document === 'undefined' || document.body?.dataset?.adminPage !== 'website') return;
+  if (new URLSearchParams(location.search).get('view') !== 'guide') return;
+  guideAdminStyle();
+  const host = document.getElementById('pagesEditor');
+  if (!host) return;
+
+  let mounting = false;
+  const mount = async () => {
+    if (mounting) return false;
+    const card = [...host.querySelectorAll('.module-editor')].find((entry) => entry.querySelector('.module-title small')?.textContent?.includes('guide-steps'));
+    if (!card || card.dataset.guideStepEnhanced === '1' || card.dataset.guideStepEditor !== '1') return false;
+    mounting = true;
+    try {
+      const data = await guideAdminApi('/admin/api/website');
+      const module = data.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps');
+      if (!module || !Array.isArray(module.items)) return false;
+
+      const oldWrap = card.querySelector('.nested-items');
+      if (!oldWrap) return false;
+      const wrap = guideAdminNode('div', 'guide-step-editor-list');
+      module.items.forEach((item, index) => {
+        const row = guideAdminNode('div', 'guide-step-editor-row');
+        row.dataset.guideStepIndex = String(index);
+
+        const titleLabel = guideAdminNode('label', 'guide-step-title-field');
+        const titleCaption = guideAdminNode('span', 'cms-field-label');
+        titleCaption.append(guideAdminNode('span', 'guide-step-number', String(index + 1).padStart(2, '0')), document.createTextNode('步骤标题'));
+        const titleInput = document.createElement('input');
+        titleInput.maxLength = 160;
+        titleInput.value = item.title || '';
+        titleInput.setAttribute('aria-label', `步骤 ${index + 1} 标题`);
+        titleLabel.append(titleCaption, titleInput);
+
+        const bodyLabel = guideAdminNode('label', 'guide-step-body-field');
+        bodyLabel.append(guideAdminNode('span', 'cms-field-label', '步骤说明'));
+        const bodyInput = document.createElement('textarea');
+        bodyInput.rows = 6;
+        bodyInput.maxLength = 1200;
+        bodyInput.value = item.body || '';
+        bodyInput.setAttribute('aria-label', `步骤 ${index + 1} 说明`);
+        let bodyStyle = normalizeTextStyle(item.styles?.body || {});
+        const toolbar = createTextStyleToolbar({
+          control: bodyInput,
+          value: bodyStyle,
+          onChange: (next) => {
+            bodyStyle = normalizeTextStyle(next);
+            status.textContent = '样式已修改，点击保存';
+          },
+        });
+        bodyLabel.append(toolbar, bodyInput);
+
+        const actions = guideAdminNode('div', 'guide-step-actions');
+        const status = guideAdminNode('small', 'cms-field-status');
+        const save = guideAdminNode('button', 'cms-field-save', '保存');
+        save.type = 'button';
+        save.addEventListener('click', async () => {
+          const original = save.textContent;
+          save.disabled = true;
+          save.textContent = '保存中…';
+          status.textContent = '正在保存';
+          try {
+            const latest = await guideAdminApi('/admin/api/website');
+            const guideModule = latest.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps');
+            if (!guideModule?.items?.[index]) throw new Error('教程步骤配置不存在，请刷新页面重试');
+            const target = guideModule.items[index];
+            target.title = titleInput.value;
+            target.body = bodyInput.value;
+            target.styles = { ...(target.styles || {}), body: bodyStyle };
+            const saved = await guideAdminApi('/admin/api/website', { method: 'PUT', body: JSON.stringify({ config: latest.config }) });
+            const savedItem = saved.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps')?.items?.[index];
+            if (!savedItem) throw new Error('保存后未读取到教程步骤');
+            titleInput.value = savedItem.title || '';
+            bodyInput.value = savedItem.body || '';
+            bodyStyle = normalizeTextStyle(savedItem.styles?.body || {});
+            applyTextStyle(bodyInput, bodyStyle);
+            status.textContent = '已保存并同步官网';
+            const globalMessage = document.getElementById('websiteMessage');
+            if (globalMessage) {
+              globalMessage.textContent = `教程步骤 ${index + 1} 已保存并实时生效。`;
+              globalMessage.className = 'message good';
+            }
+          } catch (error) {
+            status.textContent = '保存失败';
+            const globalMessage = document.getElementById('websiteMessage');
+            if (globalMessage) {
+              globalMessage.textContent = error.message;
+              globalMessage.className = 'message bad';
+            }
+          } finally {
+            save.disabled = false;
+            save.textContent = original;
+          }
+        });
+        actions.append(status, save);
+        row.append(titleLabel, bodyLabel, actions);
+        wrap.append(row);
+      });
+      oldWrap.replaceWith(wrap);
+      card.dataset.guideStepEnhanced = '1';
+      const intro = [...card.children].find((entry) => entry.classList?.contains('muted'));
+      if (intro) intro.textContent = '教程步骤编号与页面结构由系统保护；标题保持紧凑编辑，步骤说明使用更大的编辑区，并支持字体、字号、加粗、斜体、下划线和颜色等简易格式。';
+      const note = guideAdminNode('p', 'guide-step-editor-note', '格式只作用于对应步骤说明；修改文字或格式后点击该步骤右侧“保存”，即可实时同步到官网。');
+      wrap.before(note);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      mounting = false;
+    }
+  };
+
+  void mount();
+  const observer = new MutationObserver(() => {
+    void mount().then((done) => { if (done) observer.disconnect(); });
+  });
+  observer.observe(host, { childList: true, subtree: true });
+}
+
 installPublicCmsLiveReload();
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', installGuideStepsAdminEnhancer, { once: true });
+  else installGuideStepsAdminEnhancer();
+}
