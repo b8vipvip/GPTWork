@@ -1,0 +1,80 @@
+name: Store Package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  store-package:
+    name: Build Chrome and Edge store packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate store packaging scripts
+        run: |
+          node --check packaging/store/build-store-package.mjs
+          node --check extension/distribution-channel.js
+          node --check extension/background-entry-store.js
+          node --check extension/store-update-page.js
+          node --test extension/tests/store-package.test.mjs
+
+      - name: Build Chrome Web Store package
+        env:
+          STORE_ID: ${{ vars.GPTWORK_CHROME_STORE_EXTENSION_ID }}
+        run: |
+          args=(--browser chrome --out dist/store/chrome)
+          if [[ -n "${STORE_ID:-}" ]]; then args+=(--extension-id "$STORE_ID"); fi
+          node packaging/store/build-store-package.mjs "${args[@]}"
+          (cd dist/store/chrome && zip -9 -r ../GPTWork-chrome-store.zip .)
+
+      - name: Build Microsoft Edge Add-ons package
+        env:
+          STORE_ID: ${{ vars.GPTWORK_EDGE_STORE_EXTENSION_ID }}
+        run: |
+          args=(--browser edge --out dist/store/edge)
+          if [[ -n "${STORE_ID:-}" ]]; then args+=(--extension-id "$STORE_ID"); fi
+          node packaging/store/build-store-package.mjs "${args[@]}"
+          (cd dist/store/edge && zip -9 -r ../GPTWork-edge-store.zip .)
+
+      - name: Enforce store distribution boundary
+        run: |
+          set -Eeuo pipefail
+          for package in dist/store/GPTWork-chrome-store.zip dist/store/GPTWork-edge-store.zip; do
+            listing="$(unzip -Z1 "$package")"
+            if grep -Eq '(^|/)(private-engine|private-source|private-core)/|\.rs$|Cargo\.(toml|lock)$' <<<"$listing"; then
+              echo "Private implementation source leaked into $package" >&2
+              exit 1
+            fi
+            if grep -Eq '(^|/)background-update\.js$|(^|/)options-update\.js$' <<<"$listing"; then
+              echo "Standalone self-update runtime leaked into $package" >&2
+              exit 1
+            fi
+            unzip -p "$package" manifest.json | python -m json.tool >/dev/null
+            if unzip -p "$package" manifest.json | jq -e '.permissions | index("downloads")' >/dev/null; then
+              echo "Store package must not request downloads permission." >&2
+              exit 1
+            fi
+            if unzip -p "$package" manifest.json | jq -e 'has("key")' >/dev/null; then
+              echo "Store package must not pin the standalone extension key." >&2
+              exit 1
+            fi
+            test "$(unzip -p "$package" manifest.json | jq -r '.background.service_worker')" = 'background-entry-store.js'
+            unzip -p "$package" settings-v0521.html | grep -q 'store-update-page.js'
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gptwork-store-packages
+          path: |
+            dist/store/GPTWork-chrome-store.zip
+            dist/store/GPTWork-edge-store.zip
+          if-no-files-found: error
