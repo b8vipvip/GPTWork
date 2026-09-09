@@ -4,15 +4,25 @@
 
   const OWN_NOTICE_SELECTOR = '#gptlock-context-warning-host,#gptlock-context-learning-toast,#gptlock-context-hard-limit-toast';
   const CONVERSATION_TURN_SELECTOR = '[data-message-author-role],article[data-testid^="conversation-turn-"]';
+  const CANDIDATE_SELECTOR = 'p,div,span,[role="alert"],[role="status"],[data-gptlock-hard-limit-semantic]';
   const MARKER = 'data-gptlock-hard-limit-semantic';
+  const MAX_NOTICE_TEXT = 1_500;
 
   function normalizeText(value) {
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
-  function shouldNormalizeCandidate({ text = '', classifier = null, insideConversation = false, ownNotice = false } = {}) {
-    if (ownNotice || insideConversation || typeof classifier !== 'function') return false;
-    return Boolean(classifier(normalizeText(text)));
+  function shouldNormalizeCandidate({
+    text = '',
+    classifier = null,
+    insideConversation = false,
+    containsConversation = false,
+    ownNotice = false,
+  } = {}) {
+    if (ownNotice || insideConversation || containsConversation || typeof classifier !== 'function') return false;
+    const normalized = normalizeText(text);
+    if (!normalized || normalized.length > MAX_NOTICE_TEXT) return false;
+    return Boolean(classifier(normalized));
   }
 
   const api = Object.freeze({ normalizeText, shouldNormalizeCandidate });
@@ -33,28 +43,31 @@
     const classify = classifier();
     if (!classify) return;
 
-    for (const element of document.querySelectorAll(`p,[role="alert"],[role="status"],[${MARKER}]`)) {
+    for (const element of document.querySelectorAll(CANDIDATE_SELECTOR)) {
       const ownNotice = Boolean(element.closest(OWN_NOTICE_SELECTOR));
       const insideConversation = Boolean(element.closest(CONVERSATION_TURN_SELECTOR));
+      const containsConversation = Boolean(element.querySelector?.(CONVERSATION_TURN_SELECTOR));
       const matches = shouldNormalizeCandidate({
         text: elementText(element),
         classifier: classify,
         insideConversation,
+        containsConversation,
         ownNotice,
       });
 
       if (matches) {
-        // The remaining-length indicator deliberately requires a semantic system notice
-        // or a nearby new-chat action. ChatGPT's current hard-limit banner can be a plain
-        // out-of-turn <p>, so normalize that system chrome to status without touching
-        // quoted/user content inside conversation turns.
+        // ChatGPT may render the terminal conversation-length notice as a plain p/div/span.
+        // Mark only compact system chrome that is completely outside normal conversation turns.
         if (!element.getAttribute('role')) {
           element.setAttribute('role', 'status');
           element.setAttribute(MARKER, 'role-added');
+        } else {
+          element.setAttribute(MARKER, 'matched');
         }
-      } else if (element.getAttribute(MARKER) === 'role-added') {
+      } else if (element.getAttribute(MARKER)) {
+        const marker = element.getAttribute(MARKER);
         element.removeAttribute(MARKER);
-        if (element.getAttribute('role') === 'status') element.removeAttribute('role');
+        if (marker === 'role-added' && element.getAttribute('role') === 'status') element.removeAttribute('role');
       }
     }
   }
