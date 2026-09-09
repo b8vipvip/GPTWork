@@ -27,16 +27,25 @@ test('release page loads installer-only filter and hides non-installer artifacts
   assert.match(helper, /if \(!isInstallerAssetLabel\(link\.textContent\)\) link\.remove\(\)/);
 });
 
-test('guide steps are editable in admin and rendered from website CMS', () => {
+test('guide steps use a compact title field, large detail editor and simple formatting toolbar', () => {
   const adminPage = read('../public/admin-website.html');
-  const adminHelper = read('../public/admin-release-mirror.js');
+  const legacyEditor = read('../public/admin-release-mirror.js');
+  const richEditor = read('../public/rich-text-style.js');
   const guide = read('../public/guide.html');
   const siteHelper = read('../public/order-countdown.js');
   assert.match(adminPage, /admin-release-mirror\.js/);
-  assert.match(adminHelper, /installGuideStepsEditor/);
-  assert.match(adminHelper, /教程步骤的编号与页面结构由系统保护/);
+  assert.match(legacyEditor, /installGuideStepsEditor/);
+  assert.match(legacyEditor, /教程步骤的编号与页面结构由系统保护/);
+  assert.match(richEditor, /installGuideStepsAdminEnhancer/);
+  assert.match(richEditor, /guide-step-editor-row/);
+  assert.match(richEditor, /max-width:300px/);
+  assert.match(richEditor, /min-height:156px/);
+  assert.match(richEditor, /createTextStyleToolbar/);
+  assert.match(richEditor, /字体、字号、加粗、斜体、下划线和颜色/);
+  assert.match(richEditor, /target\.styles = \{ \.\.\.\(target\.styles \|\| \{\}\), body: bodyStyle \}/);
   assert.match(guide, /order-countdown\.js/);
   assert.match(siteHelper, /renderGuideStepsFromCms/);
+  assert.match(siteHelper, /applyTextStyle\?\.\(body, item\?\.styles\?\.body/);
 });
 
 test('Windows installation docs state that Setup bundles extension files but browser confirmation remains required', () => {
