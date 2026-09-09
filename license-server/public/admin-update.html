@@ -32,6 +32,17 @@
         <pre id="updateLog" class="logbox">暂无更新日志</pre>
       </section>
 
+      <section id="clientUpdateControl" class="card update-card">
+        <div class="section-title">
+          <div><h2>客户端更新配置</h2><p class="muted">控制正式版通知和后台自动更新。关闭后，客户端不会接收自动新版本通知，也不会自行执行新版本更新。</p></div>
+          <button id="syncClientVersions" class="primary">同步客户端版本</button>
+        </div>
+        <label class="check"><input id="clientAutoUpdateEnabled" type="checkbox"> 启用新版本通知与自动更新</label>
+        <div class="update-meta"><span>策略状态 <strong id="clientUpdateState">等待读取</strong></span><span>同步批次 <strong id="clientUpdateGeneration">0</strong></span></div>
+        <p class="muted">“同步客户端版本”是管理员强制同步命令，不受上方自动更新开关影响：在线用户会立即检查并执行可用新版本；离线用户会排队，在下次上线时自动执行。</p>
+        <p id="clientUpdateConfigMessage" class="message"></p>
+      </section>
+
       <section id="releaseMirror" class="card update-card">
         <div class="section-title"><div><h2>客户端 Release 镜像</h2><p class="muted">GitHub 正式 Release 会先由服务端下载并校验，再发布到官网。客户端只从官网镜像检查和下载安装包。</p></div><button id="releaseSyncButton" class="primary">立即同步</button></div>
         <div class="update-meta"><span>GPTWork 产品版本 <strong id="releaseProductVersion">—</strong></span><span>最新镜像 <strong id="releaseLatestVersion">—</strong></span><span>镜像状态 <strong id="releaseMirrorState">等待检查</strong></span><span>最近发布 <strong id="releaseMirroredAt">—</strong></span></div>
@@ -45,6 +56,7 @@
 </div>
 <script src="/page-cms.js" defer></script>
 <script type="module" src="/admin.js"></script>
+<script type="module" src="/admin-client-control.js"></script>
 <script type="module" src="/admin-release-mirror.js"></script>
 </body>
 </html>
