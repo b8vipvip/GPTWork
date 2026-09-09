@@ -156,6 +156,66 @@ async function renderGuideStepsFromCms() {
   }
 }
 
+function currentDownloadPlatform() {
+  const raw = [navigator.userAgentData?.platform, navigator.platform, navigator.userAgent]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (raw.includes('win')) return 'windows';
+  if (raw.includes('linux') && !raw.includes('android')) return 'linux';
+  return 'other';
+}
+
+function installerAssetForPlatform(release, platform) {
+  const assets = (Array.isArray(release?.assets) ? release.assets : [])
+    .filter((asset) => /^GPTWork/i.test(String(asset?.name || '')));
+  const byName = (pattern) => assets.find((asset) => pattern.test(String(asset?.name || '')));
+  if (platform === 'windows') {
+    return byName(/^GPTWorkSetup-x64\.exe$/i)
+      || byName(/\.exe$/i)
+      || byName(/\.msi$/i)
+      || null;
+  }
+  if (platform === 'linux') {
+    return byName(/^GPTWork_.*_amd64\.deb$/i)
+      || byName(/\.deb$/i)
+      || byName(/\.appimage$/i)
+      || byName(/\.rpm$/i)
+      || null;
+  }
+  return null;
+}
+
+async function wireGuideLatestDownload() {
+  if (document.body.dataset.page !== 'guide') return;
+  const link = document.getElementById('guideLatestDownload');
+  if (!link) return;
+  link.setAttribute('aria-busy', 'true');
+  try {
+    const response = await fetch('/site/api/releases', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => null);
+    const latest = data?.releases?.[0];
+    const platform = currentDownloadPlatform();
+    const asset = installerAssetForPlatform(latest, platform);
+    if (!asset?.url || !asset?.name) {
+      link.title = platform === 'other' ? '当前系统请前往版本发布页选择安装包' : '暂未找到适合当前系统的最新安装包';
+      return;
+    }
+    const url = new URL(String(asset.url), location.origin);
+    if (url.protocol !== 'https:' && url.origin !== location.origin) return;
+    link.href = url.toString();
+    link.setAttribute('download', String(asset.name));
+    link.dataset.releaseTag = String(latest?.tag || '');
+    link.dataset.assetName = String(asset.name);
+    link.title = `下载 ${latest?.tag || '最新版本'} · ${asset.name}`;
+  } catch {
+    // Keep /releases as a safe fallback when the mirrored release feed is temporarily unavailable.
+  } finally {
+    link.removeAttribute('aria-busy');
+  }
+}
+
 function isInstallerAssetLabel(label) {
   const name = String(label || '').split(' · ')[0].trim();
   return /(?:\.exe|\.msi|\.deb|\.rpm|\.dmg|\.pkg|\.appimage)$/i.test(name);
@@ -194,6 +254,7 @@ function ensureDisclaimerFooterLink() {
 function startSiteEnhancements() {
   startOrderCountdowns();
   void renderGuideStepsFromCms();
+  void wireGuideLatestDownload();
   startReleaseInstallerFilter();
   ensureDisclaimerFooterLink();
 }
