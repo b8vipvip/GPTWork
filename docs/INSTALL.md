@@ -5,12 +5,21 @@ GPTWork 支持 Windows 与 Linux，推荐始终从 GPTWork 官网或 GitHub 正�
 ## Windows
 
 1. 下载最新 `GPTWorkSetup-x64.exe`；
-2. 运行安装程序完成安装；安装器已经包含与该版本配套的 GPTWork 浏览器扩展文件，因此普通用户不需要再单独下载 `GPTWork-extension-*.zip`；
-3. 按安装提示在 Chrome / Edge 中启用安装器部署到 GPTWork 安装目录的浏览器扩展；当前安装器会部署扩展文件并注册 Native Messaging，但不会绕过浏览器安全确认静默启用扩展；
-4. 完全重启 Chrome / Edge；
-5. 打开 GPTWork，确认状态正常后登录账户并完成设置。
+2. 运行安装程序。安装器已经包含与该版本配套的 GPTWork 浏览器扩展文件，普通用户不需要再单独下载 `GPTWork-extension-*.zip`；
+3. 在“选择浏览器扩展”页面选择 `仅 Chrome`、`仅 Edge` 或 `Chrome + Edge`（默认）；
+4. 安装器自动部署 GPTWork、本地核心和扩展文件，并只为所选浏览器注册 Native Messaging 连接；
+5. 如果 Chrome / Edge 显示扩展安装或启用安全确认，请在浏览器自己的界面完成一次确认，然后完全重启所选浏览器；
+6. 打开 GPTWork，确认状态正常后登录账户并完成设置。
+
+升级时可以重新选择浏览器目标。例如从“Chrome + Edge”改为“仅 Chrome”后，安装器会清理 GPTWork 在 Edge 中的 Native Messaging 注册，不再把未选择的浏览器当作安装目标。
 
 如果升级后出现旧界面、组件离线或版本不一致，优先重新运行最新安装器或使用产品内修复/更新入口。
+
+## 为什么普通 Windows 不能由安装器直接静默启用扩展
+
+Chrome / Edge 对普通终端用户保留浏览器侧的扩展安装/启用确认。GPTWork 安装器可以让用户先选择目标浏览器、自动部署扩展文件并完成 Native Messaging 注册，但不会通过企业强制安装策略或修改浏览器安全设置来绕过浏览器自己的确认界面。
+
+Chrome Web Store / Microsoft Edge Add-ons 正式版本发布后，可以把安装器进一步接到浏览器官方商店分发链，减少用户手工定位扩展的步骤；普通用户最终是否需要一次浏览器确认仍由 Chrome / Edge 的安全策略决定。组织管理设备可以使用浏览器官方企业策略自动安装扩展，但该模式不作为 GPTWork 普通用户安装器的默认行为。
 
 ## Linux
 
@@ -37,4 +46,4 @@ GPTWork 支持 Windows 与 Linux，推荐始终从 GPTWork 官网或 GitHub 正�
 
 ## English
 
-Download GPTWork only from the official product site or GitHub Releases. The Windows Setup already bundles the matching browser-extension files, so ordinary users do not need a separate extension ZIP. The installer deploys those files and registers Native Messaging, but the browser may still require the user to enable/confirm the extension. Restart the browser completely, then sign in and configure GPTWork.
+Download GPTWork only from the official product site or GitHub Releases. The Windows Setup bundles the matching browser-extension files. During setup, choose Chrome only, Edge only, or both (default). Setup deploys GPTWork and registers Native Messaging only for the selected browser targets. Chrome or Edge may still require one browser-owned install/enable confirmation; GPTWork does not bypass that security confirmation with enterprise force-install policy on ordinary consumer devices. Restart the selected browser completely, then sign in and configure GPTWork.
