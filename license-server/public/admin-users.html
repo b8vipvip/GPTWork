@@ -22,7 +22,7 @@
     </section>
     <div id="app" hidden>
       <section id="users" class="card">
-        <div class="section-title"><div><h2>用户账户</h2><p class="muted">管理账号状态、免费期限、设备上限、会员和设备绑定；同时窗口不限。</p></div><div class="section-actions"><button id="createUserToggle" class="primary">添加用户</button><input id="userSearch" placeholder="搜索邮箱"><button id="refreshUsers">刷新</button></div></div>
+        <div class="section-title"><div><h2>用户列表</h2><p class="muted">查看账户权益、客户端版本、在线设备和同步状态；列表内使用编辑/设置图标进入单项配置。</p></div><div class="section-actions"><button id="createUserToggle" class="primary">添加用户</button><input id="userSearch" placeholder="搜索邮箱"><button id="refreshUsers">刷新</button></div></div>
         <div id="createUserPanel" class="create-user-panel" hidden>
           <div class="section-title"><div><h3>手动添加用户</h3><p class="muted">初始密码只用于创建，不会在服务端明文保存或再次显示。</p></div><button id="cancelCreateUser">取消</button></div>
           <div class="grid four">
@@ -34,11 +34,17 @@
           </div>
           <div class="create-user-footer"><p id="createUserMessage" class="message"></p><button id="createUserSubmit" class="primary">创建用户</button></div>
         </div>
-        <div class="table-wrap"><table class="users-table"><thead><tr><th>ID</th><th>邮箱</th><th>状态</th><th>权益 / 套餐</th><th>设备上限</th><th>有效期</th><th>操作</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+        <div class="table-wrap"><table class="users-table"><thead><tr><th>ID</th><th>邮箱</th><th>状态</th><th>权益 / 套餐</th><th>设备上限</th><th>客户端版本</th><th>在线状态</th><th>操作</th></tr></thead><tbody id="usersBody"></tbody></table></div>
       </section>
     </div>
   </main>
 </div>
+<dialog id="userEditDialog" class="admin-dialog">
+  <div class="dialog-head"><div><h2 id="userEditTitle">编辑用户</h2><p class="muted" id="userEditTarget">—</p></div><button id="userEditClose" type="button" aria-label="关闭">×</button></div>
+  <div class="dialog-body" id="userEditBody"></div>
+  <div class="dialog-body" style="padding-top:0"><p id="userEditMessage" class="message"></p></div>
+  <div class="dialog-actions"><button id="userEditCancel" type="button">取消</button><button id="userEditSubmit" class="primary" type="button">保存</button></div>
+</dialog>
 <dialog id="userPasswordDialog" class="admin-dialog">
   <div class="dialog-head"><div><h2>修改用户密码</h2><p class="muted" id="userPasswordTarget">—</p></div><button id="userPasswordClose" type="button" aria-label="关闭">×</button></div>
   <div class="dialog-body">
@@ -50,6 +56,6 @@
   <div class="dialog-actions"><button id="userPasswordCancel" type="button">取消</button><button id="userPasswordSubmit" class="primary" type="button">保存新密码</button></div>
 </dialog>
 <script src="/page-cms.js" defer></script>
-<script type="module" src="/admin.js"></script>
+<script type="module" src="/admin-users.js"></script>
 </body>
 </html>
