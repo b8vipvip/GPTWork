@@ -68,8 +68,20 @@ test('guide download button resolves the latest mirrored installer for Windows o
   assert.match(helper, /void wireGuideLatestDownload\(\)/);
 });
 
-test('Windows installation docs state that Setup bundles extension files but browser confirmation remains required', () => {
+test('Windows Setup lets users target Chrome, Edge, or both without bypassing browser confirmation', () => {
+  const setup = read('../../packaging/windows/GPTWork.iss');
   const install = read('../../docs/INSTALL.md');
-  assert.match(install, /安装器已经包含与该版本配套的 GPTWork 浏览器扩展文件/);
-  assert.match(install, /不会绕过浏览器安全确认静默启用扩展/);
+  const guide = read('../public/guide.html');
+  assert.match(setup, /CreateInputOptionPage/);
+  assert.match(setup, /仅安装到 Chrome/);
+  assert.match(setup, /仅安装到 Edge/);
+  assert.match(setup, /全部安装：Chrome \+ Edge/);
+  assert.match(setup, /BrowserPage\.SelectedValueIndex := 2/);
+  assert.match(setup, /Check: ChromeSelected/);
+  assert.match(setup, /Check: EdgeSelected/);
+  assert.match(setup, /-Browser \{code:SelectedBrowserArgument\}/);
+  assert.match(setup, /RemoveUnselectedBrowserRegistration/);
+  assert.match(install, /普通用户不需要再单独下载/);
+  assert.match(install, /不会通过企业强制安装策略或修改浏览器安全设置来绕过浏览器自己的确认界面/);
+  assert.match(guide, /安装时选择仅 Chrome、仅 Edge 或 Chrome \+ Edge/);
 });
