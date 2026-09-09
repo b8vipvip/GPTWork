@@ -40,8 +40,8 @@ for (const fixture of [
       assert.doesNotMatch(settings, /options-update\.js/);
 
       const channel = readFileSync(join(root, 'distribution-channel.js'), 'utf8');
-      assert.match(channel, new RegExp(`DISTRIBUTION_CHANNEL = '${fixture.channel}'`));
-      assert.match(channel, new RegExp(`STORE_EXTENSION_ID = '${fixture.id}'`));
+      assert.match(channel, new RegExp(`DISTRIBUTION_CHANNEL = ["']${fixture.channel}["']`));
+      assert.match(channel, new RegExp(`STORE_EXTENSION_ID = ["']${fixture.id}["']`));
       assert.match(channel, new RegExp(fixture.host.replaceAll('.', '\\.')));
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -55,8 +55,8 @@ test('store package can be built before official store ids exist', () => {
   try {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     const channel = readFileSync(join(root, 'distribution-channel.js'), 'utf8');
-    assert.match(channel, /STORE_EXTENSION_ID = ''/);
-    assert.match(channel, /STORE_LISTING_URL = ''/);
+    assert.match(channel, /STORE_EXTENSION_ID = ["']{2}/);
+    assert.match(channel, /STORE_LISTING_URL = ["']{2}/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
