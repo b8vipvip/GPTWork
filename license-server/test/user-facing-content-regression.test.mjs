@@ -27,21 +27,25 @@ test('release page loads installer-only filter and hides non-installer artifacts
   assert.match(helper, /if \(!isInstallerAssetLabel\(link\.textContent\)\) link\.remove\(\)/);
 });
 
-test('guide steps use a compact title field, large detail editor and simple formatting toolbar', () => {
+test('guide steps size the exact title input smaller and the exact detail textarea larger with a simple editor', () => {
   const adminPage = read('../public/admin-website.html');
   const legacyEditor = read('../public/admin-release-mirror.js');
   const richEditor = read('../public/rich-text-style.js');
+  const adminCss = read('../public/admin-website.css');
   const guide = read('../public/guide.html');
   const siteHelper = read('../public/order-countdown.js');
   assert.match(adminPage, /admin-release-mirror\.js/);
   assert.match(legacyEditor, /installGuideStepsEditor/);
-  assert.match(legacyEditor, /教程步骤的编号与页面结构由系统保护/);
   assert.match(richEditor, /installGuideStepsAdminEnhancer/);
-  assert.match(richEditor, /guide-step-editor-row/);
-  assert.match(richEditor, /max-width:300px/);
-  assert.match(richEditor, /min-height:156px/);
+  assert.match(richEditor, /titleInput\.maxLength = 160/);
+  assert.match(richEditor, /bodyInput\.rows = 6/);
+  assert.match(richEditor, /bodyInput\.maxLength = 1200/);
+  assert.match(richEditor, /bodyLabel\.append\(toolbar, bodyInput\)/);
   assert.match(richEditor, /createTextStyleToolbar/);
-  assert.match(richEditor, /字体、字号、加粗、斜体、下划线和颜色/);
+  assert.match(adminCss, /guide-step-editor-row\{display:grid!important;grid-template-columns:220px minmax\(0,1fr\) 92px!important/);
+  assert.match(adminCss, /input\[maxlength="160"\]\[aria-label\$="标题"\]\{width:220px!important;max-width:220px!important/);
+  assert.match(adminCss, /textarea\[rows="6"\]\[maxlength="1200"\]\[aria-label\$="说明"\]\{display:block;width:100%!important;max-width:none!important/);
+  assert.match(adminCss, /guide-step-body-field \.cms-style-toolbar\{display:flex!important;width:100%!important/);
   assert.match(richEditor, /target\.styles = \{ \.\.\.\(target\.styles \|\| \{\}\), body: bodyStyle \}/);
   assert.match(guide, /order-countdown\.js/);
   assert.match(siteHelper, /renderGuideStepsFromCms/);

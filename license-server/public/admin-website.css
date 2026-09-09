@@ -6,3 +6,19 @@
 
 @media(max-width:1180px){.module-grid,.nav-fields,.legal-split{grid-template-columns:1fr}.module-grid .wide,.nested-items,.website-site-grid .span-2{grid-column:auto}.nav-fields .cms-field>input[type=number]{max-width:160px!important}}
 @media(max-width:900px){.website-toolbar{flex-direction:column}.website-toolbar .section-actions{justify-content:flex-start}.website-view-tabs{position:static;overflow-x:auto;flex-wrap:nowrap}.module-head,.nav-row-head,.legal-editor-head,.legal-history-row{align-items:flex-start;flex-direction:column}.module-controls{justify-content:flex-start}.cms-field{grid-template-columns:minmax(0,1fr);grid-template-areas:"label" "toolbar" "control" "footer" "help"}.cms-field-footer{justify-content:flex-start}.cms-field-status{max-width:none}.cms-style-toolbar{overflow-x:auto;flex-wrap:nowrap}.cms-style-toolbar>*{flex:0 0 auto}}
+
+/* Guide step editor: keep the title compact and give the detail textarea most of the row. */
+body[data-admin-page="website"] .guide-step-editor-list{display:grid;gap:14px;margin-top:14px}
+body[data-admin-page="website"] .guide-step-editor-row{display:grid!important;grid-template-columns:220px minmax(0,1fr) 92px!important;gap:14px!important;align-items:start;padding:14px;border:1px solid #dbe3ef;border-radius:14px;background:#fbfdff;min-width:0}
+body[data-admin-page="website"] .guide-step-title-field,body[data-admin-page="website"] .guide-step-body-field{display:flex!important;flex-direction:column;gap:7px;min-width:0;margin:0!important}
+body[data-admin-page="website"] .guide-step-title-field input[maxlength="160"][aria-label$="标题"]{width:220px!important;max-width:220px!important;min-width:0!important;min-height:42px}
+body[data-admin-page="website"] .guide-step-body-field{width:100%;max-width:none}
+body[data-admin-page="website"] .guide-step-body-field .cms-style-toolbar{display:flex!important;width:100%!important;max-width:none!important;margin:0 0 6px!important;box-sizing:border-box}
+body[data-admin-page="website"] .guide-step-body-field textarea[rows="6"][maxlength="1200"][aria-label$="说明"]{display:block;width:100%!important;max-width:none!important;min-width:0!important;min-height:176px!important;resize:vertical;line-height:1.65;padding:12px 13px}
+body[data-admin-page="website"] .guide-step-actions{display:flex!important;flex-direction:column;align-items:stretch;justify-content:flex-end;gap:8px;min-height:224px;padding-top:26px}
+body[data-admin-page="website"] .guide-step-actions .cms-field-save{width:100%;min-height:40px!important}
+body[data-admin-page="website"] .guide-step-actions .cms-field-status{max-width:none;white-space:normal;text-align:center;line-height:1.45}
+body[data-admin-page="website"] .guide-step-number{display:inline-flex;align-items:center;justify-content:center;width:34px;height:24px;margin-right:7px;border-radius:999px;background:#17201d;color:#fff;font-size:11px;font-weight:800;vertical-align:middle}
+body[data-admin-page="website"] .guide-step-editor-note{margin:10px 0 0;color:#64748b;font-size:12px;line-height:1.55}
+@media(max-width:1180px){body[data-admin-page="website"] .guide-step-editor-row{grid-template-columns:190px minmax(0,1fr) 88px!important}body[data-admin-page="website"] .guide-step-title-field input[maxlength="160"][aria-label$="标题"]{width:190px!important;max-width:190px!important}}
+@media(max-width:900px){body[data-admin-page="website"] .guide-step-editor-row{grid-template-columns:1fr!important}body[data-admin-page="website"] .guide-step-title-field input[maxlength="160"][aria-label$="标题"]{width:min(100%,260px)!important;max-width:260px!important}body[data-admin-page="website"] .guide-step-actions{min-height:0;padding-top:0;flex-direction:row;align-items:center;justify-content:flex-end}body[data-admin-page="website"] .guide-step-actions .cms-field-save{width:auto;min-width:92px}body[data-admin-page="website"] .guide-step-actions .cms-field-status{text-align:right}}
