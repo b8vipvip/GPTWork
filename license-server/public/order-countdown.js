@@ -124,5 +124,69 @@ window.addEventListener('pagehide', () => {
   orderCountdownState.observer?.disconnect();
 }, { once: true });
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startOrderCountdowns, { once: true });
-else startOrderCountdowns();
+async function renderGuideStepsFromCms() {
+  if (document.body.dataset.page !== 'guide') return;
+  try {
+    const response = await fetch('/site/api/website', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => null);
+    const module = data?.config?.pages?.guide?.modules?.find((entry) => entry.id === 'guide-steps');
+    if (!module?.enabled || !Array.isArray(module.items)) return;
+    const steps = [...document.querySelectorAll('.guide-map .guide-step')];
+    module.items.forEach((item, index) => {
+      const step = steps[index];
+      if (!step) return;
+      const title = step.querySelector('h3');
+      const body = step.querySelector('p');
+      if (title) title.textContent = String(item?.title || '');
+      if (body) body.textContent = String(item?.body || '');
+    });
+  } catch {
+    // Static tutorial content remains usable if the CMS endpoint is temporarily unavailable.
+  }
+}
+
+function isInstallerAssetLabel(label) {
+  const name = String(label || '').split(' · ')[0].trim();
+  return /(?:\.exe|\.msi|\.deb|\.rpm|\.dmg|\.pkg|\.appimage)$/i.test(name);
+}
+
+function filterReleaseAssetsToInstallers() {
+  if (document.body.dataset.page !== 'releases') return;
+  document.querySelectorAll('#releaseFeed .asset-link').forEach((link) => {
+    if (!isInstallerAssetLabel(link.textContent)) link.remove();
+  });
+  document.querySelectorAll('#releaseFeed .asset-row').forEach((row) => {
+    if (!row.querySelector('.asset-link')) row.remove();
+  });
+}
+
+function startReleaseInstallerFilter() {
+  if (document.body.dataset.page !== 'releases') return;
+  const feed = document.getElementById('releaseFeed');
+  if (!feed) return;
+  filterReleaseAssetsToInstallers();
+  const observer = new MutationObserver(filterReleaseAssetsToInstallers);
+  observer.observe(feed, { childList: true, subtree: true });
+  window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+}
+
+function ensureDisclaimerFooterLink() {
+  const links = document.querySelector('.site-footer .footer-links');
+  if (!links || links.querySelector('[data-disclaimer-link]')) return;
+  const link = document.createElement('a');
+  link.href = '/#disclaimer';
+  link.textContent = '免责声明';
+  link.dataset.disclaimerLink = '1';
+  links.append(link);
+}
+
+function startSiteEnhancements() {
+  startOrderCountdowns();
+  void renderGuideStepsFromCms();
+  startReleaseInstallerFilter();
+  ensureDisclaimerFooterLink();
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startSiteEnhancements, { once: true });
+else startSiteEnhancements();
