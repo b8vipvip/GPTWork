@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$repository = 'b8vipvip/GPTLock'
+$repository = 'b8vipvip/GPTWork'
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installRoot = Split-Path -Parent $scriptDirectory
 $headers = @{
@@ -69,23 +69,25 @@ try {
     $release = Get-Content -LiteralPath $releaseJsonPath -Raw | ConvertFrom-Json
 
     $installerAsset = $release.assets | Where-Object { $_.name -eq 'GPTWorkSetup-x64.exe' } | Select-Object -First 1
-    $checksumAsset = $release.assets | Where-Object { $_.name -eq 'SHA256SUMS.txt' } | Select-Object -First 1
-    if ($null -eq $installerAsset -or $null -eq $checksumAsset) {
-        throw '最新版本缺少安装器或校验和 / Latest release is missing the installer or checksums.'
+    if ($null -eq $installerAsset) {
+        throw '最新版本缺少 Windows 安装器 / Latest release is missing the Windows installer.'
+    }
+
+    $digest = [string]$installerAsset.digest
+    if ($digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
+        throw '最新版本安装器缺少 GitHub SHA-256 摘要 / Latest installer is missing its GitHub SHA-256 digest.'
+    }
+    $expected = $Matches[1].ToLowerInvariant()
+
+    $downloadUrl = [string]$installerAsset.browser_download_url
+    if ($downloadUrl -notmatch '^https://github\.com/b8vipvip/GPTWork/releases/download/v\d+(?:\.\d+){1,3}/GPTWorkSetup-x64\.exe$') {
+        throw '安装器下载地址不受信任 / Installer download URL is not trusted.'
     }
 
     $installerPath = Join-Path $temporaryDirectory $installerAsset.name
-    $checksumPath = Join-Path $temporaryDirectory $checksumAsset.name
     Write-Host "正在下载 $($installerAsset.name)，网络失败会自动重试 / Downloading $($installerAsset.name) with automatic retries…"
-    Invoke-GptWorkDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
-    Invoke-GptWorkDownload -Uri $checksumAsset.browser_download_url -OutFile $checksumPath
+    Invoke-GptWorkDownload -Uri $downloadUrl -OutFile $installerPath
 
-    $escapedName = [Regex]::Escape($installerAsset.name)
-    $line = Get-Content -LiteralPath $checksumPath | Where-Object { $_ -match "\s\*?$escapedName$" } | Select-Object -First 1
-    if ([string]::IsNullOrWhiteSpace($line)) {
-        throw '校验和文件中找不到安装器 / Installer is missing from checksum file.'
-    }
-    $expected = ($line -split '\s+')[0].ToLowerInvariant()
     $actual = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($expected -ne $actual) {
         throw 'SHA-256 校验失败，已停止更新 / SHA-256 verification failed; update aborted.'

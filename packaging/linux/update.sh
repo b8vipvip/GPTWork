@@ -38,8 +38,6 @@ preferred = f"GPTWork_{version}_amd64.deb"
 if preferred not in assets:
     raise SystemExit("official mirrored release does not contain the GPTWork Linux amd64 package")
 name = preferred
-if "SHA256SUMS.txt" not in assets:
-    raise SystemExit("official mirrored release does not contain SHA256SUMS.txt")
 
 def trusted_url(item):
     value = str(item.get("url") or "")
@@ -60,7 +58,6 @@ print(tag)
 print(name)
 print(trusted_url(assets[name]))
 print(digest(assets[name]))
-print(trusted_url(assets["SHA256SUMS.txt"]))
 PY
 )
 
@@ -68,16 +65,13 @@ tag="${release_data[0]}"
 asset="${release_data[1]}"
 asset_url="${release_data[2]}"
 feed_digest="${release_data[3]}"
-checksums_url="${release_data[4]}"
 
 echo "正在从 GPTWork 服务端镜像下载 $asset / Downloading $asset from the GPTWork server mirror…"
 curl_official "$asset_url" -o "$temp_dir/$asset"
-curl_official "$checksums_url" -o "$temp_dir/SHA256SUMS.txt"
 
-sum_digest="$(awk -v name="$asset" '$2 == name || $2 == "*" name {print tolower($1); exit}' "$temp_dir/SHA256SUMS.txt")"
 actual="$(sha256sum "$temp_dir/$asset" | awk '{print tolower($1)}')"
-if [[ -z "$sum_digest" || "$actual" != "$feed_digest" || "$actual" != "$sum_digest" ]]; then
-  echo "服务端镜像校验失败，已停止更新 / Server mirror checksum verification failed; update aborted." >&2
+if [[ "$actual" != "$feed_digest" ]]; then
+  echo "服务端镜像 SHA-256 校验失败，已停止更新 / Server mirror SHA-256 verification failed; update aborted." >&2
   exit 1
 fi
 
