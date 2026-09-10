@@ -1,5 +1,4 @@
 const SURFACES = [
-  ['account-membership-plans', 'membershipPlansSection'],
   ['account-recent-orders', 'recentOrdersSection'],
 ];
 
@@ -27,7 +26,7 @@ async function load() {
     const data = await response.json().catch(() => null);
     apply(data?.config);
   } catch {
-    // Fail closed: commerce surfaces stay hidden until the website config can be read.
+    // Fail closed: optional order history stays hidden until the website config can be read.
   }
 }
 
