@@ -1,6 +1,6 @@
 #define MyAppName "GPTWork"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.4"
+  #define MyAppVersion "0.5.49"
 #endif
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
@@ -12,7 +12,7 @@
   #define EdgeStoreExtensionId ""
 #endif
 #define MyAppPublisher "GPTWork Maintainers"
-#define MyAppURL "https://github.com/b8vipvip/GPTLock"
+#define MyAppURL "https://github.com/b8vipvip/GPTWork"
 #define ExtensionId "bhchcpeodphgjfjoookncemnamdbfcof"
 
 [Setup]
