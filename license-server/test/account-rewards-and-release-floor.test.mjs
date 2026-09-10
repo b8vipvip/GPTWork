@@ -29,8 +29,8 @@ test('account center hides membership plans and exposes check-in and invite cont
   assert.match(account, /id="copyInvite"/);
   assert.match(account, /每日签到 \+1 天/);
   assert.match(account, /每成功邀请 1 个已验证账户增加 7 天/);
-  assert.match(account, /<div class="account-section" hidden aria-hidden="true"><h3>会员方案<\/h3>/);
-  assert.match(extensionAccount, /<section class="card" hidden aria-hidden="true">\s*<div class="section-title"><div><h2>会员方案<\/h2>/);
+  assert.match(account, /<div class="account-section" id="membershipPlansSection" hidden aria-hidden="true"><h3>会员方案<\/h3>/);
+  assert.match(extensionAccount, /<section class="card" id="membershipPlansSection" hidden aria-hidden="true">\s*<div class="section-title"><div><h2>会员方案<\/h2>/);
   assert.match(rewards, /\/site\/api\/account\/checkin/);
   assert.match(rewards, /\/site\/api\/account\/invite\/redeem/);
 });

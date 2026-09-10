@@ -49,6 +49,8 @@ const PAGE_DEFAULTS = {
     modules: [
       { id: 'account-login', type: 'protected', name: '账户登录', enabled: true, order: 10 },
       { id: 'account-dashboard', type: 'protected', name: '账户权益与安全面板', enabled: true, order: 20 },
+      { id: 'account-membership-plans', type: 'protected', name: '会员方案', enabled: false, order: 30, lockedOrder: true },
+      { id: 'account-recent-orders', type: 'protected', name: '最近订单', enabled: false, order: 40, lockedOrder: true },
     ],
   },
 };
