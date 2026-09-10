@@ -1,0 +1,36 @@
+name: One-shot user level migration
+
+on:
+  push:
+    branches:
+      - feat/user-levels-rewards-20260910
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: ${{ !contains(github.event.head_commit.message, '[user-levels-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/user-levels-rewards-20260910
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply source migration
+        run: python tools/apply-user-levels-v1.py
+      - name: Commit migration
+        shell: bash
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No migration changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension license-server
+          git commit -m "feat: replace membership UI with user levels [user-levels-applied]"
+          git push origin HEAD:feat/user-levels-rewards-20260910
