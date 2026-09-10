@@ -48,30 +48,31 @@ jobs:
               raise SystemExit(f'missing smoke replacement: {old[:100]!r}')
             s = s.replace(old, new, 1)
 
-          # Exercise the extension bearer reward endpoints, not only the website cookie flow.
           marker = "    const firstToken = userLogin.data.sessionToken;\n\n    const heartbeat ="
-          reward_test = """    const firstToken = userLogin.data.sessionToken;
-
-    const rewardsBefore = await jsonRequest(`${base}/api/v1/account/rewards`, {
-      headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` },
-    });
-    assert.equal(rewardsBefore.response.status, 200);
-    assert.equal(rewardsBefore.data.rewards.checkin.checkedInToday, false);
-    assert.equal(rewardsBefore.data.rewards.checkin.rewardDays, 1);
-    assert.equal(rewardsBefore.data.rewards.share.rewardDays, 7);
-    assert.match(rewardsBefore.data.rewards.share.url, /\\/account\\?invite=GW-/);
-    const expiryBeforeCheckin = Date.parse(userLogin.data.account.entitlement.expiresAt);
-    const checkin = await jsonRequest(`${base}/api/v1/account/checkin`, {
-      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` }, body: {},
-    });
-    assert.equal(checkin.response.status, 200);
-    assert.equal(checkin.data.rewards.checkin.checkedInToday, true);
-    assert.ok(Date.parse(checkin.data.account.entitlement.expiresAt) >= expiryBeforeCheckin + 24 * 60 * 60 * 1000 - 1000);
-
-    const heartbeat ="""
+          reward_lines = [
+            "    const firstToken = userLogin.data.sessionToken;",
+            "",
+            "    const rewardsBefore = await jsonRequest(`${base}/api/v1/account/rewards`, {",
+            "      headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` },",
+            "    });",
+            "    assert.equal(rewardsBefore.response.status, 200);",
+            "    assert.equal(rewardsBefore.data.rewards.checkin.checkedInToday, false);",
+            "    assert.equal(rewardsBefore.data.rewards.checkin.rewardDays, 1);",
+            "    assert.equal(rewardsBefore.data.rewards.share.rewardDays, 7);",
+            "    assert.match(rewardsBefore.data.rewards.share.url, /\\/account\\?invite=GW-/);",
+            "    const expiryBeforeCheckin = Date.parse(userLogin.data.account.entitlement.expiresAt);",
+            "    const checkin = await jsonRequest(`${base}/api/v1/account/checkin`, {",
+            "      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` }, body: {},",
+            "    });",
+            "    assert.equal(checkin.response.status, 200);",
+            "    assert.equal(checkin.data.rewards.checkin.checkedInToday, true);",
+            "    assert.ok(Date.parse(checkin.data.account.entitlement.expiresAt) >= expiryBeforeCheckin + 24 * 60 * 60 * 1000 - 1000);",
+            "",
+            "    const heartbeat =",
+          ]
           if marker not in s:
             raise SystemExit('missing reward insertion marker')
-          s = s.replace(marker, reward_test, 1)
+          s = s.replace(marker, '\n'.join(reward_lines), 1)
           p.write_text(s, encoding='utf-8')
           PY
       - name: Run license-server checks
