@@ -1,0 +1,88 @@
+name: One-shot user level smoke update
+
+on:
+  push:
+    branches:
+      - feat/user-levels-rewards-20260910
+
+permissions:
+  contents: write
+
+jobs:
+  update-smoke:
+    if: ${{ !contains(github.event.head_commit.message, '[level-smoke-updated]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/user-levels-rewards-20260910
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+      - name: Update smoke test to user-level contract
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('license-server/test/smoke.test.mjs')
+          s = p.read_text(encoding='utf-8')
+          replacements = [
+            ("test('account system verifies email, enforces entitlements, manages membership, and protects credentials'", "test('account system verifies email, enforces user levels and rewards, and protects credentials'"),
+            ("assert.deepEqual(accountConfig.data.plans.map((plan) => plan.code), ['monthly', 'quarterly', 'yearly']);", "assert.deepEqual(accountConfig.data.plans.map((plan) => plan.code), ['deep', 'heavy']);\n    assert.deepEqual(accountConfig.data.levels.map((level) => level.code), ['normal', 'deep', 'heavy']);"),
+            ("assert.equal(instantLogin.data.account.entitlement.source, 'free');", "assert.equal(instantLogin.data.account.entitlement.source, 'level');\n    assert.equal(instantLogin.data.account.level.code, 'normal');"),
+            ("assert.equal(manualLogin.data.account.entitlement.source, 'free');", "assert.equal(manualLogin.data.account.entitlement.source, 'level');\n    assert.equal(manualLogin.data.account.level.code, 'normal');"),
+            ("// First device logs in; account entitlement is required but concurrent Chrome windows are unlimited.", "// First device logs in as a normal user; the 1-window level limit is enforced server-side."),
+            ("assert.equal(userLogin.data.account.entitlement.source, 'free');", "assert.equal(userLogin.data.account.entitlement.source, 'level');\n    assert.equal(userLogin.data.account.level.code, 'normal');\n    assert.deepEqual(userLogin.data.account.entitlement.limits, { devices: 1, windows: 1 });"),
+            ("assert.deepEqual(heartbeat.data.allowedWindowKeys, ['chrome:10000001', 'chrome:10000002']);\n    assert.deepEqual(heartbeat.data.deniedWindowKeys, []);\n    assert.equal(heartbeat.data.account.entitlement.usage.windows, 2);", "assert.deepEqual(heartbeat.data.allowedWindowKeys, ['chrome:10000001']);\n    assert.deepEqual(heartbeat.data.deniedWindowKeys, ['chrome:10000002']);\n    assert.equal(heartbeat.data.account.entitlement.usage.windows, 1);"),
+            ("// Admin can configure plans; client sees only enabled payment methods and public benefits.\n    const planUpdate = await jsonRequest(`${base}/admin/api/account/plans/monthly`, {\n      method: 'PUT', headers: { cookie }, body: {\n        name: '月卡 Pro', priceCents: 1999, durationDays: 30, maxDevices: 4, maxWindows: 4,\n        benefits: ['30 天会员', '4 台设备', '4 个同时窗口'], enabled: true,\n      },\n    });", "// Admin can configure paid user levels; client sees only upgrade levels and enabled payment methods.\n    const planUpdate = await jsonRequest(`${base}/admin/api/account/plans/deep`, {\n      method: 'PUT', headers: { cookie }, body: {\n        name: '深度 Pro', priceCents: 1999, durationDays: 30, maxDevices: 1, maxWindows: 3,\n        benefits: ['30 天深度用户', '1 台设备', '3 个同时窗口'], enabled: true,\n      },\n    });"),
+            ("const monthly = clientConfig.data.plans.find((plan) => plan.code === 'monthly');\n    assert.equal(monthly.priceCents, 1999);\n    assert.equal(monthly.limits.devices, 4);", "const deep = clientConfig.data.plans.find((plan) => plan.code === 'deep');\n    assert.equal(deep.priceCents, 1999);\n    assert.equal(deep.limits.devices, 1);\n    assert.equal(deep.limits.windows, 3);"),
+            ("// User creates order; admin marks paid; membership becomes active and raises benefits.", "// User creates an upgrade order; admin marks paid; the user level becomes deep."),
+            ("body: { planCode: 'monthly', paymentMethod: 'wechat' }", "body: { planCode: 'deep', paymentMethod: 'wechat' }"),
+            ("assert.equal(createOrder.data.order.planSnapshot.name, '月卡 Pro');\n    assert.equal(createOrder.data.order.planSnapshot.maxDevices, 4);", "assert.equal(createOrder.data.order.planSnapshot.name, '深度 Pro');\n    assert.equal(createOrder.data.order.planSnapshot.maxDevices, 1);\n    assert.equal(createOrder.data.order.planSnapshot.maxWindows, 3);"),
+            ("const futurePlanUpdate = await jsonRequest(`${base}/admin/api/account/plans/monthly`, {\n      method: 'PUT', headers: { cookie }, body: {\n        name: '月卡 Future', priceCents: 2999, durationDays: 45, maxDevices: 8, maxWindows: 8,\n        benefits: ['45 天会员', '8 台设备', '8 个同时窗口'], enabled: true,\n      },\n    });", "const futurePlanUpdate = await jsonRequest(`${base}/admin/api/account/plans/deep`, {\n      method: 'PUT', headers: { cookie }, body: {\n        name: '深度 Future', priceCents: 2999, durationDays: 45, maxDevices: 1, maxWindows: 3,\n        benefits: ['45 天深度用户', '1 台设备', '3 个同时窗口'], enabled: true,\n      },\n    });"),
+            ("assert.equal(meAfterMembership.data.account.membership.planCode, 'monthly');\n    assert.equal(meAfterMembership.data.account.membership.name, '月卡 Pro');\n    assert.deepEqual(meAfterMembership.data.account.membership.limits, { devices: 4, windows: 4 });", "assert.equal(meAfterMembership.data.account.level.code, 'deep');\n    assert.equal(meAfterMembership.data.account.membership.planCode, 'deep');\n    assert.equal(meAfterMembership.data.account.membership.name, '深度 Pro');\n    assert.deepEqual(meAfterMembership.data.account.membership.limits, { devices: 1, windows: 3 });"),
+          ]
+          for old, new in replacements:
+            if old not in s:
+              raise SystemExit(f'missing smoke replacement: {old[:100]!r}')
+            s = s.replace(old, new, 1)
+
+          # Exercise the extension bearer reward endpoints, not only the website cookie flow.
+          marker = "    const firstToken = userLogin.data.sessionToken;\n\n    const heartbeat ="
+          reward_test = """    const firstToken = userLogin.data.sessionToken;
+
+    const rewardsBefore = await jsonRequest(`${base}/api/v1/account/rewards`, {
+      headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` },
+    });
+    assert.equal(rewardsBefore.response.status, 200);
+    assert.equal(rewardsBefore.data.rewards.checkin.checkedInToday, false);
+    assert.equal(rewardsBefore.data.rewards.checkin.rewardDays, 1);
+    assert.equal(rewardsBefore.data.rewards.share.rewardDays, 7);
+    assert.match(rewardsBefore.data.rewards.share.url, /\\/account\\?invite=GW-/);
+    const expiryBeforeCheckin = Date.parse(userLogin.data.account.entitlement.expiresAt);
+    const checkin = await jsonRequest(`${base}/api/v1/account/checkin`, {
+      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` }, body: {},
+    });
+    assert.equal(checkin.response.status, 200);
+    assert.equal(checkin.data.rewards.checkin.checkedInToday, true);
+    assert.ok(Date.parse(checkin.data.account.entitlement.expiresAt) >= expiryBeforeCheckin + 24 * 60 * 60 * 1000 - 1000);
+
+    const heartbeat ="""
+          if marker not in s:
+            raise SystemExit('missing reward insertion marker')
+          s = s.replace(marker, reward_test, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Run license-server checks
+        run: |
+          npm --prefix license-server run check
+          npm --prefix license-server test
+      - name: Commit smoke update
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add license-server/test/smoke.test.mjs
+          git commit -m "test: cover user levels and popup reward APIs [level-smoke-updated]"
+          git push origin HEAD:feat/user-levels-rewards-20260910
