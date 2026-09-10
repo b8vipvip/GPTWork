@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Normalize migration patcher whitespace assumptions
+      - name: Normalize migration patcher assumptions
         shell: bash
         run: |
           python - <<'PY'
@@ -29,6 +29,14 @@ jobs:
           s = p.read_text(encoding='utf-8')
           s = s.replace("<div class=\"account-meta\">\\n          <span id=\"accountExpiry\">有效期 —</span>\\n          <span id=\"accountUsage\">设备/窗口 —</span>\\n        </div>", "<div class=\"account-meta\">\\n        <span id=\"accountExpiry\">有效期 —</span>\\n        <span id=\"accountUsage\">设备/窗口 —</span>\\n      </div>")
           p.write_text(s, encoding='utf-8')
+
+          a = Path('extension/auth-gate.js')
+          t = a.read_text(encoding='utf-8')
+          t = t.replace(
+            "  accountEmail: $('accountEmail'), accountTier: $('accountTier'), accountExpiry: $('accountExpiry'), accountUsage: $('accountUsage'),\n  accountCenter: $('accountCenter'), accountLogout: $('accountLogout'), enabled: $('enabled'),",
+            "  accountEmail: $('accountEmail'), accountTier: $('accountTier'), accountExpiry: $('accountExpiry'), accountUsage: $('accountUsage'), accountCenter: $('accountCenter'), accountLogout: $('accountLogout'),\n  enabled: $('enabled'),"
+          )
+          a.write_text(t, encoding='utf-8')
           PY
       - name: Apply source migration
         run: python tools/apply-user-levels-v1.py
