@@ -9,6 +9,7 @@ const account = readFileSync(join(ROOT, 'license-server/account-system.mjs'), 'u
 const popup = readFileSync(join(ROOT, 'extension/popup.html'), 'utf8');
 const rewards = readFileSync(join(ROOT, 'extension/popup-rewards.js'), 'utf8');
 const background = readFileSync(join(ROOT, 'extension/background.js'), 'utf8');
+const overview = readFileSync(join(ROOT, 'license-server/public/admin.html'), 'utf8');
 const plans = readFileSync(join(ROOT, 'license-server/public/admin-plans.html'), 'utf8');
 const users = readFileSync(join(ROOT, 'license-server/public/admin-users.html'), 'utf8');
 
@@ -32,6 +33,10 @@ test('popup exposes check-in +1, share +7 and upgrade entry', () => {
 });
 
 test('admin membership tab is now user configuration and user list says user level', () => {
+  assert.match(overview, />用户配置<\/a>/);
+  assert.doesNotMatch(overview, />会员<\/a>/);
+  assert.match(overview, />升级用户<\/span>/);
+  assert.doesNotMatch(overview, />有效会员<\/span>/);
   assert.match(plans, /用户配置/);
   assert.match(plans, /普通、深度、重度/);
   assert.match(users, /<th>用户等级<\/th>/);
