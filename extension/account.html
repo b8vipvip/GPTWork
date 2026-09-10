@@ -20,19 +20,17 @@
   <div id="app" hidden>
     <section class="hero card">
       <div><p class="muted">当前账号</p><h2 id="email">—</h2><span id="statusBadge" class="badge">—</span></div>
-      <div class="hero-right"><strong id="tier">—</strong><span id="expiry">—</span></div>
+      <div class="hero-right"><div class="level-line"><span class="muted">用户等级</span><strong id="tier">—</strong><button id="upgradeButton" class="upgrade-link" type="button">升级</button></div><span id="expiry">—</span></div>
     </section>
 
-    <section class="stats">
-      <article class="card"><span>设备</span><strong id="deviceUsage">—</strong></article>
-      <article class="card"><span>免费期限</span><strong id="freeExpiry">—</strong></article>
-      <article class="card"><span>会员期限</span><strong id="memberExpiry">—</strong></article>
-    </section>
+    <section class="stats"><article class="card"><span>设备</span><strong id="deviceUsage">—</strong></article><article class="card"><span>窗口</span><strong id="windowUsage">—</strong></article><article class="card"><span>有效期</span><strong id="levelExpiry">—</strong></article></section>
+
+    <dialog id="upgradeDialog" class="upgrade-dialog"><div class="upgrade-dialog-head"><div><h2>升级用户等级</h2><p class="muted">普通用户可升级为深度或重度用户；价格、有效期、设备和窗口权益以服务端配置为准。</p></div><button id="upgradeClose" type="button" aria-label="关闭">×</button></div><div id="plans" class="plans"></div><p id="orderMessage" class="message"></p></dialog>
 
     <section class="card" id="membershipPlansSection" hidden aria-hidden="true">
       <div class="section-title"><div><h2>会员方案</h2><p class="muted">价格与设备权益由服务端统一配置；GPTWork 同时窗口不限。</p></div></div>
-      <div id="plans" class="plans"></div>
-      <p id="orderMessage" class="message"></p>
+      <div class="plans-legacy-placeholder"></div>
+      <p class="message"></p>
     </section>
 
     <section class="card" id="recentOrdersSection" hidden aria-hidden="true">

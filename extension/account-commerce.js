@@ -21,7 +21,7 @@ function paymentLabel(code) {
   return String(code || '支付');
 }
 function orderStatusLabel(status) {
-  return ({ pending: '待支付', paid: '支付成功 · 已开通', expired: '已失效', cancelled: '已取消' })[status] || String(status || '未知');
+  return ({ pending: '待支付', paid: '支付成功 · 已升级', expired: '已失效', cancelled: '已取消' })[status] || String(status || '未知');
 }
 function localDate(value) {
   const time = Date.parse(value || '');
@@ -106,7 +106,7 @@ function openModal(result, method, plan) {
   styles(panel, { width: 'min(94vw,620px)', height: 'min(88vh,720px)', background: '#fff', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 30px 80px rgba(15,23,42,.3)', display: 'grid', gridTemplateRows: 'auto auto 1fr auto' });
   const head = document.createElement('div'); styles(head, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 18px 10px' });
   const title = document.createElement('div');
-  const strong = document.createElement('strong'); strong.textContent = `${paymentLabel(method.code)} · ${plan?.name || order.planSnapshot?.name || '会员开通'}`;
+  const strong = document.createElement('strong'); strong.textContent = `${paymentLabel(method.code)} · ${plan?.name || order.planSnapshot?.name || '等级升级'}`;
   const price = document.createElement('div'); price.textContent = order.paymentMethod === 'usdt' && order.payment?.amount ? `${order.payment.amount} USDT` : money(order.amountCents);
   styles(price, { color: '#dc2626', fontWeight: '900', fontSize: '22px', marginTop: '3px' }); title.append(strong, price);
   const close = document.createElement('button'); close.textContent = '×'; styles(close, { border: '0', background: 'transparent', fontSize: '28px' }); close.addEventListener('click', closeModal);
@@ -132,7 +132,7 @@ function openModal(result, method, plan) {
       const data = await sendMessage({ type: 'GPTLOCK_ACCOUNT_GET_ORDER', orderId: order.id });
       if (data.order) rememberOrder(data.order);
       if (data.order?.status === 'paid') {
-        stopPoll(); status.textContent = '支付成功，会员权益已自动开通。正在刷新…';
+        stopPoll(); status.textContent = '支付成功，用户等级权益已自动升级。正在刷新…';
         setTimeout(async () => { closeModal(); await sendMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }).catch(() => {}); await refreshOrders(); location.reload(); }, 850);
       } else if (['cancelled', 'expired'].includes(data.order?.status)) {
         stopPoll(); status.textContent = data.order.status === 'expired' ? '订单已过期，请重新开通。' : '订单已取消。';
@@ -169,7 +169,7 @@ function renderOrders() {
     const copy = document.createElement('div'); styles(copy, { minWidth: '0' });
     const title = document.createElement('strong');
     const amount = order.paymentMethod === 'usdt' && order.payment?.amount ? `${order.payment.amount} USDT` : money(order.amountCents);
-    title.textContent = `#${order.id} · ${order.planSnapshot?.name || order.planCode || '会员'} · ${amount}`;
+    title.textContent = `#${order.id} · ${order.planSnapshot?.name || order.planCode || '用户等级'} · ${amount}`;
     const meta = document.createElement('p'); styles(meta, { margin: '5px 0 0', color: '#64748b', fontSize: '12px' });
     meta.textContent = `${orderStatusLabel(order.status)} · ${localDate(order.createdAt)}`;
     if (order.status === 'pending') {

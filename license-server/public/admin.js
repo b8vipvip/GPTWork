@@ -313,54 +313,52 @@ async function loadUsers() {
 
 function planCard(plan) {
   const card = document.createElement('article'); card.className = 'plan-card';
+  const isNormal = plan.code === 'normal';
   const head = document.createElement('div'); head.className = 'plan-head';
   const title = document.createElement('div');
-  const name = document.createElement('input'); name.value = plan.name; name.setAttribute('aria-label', '套餐名称');
+  const name = document.createElement('input'); name.value = plan.name; name.readOnly = isNormal; name.setAttribute('aria-label', '用户等级名称');
   const code = document.createElement('small'); code.textContent = plan.code;
-  title.append(name, code);
-  const enabledLabel = document.createElement('label'); enabledLabel.className = 'check compact';
-  const enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.checked = Boolean(plan.enabled);
-  enabledLabel.append(enabled, document.createTextNode(' 启用'));
-  head.append(title, enabledLabel);
-
+  title.append(name, code); head.append(title);
   const grid = document.createElement('div'); grid.className = 'plan-fields';
   const makeField = (labelText, value, min = 0) => {
     const label = document.createElement('label'); label.textContent = labelText;
-    const input = document.createElement('input'); input.type = 'number'; input.min = String(min); input.value = String(value);
+    const input = document.createElement('input'); input.type = 'number'; input.min = String(min); input.value = String(value ?? '');
     label.append(input); grid.append(label); return input;
   };
-  const originalPrice = makeField('原价（元）', ((plan.originalPriceCents ?? plan.priceCents) / 100).toFixed(2), 0); originalPrice.step = '0.01';
-  const promoPrice = makeField('促销价（元，可选）', plan.promoPriceCents === null || plan.promoPriceCents === undefined ? '' : (plan.promoPriceCents / 100).toFixed(2), 0); promoPrice.step = '0.01';
-  const promoEndLabel = document.createElement('label'); promoEndLabel.textContent = '促销结束时间（可选）';
-  const promoEnd = document.createElement('input'); promoEnd.type = 'datetime-local'; promoEnd.value = localDateInput(plan.promoEndsAt); promoEndLabel.append(promoEnd); grid.append(promoEndLabel);
-  const days = makeField('有效天数', plan.durationDays, 1);
+  let originalPrice = null; let promoPrice = null; let promoEnd = null; let enabled = { checked: true };
+  if (!isNormal) {
+    originalPrice = makeField('升级价格（元）', ((plan.originalPriceCents ?? plan.priceCents) / 100).toFixed(2), 0); originalPrice.step = '0.01';
+    promoPrice = makeField('促销价（元，可选）', plan.promoPriceCents == null ? '' : (plan.promoPriceCents / 100).toFixed(2), 0); promoPrice.step = '0.01';
+    const promoEndLabel = document.createElement('label'); promoEndLabel.textContent = '促销结束时间（可选）';
+    promoEnd = document.createElement('input'); promoEnd.type = 'datetime-local'; promoEnd.value = localDateInput(plan.promoEndsAt); promoEndLabel.append(promoEnd); grid.append(promoEndLabel);
+    const enabledLabel = document.createElement('label'); enabledLabel.className = 'check compact'; enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.checked = Boolean(plan.enabled); enabledLabel.append(enabled, document.createTextNode(' 允许付费升级')); head.append(enabledLabel);
+  }
+  const days = makeField(isNormal ? '新用户初始有效天数' : '升级后有效天数', plan.durationDays, isNormal ? 0 : 1);
   const devices = makeField('设备上限', plan.limits.devices, 1);
+  const windows = makeField('同时窗口上限', plan.limits.windows, 1);
   const benefitsLabel = document.createElement('label'); benefitsLabel.className = 'benefit-field'; benefitsLabel.textContent = '权益说明（每行一条）';
-  const benefits = document.createElement('textarea'); benefits.rows = 5; benefits.value = (plan.benefits || []).join('\n'); benefitsLabel.append(benefits);
-  const save = button('保存套餐', async () => {
+  const benefits = document.createElement('textarea'); benefits.rows = 5; benefits.value = (plan.benefits || []).join('
+'); benefits.disabled = isNormal; benefitsLabel.append(benefits);
+  const save = button('保存等级配置', async () => {
     save.disabled = true;
     try {
-      const originalPriceCents = Math.round(Number(originalPrice.value) * 100);
-      const promoPriceCents = promoPrice.value.trim() === '' ? null : Math.round(Number(promoPrice.value) * 100);
-      const promoEndsAt = promoEnd.value ? new Date(promoEnd.value).toISOString() : null;
-      if (!Number.isInteger(originalPriceCents) || originalPriceCents < 0) throw new Error('原价格式无效');
-      if (promoPriceCents !== null && (!Number.isInteger(promoPriceCents) || promoPriceCents < 0 || promoPriceCents >= originalPriceCents)) throw new Error('促销价必须低于原价');
-      if (promoPriceCents !== null && (!promoEndsAt || Date.parse(promoEndsAt) <= Date.now())) throw new Error('促销结束时间必须晚于当前时间');
+      const originalPriceCents = isNormal ? 0 : Math.round(Number(originalPrice.value) * 100);
+      const promoPriceCents = isNormal || promoPrice.value.trim() === '' ? null : Math.round(Number(promoPrice.value) * 100);
+      const promoEndsAt = isNormal || !promoEnd.value ? null : new Date(promoEnd.value).toISOString();
+      if (!Number.isInteger(originalPriceCents) || originalPriceCents < 0) throw new Error('升级价格格式无效');
+      if (promoPriceCents !== null && (!Number.isInteger(promoPriceCents) || promoPriceCents < 0 || promoPriceCents >= originalPriceCents)) throw new Error('促销价必须低于升级价格');
       await api(`/admin/api/account/plans/${encodeURIComponent(plan.code)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: name.value.trim(), priceCents: originalPriceCents, originalPriceCents, promoPriceCents, promoEndsAt, durationDays: Number(days.value), maxDevices: Number(devices.value), maxWindows: plan.limits.windows,
-          benefits: benefits.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), enabled: enabled.checked,
+        method: 'PUT', body: JSON.stringify({
+          name: name.value.trim(), priceCents: originalPriceCents, originalPriceCents, promoPriceCents, promoEndsAt,
+          durationDays: Number(days.value), maxDevices: Number(devices.value), maxWindows: Number(windows.value),
+          benefits: benefits.value.split(/?
+/).map((item) => item.trim()).filter(Boolean), enabled: enabled.checked,
         }),
       });
-      save.textContent = '已保存';
-      setTimeout(() => { save.textContent = '保存套餐'; }, 1000);
-      await Promise.all([loadPlans(), loadDashboard()]);
-    } catch (error) { alert(error.message); }
-    finally { save.disabled = false; }
+      save.textContent = '已保存'; setTimeout(() => { save.textContent = '保存等级配置'; }, 1000); await loadPlans();
+    } catch (error) { alert(error.message); } finally { save.disabled = false; }
   }, 'primary');
-  card.append(head, grid, benefitsLabel, save);
-  return card;
+  card.append(head, grid, benefitsLabel, save); return card;
 }
 
 function renderPlans(plans) {

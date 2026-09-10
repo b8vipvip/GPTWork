@@ -3,18 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>GPTWork 管理 · 会员</title>
+  <title>GPTWork 管理 · 用户配置</title>
   <link rel="stylesheet" href="/admin.css">
 </head>
 <body data-admin-page="plans">
 <div class="shell">
   <aside class="sidebar">
     <div class="brand"><span>G</span><div><strong>GPTWork</strong><small>Control Center</small></div></div>
-    <nav><a href="/admin/overview" data-page="overview">总览</a><a href="/admin/users" data-page="users">用户</a><a href="/admin/plans" data-page="plans" class="active" aria-current="page">会员</a><a href="/admin/orders" data-page="orders">订单</a><a href="/admin/issues" data-page="issues">Issues 讨论区</a><a href="/admin/website" data-page="website">官网管理</a><a href="/admin/settings" data-page="settings">系统配置</a><a href="/admin/client-logs" data-page="client-logs">客户端运行日志</a><a href="/admin/server-logs" data-page="server-logs">服务端日志</a><a href="/admin/update" data-page="update">更新</a></nav>
+    <nav><a href="/admin/overview" data-page="overview">总览</a><a href="/admin/users" data-page="users">用户</a><a href="/admin/plans" data-page="plans" class="active" aria-current="page">用户配置</a><a href="/admin/orders" data-page="orders">订单</a><a href="/admin/issues" data-page="issues">Issues 讨论区</a><a href="/admin/website" data-page="website">官网管理</a><a href="/admin/settings" data-page="settings">系统配置</a><a href="/admin/client-logs" data-page="client-logs">客户端运行日志</a><a href="/admin/server-logs" data-page="server-logs">服务端日志</a><a href="/admin/update" data-page="update">更新</a></nav>
     <button id="logout" class="ghost" hidden>退出管理员</button>
   </aside>
   <main class="workspace">
-    <header class="topbar"><div><p>GPTWORK ADMIN · PLANS</p><h1>会员</h1></div><span class="security-pill">Account Control</span></header>
+    <header class="topbar"><div><p>GPTWORK ADMIN · PLANS</p><h1>用户配置</h1></div><span class="security-pill">Account Control</span></header>
     <section id="login" class="card login-card">
       <h2>管理员登录</h2><p class="muted">后台仅使用独立管理员密码。建议通过 HTTPS + WAF / IP 白名单访问。</p>
       <div class="inline"><input id="password" type="password" autocomplete="current-password" placeholder="管理员密码"><button id="loginButton" class="primary">登录</button></div>
@@ -22,7 +22,7 @@
     </section>
     <div id="app" hidden>
       <section id="plans" class="card">
-        <div class="section-title"><div><h2>会员套餐</h2><p class="muted">月卡、季卡、年卡的价格、期限与设备权益可在线调整；同时窗口不限。</p></div></div>
+        <div class="section-title"><div><h2>用户等级</h2><p class="muted">新用户注册后默认普通用户。这里可设置新用户初始有效天数，以及普通、深度、重度用户的设备/窗口权益和深度、重度升级价格。</p></div></div>
         <div id="planCards" class="plan-grid"></div>
       </section>
     </div>

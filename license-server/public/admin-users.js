@@ -79,9 +79,7 @@ function remainingDays(value) {
   return Math.max(0, Math.ceil((expires - Date.now()) / (24 * 60 * 60 * 1000)));
 }
 function accountTier(row) {
-  if (row.membership?.name) return row.membership.name;
-  if (row.entitlement?.source === 'free') return '免费期';
-  return '无有效权益';
+  return row.level?.name || row.entitlement?.level?.name || '普通用户';
 }
 function statusLabel(value) {
   return ({ active: '启用', pending: '待验证', disabled: '停用' })[value] || value || '—';
@@ -146,7 +144,7 @@ async function patchUser(row, patch) {
 function openEditor(row, kind) {
   activeEditor = { row, kind, controls: {} };
   el.userEditBody.textContent = '';
-  el.userEditTitle.textContent = ({ email: '编辑邮箱', status: '设置账户状态', devices: '设置设备上限', entitlement: '设置权益 / 套餐' })[kind] || '编辑用户';
+  el.userEditTitle.textContent = ({ email: '编辑邮箱', status: '设置账户状态', devices: '设置设备上限', entitlement: '设置用户等级' })[kind] || '编辑用户';
   el.userEditTarget.textContent = `${row.email} · 用户 #${row.id}`;
   setMessage(el.userEditMessage, '');
 
@@ -162,45 +160,9 @@ function openEditor(row, kind) {
     const note = document.createElement('p'); note.className = 'dialog-note'; note.textContent = `当前已用 ${row.entitlement?.usage?.devices ?? 0} 台，当前生效上限 ${row.entitlement?.limits?.devices ?? 0} 台。`;
     el.userEditBody.append(note);
   } else if (kind === 'entitlement') {
-    const enabledPlans = plansCache.filter((plan) => plan.enabled);
-    const plan = selectControl(enabledPlans.map((item) => [item.code, item.name]), row.membership?.planCode || enabledPlans[0]?.code || '');
-    plan.disabled = !enabledPlans.length;
-    const expiry = document.createElement('input'); expiry.type = 'datetime-local'; expiry.value = localDateInput(row.entitlement?.expiresAt);
-    activeEditor.controls.plan = plan; activeEditor.controls.expiry = expiry;
-    el.userEditBody.append(field('会员套餐', plan), field('权益到期时间', expiry));
-    const note = document.createElement('p'); note.className = 'dialog-note';
-    note.textContent = row.membership ? '更换套餐会按现有会员规则开通下一段权益；只修改到期时间不会额外续期。' : '选择套餐后保存会开通该套餐；免费期也可单独修改到期时间。';
-    el.userEditBody.append(note);
-  }
-  el.userEditDialog.showModal();
-  el.userEditBody.querySelector('input,select')?.focus();
-}
-function closeEditor() {
-  if (el.userEditDialog.open) el.userEditDialog.close();
-  activeEditor = null; el.userEditBody.textContent = ''; setMessage(el.userEditMessage, '');
-}
-async function saveEditor() {
-  if (!activeEditor) return;
-  const { row, kind, controls } = activeEditor;
-  if (kind === 'email') {
-    const email = controls.email.value.trim(); if (!email) throw new Error('邮箱不能为空');
-    await patchUser(row, { email });
-  } else if (kind === 'status') {
-    await patchUser(row, { status: controls.status.value });
-  } else if (kind === 'devices') {
-    await patchUser(row, { maxDevicesOverride: optionalPositiveInt(controls.devices, '设备上限') });
-  } else if (kind === 'entitlement') {
     const expiry = controls.expiry.value ? new Date(controls.expiry.value) : null;
-    if (expiry && Number.isNaN(expiry.getTime())) throw new Error('权益到期时间格式无效');
-    const selectedPlan = controls.plan.value;
-    if ((!row.membership || selectedPlan !== row.membership.planCode) && selectedPlan) {
-      await api(`/admin/api/account/users/${row.id}/grant-membership`, { method: 'POST', body: JSON.stringify({ planCode: selectedPlan }) });
-      const refreshed = await api(`/admin/api/account/users/${row.id}`);
-      if (expiry) await patchUser(refreshed.user, { entitlementExpiresAt: expiry.toISOString() });
-      else await loadUsers();
-    } else {
-      await patchUser(row, { entitlementExpiresAt: expiry ? expiry.toISOString() : null });
-    }
+    if (expiry && Number.isNaN(expiry.getTime())) throw new Error('有效期格式无效');
+    await patchUser(row, { userLevel: controls.level.value, entitlementExpiresAt: expiry ? expiry.toISOString() : null });
   }
   closeEditor();
 }
@@ -266,7 +228,7 @@ function renderUsers(rows) {
     const days = remainingDays(row.entitlement?.expiresAt);
     const remaining = document.createElement('small'); remaining.style.display = 'block'; remaining.style.marginTop = '4px'; remaining.style.color = '#64748b';
     remaining.textContent = days === null ? '剩余天数 —' : `剩余 ${days} 天`;
-    entitlementCell.append(tier, iconButton('⚙', `设置 ${row.email} 的权益 / 套餐`, () => openEditor(row, 'entitlement')), remaining); tr.append(entitlementCell);
+    entitlementCell.append(tier, iconButton('⚙', `设置 ${row.email} 的用户等级`, () => openEditor(row, 'entitlement')), remaining); tr.append(entitlementCell);
 
     const devicesCell = td('');
     const deviceText = document.createElement('span');

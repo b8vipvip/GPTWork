@@ -84,11 +84,11 @@ async function redeemPendingInvite() {
       method: 'POST',
       body: JSON.stringify({ code: pendingInviteCode }),
     });
-    setNotice(data.alreadyRedeemed ? '该邀请关系此前已经确认，无需重复操作。' : '邀请关系已确认，邀请人已获得 7 天使用时长。', 'good');
+    setNotice(data.alreadyRedeemed ? '该分享关系此前已经确认，无需重复操作。' : '分享关系已确认，分享人已获得 7 天使用时长。', 'good');
     history.replaceState(null, '', location.pathname);
     await refresh();
   } catch (error) {
-    setNotice(`邀请码处理失败：${error.message}`, 'error');
+    setNotice(`分享码处理失败：${error.message}`, 'error');
     if (error.status !== 401) history.replaceState(null, '', location.pathname);
     if (error.status === 401) inviteHandled = false;
   }
@@ -112,11 +112,11 @@ copyInvite?.addEventListener('click', async () => {
   if (!value) return;
   try {
     await navigator.clipboard.writeText(value);
-    setNotice('邀请链接已复制。对方注册并登录该链接后，你将获得 7 天使用时长。', 'good');
+    setNotice('分享链接已复制。对方注册并登录该链接后，你将获得 7 天使用时长。', 'good');
   } catch {
     inviteLink?.focus();
     inviteLink?.select();
-    setNotice('请复制已选中的邀请链接。');
+    setNotice('请复制已选中的分享链接。');
   }
 });
 
