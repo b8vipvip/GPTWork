@@ -6,7 +6,9 @@ import test from 'node:test';
 
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const account = readFileSync(join(ROOT, 'license-server/account-system.mjs'), 'utf8');
+const manifest = JSON.parse(readFileSync(join(ROOT, 'extension/manifest.json'), 'utf8'));
 const popup = readFileSync(join(ROOT, 'extension/popup.html'), 'utf8');
+const shippedPopup = readFileSync(join(ROOT, 'extension', manifest.action.default_popup), 'utf8');
 const popupCss = readFileSync(join(ROOT, 'extension/popup.css'), 'utf8');
 const authGate = readFileSync(join(ROOT, 'extension/auth-gate.js'), 'utf8');
 const extensionAccount = readFileSync(join(ROOT, 'extension/account.html'), 'utf8');
@@ -29,13 +31,17 @@ test('user levels replace public membership semantics and enforce requested defa
   assert.match(background, /allowed\.includes\(windowKey\)/);
 });
 
-test('popup exposes check-in, share and upgrade in a single entitlement metadata row', () => {
-  assert.match(popup, /id="accountCheckin"/);
-  assert.match(popup, /<sup>\+1<\/sup>/);
-  assert.match(popup, /id="accountShare"/);
-  assert.match(popup, /<sup>\+7<\/sup>/);
-  assert.match(popup, /id="accountUpgrade"/);
-  assert.match(popup, /id="accountExpiry">权益有效期 —<\/span>/);
+test('shipped popup exposes check-in, share and upgrade in a single entitlement metadata row', () => {
+  assert.equal(manifest.action.default_popup, 'popup-v0513.html');
+  for (const surface of [popup, shippedPopup]) {
+    assert.match(surface, /id="accountCheckin"/);
+    assert.match(surface, /<sup>\+1<\/sup>/);
+    assert.match(surface, /id="accountShare"/);
+    assert.match(surface, /<sup>\+7<\/sup>/);
+    assert.match(surface, /id="accountUpgrade"/);
+    assert.match(surface, /id="accountExpiry">权益有效期 —<\/span>/);
+  }
+  assert.match(shippedPopup, /src="popup-rewards\.js"/);
   assert.match(rewards, /\/api\/v1\/account\/checkin/);
   assert.match(rewards, /share\?\.url/);
   assert.match(authGate, /accountExpiry\.textContent = `权益有效期 \$\{localDate\(entitlement\.expiresAt\)\}`/);
@@ -69,6 +75,7 @@ test('account entitlement expiry wording is canonical across account surfaces', 
   assert.doesNotMatch(websiteAccount, /<span>有效至<\/span>/);
   assert.doesNotMatch(extensionAccount, /<span>有效期<\/span>/);
   assert.doesNotMatch(popup, />有效期 —<\/span>/);
+  assert.doesNotMatch(shippedPopup, />有效期 —<\/span>/);
 });
 
 test('admin membership tab is now user configuration and user list says user level', () => {
