@@ -53,5 +53,6 @@ share?.addEventListener('click', async () => {
     setTimeout(() => { if (share.firstChild) share.firstChild.textContent = original; }, 1200);
   } catch (error) { share.title = `分享失败：${error.message}`; }
 });
+window.addEventListener('gptlock-account-changed', () => void refresh());
 document.addEventListener('gptwork-account-changed', () => void refresh());
 void refresh();

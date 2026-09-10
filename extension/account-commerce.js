@@ -207,7 +207,7 @@ function decorate() {
   if (!state.config) return;
   const cards = [...document.querySelectorAll('#plans .plan')];
   cards.forEach((card, index) => {
-    const plan = state.config.plans?.[index]; if (!plan || card.dataset.commerceDecorated === plan.code) return;
+    const plan = state.config.plans?.find((item) => item.code === card.dataset.planCode) || state.config.plans?.[index]; if (!plan || card.dataset.commerceDecorated === plan.code) return;
     card.dataset.commerceDecorated = plan.code;
     styles(card, { position: 'relative', borderColor: activePromo(plan) ? '#fecaca' : '#dbe3ef', boxShadow: activePromo(plan) ? '0 15px 34px rgba(239,68,68,.10)' : '' });
     const price = card.querySelector('.price');

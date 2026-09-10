@@ -38,7 +38,7 @@ function renderPlans() {
     const empty = document.createElement('p'); empty.className = 'muted'; empty.textContent = '当前已经是最高用户等级。'; el.plans.append(empty); return;
   }
   for (const plan of plans) {
-    const card = document.createElement('article'); card.className = 'plan';
+    const card = document.createElement('article'); card.className = 'plan'; card.dataset.planCode = plan.code;
     const title = document.createElement('h3'); title.textContent = plan.name;
     const price = document.createElement('div'); price.className = 'price'; price.textContent = money(plan.priceCents);
     const small = document.createElement('small'); small.textContent = ` / ${plan.durationDays} 天`; price.append(small);
