@@ -7,7 +7,7 @@ const cmsRichTextPromise = import('/rich-text-style.js').catch(() => null);
   const items = [
     ['overview', '/admin/overview', '总览'],
     ['users', '/admin/users', '用户'],
-    ['plans', '/admin/plans', '会员'],
+    ['plans', '/admin/plans', '用户配置'],
     ['orders', '/admin/orders', '订单'],
     ['issues', '/admin/issues', 'Issues 讨论区'],
     ['website', '/admin/website', '官网管理'],
