@@ -29,13 +29,13 @@
       <article class="card"><span>会员期限</span><strong id="memberExpiry">—</strong></article>
     </section>
 
-    <section class="card" hidden aria-hidden="true">
+    <section class="card" id="membershipPlansSection" hidden aria-hidden="true">
       <div class="section-title"><div><h2>会员方案</h2><p class="muted">价格与设备权益由服务端统一配置；GPTWork 同时窗口不限。</p></div></div>
       <div id="plans" class="plans"></div>
       <p id="orderMessage" class="message"></p>
     </section>
 
-    <section class="card">
+    <section class="card" id="recentOrdersSection" hidden aria-hidden="true">
       <div class="section-title"><div><h2>最近订单</h2><p class="muted">显示本插件创建的最近会员订单；待支付订单使用服务端 expiresAt 秒级倒计时，并自动核对最终状态。</p></div></div>
       <div id="recentOrders"></div>
     </section>
@@ -73,6 +73,7 @@
   </div>
 </main>
 <script type="module" src="account.js"></script>
+<script type="module" src="account-visibility.js"></script>
 <script type="module" src="account-commerce.js"></script>
 </body>
 </html>
