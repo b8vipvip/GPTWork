@@ -6,7 +6,7 @@ import { normalizeWebsiteConfig } from '../website-system.mjs';
 
 const root = resolve(import.meta.dirname, '..', '..');
 const websiteAccount = readFileSync(resolve(root, 'license-server/public/account.html'), 'utf8');
-const websiteVisibility = readFileSync(resolve(root, 'license-server/public/account-visibility.js'), 'utf8');
+const websiteRuntime = readFileSync(resolve(root, 'license-server/public/account-commerce.js'), 'utf8');
 const extensionAccount = readFileSync(resolve(root, 'extension/account.html'), 'utf8');
 const extensionVisibility = readFileSync(resolve(root, 'extension/account-visibility.js'), 'utf8');
 const websiteAdmin = readFileSync(resolve(root, 'license-server/public/admin-website.js'), 'utf8');
@@ -15,7 +15,7 @@ function accountModule(config, id) {
   return config.pages.account.modules.find((item) => item.id === id);
 }
 
-test('membership plans and recent orders default to disabled website-managed account modules', () => {
+test('legacy membership plans and recent orders remain default-disabled website config modules', () => {
   const config = normalizeWebsiteConfig({});
   const plans = accountModule(config, 'account-membership-plans');
   const orders = accountModule(config, 'account-recent-orders');
@@ -26,7 +26,7 @@ test('membership plans and recent orders default to disabled website-managed acc
   assert.match(websiteAdmin, /页面模块启停状态已自动保存并实时生效/);
 });
 
-test('website-managed account module switches persist enabled state', () => {
+test('website-managed account module switches still persist enabled state for compatibility', () => {
   const config = normalizeWebsiteConfig({
     pages: {
       account: {
@@ -41,18 +41,23 @@ test('website-managed account module switches persist enabled state', () => {
   assert.equal(accountModule(config, 'account-recent-orders')?.enabled, true);
 });
 
-test('website and extension commerce sections fail closed and follow the same server switches', () => {
-  for (const html of [websiteAccount, extensionAccount]) {
-    assert.match(html, /id="membershipPlansSection" hidden aria-hidden="true"/);
-    assert.match(html, /id="recentOrdersSection" hidden aria-hidden="true"/);
-    assert.match(html, /account-visibility\.js/);
-  }
-  for (const script of [websiteVisibility, extensionVisibility]) {
-    assert.match(script, /account-membership-plans/);
-    assert.match(script, /account-recent-orders/);
-    assert.match(script, /pages\?\.account\?\.modules/);
-    assert.match(script, /Boolean\(module\?\.enabled\)/);
-  }
-  assert.match(websiteVisibility, /\/site\/api\/website/);
+test('website upgrade is canonical while optional order history stays server-configured', () => {
+  assert.match(websiteAccount, /id="siteUpgrade"/);
+  assert.match(websiteAccount, /id="siteUpgradeDialog"/);
+  assert.doesNotMatch(websiteAccount, /id="membershipPlansSection"/);
+  assert.match(websiteAccount, /id="recentOrdersSection" hidden aria-hidden="true"/);
+  assert.match(websiteAccount, /account-commerce\.js/);
+  assert.doesNotMatch(websiteAccount, /account-visibility\.js/);
+  assert.match(websiteRuntime, /account-recent-orders/);
+  assert.match(websiteRuntime, /recentOrders\.hidden = !Boolean\(ordersModule\?\.enabled\)/);
+  assert.match(websiteRuntime, /pages\?\.account\?\.modules/);
+
+  assert.match(extensionAccount, /id="membershipPlansSection" hidden aria-hidden="true"/);
+  assert.match(extensionAccount, /id="recentOrdersSection" hidden aria-hidden="true"/);
+  assert.match(extensionAccount, /account-visibility\.js/);
+  assert.match(extensionVisibility, /account-membership-plans/);
+  assert.match(extensionVisibility, /account-recent-orders/);
+  assert.match(extensionVisibility, /pages\?\.account\?\.modules/);
+  assert.match(extensionVisibility, /Boolean\(module\?\.enabled\)/);
   assert.match(extensionVisibility, /https:\/\/gptlock\.mv3\.cn\/site\/api\/website/);
 });
