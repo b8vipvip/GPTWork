@@ -24,14 +24,16 @@ test('account rewards are persisted and exposed through authenticated site APIs'
   assert.match(server, /INVITE_ALREADY_REDEEMED/);
 });
 
-test('account center hides membership plans and exposes check-in and invite controls', () => {
+test('account center exposes check-in/share while legacy purchase mounts stay hidden', () => {
   assert.match(account, /id="rewardSection"/);
   assert.match(account, /id="dailyCheckin"/);
   assert.match(account, /id="copyInvite"/);
   assert.match(account, /每日签到 \+1 天/);
   assert.match(account, /每成功分享并带来 1 个已验证账户增加 7 天/);
-  assert.match(account, /<div class="account-section" id="membershipPlansSection" hidden aria-hidden="true"><h3>会员方案<\/h3>/);
-  assert.match(extensionAccount, /<section class="card" id="membershipPlansSection" hidden aria-hidden="true">\s*<div class="section-title"><div><h2>会员方案<\/h2>/);
+  assert.match(account, /<div class="account-section" id="membershipPlansSection" hidden aria-hidden="true"><h3>旧版升级兼容<\/h3>/);
+  assert.doesNotMatch(account, />会员方案</);
+  assert.match(extensionAccount, /<section class="card" id="membershipPlansSection" hidden aria-hidden="true">\s*<div class="section-title"><div><h2>旧版升级兼容<\/h2>/);
+  assert.doesNotMatch(extensionAccount, />会员方案</);
   assert.match(rewards, /\/site\/api\/account\/checkin/);
   assert.match(rewards, /\/site\/api\/account\/invite\/redeem/);
 });
