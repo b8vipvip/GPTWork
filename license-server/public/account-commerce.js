@@ -4,6 +4,7 @@ const state = {
   websiteConfig: null,
   paymentPoll: null,
   refreshTimer: null,
+  promoTimer: null,
 };
 
 function text(value, fallback = '—') {
@@ -14,6 +15,19 @@ function dateText(value) {
   return Number.isFinite(time) ? new Date(time).toLocaleString('zh-CN', { hour12: false }) : '—';
 }
 function money(cents) { return `¥${(Number(cents || 0) / 100).toFixed(2)}`; }
+function remainingText(endValue) {
+  const ms = Date.parse(endValue || '') - Date.now();
+  if (!(ms > 0)) return '活动已结束';
+  const seconds = Math.floor(ms / 1000);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return [days ? `${days}天` : '', `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`].filter(Boolean).join(' ');
+}
+function activePromo(plan) {
+  return Boolean(plan?.promoActive && Number(plan?.promoPriceCents) < Number(plan?.originalPriceCents) && Date.parse(plan?.promoEndsAt || '') > Date.now());
+}
 function safeHttps(value) {
   try {
     const url = new URL(String(value || ''));
@@ -31,6 +45,7 @@ function node(tag, className = '', value = undefined) {
   if (value !== undefined) element.textContent = String(value);
   return element;
 }
+function setStyles(element, values) { Object.assign(element.style, values); return element; }
 function setNotice(element, message, tone = '') {
   if (!element) return;
   element.textContent = message || '';
@@ -236,17 +251,48 @@ function renderUpgradePlans() {
   const methods = state.config.paymentMethods || [];
   for (const plan of plans) {
     const card = node('article', 'plan');
-    card.append(node('strong', '', plan.name), node('div', 'plan-price', money(plan.priceCents)), node('small', '', `${plan.durationDays} 天 · 设备 ${plan.limits?.devices ?? 1} · 同时窗口 ${plan.limits?.windows ?? 1}`));
+    const price = node('div', 'plan-price');
+    const current = node('span', '', money(plan.priceCents));
+    setStyles(current, { color: '#dc2626', fontSize: '30px', fontWeight: '900', letterSpacing: '-.02em' });
+    price.append(current);
+    if (activePromo(plan)) {
+      const original = node('span', '', `原价 ${money(plan.originalPriceCents)}`);
+      setStyles(original, { color: '#94a3b8', fontSize: '13px', fontWeight: '600', textDecoration: 'line-through', marginLeft: '10px' });
+      const save = node('span', '', `立省 ${money(plan.savingsCents)}`);
+      setStyles(save, { color: '#b91c1c', fontSize: '12px', fontWeight: '800', background: '#fee2e2', borderRadius: '999px', padding: '4px 8px', marginLeft: '8px' });
+      price.append(original, save);
+      const countdown = node('div', '', `限时优惠 · 恢复原价剩余时间 ${remainingText(plan.promoEndsAt)}`);
+      countdown.dataset.promoCountdown = plan.promoEndsAt;
+      setStyles(countdown, { marginTop: '9px', color: '#991b1b', fontSize: '12px', fontWeight: '750' });
+      price.after(countdown);
+    }
+    card.append(node('strong', '', plan.name), price, node('small', '', `${plan.durationDays} 天 · 设备 ${plan.limits?.devices ?? 1} · 同时窗口 ${plan.limits?.windows ?? 1}`));
     const benefits = node('ul');
     for (const benefit of plan.benefits || []) benefits.append(node('li', '', benefit));
     if (benefits.childElementCount) card.append(benefits);
     const actions = node('div', 'asset-row');
-    if (!methods.length) actions.append(node('button', 'btn btn-small btn-soft', '支付方式暂未配置'));
-    for (const method of methods) {
-      const button = node('button', 'btn btn-small btn-primary', `${paymentMethodLabel(method)}升级`);
+    if (!methods.length) {
+      const disabled = node('button', 'btn btn-small btn-soft', '支付方式暂未配置');
+      disabled.disabled = true;
+      actions.append(disabled);
+    } else {
+      const select = document.createElement('select');
+      select.className = 'payment-method-select';
+      select.setAttribute('aria-label', `${plan.name}支付方式`);
+      for (const method of methods) {
+        const option = document.createElement('option');
+        option.value = method.code;
+        option.textContent = paymentMethodLabel(method);
+        select.append(option);
+      }
+      const button = node('button', 'btn btn-small btn-primary', '开通');
       button.type = 'button';
-      button.addEventListener('click', () => void createUpgradeOrder(plan, method, button));
-      actions.append(button);
+      button.textContent = '开通';
+      button.addEventListener('click', () => {
+        const method = methods.find((item) => item.code === select.value) || methods[0];
+        if (method) void createUpgradeOrder(plan, method, button);
+      });
+      actions.append(select, button);
     }
     card.append(actions); root.append(card);
   }
@@ -273,7 +319,11 @@ function renderPaymentBox(result, method) {
   if (result.instructions) box.append(node('p', '', result.instructions));
   const qr = safeHttps(order.payment?.qrImageUrl || method?.qrUrl);
   if (qr) {
-    const image = document.createElement('img'); image.src = qr; image.alt = `${paymentMethodLabel(method)}支付二维码`; image.className = 'payment-qr'; box.append(image);
+    const image = document.createElement('img');
+    image.src = qr;
+    image.alt = `${paymentMethodLabel(method)}支付二维码`;
+    image.className = 'payment-qr';
+    box.append(image, node('div', '', `请使用${paymentMethodLabel(method)}扫码完成支付`));
   }
   const pay = safeHttps(order.payUrl || method?.payUrl);
   if (pay) {
@@ -283,7 +333,7 @@ function renderPaymentBox(result, method) {
 }
 async function createUpgradeOrder(plan, method, button) {
   const original = button.textContent;
-  button.disabled = true; button.textContent = '创建订单…';
+  button.disabled = true; button.textContent = '正在打开…';
   try {
     const result = await api('/site/api/account/orders', { method: 'POST', body: JSON.stringify({ planCode: plan.code, paymentMethod: method.code }) });
     renderPaymentBox(result, method);
@@ -436,6 +486,11 @@ async function redeemPendingShare() {
   }
 }
 
+async function refreshExpiredPromotion() {
+  await loadUpgradeConfig();
+  renderUpgradePlans();
+}
+
 async function boot() {
   setupMobileNavigation();
   installActions();
@@ -448,11 +503,20 @@ async function boot() {
   state.refreshTimer = setInterval(() => {
     if (!document.hidden && state.account?.authenticated) void refreshAccount();
   }, 10_000);
+  state.promoTimer = setInterval(() => {
+    let expired = false;
+    document.querySelectorAll('[data-promo-countdown]').forEach((item) => {
+      item.textContent = `限时优惠 · 恢复原价剩余时间 ${remainingText(item.dataset.promoCountdown)}`;
+      if (Date.parse(item.dataset.promoCountdown || '') <= Date.now()) expired = true;
+    });
+    if (expired) void refreshExpiredPromotion();
+  }, 1000);
 }
 
 window.addEventListener('pagehide', () => {
   stopPaymentPoll();
   if (state.refreshTimer) clearInterval(state.refreshTimer);
+  if (state.promoTimer) clearInterval(state.promoTimer);
 }, { once: true });
 
 void boot();
