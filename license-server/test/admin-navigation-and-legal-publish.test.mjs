@@ -19,20 +19,25 @@ const ADMIN_PAGES = [
   'admin-update.html',
 ];
 
-test('every admin page exposes Issues and website management and loads the shared navigation runtime', () => {
+test('every admin page exposes the canonical user-configuration navigation and loads the shared navigation runtime', () => {
   for (const filename of ADMIN_PAGES) {
     const html = readFileSync(join(PUBLIC, filename), 'utf8');
+    assert.match(html, /href="\/admin\/plans"[^>]*>用户配置<\/a>/, `${filename} should label /admin/plans as 用户配置`);
+    assert.doesNotMatch(html, /href="\/admin\/plans"[^>]*>会员<\/a>/, `${filename} should not retain the legacy 会员 label`);
     assert.match(html, /href="\/admin\/issues"/, `${filename} should link to Issues`);
     assert.match(html, /href="\/admin\/website"/, `${filename} should link to website management`);
     assert.match(html, /src="\/page-cms\.js"/, `${filename} should load the shared admin navigation runtime`);
   }
 });
 
-test('shared admin navigation contains the complete canonical menu', () => {
+test('shared admin navigation is the final authority for the complete canonical menu', () => {
   const source = readFileSync(join(PUBLIC, 'page-cms.js'), 'utf8');
   for (const route of ['/admin/overview', '/admin/users', '/admin/plans', '/admin/orders', '/admin/issues', '/admin/website', '/admin/settings', '/admin/client-logs', '/admin/server-logs', '/admin/update']) {
     assert.ok(source.includes(route), `shared navigation should contain ${route}`);
   }
+  const userConfigTuple = /\['plans', '\/admin\/plans', '用户配置'\]/g;
+  assert.equal(source.match(userConfigTuple)?.length ?? 0, 1, 'shared navigation should define exactly one canonical 用户配置 entry');
+  assert.doesNotMatch(source, /\['plans', '\/admin\/plans', '会员'\]/, 'shared navigation must not retain the legacy 会员 label');
 });
 
 test('system settings stylesheet is linked, served and contains the official-payment layout', () => {
