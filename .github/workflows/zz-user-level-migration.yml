@@ -36,6 +36,10 @@ jobs:
             "  accountEmail: $('accountEmail'), accountTier: $('accountTier'), accountExpiry: $('accountExpiry'), accountUsage: $('accountUsage'),\n  accountCenter: $('accountCenter'), accountLogout: $('accountLogout'), enabled: $('enabled'),",
             "  accountEmail: $('accountEmail'), accountTier: $('accountTier'), accountExpiry: $('accountExpiry'), accountUsage: $('accountUsage'), accountCenter: $('accountCenter'), accountLogout: $('accountLogout'),\n  enabled: $('enabled'),"
           )
+          t = t.replace(
+            "el.accountCenter.addEventListener('click', () => {\n  void chrome.tabs.create({ url: chrome.runtime.getURL('account.html') }).then(() => window.close());\n});",
+            "el.accountCenter?.addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('account.html') }));"
+          )
           a.write_text(t, encoding='utf-8')
           PY
       - name: Apply source migration
