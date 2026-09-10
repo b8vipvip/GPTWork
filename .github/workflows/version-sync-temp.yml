@@ -1,0 +1,66 @@
+name: Temporary v0.5.50 version sync
+
+on:
+  push:
+    branches:
+      - fix/account-level-actions-layout-20260910
+    paths:
+      - .github/workflows/version-sync-temp.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/account-level-actions-layout-20260910
+          fetch-depth: 0
+      - name: Synchronize release version and account expiry wording
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          old = '0.5.49'
+          new = '0.5.50'
+
+          for path in [Path('extension/manifest.json'), Path('extension/package.json')]:
+              data = json.loads(path.read_text(encoding='utf-8'))
+              assert data['version'] == old, (path, data.get('version'))
+              data['version'] = new
+              path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          replacements = {
+              Path('native-core/Cargo.toml'): [(f'version = "{old}"', f'version = "{new}"')],
+              Path('native-core/Cargo.lock'): [(f'name = "gptwork-core"\nversion = "{old}"', f'name = "gptwork-core"\nversion = "{new}"')],
+              Path('packaging/windows/GPTWork.iss'): [(f'#define MyAppVersion "{old}"', f'#define MyAppVersion "{new}"')],
+              Path('license-server/public/admin-users.js'): [
+                  ("field('使用有效期', expiry)", "field('权益有效期', expiry)"),
+                  ('等级决定设备/窗口上限；有效期决定当前账号还能使用多久。管理员可直接调整等级。', '等级决定设备/窗口上限；权益有效期决定当前账号还能使用多久。管理员可直接调整等级。'),
+                  ("throw new Error('有效期格式无效')", "throw new Error('权益有效期格式无效')"),
+              ],
+          }
+          for path, pairs in replacements.items():
+              content = path.read_text(encoding='utf-8')
+              for before, after in pairs:
+                  count = content.count(before)
+                  assert count == 1, (path, before, count)
+                  content = content.replace(before, after)
+              path.write_text(content, encoding='utf-8')
+
+          lock = Path('native-core/Cargo.lock').read_text(encoding='utf-8')
+          assert f'name = "gptwork-core"\nversion = "{new}"' in lock
+          assert json.loads(Path('extension/manifest.json').read_text())['version'] == new
+          assert json.loads(Path('extension/package.json').read_text())['version'] == new
+          PY
+      - name: Commit synchronized files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add extension/manifest.json extension/package.json native-core/Cargo.toml native-core/Cargo.lock packaging/windows/GPTWork.iss license-server/public/admin-users.js
+          git diff --cached --check
+          git commit -m 'release: prepare GPTWork v0.5.50'
+          git push origin HEAD:fix/account-level-actions-layout-20260910
