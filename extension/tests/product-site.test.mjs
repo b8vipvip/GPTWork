@@ -13,9 +13,14 @@ test('public product site exposes dedicated product, guide, releases, and accoun
     assert.match(html, /href="\/guide"/);
     assert.match(html, /href="\/releases"/);
     assert.match(html, /href="\/account"/);
-    assert.match(html, /src="\/site\.js"/);
+    if (page === 'account') assert.match(html, /src="\/account-commerce\.js"/);
+    else assert.match(html, /src="\/site\.js"/);
     assert.match(html, /href="\/site\.css"/);
   }
+
+  const account = pages.get('account.html');
+  assert.doesNotMatch(account, /src="\/site\.js"/);
+  assert.match(account, /src="\/account-commerce\.js"/);
 
   const guide = pages.get('guide.html');
   assert.match(guide, /自动验证/);
