@@ -164,9 +164,9 @@ function openEditor(row, kind) {
     const level = selectControl(levels.map((item) => [item.code, item.name]), row.level?.code || row.entitlement?.level?.code || 'normal');
     const expiry = document.createElement('input'); expiry.type = 'datetime-local'; expiry.value = localDateInput(row.entitlement?.expiresAt);
     activeEditor.controls.level = level; activeEditor.controls.expiry = expiry;
-    el.userEditBody.append(field('用户等级', level), field('使用有效期', expiry));
+    el.userEditBody.append(field('用户等级', level), field('权益有效期', expiry));
     const note = document.createElement('p'); note.className = 'dialog-note';
-    note.textContent = '等级决定设备/窗口上限；有效期决定当前账号还能使用多久。管理员可直接调整等级。';
+    note.textContent = '等级决定设备/窗口上限；权益有效期决定当前账号还能使用多久。管理员可直接调整等级。';
     el.userEditBody.append(note);
   }
   el.userEditDialog.showModal();
@@ -188,7 +188,7 @@ async function saveEditor() {
     await patchUser(row, { maxDevicesOverride: optionalPositiveInt(controls.devices, '设备上限') });
   } else if (kind === 'entitlement') {
     const expiry = controls.expiry.value ? new Date(controls.expiry.value) : null;
-    if (expiry && Number.isNaN(expiry.getTime())) throw new Error('有效期格式无效');
+    if (expiry && Number.isNaN(expiry.getTime())) throw new Error('权益有效期格式无效');
     await patchUser(row, { userLevel: controls.level.value, entitlementExpiresAt: expiry ? expiry.toISOString() : null });
   }
   closeEditor();

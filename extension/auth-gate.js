@@ -103,7 +103,7 @@ function renderAccount(account) {
   const sourceName = account.level?.name || entitlement.level?.name || '普通用户';
   el.accountEmail.textContent = user.email || '—';
   el.accountTier.textContent = sourceName;
-  el.accountExpiry.textContent = `有效期 ${localDate(entitlement.expiresAt)}`;
+  el.accountExpiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
   const usage = entitlement.usage || {};
   const limits = entitlement.limits || {};
   el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口 ${usage.windows ?? 0}/${limits.windows ?? 0}`;

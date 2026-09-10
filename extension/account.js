@@ -103,7 +103,7 @@ function renderAccount() {
   el.statusBadge.textContent = entitlement.active ? '权益有效' : '权益已到期';
   el.statusBadge.className = `badge ${entitlement.active ? 'good' : 'bad'}`;
   el.tier.textContent = account.level?.name || entitlement.level?.name || '普通用户';
-  el.expiry.textContent = `权益有效期至 ${localDate(entitlement.expiresAt)}`;
+  el.expiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
   el.deviceUsage.textContent = `${entitlement.usage?.devices ?? 0} / ${entitlement.limits?.devices ?? 0}`;
   el.windowUsage.textContent = `${entitlement.usage?.windows ?? 0} / ${entitlement.limits?.windows ?? 0}`;
   el.levelExpiry.textContent = localDate(entitlement.expiresAt);
