@@ -5,6 +5,9 @@ import { promisify } from 'node:util';
 const scryptAsync = promisify(scrypt);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const COOKIE_NAME = 'gptlock_site_session';
+const CHECKIN_REWARD_DAYS = 1;
+const INVITE_REWARD_DAYS = 7;
+const REWARD_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
 
 class SiteAccountError extends Error {
   constructor(status, code, message) {
@@ -51,6 +54,9 @@ function clampInt(value, min, max, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
+function rewardDayKey(at = Date.now()) {
+  return new Date(at + REWARD_TIMEZONE_OFFSET_MS).toISOString().slice(0, 10);
+}
 
 export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson, clientIp, accountSummary, paymentSystem }) {
   db.exec(`
@@ -65,8 +71,30 @@ export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson,
       ip TEXT NOT NULL DEFAULT '',
       user_agent TEXT NOT NULL DEFAULT ''
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS account_daily_checkins (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day_key TEXT NOT NULL,
+      reward_days INTEGER NOT NULL DEFAULT 1 CHECK(reward_days >= 1),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, day_key)
+    ) STRICT;
+    CREATE TABLE IF NOT EXISTS account_invite_codes (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      code TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL
+    ) STRICT;
+    CREATE TABLE IF NOT EXISTS account_invites (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inviter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      invitee_user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      invite_code TEXT NOT NULL,
+      reward_days INTEGER NOT NULL DEFAULT 7 CHECK(reward_days >= 1),
+      created_at TEXT NOT NULL,
+      rewarded_at TEXT NOT NULL
+    ) STRICT;
     CREATE INDEX IF NOT EXISTS idx_site_sessions_user ON site_sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_site_sessions_token ON site_sessions(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_account_invites_inviter ON account_invites(inviter_user_id, rewarded_at);
   `);
 
   const attempts = new Map();
@@ -199,6 +227,102 @@ export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson,
   function listOrders(userId) {
     return db.prepare('SELECT * FROM membership_orders WHERE user_id=? ORDER BY id DESC LIMIT 20').all(userId).map(orderPublic);
   }
+  function ensureInviteCode(userId) {
+    const existing = db.prepare('SELECT code FROM account_invite_codes WHERE user_id=?').get(userId);
+    if (existing?.code) return existing.code;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const code = `GW-${randomBytes(6).toString('base64url').toUpperCase()}`;
+      try {
+        db.prepare('INSERT INTO account_invite_codes(user_id,code,created_at) VALUES(?,?,?)').run(userId, code, nowIso());
+        return code;
+      } catch (error) {
+        if (!String(error?.message || '').includes('UNIQUE')) throw error;
+      }
+    }
+    fail(500, 'INVITE_CODE_UNAVAILABLE', '暂时无法生成邀请码，请稍后重试');
+  }
+  function extendRewardDays(userId, days) {
+    const rewardDays = clampInt(days, 1, 3650, 1);
+    const user = userById(userId);
+    if (!user) fail(404, 'ACCOUNT_NOT_FOUND', '账户不存在');
+    const membership = db.prepare("SELECT MAX(expires_at) AS expires_at FROM memberships WHERE user_id=? AND status='active'").get(userId);
+    const baseMs = Math.max(
+      Date.now(),
+      Date.parse(user.free_expires_at || '') || 0,
+      Date.parse(membership?.expires_at || '') || 0,
+    );
+    const expiresAt = new Date(baseMs + rewardDays * DAY_MS).toISOString();
+    db.prepare('UPDATE users SET free_expires_at=?,updated_at=? WHERE id=?').run(expiresAt, nowIso(), userId);
+    return expiresAt;
+  }
+  function rewardSnapshot(userId) {
+    const code = ensureInviteCode(userId);
+    const dayKey = rewardDayKey();
+    const checked = db.prepare('SELECT created_at FROM account_daily_checkins WHERE user_id=? AND day_key=?').get(userId, dayKey);
+    const checkins = db.prepare('SELECT COUNT(*) AS count FROM account_daily_checkins WHERE user_id=?').get(userId);
+    const invites = db.prepare('SELECT COUNT(*) AS count FROM account_invites WHERE inviter_user_id=?').get(userId);
+    const user = userById(userId);
+    return {
+      checkin: {
+        dayKey,
+        checkedInToday: Boolean(checked),
+        checkedInAt: checked?.created_at || null,
+        rewardDays: CHECKIN_REWARD_DAYS,
+        totalCheckins: Number(checkins?.count || 0),
+      },
+      invite: {
+        code,
+        url: `${String(publicOrigin || '').replace(/\/$/, '')}/account?invite=${encodeURIComponent(code)}`,
+        rewardDays: INVITE_REWARD_DAYS,
+        successfulInvites: Number(invites?.count || 0),
+      },
+      bonusExpiresAt: user?.free_expires_at || null,
+    };
+  }
+  function checkIn(userId) {
+    const dayKey = rewardDayKey();
+    const existing = db.prepare('SELECT created_at FROM account_daily_checkins WHERE user_id=? AND day_key=?').get(userId, dayKey);
+    if (existing) return { alreadyCheckedIn: true, rewards: rewardSnapshot(userId) };
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('INSERT INTO account_daily_checkins(user_id,day_key,reward_days,created_at) VALUES(?,?,?,?)')
+        .run(userId, dayKey, CHECKIN_REWARD_DAYS, nowIso());
+      extendRewardDays(userId, CHECKIN_REWARD_DAYS);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+    return { alreadyCheckedIn: false, rewards: rewardSnapshot(userId) };
+  }
+  function redeemInvite(inviteeUserId, rawCode) {
+    const code = String(rawCode || '').trim().toUpperCase();
+    if (!/^GW-[A-Z0-9_-]{6,24}$/.test(code)) fail(400, 'INVALID_INVITE_CODE', '邀请码格式无效');
+    const inviteCode = db.prepare('SELECT user_id,code FROM account_invite_codes WHERE code=?').get(code);
+    if (!inviteCode) fail(404, 'INVITE_CODE_NOT_FOUND', '邀请码不存在或已失效');
+    if (Number(inviteCode.user_id) === Number(inviteeUserId)) fail(409, 'SELF_INVITE_NOT_ALLOWED', '不能使用自己的邀请码');
+    const existing = db.prepare('SELECT inviter_user_id,invite_code,rewarded_at FROM account_invites WHERE invitee_user_id=?').get(inviteeUserId);
+    if (existing) {
+      if (Number(existing.inviter_user_id) === Number(inviteCode.user_id)) {
+        return { alreadyRedeemed: true, rewards: rewardSnapshot(inviteeUserId) };
+      }
+      fail(409, 'INVITE_ALREADY_REDEEMED', '当前账户已经绑定过其他邀请关系');
+    }
+    const inviter = userById(inviteCode.user_id);
+    if (!inviter || inviter.status === 'disabled' || !emailAccessSatisfied(inviter)) fail(409, 'INVITER_UNAVAILABLE', '邀请人账户当前不可用');
+    const redeemedAt = nowIso();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`INSERT INTO account_invites(inviter_user_id,invitee_user_id,invite_code,reward_days,created_at,rewarded_at)
+        VALUES(?,?,?,?,?,?)`).run(inviteCode.user_id, inviteeUserId, code, INVITE_REWARD_DAYS, redeemedAt, redeemedAt);
+      extendRewardDays(inviteCode.user_id, INVITE_REWARD_DAYS);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+    return { alreadyRedeemed: false, rewards: rewardSnapshot(inviteeUserId) };
+  }
 
   async function handle(req, res, url) {
     if (!url.pathname.startsWith('/site/api/')) return false;
@@ -235,7 +359,22 @@ export function createSiteAccountSystem({ db, env, publicOrigin, json, bodyJson,
         const session = requireSession(req);
         db.prepare('UPDATE site_sessions SET last_seen_at=? WHERE id=?').run(nowIso(), session.id);
         return json(res, 200, { ok: true, account: accountSummary(userById(session.user_id)),
-          security: securitySnapshot(session.user_id, session.id), orders: listOrders(session.user_id) }), true;
+          security: securitySnapshot(session.user_id, session.id), orders: listOrders(session.user_id), rewards: rewardSnapshot(session.user_id) }), true;
+      }
+      if (url.pathname === '/site/api/account/rewards' && req.method === 'GET') {
+        const session = requireSession(req);
+        return json(res, 200, { ok: true, rewards: rewardSnapshot(session.user_id) }), true;
+      }
+      if (url.pathname === '/site/api/account/checkin' && req.method === 'POST') {
+        const session = requireSession(req);
+        const result = checkIn(session.user_id);
+        return json(res, 200, { ok: true, ...result, account: accountSummary(userById(session.user_id)) }), true;
+      }
+      if (url.pathname === '/site/api/account/invite/redeem' && req.method === 'POST') {
+        const session = requireSession(req);
+        const input = await bodyJson(req);
+        const result = redeemInvite(session.user_id, input.code);
+        return json(res, 200, { ok: true, ...result }), true;
       }
       if (url.pathname === '/site/api/account/security' && req.method === 'GET') {
         const session = requireSession(req);
