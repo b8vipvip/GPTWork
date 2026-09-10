@@ -337,8 +337,7 @@ function planCard(plan) {
   const devices = makeField('设备上限', plan.limits.devices, 1);
   const windows = makeField('同时窗口上限', plan.limits.windows, 1);
   const benefitsLabel = document.createElement('label'); benefitsLabel.className = 'benefit-field'; benefitsLabel.textContent = '权益说明（每行一条）';
-  const benefits = document.createElement('textarea'); benefits.rows = 5; benefits.value = (plan.benefits || []).join('
-'); benefits.disabled = isNormal; benefitsLabel.append(benefits);
+  const benefits = document.createElement('textarea'); benefits.rows = 5; benefits.value = (plan.benefits || []).join('\n'); benefits.disabled = isNormal; benefitsLabel.append(benefits);
   const save = button('保存等级配置', async () => {
     save.disabled = true;
     try {
@@ -351,8 +350,7 @@ function planCard(plan) {
         method: 'PUT', body: JSON.stringify({
           name: name.value.trim(), priceCents: originalPriceCents, originalPriceCents, promoPriceCents, promoEndsAt,
           durationDays: Number(days.value), maxDevices: Number(devices.value), maxWindows: Number(windows.value),
-          benefits: benefits.value.split(/?
-/).map((item) => item.trim()).filter(Boolean), enabled: enabled.checked,
+          benefits: benefits.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), enabled: enabled.checked,
         }),
       });
       save.textContent = '已保存'; setTimeout(() => { save.textContent = '保存等级配置'; }, 1000); await loadPlans();

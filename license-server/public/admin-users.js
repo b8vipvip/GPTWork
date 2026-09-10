@@ -155,10 +155,37 @@ function openEditor(row, kind) {
     const select = selectControl([['active', '启用'], ['pending', '待验证'], ['disabled', '停用']], row.status);
     activeEditor.controls.status = select; el.userEditBody.append(field('账户状态', select));
   } else if (kind === 'devices') {
-    const input = document.createElement('input'); input.type = 'number'; input.min = '1'; input.max = '1000'; input.placeholder = '留空 = 跟随默认/套餐'; input.value = row.overrides?.devices ?? '';
+    const input = document.createElement('input'); input.type = 'number'; input.min = '1'; input.max = '1000'; input.placeholder = '留空 = 跟随用户等级'; input.value = row.overrides?.devices ?? '';
     activeEditor.controls.devices = input; el.userEditBody.append(field('自定义设备上限', input));
     const note = document.createElement('p'); note.className = 'dialog-note'; note.textContent = `当前已用 ${row.entitlement?.usage?.devices ?? 0} 台，当前生效上限 ${row.entitlement?.limits?.devices ?? 0} 台。`;
     el.userEditBody.append(note);
+  } else if (kind === 'entitlement') {
+    const levels = plansCache.filter((item) => ['normal', 'deep', 'heavy'].includes(item.code));
+    const level = selectControl(levels.map((item) => [item.code, item.name]), row.level?.code || row.entitlement?.level?.code || 'normal');
+    const expiry = document.createElement('input'); expiry.type = 'datetime-local'; expiry.value = localDateInput(row.entitlement?.expiresAt);
+    activeEditor.controls.level = level; activeEditor.controls.expiry = expiry;
+    el.userEditBody.append(field('用户等级', level), field('使用有效期', expiry));
+    const note = document.createElement('p'); note.className = 'dialog-note';
+    note.textContent = '等级决定设备/窗口上限；有效期决定当前账号还能使用多久。管理员可直接调整等级。';
+    el.userEditBody.append(note);
+  }
+  el.userEditDialog.showModal();
+  el.userEditBody.querySelector('input,select')?.focus();
+}
+function closeEditor() {
+  if (el.userEditDialog.open) el.userEditDialog.close();
+  activeEditor = null; el.userEditBody.textContent = ''; setMessage(el.userEditMessage, '');
+}
+async function saveEditor() {
+  if (!activeEditor) return;
+  const { row, kind, controls } = activeEditor;
+  if (kind === 'email') {
+    const email = controls.email.value.trim(); if (!email) throw new Error('邮箱不能为空');
+    await patchUser(row, { email });
+  } else if (kind === 'status') {
+    await patchUser(row, { status: controls.status.value });
+  } else if (kind === 'devices') {
+    await patchUser(row, { maxDevicesOverride: optionalPositiveInt(controls.devices, '设备上限') });
   } else if (kind === 'entitlement') {
     const expiry = controls.expiry.value ? new Date(controls.expiry.value) : null;
     if (expiry && Number.isNaN(expiry.getTime())) throw new Error('有效期格式无效');
