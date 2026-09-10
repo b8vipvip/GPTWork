@@ -20,6 +20,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Normalize migration patcher whitespace assumptions
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tools/apply-user-levels-v1.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace("<div class=\"account-meta\">\\n          <span id=\"accountExpiry\">有效期 —</span>\\n          <span id=\"accountUsage\">设备/窗口 —</span>\\n        </div>", "<div class=\"account-meta\">\\n        <span id=\"accountExpiry\">有效期 —</span>\\n        <span id=\"accountUsage\">设备/窗口 —</span>\\n      </div>")
+          p.write_text(s, encoding='utf-8')
+          PY
       - name: Apply source migration
         run: python tools/apply-user-levels-v1.py
       - name: Commit migration
