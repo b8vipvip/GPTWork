@@ -8,6 +8,7 @@ const server = readFileSync(resolve(root, 'license-server/site-account.mjs'), 'u
 const account = readFileSync(resolve(root, 'license-server/public/account.html'), 'utf8');
 const rewards = readFileSync(resolve(root, 'license-server/public/account-rewards.js'), 'utf8');
 const releases = readFileSync(resolve(root, 'license-server/public/releases.html'), 'utf8');
+const releaseSurface = readFileSync(resolve(root, 'license-server/public/release-surface.js'), 'utf8');
 const extensionAccount = readFileSync(resolve(root, 'extension/account.html'), 'utf8');
 
 test('account rewards are persisted and exposed through authenticated site APIs', () => {
@@ -37,8 +38,9 @@ test('account center hides membership plans and exposes check-in and invite cont
 
 test('official releases page keeps v0.5.48 and newer only', () => {
   assert.match(releases, /v0\.5\.48 及之后版本/);
-  assert.match(releases, /\[0,5,48,0\]/);
-  assert.match(releases, /querySelectorAll\('\.release-card'\)/);
-  assert.match(releases, /GPTWorkSetup-x64/);
-  assert.match(releases, /amd64/);
+  assert.match(releases, /release-surface\.js/);
+  assert.match(releaseSurface, /minimumVersion = \[0, 5, 48, 0\]/);
+  assert.match(releaseSurface, /querySelectorAll\('\.release-card'\)/);
+  assert.match(releaseSurface, /GPTWorkSetup-x64/);
+  assert.match(releaseSurface, /amd64/);
 });

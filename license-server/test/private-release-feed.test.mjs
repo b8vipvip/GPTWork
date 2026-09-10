@@ -17,23 +17,23 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function releaseRow({ tag = 'v0.5.30', assets }) {
+function releaseRow({ tag = 'v0.5.48', assets }) {
   return [{
     tag_name: tag,
     name: `GPTWork ${tag}`,
     body: `Release notes for ${tag}`,
     draft: false,
     prerelease: false,
-    published_at: '2026-09-01T00:00:00Z',
+    published_at: '2026-09-09T00:00:00Z',
     assets,
   }];
 }
 
-function asset(name, id, bytes, tag = 'v0.5.30') {
+function asset(name, id, bytes, tag = 'v0.5.48') {
   return {
     name,
-    url: `https://api.github.com/repos/b8vipvip/GPTLock/releases/assets/${id}`,
-    browser_download_url: `https://github.com/b8vipvip/GPTLock/releases/download/${tag}/${name}`,
+    url: `https://api.github.com/repos/b8vipvip/GPTWork/releases/assets/${id}`,
+    browser_download_url: `https://github.com/b8vipvip/GPTWork/releases/download/${tag}/${name}`,
     size: bytes.length,
     digest: `sha256:${sha256(bytes)}`,
   };
@@ -73,7 +73,7 @@ function testFeed({ mirrorRoot, currentRelease }) {
   return { feed, calls };
 }
 
-function fixture(tag = 'v0.5.30', idBase = 100) {
+function fixture(tag = 'v0.5.48', idBase = 100) {
   const installer = Buffer.from(`installer-${tag}`);
   const extension = Buffer.from(`extension-${tag}`);
   const sums = Buffer.from(`${sha256(installer)}  ${INSTALLER}\n${sha256(extension)}  gptwork-extension-${tag.slice(1)}.zip\n`);
@@ -102,7 +102,7 @@ function combineFixtures(...fixtures) {
 }
 
 test('private GitHub releases are fully mirrored to the official server with verified digests', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-mirror-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-mirror-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
   let rows = fixture();
   const { feed, calls } = testFeed({ mirrorRoot, currentRelease: () => rows });
@@ -110,7 +110,7 @@ test('private GitHub releases are fully mirrored to the official server with ver
   const result = await feed.sync();
   assert.equal(result.ok, true);
   assert.equal(result.source, 'server-mirror');
-  assert.equal(result.latestVersion, '0.5.30');
+  assert.equal(result.latestVersion, '0.5.48');
   assert.equal(result.releases.length, 1);
   assert.equal(result.releases[0].assets.length, 3);
   assert.match(result.generation, /^[0-9a-f]{24}$/);
@@ -118,9 +118,9 @@ test('private GitHub releases are fully mirrored to the official server with ver
   for (const mirrored of result.releases[0].assets) {
     assert.equal(
       mirrored.url,
-      `${ORIGIN}/downloads/releases/v0.5.30/${encodeURIComponent(mirrored.name)}`,
+      `${ORIGIN}/downloads/releases/v0.5.48/${encodeURIComponent(mirrored.name)}`,
     );
-    const path = join(mirrorRoot, 'v0.5.30', mirrored.name);
+    const path = join(mirrorRoot, 'v0.5.48', mirrored.name);
     assert.equal(existsSync(path), true);
     assert.equal(`sha256:${sha256(readFileSync(path))}`, mirrored.digest);
   }
@@ -132,7 +132,7 @@ test('private GitHub releases are fully mirrored to the official server with ver
 });
 
 test('a second sync reuses already verified local assets instead of downloading them again', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-reuse-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-reuse-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
   const rows = fixture();
   const { feed, calls } = testFeed({ mirrorRoot, currentRelease: () => rows });
@@ -147,7 +147,7 @@ test('a second sync reuses already verified local assets instead of downloading 
 });
 
 test('latest release publication is atomic when one of its assets fails verification', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-atomic-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-atomic-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
   const rows = fixture();
   rows[0].assets[1].digest = `sha256:${'0'.repeat(64)}`;
@@ -161,44 +161,44 @@ test('latest release publication is atomic when one of its assets fails verifica
 });
 
 test('a broken historical release never blocks a fully verified newest release', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-latest-first-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-latest-first-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
-  const latest = fixture('v0.5.31', 200);
-  const historical = fixture('v0.5.30', 300);
+  const latest = fixture('v0.5.49', 200);
+  const historical = fixture('v0.5.48', 300);
   historical[0].assets[1].digest = `sha256:${'0'.repeat(64)}`;
   const rows = combineFixtures(latest, historical);
   const { feed } = testFeed({ mirrorRoot, currentRelease: () => rows });
 
   const result = await feed.sync();
   assert.equal(result.source, 'server-mirror');
-  assert.equal(result.latestVersion, '0.5.31');
-  assert.equal(result.releases[0].tag, 'v0.5.31');
+  assert.equal(result.latestVersion, '0.5.49');
+  assert.equal(result.releases[0].tag, 'v0.5.49');
   assert.equal(result.releases[0].assets.length, 3);
   assert.equal(result.warning, 'release_history_partial');
   assert.equal(existsSync(join(mirrorRoot, 'index.json')), true);
-  assert.equal(existsSync(join(mirrorRoot, 'v0.5.31', INSTALLER)), true);
+  assert.equal(existsSync(join(mirrorRoot, 'v0.5.49', INSTALLER)), true);
 });
 
 test('notification wait resolves when a newly mirrored release changes the generation', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-notify-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-notify-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
-  let rows = fixture('v0.5.30', 400);
+  let rows = fixture('v0.5.48', 400);
   const { feed } = testFeed({ mirrorRoot, currentRelease: () => rows });
   const first = await feed.sync();
 
   const pending = feed.waitForChange(first.generation, 2_000);
-  rows = fixture('v0.5.31', 500);
+  rows = fixture('v0.5.49', 500);
   await feed.sync();
   const notification = await pending;
   const payload = feed.notificationPayload(notification);
 
   assert.equal(payload.changed, true);
-  assert.equal(payload.latestVersion, '0.5.31');
+  assert.equal(payload.latestVersion, '0.5.49');
   assert.notEqual(payload.generation, first.generation);
 });
 
 test('private repository without a server token never contacts GitHub and safely serves the local mirror state', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-no-token-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-no-token-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
   let calls = 0;
   const feed = createSiteReleaseFeed({

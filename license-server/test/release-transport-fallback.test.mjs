@@ -25,18 +25,18 @@ test('release proxy accepts only explicit HTTP/SOCKS proxy schemes', () => {
 });
 
 test('release mirror falls back from failed Node fetch to injected curl transport without exposing token', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-curl-fallback-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-curl-fallback-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
 
   const installer = Buffer.from('curl-fallback-installer');
   const digest = `sha256:${sha256(installer)}`;
-  const assetUrl = 'https://api.github.com/repos/b8vipvip/GPTLock/releases/assets/9001';
+  const assetUrl = 'https://api.github.com/repos/b8vipvip/GPTWork/releases/assets/9001';
   const releases = [{
-    tag_name: 'v0.5.30',
-    name: 'GPTWork v0.5.30',
+    tag_name: 'v0.5.48',
+    name: 'GPTWork v0.5.48',
     draft: false,
     prerelease: false,
-    published_at: '2026-09-01T00:00:00Z',
+    published_at: '2026-09-09T00:00:00Z',
     assets: [{
       name: 'GPTWorkSetup-x64.exe',
       url: assetUrl,
@@ -79,7 +79,7 @@ test('release mirror falls back from failed Node fetch to injected curl transpor
   const result = await feed.sync();
   assert.equal(directCalls, 2);
   assert.equal(curlCalls.length, 2);
-  assert.equal(result.latestVersion, '0.5.30');
+  assert.equal(result.latestVersion, '0.5.48');
   assert.equal(result.source, 'server-mirror');
   assert.equal(result.mirror.lastTransport, 'curl-direct');
   assert.equal(result.mirror.lastError, null);

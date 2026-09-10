@@ -21,46 +21,46 @@ function row(tag, id, bytes) {
     name: `GPTWork ${tag}`,
     draft: false,
     prerelease: false,
-    published_at: '2026-09-02T00:00:00Z',
+    published_at: '2026-09-09T00:00:00Z',
     assets: [{
       id,
-      name: `gptlock-${tag.slice(1)}.zip`,
-      url: `https://api.github.com/repos/b8vipvip/GPTLock/releases/assets/${id}`,
+      name: `gptwork-${tag.slice(1)}.zip`,
+      url: `https://api.github.com/repos/b8vipvip/GPTWork/releases/assets/${id}`,
       size: bytes.length,
       digest: digest(bytes),
     }],
   };
 }
 
-test('public mirror permanently excludes and removes releases older than v0.5.30', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-privacy-floor-'));
+test('public mirror permanently excludes and removes releases older than v0.5.48', async (t) => {
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-privacy-floor-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
 
-  const oldDir = join(mirrorRoot, 'v0.5.29');
+  const oldDir = join(mirrorRoot, 'v0.5.47');
   mkdirSync(oldDir, { recursive: true });
   writeFileSync(join(oldDir, 'private-old.zip'), 'private-history');
   writeFileSync(join(mirrorRoot, 'index.json'), JSON.stringify({
     generation: 'legacy-generation',
-    mirroredAt: '2026-08-31T00:00:00Z',
+    mirroredAt: '2026-09-08T00:00:00Z',
     releases: [{
-      tag: 'v0.5.29',
+      tag: 'v0.5.47',
       name: 'private historical release',
-      publishedAt: '2026-08-31T00:00:00Z',
-      assets: [{ name: 'private-old.zip', url: 'https://gptlock.mv3.cn/downloads/releases/v0.5.29/private-old.zip', size: 15, digest: digest(Buffer.from('private-history')) }],
+      publishedAt: '2026-09-08T00:00:00Z',
+      assets: [{ name: 'private-old.zip', url: 'https://gptlock.mv3.cn/downloads/releases/v0.5.47/private-old.zip', size: 15, digest: digest(Buffer.from('private-history')) }],
     }],
   }));
 
-  const currentBytes = Buffer.from('public-v0.5.30');
-  const oldBytes = Buffer.from('private-v0.5.29');
-  const rows = [row('v0.5.30', 530, currentBytes), row('v0.5.29', 529, oldBytes)];
+  const currentBytes = Buffer.from('public-v0.5.48');
+  const oldBytes = Buffer.from('private-v0.5.47');
+  const rows = [row('v0.5.48', 548, currentBytes), row('v0.5.47', 547, oldBytes)];
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(String(url));
     if (String(url).includes('/releases?per_page=12')) {
       return new Response(JSON.stringify(rows), { status: 200, headers: { 'content-type': 'application/json' } });
     }
-    if (String(url).endsWith('/530')) return new Response(currentBytes, { status: 200 });
-    if (String(url).endsWith('/529')) return new Response(oldBytes, { status: 200 });
+    if (String(url).endsWith('/548')) return new Response(currentBytes, { status: 200 });
+    if (String(url).endsWith('/547')) return new Response(oldBytes, { status: 200 });
     throw new Error(`Unexpected URL: ${url}`);
   };
 
@@ -76,16 +76,16 @@ test('public mirror permanently excludes and removes releases older than v0.5.30
   });
 
   const before = await feed.load();
-  assert.equal(before.minimumPublicVersion, '0.5.30');
+  assert.equal(before.minimumPublicVersion, '0.5.48');
   assert.deepEqual(before.releases, []);
   assert.equal(existsSync(oldDir), false);
-  assert.doesNotMatch(readFileSync(join(mirrorRoot, 'index.json'), 'utf8'), /0\.5\.29|private-old/);
+  assert.doesNotMatch(readFileSync(join(mirrorRoot, 'index.json'), 'utf8'), /0\.5\.47|private-old/);
 
   const result = await feed.sync();
-  assert.equal(result.latestVersion, '0.5.30');
-  assert.deepEqual(result.releases.map((release) => release.tag), ['v0.5.30']);
-  assert.equal(calls.some((url) => url.endsWith('/529')), false);
-  assert.equal(feed.serveAsset({ method: 'GET' }, {}, '/downloads/releases/v0.5.29/private-old.zip'), false);
-  assert.equal(existsSync(join(mirrorRoot, 'v0.5.29')), false);
-  assert.doesNotMatch(readFileSync(join(mirrorRoot, 'index.json'), 'utf8'), /0\.5\.29|private-old/);
+  assert.equal(result.latestVersion, '0.5.48');
+  assert.deepEqual(result.releases.map((release) => release.tag), ['v0.5.48']);
+  assert.equal(calls.some((url) => url.endsWith('/547')), false);
+  assert.equal(feed.serveAsset({ method: 'GET' }, {}, '/downloads/releases/v0.5.47/private-old.zip'), false);
+  assert.equal(existsSync(join(mirrorRoot, 'v0.5.47')), false);
+  assert.doesNotMatch(readFileSync(join(mirrorRoot, 'index.json'), 'utf8'), /0\.5\.47|private-old/);
 });

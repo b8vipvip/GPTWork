@@ -14,13 +14,13 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 import { createCurlReleaseTransport } from './release-http.mjs';
 
-const RELEASES_API = 'https://api.github.com/repos/b8vipvip/GPTLock/releases?per_page=12';
+const RELEASES_API = 'https://api.github.com/repos/b8vipvip/GPTWork/releases?per_page=12';
 const DEFAULT_ORIGIN = 'https://gptlock.mv3.cn';
 const DEFAULT_SYNC_MS = 60 * 1000;
 const DEFAULT_FETCH_RETRIES = 2;
 const DEFAULT_ASSET_TIMEOUT_MS = 60 * 1000;
 const MAX_NOTIFICATION_WAIT_MS = 25 * 1000;
-const MIN_PUBLIC_RELEASE_TAG = 'v0.5.30';
+const MIN_PUBLIC_RELEASE_TAG = 'v0.5.48';
 const SAFE_TAG = /^v\d+(?:\.\d+){1,3}$/i;
 const SAFE_ASSET = /^[A-Za-z0-9][A-Za-z0-9._+()-]{0,159}$/;
 const CONTENT_TYPES = new Map([
