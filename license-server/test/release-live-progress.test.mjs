@@ -19,15 +19,15 @@ function sha256(bytes) {
 function asset(name, id, bytes) {
   return {
     name,
-    url: `https://api.github.com/repos/b8vipvip/GPTLock/releases/assets/${id}`,
-    browser_download_url: `https://github.com/b8vipvip/GPTLock/releases/download/v0.5.30/${name}`,
+    url: `https://api.github.com/repos/b8vipvip/GPTWork/releases/assets/${id}`,
+    browser_download_url: `https://github.com/b8vipvip/GPTWork/releases/download/v0.5.48/${name}`,
     size: bytes.length,
     digest: `sha256:${sha256(bytes)}`,
   };
 }
 
 test('GitHub 401 is classified as an invalid release token instead of a generic feed failure', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-auth-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-auth-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
 
   const feed = createSiteReleaseFeed({
@@ -52,14 +52,14 @@ test('GitHub 401 is classified as an invalid release token instead of a generic 
 });
 
 test('latest release assets start concurrently and live status exposes download progress', async (t) => {
-  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptlock-release-progress-'));
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-progress-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
 
   const first = Buffer.from('first-release-asset');
   const second = Buffer.from('second-release-asset');
   const assets = [
     asset('GPTWorkSetup-x64.exe', 1001, first),
-    asset('gptwork-extension-0.5.30.zip', 1002, second),
+    asset('gptwork-extension-0.5.48.zip', 1002, second),
   ];
   const bytesByUrl = new Map([
     [assets[0].url, first],
@@ -83,11 +83,11 @@ test('latest release assets start concurrently and live status exposes download 
       const target = String(url);
       if (target.includes('/releases?per_page=12')) {
         return new Response(JSON.stringify([{
-          tag_name: 'v0.5.30',
-          name: 'GPTWork v0.5.30',
+          tag_name: 'v0.5.48',
+          name: 'GPTWork v0.5.48',
           draft: false,
           prerelease: false,
-          published_at: '2026-09-01T00:00:00Z',
+          published_at: '2026-09-09T00:00:00Z',
           assets,
         }]), { status: 200, headers: { 'content-type': 'application/json' } });
       }
@@ -115,7 +115,7 @@ test('latest release assets start concurrently and live status exposes download 
 
   releaseGateResolve();
   const result = await pending;
-  assert.equal(result.latestVersion, '0.5.30');
+  assert.equal(result.latestVersion, '0.5.48');
   assert.equal(result.sync.stage, 'completed');
   assert.equal(result.sync.completedAssets, 2);
   assert.equal(result.sync.totalAssets, 2);
