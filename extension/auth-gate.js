@@ -8,8 +8,8 @@ const el = {
   forgotForm: $('forgotForm'), forgotEmail: $('forgotEmail'),
   resetForm: $('resetForm'), resetEmailText: $('resetEmailText'), resetCode: $('resetCode'), resetPassword: $('resetPassword'),
   deviceReplaceForm: $('deviceReplaceForm'), deviceReplaceHint: $('deviceReplaceHint'), deviceReplaceList: $('deviceReplaceList'), cancelDeviceReplace: $('cancelDeviceReplace'),
-  accountEmail: $('accountEmail'), accountTier: $('accountTier'), accountExpiry: $('accountExpiry'), accountUsage: $('accountUsage'),
-  accountCenter: $('accountCenter'), accountLogout: $('accountLogout'), enabled: $('enabled'),
+  accountEmail: $('accountEmail'), accountTier: $('accountTier'), accountExpiry: $('accountExpiry'), accountUsage: $('accountUsage'), accountCenter: $('accountCenter'), accountLogout: $('accountLogout'), accountUpgrade: $('accountUpgrade'),
+  enabled: $('enabled'),
 };
 
 let verificationEmail = '';
@@ -100,17 +100,16 @@ function renderAccount(account) {
 
   const user = account.user || {};
   const entitlement = account.entitlement || {};
-  const membership = account.membership;
-  const sourceName = membership?.name || (entitlement.source === 'free' ? '免费期 / Free' : '无有效权益');
+  const sourceName = account.level?.name || entitlement.level?.name || '普通用户';
   el.accountEmail.textContent = user.email || '—';
   el.accountTier.textContent = sourceName;
   el.accountExpiry.textContent = `有效期 ${localDate(entitlement.expiresAt)}`;
   const usage = entitlement.usage || {};
   const limits = entitlement.limits || {};
-  el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口不限`;
+  el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口 ${usage.windows ?? 0}/${limits.windows ?? 0}`;
   if (el.enabled) {
-    if (!entitlement.active) el.enabled.title = '免费期或会员已到期，请在账户中心开通会员';
-    else el.enabled.title = '启用或关闭 GPTWork；窗口数量不受限制';
+    if (!entitlement.active) el.enabled.title = '当前使用时长已到期，请签到、分享或升级用户等级';
+    else el.enabled.title = `启用或关闭 GPTWork；当前等级最多 ${limits.windows ?? 1} 个同时窗口`;
   }
   window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
     detail: { authenticated, active: Boolean(entitlement.active) },
@@ -249,9 +248,8 @@ el.resetForm.addEventListener('submit', (event) => {
     .catch((error) => setMessage(`重置失败：${error.message}`, 'bad'));
 });
 
-el.accountCenter.addEventListener('click', () => {
-  void chrome.tabs.create({ url: chrome.runtime.getURL('account.html') }).then(() => window.close());
-});
+el.accountCenter?.addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('account.html') }));
+el.accountUpgrade?.addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('account.html#upgrade') }));
 
 el.accountLogout.addEventListener('click', () => {
   void sendMessage({ type: 'GPTLOCK_ACCOUNT_LOGOUT' })

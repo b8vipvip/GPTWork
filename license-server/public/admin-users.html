@@ -10,7 +10,7 @@
 <div class="shell">
   <aside class="sidebar">
     <div class="brand"><span>G</span><div><strong>GPTWork</strong><small>Control Center</small></div></div>
-    <nav><a href="/admin/overview" data-page="overview">总览</a><a href="/admin/users" data-page="users" class="active" aria-current="page">用户</a><a href="/admin/plans" data-page="plans">会员</a><a href="/admin/orders" data-page="orders">订单</a><a href="/admin/issues" data-page="issues">Issues 讨论区</a><a href="/admin/website" data-page="website">官网管理</a><a href="/admin/settings" data-page="settings">系统配置</a><a href="/admin/client-logs" data-page="client-logs">客户端运行日志</a><a href="/admin/server-logs" data-page="server-logs">服务端日志</a><a href="/admin/update" data-page="update">更新</a></nav>
+    <nav><a href="/admin/overview" data-page="overview">总览</a><a href="/admin/users" data-page="users" class="active" aria-current="page">用户</a><a href="/admin/plans" data-page="plans">用户配置</a><a href="/admin/orders" data-page="orders">订单</a><a href="/admin/issues" data-page="issues">Issues 讨论区</a><a href="/admin/website" data-page="website">官网管理</a><a href="/admin/settings" data-page="settings">系统配置</a><a href="/admin/client-logs" data-page="client-logs">客户端运行日志</a><a href="/admin/server-logs" data-page="server-logs">服务端日志</a><a href="/admin/update" data-page="update">更新</a></nav>
     <button id="logout" class="ghost" hidden>退出管理员</button>
   </aside>
   <main class="workspace">
@@ -22,19 +22,19 @@
     </section>
     <div id="app" hidden>
       <section id="users" class="card">
-        <div class="section-title"><div><h2>用户列表</h2><p class="muted">查看账户权益、客户端版本、在线设备和同步状态；列表内使用编辑/设置图标进入单项配置。</p></div><div class="section-actions"><button id="createUserToggle" class="primary">添加用户</button><input id="userSearch" placeholder="搜索邮箱"><button id="refreshUsers">刷新</button></div></div>
+        <div class="section-title"><div><h2>用户列表</h2><p class="muted">查看用户等级、客户端版本、在线设备和同步状态；列表内使用编辑/设置图标进入单项配置。</p></div><div class="section-actions"><button id="createUserToggle" class="primary">添加用户</button><input id="userSearch" placeholder="搜索邮箱"><button id="refreshUsers">刷新</button></div></div>
         <div id="createUserPanel" class="create-user-panel" hidden>
           <div class="section-title"><div><h3>手动添加用户</h3><p class="muted">初始密码只用于创建，不会在服务端明文保存或再次显示。</p></div><button id="cancelCreateUser">取消</button></div>
           <div class="grid four">
             <label>邮箱<input id="createUserEmail" type="email" autocomplete="off" placeholder="user@example.com"></label>
             <label>初始密码<div class="field-with-button"><input id="createUserPassword" type="password" autocomplete="new-password" placeholder="至少 10 位"><button id="generateUserPassword" type="button">生成</button></div></label>
             <label>邮箱状态<select id="createUserEmailAccess"><option value="verified">已验证，可直接登录</option><option value="exempt">免验证，可直接登录</option><option value="pending">待验证，需验证码</option></select></label>
-            <label>免费天数<input id="createUserFreeDays" type="number" min="0" max="3650"></label>
-            <label>自定义设备上限<input id="createUserDevices" type="number" min="1" max="1000" placeholder="留空=跟随默认/套餐"></label>
+            <label>新用户初始有效天数<input id="createUserFreeDays" type="number" min="0" max="3650"></label>
+            <label>自定义设备上限<input id="createUserDevices" type="number" min="1" max="1000" placeholder="留空=跟随用户等级"></label>
           </div>
           <div class="create-user-footer"><p id="createUserMessage" class="message"></p><button id="createUserSubmit" class="primary">创建用户</button></div>
         </div>
-        <div class="table-wrap"><table class="users-table"><thead><tr><th>ID</th><th>邮箱</th><th>状态</th><th>权益 / 套餐</th><th>设备上限</th><th>客户端版本</th><th>在线状态</th><th>操作</th></tr></thead><tbody id="usersBody"></tbody></table></div>
+        <div class="table-wrap"><table class="users-table"><thead><tr><th>ID</th><th>邮箱</th><th>状态</th><th>用户等级</th><th>设备上限</th><th>客户端版本</th><th>在线状态</th><th>操作</th></tr></thead><tbody id="usersBody"></tbody></table></div>
       </section>
     </div>
   </main>

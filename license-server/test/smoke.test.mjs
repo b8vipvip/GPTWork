@@ -57,7 +57,7 @@ function latestCode(messages, email, purpose) {
   return row.code;
 }
 
-test('account system verifies email, enforces entitlements, manages membership, and protects credentials', async () => {
+test('account system verifies email, enforces user levels and rewards, and protects credentials', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'gptlock-account-test-'));
   const dbPath = join(dir, 'account.sqlite3');
   const runtimeLogPath = join(dir, 'runtime.log');
@@ -142,7 +142,8 @@ test('account system verifies email, enforces entitlements, manages membership, 
     assert.equal(accountConfig.data.free.days, 7);
     assert.equal(accountConfig.data.free.maxDevices, 1);
     assert.equal(accountConfig.data.free.maxWindows, 1);
-    assert.deepEqual(accountConfig.data.plans.map((plan) => plan.code), ['monthly', 'quarterly', 'yearly']);
+    assert.deepEqual(accountConfig.data.plans.map((plan) => plan.code), ['deep', 'heavy']);
+    assert.deepEqual(accountConfig.data.levels.map((level) => level.code), ['normal', 'deep', 'heavy']);
 
     // Admin can disable registration email verification. New accounts activate immediately,
     // while the default remains enabled for backward-compatible production behavior.
@@ -174,7 +175,8 @@ test('account system verifies email, enforces entitlements, manages membership, 
     assert.equal(instantLogin.response.status, 200);
     assert.equal(instantLogin.data.account.user.emailVerified, false);
     assert.equal(instantLogin.data.account.user.emailVerificationExempt, true);
-    assert.equal(instantLogin.data.account.entitlement.source, 'free');
+    assert.equal(instantLogin.data.account.entitlement.source, 'level');
+    assert.equal(instantLogin.data.account.level.code, 'normal');
 
     const enableVerification = await jsonRequest(`${base}/admin/api/account/settings`, {
       method: 'PUT', headers: { cookie }, body: { emailVerificationRequired: true },
@@ -213,7 +215,8 @@ test('account system verifies email, enforces entitlements, manages membership, 
     });
     assert.equal(manualLogin.response.status, 200);
     assert.equal(manualLogin.data.account.user.email, manualEmail);
-    assert.equal(manualLogin.data.account.entitlement.source, 'free');
+    assert.equal(manualLogin.data.account.entitlement.source, 'level');
+    assert.equal(manualLogin.data.account.level.code, 'normal');
 
     const duplicateManual = await jsonRequest(`${base}/admin/api/account/users`, {
       method: 'POST', headers: { cookie }, body: { email: manualEmail, password: manualPassword },
@@ -323,24 +326,42 @@ test('account system verifies email, enforces entitlements, manages membership, 
     assert.equal(wrongLogin.response.status, 401);
     assert.equal(wrongLogin.data.error.code, 'LOGIN_FAILED');
 
-    // First device logs in; account entitlement is required but concurrent Chrome windows are unlimited.
+    // First device logs in as a normal user; the 1-window level limit is enforced server-side.
     const userLogin = await jsonRequest(`${base}/api/v1/auth/login`, {
       method: 'POST', headers: { origin: ORIGIN, 'x-forwarded-for': '203.0.113.21' }, body: extensionBody({ email, password: initialPassword }),
     });
     assert.equal(userLogin.response.status, 200);
     assert.ok(userLogin.data.sessionToken.length >= 40);
     assert.equal(userLogin.data.account.authenticated, true);
-    assert.equal(userLogin.data.account.entitlement.source, 'free');
+    assert.equal(userLogin.data.account.entitlement.source, 'level');
+    assert.equal(userLogin.data.account.level.code, 'normal');
+    assert.deepEqual(userLogin.data.account.entitlement.limits, { devices: 1, windows: 1 });
     const firstToken = userLogin.data.sessionToken;
+
+    const rewardsBefore = await jsonRequest(`${base}/api/v1/account/rewards`, {
+      headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` },
+    });
+    assert.equal(rewardsBefore.response.status, 200);
+    assert.equal(rewardsBefore.data.rewards.checkin.checkedInToday, false);
+    assert.equal(rewardsBefore.data.rewards.checkin.rewardDays, 1);
+    assert.equal(rewardsBefore.data.rewards.share.rewardDays, 7);
+    assert.match(rewardsBefore.data.rewards.share.url, /\/account\?invite=GW-/);
+    const expiryBeforeCheckin = Date.parse(userLogin.data.account.entitlement.expiresAt);
+    const checkin = await jsonRequest(`${base}/api/v1/account/checkin`, {
+      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` }, body: {},
+    });
+    assert.equal(checkin.response.status, 200);
+    assert.equal(checkin.data.rewards.checkin.checkedInToday, true);
+    assert.ok(Date.parse(checkin.data.account.entitlement.expiresAt) >= expiryBeforeCheckin + 24 * 60 * 60 * 1000 - 1000);
 
     const heartbeat = await jsonRequest(`${base}/api/v1/account/heartbeat`, {
       method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` },
       body: extensionBody({ windowKeys: ['chrome:10000001', 'chrome:10000002'] }),
     });
     assert.equal(heartbeat.response.status, 200);
-    assert.deepEqual(heartbeat.data.allowedWindowKeys, ['chrome:10000001', 'chrome:10000002']);
-    assert.deepEqual(heartbeat.data.deniedWindowKeys, []);
-    assert.equal(heartbeat.data.account.entitlement.usage.windows, 2);
+    assert.deepEqual(heartbeat.data.allowedWindowKeys, ['chrome:10000001']);
+    assert.deepEqual(heartbeat.data.deniedWindowKeys, ['chrome:10000002']);
+    assert.equal(heartbeat.data.account.entitlement.usage.windows, 1);
 
     const secondDevice = await jsonRequest(`${base}/api/v1/auth/login`, {
       method: 'POST', headers: { origin: ORIGIN, 'x-forwarded-for': '203.0.113.22' },
@@ -473,37 +494,39 @@ test('account system verifies email, enforces entitlements, manages membership, 
     assert.equal(smtpSecret.ciphertext.includes('smtp-secret-should-not-be-plaintext'), false);
     assert.equal(inspectDb.prepare('SELECT password_hash FROM users WHERE id=?').get(user.id).password_hash.includes(initialPassword), false);
 
-    // Admin can configure plans; client sees only enabled payment methods and public benefits.
-    const planUpdate = await jsonRequest(`${base}/admin/api/account/plans/monthly`, {
+    // Admin can configure paid user levels; client sees only upgrade levels and enabled payment methods.
+    const planUpdate = await jsonRequest(`${base}/admin/api/account/plans/deep`, {
       method: 'PUT', headers: { cookie }, body: {
-        name: '月卡 Pro', priceCents: 1999, durationDays: 30, maxDevices: 4, maxWindows: 4,
-        benefits: ['30 天会员', '4 台设备', '4 个同时窗口'], enabled: true,
+        name: '深度 Pro', priceCents: 1999, durationDays: 30, maxDevices: 1, maxWindows: 3,
+        benefits: ['30 天深度用户', '1 台设备', '3 个同时窗口'], enabled: true,
       },
     });
     assert.equal(planUpdate.response.status, 200);
 
     const clientConfig = await jsonRequest(`${base}/api/v1/account/config`, { headers: { origin: ORIGIN } });
-    const monthly = clientConfig.data.plans.find((plan) => plan.code === 'monthly');
-    assert.equal(monthly.priceCents, 1999);
-    assert.equal(monthly.limits.devices, 4);
+    const deep = clientConfig.data.plans.find((plan) => plan.code === 'deep');
+    assert.equal(deep.priceCents, 1999);
+    assert.equal(deep.limits.devices, 1);
+    assert.equal(deep.limits.windows, 3);
     assert.deepEqual(clientConfig.data.paymentMethods.map((method) => method.code), ['wechat']);
 
-    // User creates order; admin marks paid; membership becomes active and raises benefits.
+    // User creates an upgrade order; admin marks paid; the user level becomes deep.
     const createOrder = await jsonRequest(`${base}/api/v1/account/orders`, {
-      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` }, body: { planCode: 'monthly', paymentMethod: 'wechat' },
+      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` }, body: { planCode: 'deep', paymentMethod: 'wechat' },
     });
     assert.equal(createOrder.response.status, 201);
     assert.equal(createOrder.data.order.amountCents, 1999);
     assert.equal(createOrder.data.order.payUrl, 'https://pay.example.com/wechat');
     assert.equal(createOrder.data.order.status, 'pending');
-    assert.equal(createOrder.data.order.planSnapshot.name, '月卡 Pro');
-    assert.equal(createOrder.data.order.planSnapshot.maxDevices, 4);
+    assert.equal(createOrder.data.order.planSnapshot.name, '深度 Pro');
+    assert.equal(createOrder.data.order.planSnapshot.maxDevices, 1);
+    assert.equal(createOrder.data.order.planSnapshot.maxWindows, 3);
 
     // Existing orders must keep the purchased terms even if the administrator changes the plan before payment confirmation.
-    const futurePlanUpdate = await jsonRequest(`${base}/admin/api/account/plans/monthly`, {
+    const futurePlanUpdate = await jsonRequest(`${base}/admin/api/account/plans/deep`, {
       method: 'PUT', headers: { cookie }, body: {
-        name: '月卡 Future', priceCents: 2999, durationDays: 45, maxDevices: 8, maxWindows: 8,
-        benefits: ['45 天会员', '8 台设备', '8 个同时窗口'], enabled: true,
+        name: '深度 Future', priceCents: 2999, durationDays: 45, maxDevices: 1, maxWindows: 3,
+        benefits: ['45 天深度用户', '1 台设备', '3 个同时窗口'], enabled: true,
       },
     });
     assert.equal(futurePlanUpdate.response.status, 200);
@@ -518,9 +541,8 @@ test('account system verifies email, enforces entitlements, manages membership, 
       headers: { origin: ORIGIN, authorization: `Bearer ${firstToken}` },
     });
     assert.equal(meAfterMembership.response.status, 200);
-    assert.equal(meAfterMembership.data.account.membership.planCode, 'monthly');
-    assert.equal(meAfterMembership.data.account.membership.name, '月卡 Pro');
-    assert.deepEqual(meAfterMembership.data.account.membership.limits, { devices: 4, windows: 4 });
+    assert.equal(meAfterMembership.data.account.level.code, 'deep');
+    assert.equal(meAfterMembership.data.account.entitlement.source, 'level');
     // Per-user overrides intentionally remain stronger than the frozen purchased plan defaults.
     assert.equal(meAfterMembership.data.account.entitlement.limits.devices, 2);
     assert.equal(meAfterMembership.data.account.entitlement.limits.windows, 2);

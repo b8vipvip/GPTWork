@@ -202,10 +202,14 @@ function ensureTabState(tabId, url = '') {
   return state;
 }
 
-function accountAllowsState(_state) {
-  // Account entitlement controls access, but the number of Chrome windows never does.
-  // Window keys remain heartbeat telemetry only and must not disable GPTWork.
-  return Boolean(accountState?.authenticated && accountState?.entitlement?.active);
+function accountAllowsState(state) {
+  if (!accountState?.authenticated || !accountState?.entitlement?.active) return false;
+  const windowKey = Number.isInteger(state?.windowId) ? `chrome:${state.windowId}` : null;
+  if (!windowKey) return true;
+  const allowed = Array.isArray(accountState.allowedWindowKeys) ? accountState.allowedWindowKeys : [];
+  const denied = Array.isArray(accountState.deniedWindowKeys) ? accountState.deniedWindowKeys : [];
+  if (!allowed.length && !denied.length) return true;
+  return allowed.includes(windowKey) && !denied.includes(windowKey);
 }
 function effectiveSettingsForState(state) {
   return { ...currentSettings, enabled: Boolean(currentSettings.enabled && accountAllowsState(state)) };

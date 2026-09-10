@@ -24,21 +24,22 @@ class AccountError extends Error {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const CHECKIN_REWARD_DAYS = 1;
+const SHARE_REWARD_DAYS = 7;
+const REWARD_TIMEZONE_OFFSET_MS = 8 * 60 * 60 * 1000;
+const USER_LEVELS_V1 = true;
+const USER_LEVEL_CODES = new Set(['normal', 'deep', 'heavy']);
+const USER_LEVEL_RANK = { normal: 0, deep: 1, heavy: 2 };
 const DEFAULT_PLANS = [
   {
-    code: 'monthly', name: '月卡 / Monthly', priceCents: 1900, durationDays: 30,
-    maxDevices: 3, maxWindows: 3, sortOrder: 10,
-    benefits: ['30 天会员有效期', '最多 3 台设备', '最多 3 个同时窗口', '完整 GPTWork 功能'],
+    code: 'deep', name: '深度用户', priceCents: 1900, durationDays: 30,
+    maxDevices: 1, maxWindows: 3, sortOrder: 20,
+    benefits: ['1 台设备', '最多 3 个同时窗口', '完整 GPTWork 功能'],
   },
   {
-    code: 'quarterly', name: '季卡 / Quarterly', priceCents: 4900, durationDays: 90,
-    maxDevices: 5, maxWindows: 5, sortOrder: 20,
-    benefits: ['90 天会员有效期', '最多 5 台设备', '最多 5 个同时窗口', '完整 GPTWork 功能'],
-  },
-  {
-    code: 'yearly', name: '年卡 / Yearly', priceCents: 16900, durationDays: 365,
-    maxDevices: 10, maxWindows: 10, sortOrder: 30,
-    benefits: ['365 天会员有效期', '最多 10 台设备', '最多 10 个同时窗口', '完整 GPTWork 功能'],
+    code: 'heavy', name: '重度用户', priceCents: 4900, durationDays: 30,
+    maxDevices: 5, maxWindows: 5, sortOrder: 30,
+    benefits: ['最多 5 台设备', '最多 5 个同时窗口', '完整 GPTWork 功能'],
   },
 ];
 
@@ -126,6 +127,7 @@ export function createAccountSystem({
     email_verified_at TEXT,
     email_verification_exempt INTEGER NOT NULL DEFAULT 0 CHECK(email_verification_exempt IN (0,1)),
     free_expires_at TEXT,
+    user_level TEXT NOT NULL DEFAULT 'normal',
     max_devices_override INTEGER CHECK(max_devices_override IS NULL OR max_devices_override >= 1),
     max_windows_override INTEGER CHECK(max_windows_override IS NULL OR max_windows_override >= 1),
     created_at TEXT NOT NULL,
@@ -232,6 +234,27 @@ export function createAccountSystem({
     detail TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS account_daily_checkins (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day_key TEXT NOT NULL,
+    reward_days INTEGER NOT NULL DEFAULT 1 CHECK(reward_days >= 1),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, day_key)
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS account_invite_codes (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    code TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS account_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inviter_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    invitee_user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    invite_code TEXT NOT NULL,
+    reward_days INTEGER NOT NULL DEFAULT 7 CHECK(reward_days >= 1),
+    created_at TEXT NOT NULL,
+    rewarded_at TEXT NOT NULL
+  ) STRICT;
   CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token_hash);
   CREATE INDEX IF NOT EXISTS idx_user_windows_seen ON user_window_leases(last_seen_at);
@@ -245,6 +268,8 @@ export function createAccountSystem({
     if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
   }
   ensureColumn('users', 'email_verification_exempt', 'email_verification_exempt INTEGER NOT NULL DEFAULT 0 CHECK(email_verification_exempt IN (0,1))');
+  ensureColumn('users', 'user_level', "user_level TEXT NOT NULL DEFAULT 'normal'");
+  db.prepare("UPDATE users SET user_level='normal' WHERE user_level NOT IN ('normal','deep','heavy') OR user_level IS NULL").run();
   ensureColumn('memberships', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_orders', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_plans', 'original_price_cents', 'original_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(original_price_cents >= 0)');
@@ -258,6 +283,28 @@ export function createAccountSystem({
   for (const plan of DEFAULT_PLANS) {
     insertPlan.run(plan.code, plan.name, plan.priceCents, plan.durationDays, plan.maxDevices, plan.maxWindows,
       JSON.stringify(plan.benefits), 1, plan.sortOrder, nowIso());
+  }
+  // Legacy month/quarter/year products remain in the database only so historical
+  // orders keep their foreign-key targets. They are no longer a public entitlement model.
+  db.prepare("UPDATE membership_plans SET enabled=0 WHERE code IN ('monthly','quarterly','yearly')").run();
+  const levelMigration = db.prepare("SELECT value FROM app_settings WHERE key='account_user_level_migration_v1'").get();
+  if (!levelMigration) {
+    const legacyRows = db.prepare(`SELECT m.user_id,m.expires_at,p.max_devices,p.max_windows
+      FROM memberships m JOIN membership_plans p ON p.code=m.plan_code
+      WHERE m.status='active' AND m.expires_at>? ORDER BY m.expires_at DESC`).all(nowIso());
+    const migratedUsers = new Set();
+    for (const row of legacyRows) {
+      if (migratedUsers.has(row.user_id)) continue;
+      migratedUsers.add(row.user_id);
+      const level = Number(row.max_devices) >= 5 || Number(row.max_windows) >= 5 ? 'heavy' : 'deep';
+      const user = db.prepare('SELECT free_expires_at FROM users WHERE id=?').get(row.user_id);
+      const currentExpiry = Date.parse(user?.free_expires_at || '') || 0;
+      const legacyExpiry = Date.parse(row.expires_at || '') || 0;
+      db.prepare('UPDATE users SET user_level=?,free_expires_at=?,updated_at=? WHERE id=?')
+        .run(level, legacyExpiry > currentExpiry ? row.expires_at : user?.free_expires_at, nowIso(), row.user_id);
+    }
+    db.prepare(`INSERT INTO app_settings(key,value,updated_at) VALUES('account_user_level_migration_v1','1',?)
+      ON CONFLICT(key) DO UPDATE SET value='1',updated_at=excluded.updated_at`).run(nowIso());
   }
   const insertPayment = db.prepare(`INSERT OR IGNORE INTO payment_methods(code,name,enabled,pay_url,instructions,updated_at) VALUES(?,?,?,?,?,?)`);
   insertPayment.run('wechat', '微信支付 / WeChat Pay', 0, '', '', nowIso());
@@ -420,6 +467,39 @@ export function createAccountSystem({
       maxWindows: getIntSetting('account_free_max_windows', 1, 1, 1000),
     };
   }
+  function normalLevelConfig() {
+    const free = freeConfig();
+    return {
+      code: 'normal', name: '普通用户', priceCents: 0, originalPriceCents: 0, promoPriceCents: null,
+      promoEndsAt: null, promoActive: false, savingsCents: 0, durationDays: free.days,
+      limits: { devices: free.maxDevices, windows: free.maxWindows },
+      benefits: [`${free.maxDevices} 台设备`, `最多 ${free.maxWindows} 个同时窗口`, '完整 GPTWork 功能'],
+      enabled: true, sortOrder: 10,
+    };
+  }
+  function planLevelPublic(row) {
+    if (!row) return null;
+    let benefits = [];
+    try { benefits = JSON.parse(row.benefits_json || '[]'); } catch {}
+    return {
+      code: row.code, name: row.name, ...normalizePlanPricing(row), durationDays: row.duration_days,
+      limits: { devices: row.max_devices, windows: row.max_windows }, benefits,
+      enabled: Boolean(row.enabled), sortOrder: row.sort_order,
+    };
+  }
+  function levelDefinitions({ publicOnly = false } = {}) {
+    const paid = db.prepare("SELECT * FROM membership_plans WHERE code IN ('deep','heavy') ORDER BY sort_order,code").all()
+      .filter((row) => !publicOnly || row.enabled).map(planLevelPublic);
+    return [normalLevelConfig(), ...paid];
+  }
+  function userLevelCode(user) {
+    const value = String(user?.user_level || 'normal').toLowerCase();
+    return USER_LEVEL_CODES.has(value) ? value : 'normal';
+  }
+  function userLevel(user) {
+    const code = userLevelCode(user);
+    return levelDefinitions().find((item) => item.code === code) || normalLevelConfig();
+  }
   function sessionDays() { return getIntSetting('account_session_days', 30, 1, 365); }
   function emailVerificationRequired() { return getSetting('account_email_verification_required', '1') !== '0'; }
   function emailAccessSatisfied(user) { return Boolean(user?.email_verified_at || user?.email_verification_exempt); }
@@ -456,25 +536,14 @@ export function createAccountSystem({
       ORDER BY m.starts_at ASC LIMIT 1`).get(userId, now));
   }
   function entitlementFor(user) {
-    const free = freeConfig();
-    const membership = user ? currentMembership(user.id) : null;
+    const level = userLevel(user);
     let active = false;
-    let source = 'none';
-    let expiresAt = user?.free_expires_at || null;
-    let maxDevices = free.maxDevices;
-    let maxWindows = free.maxWindows;
-    if (user && user.status === 'active' && emailAccessSatisfied(user)) {
-      if (membership) {
-        active = true;
-        source = 'membership';
-        expiresAt = membership.expires_at;
-        maxDevices = membership.max_devices;
-        maxWindows = membership.max_windows;
-      } else if (user.free_expires_at && Date.parse(user.free_expires_at) > Date.now()) {
-        active = true;
-        source = 'free';
-        expiresAt = user.free_expires_at;
-      }
+    const expiresAt = user?.free_expires_at || null;
+    let maxDevices = level.limits.devices;
+    let maxWindows = level.limits.windows;
+    if (user && user.status === 'active' && emailAccessSatisfied(user)
+        && user.free_expires_at && Date.parse(user.free_expires_at) > Date.now()) {
+      active = true;
     }
     if (user?.max_devices_override !== null && user?.max_devices_override !== undefined) maxDevices = user.max_devices_override;
     if (user?.max_windows_override !== null && user?.max_windows_override !== undefined) maxWindows = user.max_windows_override;
@@ -484,8 +553,9 @@ export function createAccountSystem({
       JOIN user_sessions s ON s.id=wl.session_id WHERE s.user_id=? AND s.revoked_at IS NULL AND s.expires_at>?`).get(user.id, nowIso()).count : 0;
     return {
       active,
-      source,
+      source: 'level',
       expiresAt,
+      level: { code: level.code, name: level.name, rank: USER_LEVEL_RANK[level.code] ?? 0 },
       limits: { devices: maxDevices, windows: maxWindows },
       usage: { devices: usageDevices, windows: usageWindows },
     };
@@ -506,8 +576,7 @@ export function createAccountSystem({
   }
   function accountSummary(user, session = null) {
     if (!user) return { authenticated: false };
-    const membership = currentMembership(user.id);
-    const next = nextMembership(user.id);
+    const entitlement = entitlementFor(user);
     return {
       authenticated: true,
       user: {
@@ -520,16 +589,18 @@ export function createAccountSystem({
         freeExpiresAt: user.free_expires_at,
         createdAt: user.created_at,
       },
-      membership: membershipPublic(membership),
-      nextMembership: membershipPublic(next),
-      entitlement: entitlementFor(user),
+      level: entitlement.level,
+      // Legacy fields are kept for old clients/order history only. New clients use level.
+      membership: membershipPublic(currentMembership(user.id)),
+      nextMembership: membershipPublic(nextMembership(user.id)),
+      entitlement,
       session: session ? { expiresAt: session.expires_at, deviceId: session.device_id } : null,
     };
   }
 
   function sessionFromToken(token) {
     if (!token) return null;
-    const row = db.prepare(`SELECT s.*,u.email,u.password_hash,u.status AS user_status,u.email_verified_at,u.email_verification_exempt,u.free_expires_at,
+    const row = db.prepare(`SELECT s.*,u.email,u.password_hash,u.status AS user_status,u.email_verified_at,u.email_verification_exempt,u.free_expires_at,u.user_level,
       u.max_devices_override,u.max_windows_override,u.created_at AS user_created_at,u.updated_at AS user_updated_at
       FROM user_sessions s JOIN users u ON u.id=s.user_id
       WHERE s.token_hash=? AND s.revoked_at IS NULL`).get(sha256(token));
@@ -546,6 +617,7 @@ export function createAccountSystem({
       email_verified_at: row.email_verified_at,
       email_verification_exempt: row.email_verification_exempt,
       free_expires_at: row.free_expires_at,
+      user_level: row.user_level,
       max_devices_override: row.max_devices_override,
       max_windows_override: row.max_windows_override,
       created_at: row.user_created_at,
@@ -624,18 +696,7 @@ export function createAccountSystem({
   }
 
   function publicPlans() {
-    return db.prepare('SELECT * FROM membership_plans WHERE enabled=1 ORDER BY sort_order,code').all().map((row) => {
-      let benefits = [];
-      try { benefits = JSON.parse(row.benefits_json || '[]'); } catch {}
-      return {
-        code: row.code,
-        name: row.name,
-        ...normalizePlanPricing(row),
-        durationDays: row.duration_days,
-        limits: { devices: row.max_devices, windows: row.max_windows },
-        benefits,
-      };
-    });
+    return levelDefinitions({ publicOnly: true }).filter((level) => level.code !== 'normal');
   }
   function publicPaymentMethods() {
     if (paymentSystem?.list) return paymentSystem.list(true);
@@ -776,17 +837,20 @@ export function createAccountSystem({
   }
 
   function grantMembership(userId, planCode, source = 'admin', orderId = null, frozenTerms = null) {
-    const plan = db.prepare('SELECT * FROM membership_plans WHERE code=?').get(String(planCode || ''));
-    if (!plan) fail(404, 'PLAN_NOT_FOUND', '会员套餐不存在');
+    const plan = db.prepare("SELECT * FROM membership_plans WHERE code IN ('deep','heavy') AND code=?").get(String(planCode || ''));
+    if (!plan) fail(404, 'PLAN_NOT_FOUND', '升级等级不存在');
     const terms = normalizePlanSnapshot(frozenTerms, plan);
-    if (terms.code !== plan.code) fail(409, 'PLAN_SNAPSHOT_MISMATCH', '订单套餐快照与套餐不匹配');
+    if (terms.code !== plan.code) fail(409, 'PLAN_SNAPSHOT_MISMATCH', '订单等级快照与升级等级不匹配');
+    const user = userById(userId);
     const latest = db.prepare(`SELECT expires_at FROM memberships WHERE user_id=? AND status='active' ORDER BY expires_at DESC LIMIT 1`).get(userId);
-    const baseMs = Math.max(Date.now(), Date.parse(latest?.expires_at || '') || 0);
+    const baseMs = Math.max(Date.now(), Date.parse(user?.free_expires_at || '') || 0, Date.parse(latest?.expires_at || '') || 0);
     const startsAt = new Date(baseMs).toISOString();
     const expiresAt = new Date(baseMs + terms.durationDays * DAY_MS).toISOString();
     const result = db.prepare(`INSERT INTO memberships(user_id,plan_code,starts_at,expires_at,status,source,order_id,plan_snapshot_json,created_at) VALUES(?,?,?,?, 'active',?,?,?,?)`)
       .run(userId, plan.code, startsAt, expiresAt, source, orderId, JSON.stringify(terms), nowIso());
-    audit('membership_granted', userId, { membershipId: Number(result.lastInsertRowid), planCode: plan.code, startsAt, expiresAt, source });
+    db.prepare('UPDATE users SET user_level=?,free_expires_at=?,updated_at=? WHERE id=?')
+      .run(plan.code, expiresAt, nowIso(), userId);
+    audit('level_upgraded', userId, { membershipId: Number(result.lastInsertRowid), level: plan.code, startsAt, expiresAt, source });
     return hydrateMembership(db.prepare(`${MEMBERSHIP_SELECT} WHERE m.id=?`).get(Number(result.lastInsertRowid)));
   }
 
@@ -823,6 +887,67 @@ export function createAccountSystem({
     return db.prepare('SELECT * FROM membership_orders WHERE id=?').get(row.id);
   }
 
+  function rewardDayKey(at = Date.now()) {
+    return new Date(at + REWARD_TIMEZONE_OFFSET_MS).toISOString().slice(0, 10);
+  }
+  function ensureShareCode(userId) {
+    const existing = db.prepare('SELECT code FROM account_invite_codes WHERE user_id=?').get(userId);
+    if (existing?.code) return existing.code;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const code = `GW-${randomBytes(6).toString('base64url').toUpperCase()}`;
+      try {
+        db.prepare('INSERT INTO account_invite_codes(user_id,code,created_at) VALUES(?,?,?)').run(userId, code, nowIso());
+        return code;
+      } catch (error) {
+        if (!String(error?.message || '').includes('UNIQUE')) throw error;
+      }
+    }
+    fail(500, 'SHARE_CODE_UNAVAILABLE', '暂时无法生成分享链接，请稍后重试');
+  }
+  function extendRewardDays(userId, days) {
+    const rewardDays = clampInt(days, 1, 3650, 1);
+    const user = userById(userId);
+    if (!user) fail(404, 'ACCOUNT_NOT_FOUND', '账户不存在');
+    const baseMs = Math.max(Date.now(), Date.parse(user.free_expires_at || '') || 0);
+    const expiresAt = new Date(baseMs + rewardDays * DAY_MS).toISOString();
+    db.prepare('UPDATE users SET free_expires_at=?,updated_at=? WHERE id=?').run(expiresAt, nowIso(), userId);
+    return expiresAt;
+  }
+  function rewardSnapshot(userId) {
+    const code = ensureShareCode(userId);
+    const checked = db.prepare('SELECT created_at FROM account_daily_checkins WHERE user_id=? AND day_key=?').get(userId, rewardDayKey());
+    const checkins = db.prepare('SELECT COUNT(*) AS count FROM account_daily_checkins WHERE user_id=?').get(userId);
+    const shares = db.prepare('SELECT COUNT(*) AS count FROM account_invites WHERE inviter_user_id=?').get(userId);
+    const user = userById(userId);
+    return {
+      checkin: { checkedInToday: Boolean(checked), checkedInAt: checked?.created_at || null, rewardDays: CHECKIN_REWARD_DAYS, totalCheckins: Number(checkins?.count || 0) },
+      share: {
+        code,
+        url: `${String(publicOrigin || '').replace(/\/$/, '')}/account?invite=${encodeURIComponent(code)}`,
+        rewardDays: SHARE_REWARD_DAYS,
+        successfulShares: Number(shares?.count || 0),
+      },
+      bonusExpiresAt: user?.free_expires_at || null,
+    };
+  }
+  function checkIn(userId) {
+    const dayKey = rewardDayKey();
+    const existing = db.prepare('SELECT created_at FROM account_daily_checkins WHERE user_id=? AND day_key=?').get(userId, dayKey);
+    if (existing) return { alreadyCheckedIn: true, rewards: rewardSnapshot(userId) };
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('INSERT INTO account_daily_checkins(user_id,day_key,reward_days,created_at) VALUES(?,?,?,?)')
+        .run(userId, dayKey, CHECKIN_REWARD_DAYS, nowIso());
+      extendRewardDays(userId, CHECKIN_REWARD_DAYS);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+    audit('daily_checkin', userId, { rewardDays: CHECKIN_REWARD_DAYS });
+    return { alreadyCheckedIn: false, rewards: rewardSnapshot(userId) };
+  }
+
   async function handleApi(req, res, url, cors = {}) {
     const path = url.pathname;
     const isAccountPath = path.startsWith('/api/v1/account/') || path.startsWith('/api/v1/auth/');
@@ -834,6 +959,7 @@ export function createAccountSystem({
           accountRequired: true,
           emailVerificationRequired: emailVerificationRequired(),
           free: freeConfig(),
+          levels: levelDefinitions({ publicOnly: true }),
           plans: publicPlans(),
           paymentMethods: publicPaymentMethods(),
         }, cors), true;
@@ -974,6 +1100,17 @@ export function createAccountSystem({
         return json(res, 200, { ok: true, account: accountSummary(userById(session.user_id), session) }, cors), true;
       }
 
+      if (path === '/api/v1/account/rewards' && req.method === 'GET') {
+        const session = requireSession(req);
+        return json(res, 200, { ok: true, rewards: rewardSnapshot(session.user_id) }, cors), true;
+      }
+
+      if (path === '/api/v1/account/checkin' && req.method === 'POST') {
+        const session = requireSession(req);
+        const result = checkIn(session.user_id);
+        return json(res, 200, { ok: true, ...result, account: accountSummary(userById(session.user_id), session) }, cors), true;
+      }
+
       if (path === '/api/v1/account/logout' && req.method === 'POST') {
         const session = sessionFromToken(bearer(req));
         if (session) {
@@ -1046,11 +1183,14 @@ export function createAccountSystem({
         const requested = [...new Set(Array.isArray(input.windowKeys)
           ? input.windowKeys.filter((key) => validId(key, 220)).slice(0, 128) : [])];
         purgeWindowLeases();
-        // Window leases are telemetry/liveness records only. Account entitlement may
-        // enable GPTWork, but concurrent Chrome window count is intentionally unlimited.
-        const allowed = entitlement.active ? requested : [];
         const now = nowIso();
         db.prepare('DELETE FROM user_window_leases WHERE session_id=?').run(session.id);
+        const occupiedByOtherSessions = Number(db.prepare(`SELECT COUNT(*) AS count FROM user_window_leases wl
+          JOIN user_sessions s ON s.id=wl.session_id
+          WHERE s.user_id=? AND s.id<>? AND s.revoked_at IS NULL AND s.expires_at>?`)
+          .get(session.user_id, session.id, now).count || 0);
+        const remaining = Math.max(0, Number(entitlement.limits.windows || 1) - occupiedByOtherSessions);
+        const allowed = entitlement.active ? requested.slice(0, remaining) : [];
         const insert = db.prepare('INSERT INTO user_window_leases(session_id,window_key,first_seen_at,last_seen_at) VALUES(?,?,?,?)');
         for (const key of allowed) insert.run(session.id, key, now, now);
         db.prepare('UPDATE user_sessions SET last_seen_at=?,extension_version=? WHERE id=?')
@@ -1140,6 +1280,7 @@ export function createAccountSystem({
       emailVerificationExempt: Boolean(user.email_verification_exempt),
       freeExpiresAt: user.free_expires_at,
       membership: membershipPublic(membership),
+      level: entitlement.level,
       entitlement,
       overrides: { devices: user.max_devices_override, windows: user.max_windows_override },
       createdAt: user.created_at,
@@ -1230,6 +1371,8 @@ export function createAccountSystem({
           if (duplicate && duplicate.id !== user.id) fail(409, 'ACCOUNT_EXISTS', '该邮箱已被其他用户使用');
         }
         const status = ['active', 'disabled', 'pending'].includes(input.status) ? input.status : user.status;
+        const requestedLevel = input.userLevel === undefined ? userLevelCode(user) : String(input.userLevel || '').toLowerCase();
+        if (!USER_LEVEL_CODES.has(requestedLevel)) fail(400, 'INVALID_USER_LEVEL', '用户等级必须是普通、深度或重度');
         let freeExpiresAt = input.freeExpiresAt === null ? null : (parseIso(input.freeExpiresAt) || user.free_expires_at);
         const membership = currentMembership(user.id);
         let membershipExpiresAt = membership?.expires_at || null;
@@ -1254,8 +1397,8 @@ export function createAccountSystem({
           if (updateMembershipExpiry) {
             db.prepare('UPDATE memberships SET expires_at=? WHERE id=?').run(membershipExpiresAt, membership.id);
           }
-          db.prepare(`UPDATE users SET email=?,status=?,free_expires_at=?,max_devices_override=?,max_windows_override=?,updated_at=? WHERE id=?`)
-            .run(email, status, freeExpiresAt, maxDevicesOverride, maxWindowsOverride, changedAt, user.id);
+          db.prepare(`UPDATE users SET email=?,status=?,free_expires_at=?,user_level=?,max_devices_override=?,max_windows_override=?,updated_at=? WHERE id=?`)
+            .run(email, status, freeExpiresAt, requestedLevel, maxDevicesOverride, maxWindowsOverride, changedAt, user.id);
           if (status === 'disabled') {
             db.prepare('DELETE FROM user_window_leases WHERE session_id IN (SELECT id FROM user_sessions WHERE user_id=?)').run(user.id);
             db.prepare('UPDATE user_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(changedAt, user.id);
@@ -1266,7 +1409,7 @@ export function createAccountSystem({
           throw error;
         }
         audit('admin_user_updated', user.id, {
-          emailChanged: email !== user.email, status, freeExpiresAt, membershipId: membership?.id || null,
+          emailChanged: email !== user.email, status, userLevel: requestedLevel, freeExpiresAt, membershipId: membership?.id || null,
           membershipExpiresAt, maxDevicesOverride, maxWindowsOverride,
         });
         return json(res, 200, { ok: true, user: adminUserRow(userById(user.id)) }), true;
@@ -1330,19 +1473,21 @@ export function createAccountSystem({
       }
 
       if (path === '/admin/api/account/plans' && req.method === 'GET') {
-        const plans = db.prepare('SELECT * FROM membership_plans ORDER BY sort_order,code').all().map((row) => {
-          let benefits = [];
-          try { benefits = JSON.parse(row.benefits_json || '[]'); } catch {}
-          return { code: row.code, name: row.name, ...normalizePlanPricing(row), durationDays: row.duration_days,
-            limits: { devices: row.max_devices, windows: row.max_windows }, benefits, enabled: Boolean(row.enabled), sortOrder: row.sort_order };
-        });
-        return json(res, 200, { ok: true, plans }), true;
+        return json(res, 200, { ok: true, plans: levelDefinitions() }), true;
       }
       const planMatch = path.match(/^\/admin\/api\/account\/plans\/([a-z0-9_-]{2,32})$/);
       if (planMatch && req.method === 'PUT') {
-        const plan = db.prepare('SELECT * FROM membership_plans WHERE code=?').get(planMatch[1]);
-        if (!plan) fail(404, 'PLAN_NOT_FOUND', '会员套餐不存在');
         const input = await bodyJson(req);
+        if (planMatch[1] === 'normal') {
+          const current = freeConfig();
+          setSetting('account_free_days', clampInt(input.durationDays, 0, 3650, current.days));
+          setSetting('account_free_max_devices', clampInt(input.maxDevices, 1, 1000, current.maxDevices));
+          setSetting('account_free_max_windows', clampInt(input.maxWindows, 1, 1000, current.maxWindows));
+          audit('admin_level_updated', null, { level: 'normal', ...freeConfig() });
+          return json(res, 200, { ok: true }), true;
+        }
+        const plan = db.prepare("SELECT * FROM membership_plans WHERE code IN ('deep','heavy') AND code=?").get(planMatch[1]);
+        if (!plan) fail(404, 'PLAN_NOT_FOUND', '用户等级不存在');
         const name = String(input.name || plan.name).slice(0, 120);
         const currentPricing = normalizePlanPricing(plan);
         const originalPriceCents = clampInt(input.originalPriceCents ?? input.priceCents, 0, 100000000, currentPricing.originalPriceCents);
