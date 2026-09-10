@@ -7,12 +7,16 @@ import { fileURLToPath } from 'node:url';
 const SERVER_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const REPOSITORY_ROOT = dirname(SERVER_ROOT);
 const RELEASES_HTML = readFileSync(join(SERVER_ROOT, 'public', 'releases.html'), 'utf8');
+const RELEASE_SURFACE = readFileSync(join(SERVER_ROOT, 'public', 'release-surface.js'), 'utf8');
 const CLEANUP_WORKFLOW = readFileSync(join(REPOSITORY_ROOT, '.github', 'workflows', 'release-asset-cleanup.yml'), 'utf8');
 
-test('public releases page keeps only Windows EXE and Linux deb installers', () => {
-  assert.match(RELEASES_HTML, /MutationObserver/);
-  assert.match(RELEASES_HTML, /Setup-x64\\\.exe/);
-  assert.match(RELEASES_HTML, /_amd64\\\.deb/);
+test('public releases page keeps only v0.5.48+ Windows EXE and Linux deb installers', () => {
+  assert.match(RELEASES_HTML, /<script src="\/release-surface\.js" defer><\/script>/);
+  assert.doesNotMatch(RELEASES_HTML, /<script>[^<]/);
+  assert.match(RELEASE_SURFACE, /MutationObserver/);
+  assert.match(RELEASE_SURFACE, /minimumVersion = \[0, 5, 48, 0\]/);
+  assert.match(RELEASE_SURFACE, /Setup-x64\\\.exe/);
+  assert.match(RELEASE_SURFACE, /_amd64\\\.deb/);
   assert.match(RELEASES_HTML, /扩展 ZIP、Core 压缩包、校验清单及其他内部构建文件不会出现在版本列表中/);
 });
 
