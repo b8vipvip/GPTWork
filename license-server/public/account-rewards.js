@@ -51,7 +51,7 @@ function render(rewards) {
     : `今日可签到 · 每次 +${Number(checkin.rewardDays || 1)} 天`;
   if (checkinButton) {
     checkinButton.disabled = Boolean(checkin.checkedInToday);
-    checkinButton.textContent = checkin.checkedInToday ? '今日已签到' : `签到 +${Number(checkin.rewardDays || 1)}`;
+    checkinButton.textContent = checkin.checkedInToday ? '今日已签到' : `签到 +${Number(checkin.rewardDays || 1)} 天`;
   }
   if (rewardExpiry) rewardExpiry.textContent = dateText(rewards.bonusExpiresAt);
   if (inviteCode) inviteCode.textContent = invite.code || '—';
@@ -60,10 +60,6 @@ function render(rewards) {
     inviteLink.title = invite.url || '';
   }
   if (inviteCount) inviteCount.textContent = `${Number(invite.successfulInvites || 0)} 人 · 每人 +${Number(invite.rewardDays || 7)} 天`;
-  if (copyInvite) {
-    copyInvite.disabled = !invite.url;
-    copyInvite.textContent = `分享 +${Number(invite.rewardDays || 7)}`;
-  }
 }
 
 async function refresh() {
@@ -75,8 +71,6 @@ async function refresh() {
   } catch (error) {
     authenticated = false;
     rewardSection?.classList.add('hidden');
-    if (checkinButton) checkinButton.disabled = true;
-    if (copyInvite) copyInvite.disabled = true;
     if (pendingInviteCode && error.status === 401) guestNotice?.classList.remove('hidden');
     return false;
   }
@@ -93,7 +87,6 @@ async function redeemPendingInvite() {
     setNotice(data.alreadyRedeemed ? '该分享关系此前已经确认，无需重复操作。' : '分享关系已确认，分享人已获得 7 天使用时长。', 'good');
     history.replaceState(null, '', location.pathname);
     await refresh();
-    document.dispatchEvent(new CustomEvent('gptwork-account-refresh'));
   } catch (error) {
     setNotice(`分享码处理失败：${error.message}`, 'error');
     if (error.status !== 401) history.replaceState(null, '', location.pathname);
@@ -107,8 +100,7 @@ checkinButton?.addEventListener('click', async () => {
   try {
     const data = await request('/site/api/account/checkin', { method: 'POST', body: '{}' });
     render(data.rewards);
-    setNotice(data.alreadyCheckedIn ? '今天已经签到过了。' : '签到成功，权益有效期已增加 1 天。', 'good');
-    document.dispatchEvent(new CustomEvent('gptwork-account-refresh'));
+    setNotice(data.alreadyCheckedIn ? '今天已经签到过了。' : '签到成功，使用时长已增加 1 天。', 'good');
   } catch (error) {
     checkinButton.disabled = false;
     setNotice(`签到失败：${error.message}`, 'error');
