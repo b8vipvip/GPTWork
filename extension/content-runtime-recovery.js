@@ -2,8 +2,8 @@ import { appendRuntimeLog } from './runtime-log.js';
 
 const MASTER_KEY = 'gptworkEnabledLocal';
 const CONTENT_SCRIPT_FILES = [
-  'floating-ui-master-state.js',
   'content-local-error-capture.js',
+  'floating-ui-master-state.js',
   'page-model-evidence.js',
   'astra-model-evidence.js',
   'context-budget.js',
