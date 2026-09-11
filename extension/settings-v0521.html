@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="options.css">
   <link rel="stylesheet" href="request-history.css">
 </head>
-<body data-settings-revision="v0521-instant-sync">
+<body data-settings-revision="v0551-dual-feature-gates">
   <main class="shell">
     <header>
       <div>
@@ -19,11 +19,17 @@
     </header>
 
     <section class="card" aria-labelledby="globalHeading">
-      <h2 id="globalHeading">总开关 <span>Global switch</span></h2>
+      <h2 id="globalHeading">功能开关 <span>Feature gates</span></h2>
+      <p class="help">两个功能可独立或同时启用。首次安装默认都关闭；未登录时仍可查看设置，但启用功能或修改锁定模型会提示先登录/注册。</p>
       <label class="check-row wide">
-        <input id="enabled" type="checkbox">
-        <span><strong>启用 GPTWork 请求锁定</strong><small>选择后立即生效；总开关保存在本机，不受 Chrome 同步写入配额影响。关闭后请求拦截与响应确认立即暂停 / Applies immediately and remains locally controllable even when sync quota is exhausted.</small></span>
+        <input id="workModeEnabled" type="checkbox">
+        <span><strong>Work 模式</strong><small>启用后自动锁定 GPT-5.6 Sol 及以上模型；已识别到的更高版本模型会自动纳入。</small></span>
       </label>
+      <label class="check-row wide">
+        <input id="modelLockEnabled" type="checkbox">
+        <span><strong>模型锁定</strong><small>启用后锁定下方“锁定模型”列表中勾选的全部模型；可与 Work 模式叠加。</small></span>
+      </label>
+      <input id="enabled" type="checkbox" hidden aria-hidden="true" tabindex="-1">
     </section>
 
     <section id="updates" class="card update-card" aria-labelledby="updateHeading">
@@ -54,11 +60,11 @@
 
     <section class="card" aria-labelledby="modelHeading">
       <h2 id="modelHeading">锁定模型 <span>Locked models</span></h2>
-      <p class="help">默认优先 GPT-6 Astra，其次 GPT-5.6 Sol。GPTWork 会先尽力把 ChatGPT 页面切到 Astra；如果当前账号或当前模式尚未开放 Astra，而正式请求已经是允许列表中的 Sol，则保留 Sol，不会为了显示“已锁定”而伪造一个 Astra transport ID。</p>
+      <p class="help">这里保存“模型锁定”功能使用的模型列表。Work 模式有独立的 GPT-5.6 Sol 及以上模型规则；两个功能同时开启时会合并两边允许的模型。</p>
       <div id="modelChoices" class="choices"></div>
       <label class="field" for="customModels">
         <span>自定义模型标识（逗号分隔）</span>
-        <small>填写实际传输 model ID；添加后会立即显示在上方模型列表并生效。Custom concrete model IDs, comma-separated.</small>
+        <small>填写实际传输 model ID；添加后会立即显示在上方模型列表。Custom concrete model IDs, comma-separated.</small>
       </label>
       <div class="custom-model-editor">
         <input id="customModels" type="text" spellcheck="false" placeholder="例如 / e.g. gpt-6-astra-preview">
@@ -153,13 +159,12 @@
 
     <footer>
       <p id="formMessage" role="status" aria-live="polite"></p>
-      <p class="permission-note">除总开关使用本机可靠状态外，其余配置均为即时保存与同步 / The master switch is device-local for reliability; other configuration changes save and sync immediately.</p>
+      <p class="permission-note">Work 模式与模型锁定为本机独立开关；模型列表及其余配置继续同步。未登录状态不会接管 ChatGPT 请求。</p>
     </footer>
   </main>
-  <script src="settings-enabled-guard.js"></script>
-  <script src="enabled-toggle-controller.js"></script>
   <script src="settings-shell.js"></script>
   <script type="module" src="options.js"></script>
+  <script type="module" src="feature-toggle-controller.js"></script>
   <script type="module" src="request-history-options.js"></script>
   <script type="module" src="options-update.js"></script>
   <script src="model-catalog-options.js"></script>
