@@ -3,26 +3,29 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const optionsSource = await readFile(new URL('../options.js', import.meta.url), 'utf8');
+const featureController = await readFile(new URL('../feature-toggle-controller.js', import.meta.url), 'utf8');
 const settingsHtml = await readFile(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
 
 test('settings page no longer depends on a bottom Save & sync action', () => {
   assert.doesNotMatch(settingsHtml, /id="save"/);
   assert.doesNotMatch(settingsHtml, /保存并同步\s*\/\s*Save &amp; sync/);
-  assert.match(settingsHtml, /总开关使用本机可靠状态/);
-  assert.match(settingsHtml, /其余配置均为即时保存与同步/);
+  assert.match(settingsHtml, /两个功能可独立或同时启用/);
+  assert.match(settingsHtml, /模型列表及其余配置继续同步/);
 });
 
 test('custom model button is Add-only and custom models are rendered in the choice list', () => {
   assert.match(settingsHtml, /id="saveCustomModels"[^>]*>添加 \/ Add<\/button>/);
   assert.match(optionsSource, /function renderCustomChoice\(/);
   assert.match(optionsSource, /renderCustomChoice\(model, true\)/);
-  assert.match(optionsSource, /elements\.customModels\.value = ''/);
+  assert.match(featureController, /function renderCustomChoice\(model\)/);
+  assert.match(featureController, /MODEL_SELECTION_KEY/);
 });
 
-test('all configurable controls use immediate patch-based storage writes', () => {
+test('feature gates and remaining settings use immediate patch-based storage writes', () => {
+  assert.match(featureController, /localSet\(\{ \[key\]: Boolean\(desired\) \}\)/);
+  assert.match(featureController, /GPTLOCK_SET_ENABLED/);
   assert.match(optionsSource, /document\.addEventListener\('change', persistFromChange\)/);
-  assert.match(optionsSource, /patchSettings\(\{ enabled: target\.checked \}\)/);
   assert.match(optionsSource, /patchSettings\(\{ networkVerificationEnabled: target\.checked \}\)/);
   assert.match(optionsSource, /patchSettings\(\{ autoAlignSelection: target\.checked \}\)/);
   assert.match(optionsSource, /patchSettings\(\{ preferredReasoning \}\)/);
