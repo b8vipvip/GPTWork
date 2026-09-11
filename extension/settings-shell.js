@@ -1,6 +1,6 @@
 const SETTINGS_RUNTIME_KEY = 'gptlockSettingsRuntimeInfo';
 const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
-const SETTINGS_REVISION = 'v0521-settings-state-repair-1';
+const SETTINGS_REVISION = 'v0554-model-availability-greyout-1';
 const SAFE_CORE_RECONCILE_PHASES = new Set(['idle', 'checking', 'ready', 'up_to_date', 'error']);
 
 const LEGACY_LICENSE_SELECTORS = [
@@ -110,6 +110,7 @@ async function persistRuntimeFingerprint() {
 removeLegacyLicenseUi();
 void persistRuntimeFingerprint();
 void reconcileDisplayedCoreVersion();
+void import('./model-availability-options.js').catch(() => {});
 
 const observer = new MutationObserver(() => removeLegacyLicenseUi());
 observer.observe(document.documentElement, { childList: true, subtree: true });
