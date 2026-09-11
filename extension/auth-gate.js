@@ -12,10 +12,20 @@ const el = {
   enabled: $('enabled'),
 };
 
+const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';
+const STATE_TIMEOUT_MS = 2500;
+
 let verificationEmail = '';
 let resetEmail = '';
 let deviceLimitDetails = null;
 let accountAuthenticated = false;
+
+function withTimeout(promise, ms = STATE_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('账户状态刷新超时 / Account state refresh timed out')), ms)),
+  ]);
+}
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -24,6 +34,17 @@ function sendMessage(message) {
       if (error) return reject(new Error(error.message));
       if (!response?.ok) return reject(Object.assign(new Error(response?.error || '请求失败'), { code: response?.code, status: response?.status, details: response?.details }));
       resolve(response.data);
+    });
+  });
+}
+
+function readCachedAccount() {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(ACCOUNT_SNAPSHOT_KEY, (stored) => {
+      const error = chrome.runtime.lastError;
+      if (error) return reject(new Error(error.message));
+      const account = stored?.[ACCOUNT_SNAPSHOT_KEY];
+      resolve(account && typeof account === 'object' ? account : null);
     });
   });
 }
@@ -134,7 +155,10 @@ function renderAccount(account) {
   if (el.accountExpiry) el.accountExpiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
   const usage = entitlement.usage || {};
   const limits = entitlement.limits || {};
-  if (el.accountUsage) el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口 ${usage.windows ?? 0}/${limits.windows ?? 0}`;
+  if (el.accountUsage) {
+    el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口 ${usage.windows ?? 0}/${limits.windows ?? 0}`;
+    el.accountUsage.title = account.lastError ? `最近一次状态刷新失败：${account.lastError}` : '';
+  }
   if (el.accountCenter) el.accountCenter.textContent = '账户中心';
   if (el.accountLogout) el.accountLogout.hidden = false;
   if (el.accountUpgrade) el.accountUpgrade.hidden = false;
@@ -148,16 +172,29 @@ function renderAccount(account) {
 }
 
 async function refreshGate() {
+  let cachedAccount = null;
   try {
-    const state = await sendMessage({ type: 'GPTLOCK_GET_STATE' });
+    cachedAccount = await readCachedAccount();
+    if (cachedAccount) renderAccount(cachedAccount);
+  } catch {
+    // Live background state below remains authoritative when local storage is unavailable.
+  }
+
+  try {
+    const state = await withTimeout(sendMessage({ type: 'GPTLOCK_GET_STATE' }));
     const account = state?.account || { authenticated: false };
     renderAccount(account);
     return state;
   } catch (error) {
-    accountAuthenticated = false;
+    // A page/runtime transport timeout is not an authentication failure. Keep a known
+    // account snapshot visible instead of flashing "logged out" until the next heartbeat.
     showAppScreen();
-    if (el.accountEmail) el.accountEmail.textContent = '账户状态暂不可用';
-    if (el.accountTier) el.accountTier.textContent = error.message;
+    if (!cachedAccount && !accountAuthenticated) {
+      if (el.accountEmail) el.accountEmail.textContent = '账户状态暂不可用';
+      if (el.accountTier) el.accountTier.textContent = error.message;
+    } else if (el.accountUsage) {
+      el.accountUsage.title = `账户状态刷新暂时延迟：${error.message}`;
+    }
     return null;
   }
 }
@@ -300,4 +337,11 @@ window.addEventListener('gptlock-auth-required', (event) => {
   showAuthScreen(event.detail?.message || '请先登录或注册 GPTWork。');
 });
 window.addEventListener('gptlock-account-refresh', () => void refreshGate());
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes[ACCOUNT_SNAPSHOT_KEY]) return;
+  const account = changes[ACCOUNT_SNAPSHOT_KEY].newValue;
+  renderAccount(account && typeof account === 'object' ? account : { authenticated: false });
+});
+
 void refreshGate();
