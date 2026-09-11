@@ -62,12 +62,7 @@ async function flush() {
 test('new discovered models do not mutate lock policy while both features are off', async () => {
   const { store, emit } = loadHarness();
   store.discoveredModels = ['gpt-5.6-sol', 'gpt-5.7-sol'];
-  emit({
-    discoveredModels: {
-      oldValue: ['gpt-5.6-sol'],
-      newValue: ['gpt-5.6-sol', 'gpt-5.7-sol'],
-    },
-  }, 'sync');
+  emit({ discoveredModels: { oldValue: ['gpt-5.6-sol'], newValue: ['gpt-5.6-sol', 'gpt-5.7-sol'] } }, 'sync');
   await flush();
   assert.deepEqual(store.policy.lockedModels, ['gpt-5.6-sol']);
   assert.deepEqual(store.gptworkModelLockSelection, ['gpt-5.6-sol']);
@@ -76,26 +71,26 @@ test('new discovered models do not mutate lock policy while both features are of
 test('Work mode locks Sol, Astra and newly discovered GPT-5.6+ models', async () => {
   const { store, emit } = loadHarness({ workModeEnabled: true });
   store.discoveredModels = ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.7-sol'];
-  emit({
-    discoveredModels: {
-      oldValue: ['gpt-5.6-sol'],
-      newValue: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.7-sol'],
-    },
-  }, 'sync');
+  emit({ discoveredModels: { oldValue: ['gpt-5.6-sol'], newValue: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-5.7-sol'] } }, 'sync');
   await flush();
   assert.deepEqual(store.policy.lockedModels, ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.7-sol']);
 });
 
-test('Model lock auto-selects a newly discovered concrete model when enabled', async () => {
+test('Model lock alone keeps the explicit checked list when a new model is discovered', async () => {
   const { store, emit } = loadHarness({ modelLockEnabled: true });
   store.discoveredModels = ['gpt-5.6-sol', 'gpt-5.7-sol'];
-  emit({
-    discoveredModels: {
-      oldValue: ['gpt-5.6-sol'],
-      newValue: ['gpt-5.6-sol', 'gpt-5.7-sol'],
-    },
-  }, 'sync');
+  emit({ discoveredModels: { oldValue: ['gpt-5.6-sol'], newValue: ['gpt-5.6-sol', 'gpt-5.7-sol'] } }, 'sync');
   await flush();
-  assert.deepEqual(store.gptworkModelLockSelection, ['gpt-5.6-sol', 'gpt-5.7-sol']);
-  assert.deepEqual(store.policy.lockedModels, ['gpt-5.6-sol', 'gpt-5.7-sol']);
+  assert.deepEqual(store.gptworkModelLockSelection, ['gpt-5.6-sol']);
+  assert.deepEqual(store.policy.lockedModels, ['gpt-5.6-sol']);
+});
+
+test('combined mode adds new GPT-5.6+ models through Work without changing Model-lock checks', async () => {
+  const { store, emit } = loadHarness({ workModeEnabled: true, modelLockEnabled: true });
+  store.gptworkModelLockSelection = ['gpt-5.5'];
+  store.discoveredModels = ['gpt-5.6-sol', 'gpt-5.7-sol'];
+  emit({ discoveredModels: { oldValue: ['gpt-5.6-sol'], newValue: ['gpt-5.6-sol', 'gpt-5.7-sol'] } }, 'sync');
+  await flush();
+  assert.deepEqual(store.gptworkModelLockSelection, ['gpt-5.5']);
+  assert.deepEqual(store.policy.lockedModels, ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.7-sol', 'gpt-5.5']);
 });
