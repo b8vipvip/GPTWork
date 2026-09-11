@@ -1,5 +1,5 @@
 const POPUP_RUNTIME_KEY = 'gptlockPopupRuntimeInfo';
-const SHELL_REVISION = 'v0552-account-ui-purge-2';
+const SHELL_REVISION = 'v0513-license-ui-purge-1';
 
 const LEGACY_LICENSE_SELECTORS = [
   '.license-card',
