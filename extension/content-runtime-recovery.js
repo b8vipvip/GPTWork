@@ -1,6 +1,8 @@
 import { appendRuntimeLog } from './runtime-log.js';
 
+const MASTER_KEY = 'gptworkEnabledLocal';
 const CONTENT_SCRIPT_FILES = [
+  'floating-ui-master-state.js',
   'content-local-error-capture.js',
   'page-model-evidence.js',
   'astra-model-evidence.js',
@@ -32,6 +34,15 @@ function log(level, event, details = {}) {
   void appendRuntimeLog(level, 'content-recovery', event, details).catch(() => {});
 }
 
+async function masterRuntimeEnabled() {
+  try {
+    const stored = await chrome.storage.local.get(MASTER_KEY);
+    return stored?.[MASTER_KEY] === true;
+  } catch {
+    return false;
+  }
+}
+
 function sendTabMessage(tabId, message) {
   return new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
@@ -56,6 +67,10 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
   if (recoveryByTab.has(tabId)) return recoveryByTab.get(tabId);
 
   const task = (async () => {
+    if (!await masterRuntimeEnabled()) {
+      return { ready: false, injected: false, reason: 'master_disabled' };
+    }
+
     let tab;
     try {
       tab = await chrome.tabs.get(tabId);
@@ -68,6 +83,12 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       return { ready: false, injected: false, reason: 'tab_loading' };
     }
     if (await contentRuntimeReady(tabId)) return { ready: true, injected: false, reason: 'already_ready' };
+
+    // Re-check immediately before injection in case the user turned the master off
+    // while this recovery task was looking up the tab.
+    if (!await masterRuntimeEnabled()) {
+      return { ready: false, injected: false, reason: 'master_disabled' };
+    }
 
     log('warn', 'content_runtime_missing', {
       tabId,
@@ -96,6 +117,9 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
     }
 
     for (let attempt = 1; attempt <= 6; attempt += 1) {
+      if (!await masterRuntimeEnabled()) {
+        return { ready: false, injected: true, reason: 'master_disabled' };
+      }
       if (await contentRuntimeReady(tabId)) {
         log('info', 'content_runtime_recovered', { tabId, reason, attempt });
         return { ready: true, injected: true, reason: 'recovered' };
@@ -112,6 +136,7 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
 }
 
 async function recoverOpenTabs(reason) {
+  if (!await masterRuntimeEnabled()) return;
   let tabs = [];
   try {
     tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
@@ -130,6 +155,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   void ensureContentRuntime(tabId, 'tab_activated');
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== 'local' || !changes[MASTER_KEY]) return;
+  if (changes[MASTER_KEY].newValue === true) void recoverOpenTabs('master_enabled');
 });
 
 // Wait until background.js has registered its GPTLOCK_* receiver before injecting
