@@ -5,14 +5,23 @@ import test from 'node:test';
 const source = await readFile(new URL('../work-mode-controller.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
 
-test('new-chat Work clicks are guided back to Chat without disabling automatic Work handling', () => {
+test('Work controller is inert until both feature selection and background account gate allow it', () => {
+  assert.match(source, /WORK_MODE_KEY = 'gptworkWorkModeEnabled'/);
+  assert.match(source, /let workModeSelected = false/);
+  assert.match(source, /let backgroundAllowed = false/);
+  assert.match(source, /enabled = Boolean\(workModeSelected && backgroundAllowed\)/);
+  assert.match(source, /account\?\.authenticated === true/);
+  assert.match(source, /account\?\.entitlement\?\.active === true/);
+});
+
+test('new-chat Work clicks are guided back to Chat only when Work handling is enabled', () => {
   assert.match(source, /无需手动选择工作模式，在聊天模式直接发消息或任务后GPT自动以工作模式处理问题/);
   assert.match(source, /function isPristineNewChat/);
   assert.match(source, /function topModeControl/);
   assert.match(source, /switchBackToChat/);
   assert.match(source, /WORK_LABEL/);
   assert.match(source, /CHAT_LABEL/);
-  assert.match(source, /document\.addEventListener\('click'/);
+  assert.match(source, /if \(!enabled \|\| !isPristineNewChat\(\)\) return/);
 });
 
 test('processing mode requires Work conversation marker plus Work output/source panel evidence', () => {
