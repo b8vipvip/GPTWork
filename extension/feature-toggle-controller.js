@@ -188,7 +188,7 @@ function selectedModelInputs() {
 
 async function renderConfiguredModels() {
   if (!document.querySelector('input[name="model"]')) return;
-  const state = await runtimeMessage('GPTLOCK_GET_STATE').catch(() => null);
+  const state = await withTimeout(runtimeMessage('GPTLOCK_GET_STATE')).catch(() => null);
   const selected = await configuredModels(state?.policy?.lockedModels || []);
   for (const input of document.querySelectorAll('input[name="model"]')) {
     input.checked = selected.includes(normalizeConcreteModelId(input.value));
@@ -263,7 +263,21 @@ async function addCustomModels() {
 }
 
 async function reconcile({ migrateLegacy = true } = {}) {
-  const state = await withTimeout(runtimeMessage('GPTLOCK_GET_STATE'));
+  let state;
+  try {
+    state = await withTimeout(runtimeMessage('GPTLOCK_GET_STATE'));
+  } catch (error) {
+    // GET_STATE also asks the active ChatGPT tab for page observations. A temporary
+    // content-script/runtime transport failure must not visually reset saved feature
+    // switches or be interpreted as an account logout. Keep local feature state and
+    // retry naturally on the next account/storage refresh.
+    const flags = await featureFlags();
+    syncVisibleToggles(flags);
+    scheduleConfiguredModelRender();
+    showMessage('状态刷新暂时延迟，已保留当前功能配置 / State refresh delayed; keeping saved feature state.');
+    return { state: null, flags, degraded: true, error };
+  }
+
   currentAccount = state?.account || { authenticated: false, entitlement: { active: false } };
   let flags = await featureFlags();
 
@@ -353,7 +367,7 @@ document.addEventListener('change', (event) => {
   const previous = !target.checked;
   void (async () => {
     try {
-      const state = await runtimeMessage('GPTLOCK_GET_STATE');
+      const state = await withTimeout(runtimeMessage('GPTLOCK_GET_STATE'));
       currentAccount = state?.account || currentAccount;
       requireActivation(currentAccount);
       await persistModelSelection(target);
@@ -390,7 +404,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
-void reconcile().catch((error) => {
+void reconcile().catch(async (error) => {
+  const flags = await featureFlags().catch(() => null);
+  if (flags) syncVisibleToggles(flags);
   showMessage(`读取功能状态失败 / Failed to load feature state: ${error.message}`, 'bad');
-  syncVisibleToggles({ workModeEnabled: false, modelLockEnabled: false });
 });
