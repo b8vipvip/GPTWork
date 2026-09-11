@@ -55,7 +55,8 @@ test('content recovery stays off with the master disabled and resumes when it is
   assert.match(recovery, /MASTER_KEY = 'gptworkEnabledLocal'/);
   assert.match(recovery, /reason: 'master_disabled'/);
   assert.match(recovery, /master_enabled/);
-  assert.equal(manifest.content_scripts[0].js[0], 'floating-ui-master-state.js');
+  assert.equal(manifest.content_scripts[0].js[0], 'content-local-error-capture.js');
+  assert.equal(manifest.content_scripts[0].js[1], 'floating-ui-master-state.js');
   assert.equal(manifest.content_scripts[0].js.includes('floating-ui-master-state.js'), true);
 });
 
