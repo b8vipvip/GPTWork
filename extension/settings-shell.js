@@ -1,35 +1,30 @@
 const SETTINGS_RUNTIME_KEY = 'gptlockSettingsRuntimeInfo';
 const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
 const MASTER_KEY = 'gptworkEnabledLocal';
-const SETTINGS_REVISION = 'v0521-settings-state-repair-1';
+const SETTINGS_REVISION = 'v0556-settings-master-tab-isolation';
 const SAFE_CORE_RECONCILE_PHASES = new Set(['idle', 'checking', 'ready', 'up_to_date', 'error']);
-const MASTER_MESSAGE_SOURCE = 'settings_master';
+const QUOTA_MESSAGE = '当前账户并发窗口超限';
 let masterSyncTimers = [];
+let masterQuotaExceeded = false;
+let quotaToastTimer = null;
 
-// Legacy feature code still asks GPTLOCK_SET_ENABLED to mirror Work/Model-lock OR
-// state. Those requests must never override the independent GPTWork master switch.
-// The Settings master control is the only settings-page caller allowed through.
-try {
-  const originalSendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
-  chrome.runtime.sendMessage = (message, ...args) => {
-    if (message?.type === 'GPTLOCK_SET_ENABLED' && message?.source !== MASTER_MESSAGE_SOURCE) {
-      return originalSendMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }, ...args);
-    }
-    return originalSendMessage(message, ...args);
-  };
-} catch {
-  // Best effort compatibility bridge.
+function runtimeMessage(payload) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(payload, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) return reject(new Error(error.message));
+      if (!response?.ok) {
+        const requestError = new Error(response?.error || 'Extension request failed');
+        requestError.code = response?.code || null;
+        return reject(requestError);
+      }
+      resolve(response.data);
+    });
+  });
 }
 
 function getRuntimeState() {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: 'GPTLOCK_GET_STATE' }, (response) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else if (!response?.ok) reject(new Error(response?.error || 'Extension request failed'));
-      else resolve(response.data);
-    });
-  });
+  return runtimeMessage({ type: 'GPTLOCK_GET_STATE' });
 }
 
 function setSettingsMessage(text, tone = '') {
@@ -39,19 +34,47 @@ function setSettingsMessage(text, tone = '') {
   node.className = tone === 'bad' ? 'inline-message bad' : tone === 'good' ? 'inline-message good' : '';
 }
 
-function syncSettingsMasterFromRuntime() {
+function quotaToast() {
+  let node = document.getElementById('gptwork-settings-master-quota-toast');
+  if (!node) {
+    node = document.createElement('div');
+    node.id = 'gptwork-settings-master-quota-toast';
+    node.style.cssText = 'position:fixed;right:24px;top:24px;z-index:2147483647;max-width:260px;padding:8px 11px;border:1px solid rgba(220,38,38,.22);border-radius:9px;background:rgba(254,242,242,.98);color:#b91c1c;box-shadow:0 10px 28px rgba(15,23,42,.14);font:600 12px/1.45 system-ui,sans-serif;pointer-events:none;opacity:0;transform:translateY(-3px);transition:opacity .12s ease,transform .12s ease';
+    node.textContent = QUOTA_MESSAGE;
+    document.body.append(node);
+  }
+  clearTimeout(quotaToastTimer);
+  node.style.opacity = '1';
+  node.style.transform = 'translateY(0)';
+  quotaToastTimer = setTimeout(() => {
+    node.style.opacity = '0';
+    node.style.transform = 'translateY(-3px)';
+  }, 1900);
+}
+
+function applyQuotaUi(exceeded) {
+  masterQuotaExceeded = exceeded === true;
+  const master = document.getElementById('enabled');
+  const row = master?.closest('[data-gptwork-settings-master="true"]');
+  const title = masterQuotaExceeded ? QUOTA_MESSAGE : 'GPTWork 总开关 / GPTWork master switch';
+  if (master) master.title = title;
+  if (row) row.title = title;
+}
+
+async function syncSettingsMasterFromRuntime() {
   const master = document.getElementById('enabled');
   if (!master) return;
-  void getRuntimeState()
-    .then((state) => {
-      master.checked = state?.settings?.enabled !== false;
-    })
-    .catch(() => {});
+  try {
+    const snapshot = await runtimeMessage({ type: 'GPTWORK_MASTER_STATUS' });
+    master.checked = snapshot?.masterEnabled === true;
+    master.disabled = false;
+    applyQuotaUi(snapshot?.windowQuotaExceeded === true);
+  } catch {}
 }
 
 function scheduleSettingsMasterSync() {
   for (const timer of masterSyncTimers) clearTimeout(timer);
-  masterSyncTimers = [0, 60, 250, 700].map((delay) => setTimeout(syncSettingsMasterFromRuntime, delay));
+  masterSyncTimers = [0, 80, 300, 800].map((delay) => setTimeout(() => void syncSettingsMasterFromRuntime(), delay));
 }
 
 function installSettingsMasterControl() {
@@ -73,7 +96,7 @@ function installSettingsMasterControl() {
     const strong = document.createElement('strong');
     strong.textContent = 'GPTWork 总开关';
     const small = document.createElement('small');
-    small.textContent = '关闭后立即停止 GPTWork 运行；Work 模式和模型锁定的选择会保留，但不能重新开启总开关。';
+    small.textContent = '全局总开关：关闭后立即停止 GPTWork。Work 模式与模型锁定仍按每个 ChatGPT 标签页分别保存。';
     copy.append(strong, small);
     row.append(master, copy);
     const help = section.querySelector('.help');
@@ -81,36 +104,47 @@ function installSettingsMasterControl() {
     else section.prepend(row);
   }
 
+  const row = master.closest('[data-gptwork-settings-master="true"]');
+  row?.addEventListener('mouseenter', () => {
+    if (masterQuotaExceeded) quotaToast();
+  });
+  row?.addEventListener('click', () => {
+    if (masterQuotaExceeded) quotaToast();
+  }, true);
+
   master.addEventListener('change', (event) => {
     event.stopImmediatePropagation();
     const desired = Boolean(master.checked);
     const previous = !desired;
+    if (desired && masterQuotaExceeded) {
+      master.checked = previous;
+      quotaToast();
+      setSettingsMessage(QUOTA_MESSAGE, 'bad');
+      return;
+    }
     master.disabled = true;
     setSettingsMessage(desired ? '正在启用 GPTWork / Enabling…' : '正在关闭 GPTWork / Disabling…');
-    chrome.runtime.sendMessage({
-      type: 'GPTLOCK_SET_ENABLED',
-      enabled: desired,
-      source: MASTER_MESSAGE_SOURCE,
-    }, (response) => {
-      const error = chrome.runtime.lastError;
-      master.disabled = false;
-      if (error || !response?.ok) {
-        master.checked = previous;
-        setSettingsMessage(`总开关切换失败 / Master toggle failed: ${error?.message || response?.error || 'unknown error'}`, 'bad');
-      } else {
-        master.checked = response.data?.settings?.enabled !== false;
+    void runtimeMessage({ type: 'GPTWORK_MASTER_SET', enabled: desired })
+      .then((snapshot) => {
+        master.checked = snapshot?.masterEnabled === true;
+        applyQuotaUi(snapshot?.windowQuotaExceeded === true);
         setSettingsMessage(master.checked ? 'GPTWork 已启用 / Enabled.' : 'GPTWork 已关闭 / Disabled.', 'good');
-      }
-      scheduleSettingsMasterSync();
-    });
+      })
+      .catch((error) => {
+        master.checked = previous;
+        if (error?.code === 'WINDOW_QUOTA_EXCEEDED' || error?.message === QUOTA_MESSAGE) {
+          applyQuotaUi(true);
+          quotaToast();
+          setSettingsMessage(QUOTA_MESSAGE, 'bad');
+        } else {
+          setSettingsMessage(`总开关切换失败 / Master toggle failed: ${error.message}`, 'bad');
+        }
+      })
+      .finally(() => {
+        master.disabled = false;
+        scheduleSettingsMasterSync();
+      });
   }, true);
-
-  for (const featureToggle of [
-    document.getElementById('workModeEnabled'),
-    document.getElementById('modelLockEnabled'),
-  ]) {
-    featureToggle?.addEventListener('change', scheduleSettingsMasterSync, true);
-  }
 
   scheduleSettingsMasterSync();
 }
@@ -224,6 +258,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       master.checked = changes[MASTER_KEY].newValue === true;
       master.disabled = false;
     }
+    scheduleSettingsMasterSync();
   }
   if (areaName === 'local' && changes[UPDATE_STATUS_KEY]) {
     window.setTimeout(() => void reconcileDisplayedCoreVersion(), 0);
