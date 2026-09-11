@@ -15,7 +15,6 @@ const CONTENT_SCRIPT_FILES = [
   'multi-window-lock-sync.js',
   'chat-length-hard-limit-semantic.js',
   'chat-length-remaining-indicator.js',
-  'chat-length-remaining-truth.js',
 ];
 
 const recoveryByTab = new Map();
