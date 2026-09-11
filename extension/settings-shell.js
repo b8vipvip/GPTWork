@@ -3,6 +3,21 @@ const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
 const SETTINGS_REVISION = 'v0521-settings-state-repair-1';
 const SAFE_CORE_RECONCILE_PHASES = new Set(['idle', 'checking', 'ready', 'up_to_date', 'error']);
 
+// The settings page has no user-facing master control. Legacy feature code still
+// asks GPTLOCK_SET_ENABLED to mirror Work/Model-lock OR state; convert only those
+// settings-page requests into a refresh so the popup master remains authoritative.
+try {
+  const originalSendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
+  chrome.runtime.sendMessage = (message, ...args) => {
+    if (message?.type === 'GPTLOCK_SET_ENABLED') {
+      return originalSendMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }, ...args);
+    }
+    return originalSendMessage(message, ...args);
+  };
+} catch {
+  // Best effort compatibility bridge.
+}
+
 const LEGACY_LICENSE_SELECTORS = [
   '.license-card',
   '[class~="license-card"]',
