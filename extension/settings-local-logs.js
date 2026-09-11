@@ -60,8 +60,12 @@ async function clearLogs() {
   clearButton.disabled = true;
   try {
     await sendMessage({ type: 'GPTLOCK_CLEAR_RUNTIME_LOGS' });
-    const logs = await readLogs();
-    setMessage(`本地运行日志已清空；当前 ${logs.length} 条。`);
+    // The legacy background handler writes one bookkeeping event immediately after
+    // clearing. The Settings "清空" action is user-facing, so finish by clearing the
+    // local ring buffer directly and leave it truly empty.
+    await chrome.storage.local.set({ runtimeLogs: [], runtimeLogUploadedIds: [] });
+    if (count) count.textContent = '0 / 2000';
+    setMessage('本地运行日志已清空 / Local runtime logs cleared.');
   } catch (error) {
     setMessage(`清空失败 / Clear failed: ${error.message}`, true);
   } finally {
