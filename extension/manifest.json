@@ -35,6 +35,7 @@
         "https://chatgpt.com/*"
       ],
       "js": [
+        "floating-ui-master-state.js",
         "content-local-error-capture.js",
         "page-model-evidence.js",
         "astra-model-evidence.js",
