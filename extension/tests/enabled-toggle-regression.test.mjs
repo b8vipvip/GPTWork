@@ -22,15 +22,15 @@ test('popup and settings expose independent Work and model-lock feature gates', 
   }
 });
 
-test('feature controller authenticates before changing the legacy master state', () => {
-  assert.match(controller, /WORK_MODE_KEY = 'gptworkWorkModeEnabled'/);
-  assert.match(controller, /MODEL_LOCK_KEY = 'gptworkModelLockEnabled'/);
+test('feature controller authenticates then changes only the current ChatGPT tab', () => {
   assert.match(controller, /requireActivation\(currentAccount\)/);
-  assert.match(controller, /GPTLOCK_SET_ENABLED/);
-  assert.doesNotMatch(controller, /gptworkEnabledLocal/);
-  const requireIndex = controller.indexOf('if (desired) requireActivation(currentAccount)');
-  const featureWriteIndex = controller.indexOf('await withTimeout(localSet({ [key]: Boolean(desired) }))');
-  assert.ok(requireIndex >= 0 && featureWriteIndex > requireIndex);
+  assert.match(controller, /GPTWORK_TAB_FEATURE_GET/);
+  assert.match(controller, /GPTWORK_TAB_FEATURE_SET/);
+  assert.match(controller, /tabId: currentTabId/);
+  assert.match(controller, /feature: kind/);
+  assert.doesNotMatch(controller, /gptworkWorkModeEnabled/);
+  assert.doesNotMatch(controller, /gptworkModelLockEnabled/);
+  assert.doesNotMatch(controller, /GPTLOCK_SET_ENABLED/);
 });
 
 test('unauthenticated popup remains visible and protected actions can open login on demand', () => {
@@ -41,9 +41,13 @@ test('unauthenticated popup remains visible and protected actions can open login
   assert.match(popup, /<section id="authShell"[^>]*hidden/);
 });
 
-test('background message receiver is registered before update control polling starts', () => {
+test('tab isolation authority is installed before the legacy background receiver', () => {
+  const tabRuntimeIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
+  const policyIndex = backgroundEntry.indexOf("import './tab-feature-network-policy.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
   const updaterIndex = backgroundEntry.indexOf("import './background-update.js'");
-  assert.ok(backgroundIndex >= 0);
+  assert.ok(tabRuntimeIndex >= 0);
+  assert.ok(policyIndex > tabRuntimeIndex);
+  assert.ok(backgroundIndex > policyIndex);
   assert.ok(updaterIndex > backgroundIndex);
 });
