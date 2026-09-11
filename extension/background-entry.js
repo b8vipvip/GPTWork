@@ -9,6 +9,9 @@ import './background-local-error-capture.js';
 import './network-monitor-safety.js';
 // Register GPTLOCK_* runtime message handlers before recovery/update helpers start.
 import './background.js';
+// Derive optimistic higher-model availability from trusted response metadata and keep
+// unavailable models out of the active lock policy without changing ChatGPT traffic.
+import './model-availability-runtime.js';
 // Re-inject the current content runtime into already-open ChatGPT tabs after an
 // extension reload/update. This restores auto verification and the floating status UI.
 import './content-runtime-recovery.js';

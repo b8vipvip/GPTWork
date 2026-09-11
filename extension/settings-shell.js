@@ -110,6 +110,7 @@ async function persistRuntimeFingerprint() {
 removeLegacyLicenseUi();
 void persistRuntimeFingerprint();
 void reconcileDisplayedCoreVersion();
+void import('./model-availability-options.js').catch(() => {});
 
 const observer = new MutationObserver(() => removeLegacyLicenseUi());
 observer.observe(document.documentElement, { childList: true, subtree: true });
