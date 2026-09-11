@@ -10,6 +10,51 @@ const container = document.getElementById('modelChoices');
 let availability = normalizeAvailabilityState(null);
 let tooltipTimer = null;
 
+function installStyle() {
+  if (document.getElementById('gptwork-model-availability-style')) return;
+  const style = document.createElement('style');
+  style.id = 'gptwork-model-availability-style';
+  style.textContent = `
+    .check-row.model-unavailable {
+      position: relative;
+      border-color: #d7dee8;
+      background: #f1f5f9;
+      color: #94a3b8;
+      cursor: not-allowed;
+      filter: grayscale(.18);
+    }
+    .check-row.model-unavailable strong,
+    .check-row.model-unavailable small { color: #94a3b8; }
+    .check-row.model-unavailable input { opacity: .48; cursor: not-allowed; }
+    .model-unavailable-tooltip {
+      display: none !important;
+      position: absolute;
+      left: 12px;
+      bottom: calc(100% + 8px);
+      z-index: 20;
+      width: max-content;
+      max-width: min(330px, calc(100vw - 64px));
+      padding: 7px 9px;
+      border-radius: 8px;
+      background: #334155;
+      color: #fff !important;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .18);
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1.45;
+      pointer-events: none;
+      white-space: normal;
+    }
+    .check-row.model-unavailable:hover .model-unavailable-tooltip,
+    .check-row.model-unavailable:focus .model-unavailable-tooltip,
+    .check-row.model-unavailable[data-tooltip-open="true"] .model-unavailable-tooltip {
+      display: block !important;
+    }
+    .check-row.model-unavailable:focus { outline: 3px solid #dbeafe; outline-offset: 2px; }
+  `;
+  document.head.append(style);
+}
+
 function availabilityFor(input) {
   const model = normalizeConcreteModelId(input?.value);
   return model ? availability.models?.[model] || null : null;
@@ -94,6 +139,7 @@ container?.addEventListener('keydown', (event) => {
 });
 
 if (container) {
+  installStyle();
   const observer = new MutationObserver(applyAvailability);
   observer.observe(container, { childList: true, subtree: true });
 }
