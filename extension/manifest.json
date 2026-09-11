@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GPTWork",
-  "version": "0.5.50",
+  "version": "0.5.51",
   "description": "ChatGPT 正式聊天请求模型锁定与响应证据确认 / Formal chat request locking and evidence-based response verification.",
   "minimum_chrome_version": "110",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp344vhDkbnBOB1hrAcdHtk2T2+VQwyT0danaUFbc5esuZ1dWKAaEvInMIf3hs68jXt1gW5EUAjh4Wrsjew96ojHHUybDHO2HyKM7aLVugV0RmIAc+YbuzHOG3PUtZIxIi1u8KeCZc0+tA4RJhHUjj05dyGq6ZaTl0lu7oEIq8EqJBzEItMAjgo94pz3Ovlh4tzzjo7qC4NyYCF6thRJFc/VnMtpDc+Zhc3/qGPwVrPcAQT0IxHpalhheo2dviheL+4IcAiAsKu6ZV62OJ2hI3ZgE/CKrH3AU5lPc3+2TYunKKVisWMgUWNjYaGW6k2ebzJsfCqOHs+Ql8teaNZQlNwIDAQAB",

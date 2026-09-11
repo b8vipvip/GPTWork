@@ -1,6 +1,6 @@
 [package]
 name = "gptwork-core"
-version = "0.5.50"
+version = "0.5.51"
 edition = "2021"
 description = "Cross-platform local policy and verification core for GPTWork"
 repository = "https://github.com/b8vipvip/GPTWork"
