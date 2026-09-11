@@ -61,7 +61,7 @@
     return [...new Set([ASTRA_MODEL_ID, SOL_MODEL_ID, ...normalizeModels(discovered).filter(isAtLeastSol)])];
   }
 
-  function autoEnable(models) {
+  function refreshActivePolicy(models) {
     if (!models.length) return;
     writeQueue = writeQueue.then(async () => {
       const [local, stored] = await Promise.all([
@@ -71,37 +71,29 @@
       const workModeEnabled = local[WORK_MODE_KEY] === true;
       const modelLockEnabled = local[MODEL_LOCK_KEY] === true;
 
-      // Discovery is observational while both user-facing features are off. In
-      // particular, a fresh or logged-out install must not mutate the active lock policy.
-      if (!workModeEnabled && !modelLockEnabled) return;
+      // Discovery never edits the user's explicit Model-lock selection. New GPT-5.6+
+      // models are inherited automatically only by Work mode, matching its contract.
+      if (!workModeEnabled) return;
 
       const policy = stored[POLICY_KEY] && typeof stored[POLICY_KEY] === 'object'
         ? stored[POLICY_KEY]
         : defaultPolicy();
-      let selection = normalizeModels(stored[MODEL_SELECTION_KEY]);
-      if (!selection.length) selection = normalizeModels(policy.lockedModels);
+      const savedSelection = normalizeModels(stored[MODEL_SELECTION_KEY]);
+      const selection = savedSelection.length ? savedSelection : normalizeModels(policy.lockedModels);
 
-      const patch = {};
-      if (modelLockEnabled) {
-        selection = [...new Set([...selection, ...models])];
-        patch[MODEL_SELECTION_KEY] = selection;
-      }
-
-      const active = [];
-      if (workModeEnabled) active.push(...mergeWorkModels(stored[DISCOVERED_MODELS_KEY]));
+      const active = [...mergeWorkModels(stored[DISCOVERED_MODELS_KEY])];
       if (modelLockEnabled) active.push(...selection);
       const lockedModels = [...new Set(active)];
       if (!lockedModels.length) return;
 
       if (JSON.stringify(normalizeModels(policy.lockedModels)) !== JSON.stringify(lockedModels)) {
-        patch[POLICY_KEY] = { ...policy, lockedModels };
+        await chrome.storage.sync.set({ [POLICY_KEY]: { ...policy, lockedModels } });
       }
-      if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
     }).catch(() => {});
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'sync' || !changes[DISCOVERED_MODELS_KEY]) return;
-    autoEnable(newlyDiscovered(changes[DISCOVERED_MODELS_KEY]));
+    refreshActivePolicy(newlyDiscovered(changes[DISCOVERED_MODELS_KEY]));
   });
 })();
