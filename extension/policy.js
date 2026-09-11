@@ -5,7 +5,10 @@ export const DEFAULT_POLICY = Object.freeze({
 });
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  enabled: true,
+  // A fresh install must be inert until the user signs in and explicitly enables
+  // Work mode and/or Model lock. This prevents the debugger request interceptor
+  // from attaching to ChatGPT during first-run account setup.
+  enabled: false,
   networkVerificationEnabled: true,
   firstRequestMode: 'allow_once',
   autoAlignSelection: true,
