@@ -51,7 +51,9 @@ test('extension gates automatic release checks and consumes queued admin command
   assert.match(updater, /ACCOUNT_SESSION_KEY/);
   assert.match(updater, /managed_auto_update_disabled/);
   assert.match(updater, /checkAndMaybeInstall\('admin_sync', chromeApi, \{ force: true \}\)/);
-  assert.match(updater, /GPTLOCK_ACCOUNT_REFRESH/);
+  assert.match(updater, /ACCOUNT_REFRESH_ALARM/);
+  assert.match(updater, /scheduleAccountRefresh\(chromeApi\)/);
+  assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);
   assert.match(updater, /ADMIN_UPDATE_GENERATION_KEY/);
   assert.match(updater, /ACCOUNT_SYNC_GENERATION_KEY/);
 });
