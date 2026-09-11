@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const popup = fs.readFileSync(new URL('../popup-v0513.html', import.meta.url), 'utf8');
+const settings = fs.readFileSync(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const masterUi = fs.readFileSync(new URL('../master-ui-controller.js', import.meta.url), 'utf8');
 const settingsShell = fs.readFileSync(new URL('../settings-shell.js', import.meta.url), 'utf8');
 const masterRuntime = fs.readFileSync(new URL('../master-runtime-safety.js', import.meta.url), 'utf8');
@@ -22,11 +23,36 @@ test('popup header replaces the old closed verdict pill with an explicit master 
   assert.match(popup, /src="master-ui-controller\.js"/);
 });
 
-test('Work and Model lock no longer get to overwrite the explicit popup master state', () => {
+test('popup master switch remains authoritative and usable after legacy feature reconciliation', () => {
+  assert.match(masterUi, /MASTER_KEY = 'gptworkEnabledLocal'/);
+  assert.match(masterUi, /GPTLOCK_SET_ENABLED/);
+  assert.match(masterUi, /GPTLOCK_ACCOUNT_REFRESH/);
+  assert.match(masterUi, /explicitMasterAction/);
+  assert.match(masterUi, /scheduleMasterSync/);
+  assert.match(masterUi, /workModeEnabled/);
+  assert.match(masterUi, /modelLockEnabled/);
+  assert.match(masterUi, /masterToggle\.disabled = false/);
+  assert.match(masterUi, /response\.data\?\.settings\?\.enabled/);
+});
+
+test('Settings exposes the same independent master switch and persists through the background authority', () => {
+  assert.match(settings, /id="enabled"/);
+  assert.match(settingsShell, /installSettingsMasterControl/);
+  assert.match(settingsShell, /GPTWork 总开关/);
+  assert.match(settingsShell, /gptworkEnabledLocal/);
+  assert.match(settingsShell, /MASTER_MESSAGE_SOURCE = 'settings_master'/);
+  assert.match(settingsShell, /source: MASTER_MESSAGE_SOURCE/);
+  assert.match(settingsShell, /GPTLOCK_SET_ENABLED/);
+  assert.match(settingsShell, /event\.stopImmediatePropagation\(\)/);
+  assert.match(settingsShell, /scheduleSettingsMasterSync/);
+});
+
+test('Work and Model lock no longer get to overwrite the explicit master state', () => {
   assert.match(masterUi, /GPTLOCK_SET_ENABLED/);
   assert.match(masterUi, /GPTLOCK_ACCOUNT_REFRESH/);
   assert.match(masterUi, /explicitMasterAction/);
   assert.match(settingsShell, /Legacy feature code still/);
+  assert.match(settingsShell, /message\?\.source !== MASTER_MESSAGE_SOURCE/);
   assert.match(settingsShell, /GPTLOCK_ACCOUNT_REFRESH/);
 });
 
