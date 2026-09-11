@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="options.css">
   <link rel="stylesheet" href="request-history.css">
 </head>
-<body data-settings-revision="v0551-dual-feature-gates">
+<body data-settings-revision="v0552-runtime-recovery-local-logs">
   <main class="shell">
     <header>
       <div>
@@ -34,9 +34,7 @@
 
     <section id="updates" class="card update-card" aria-labelledby="updateHeading">
       <div class="update-heading">
-        <div>
-          <h2 id="updateHeading">版本更新 <span>Update center</span></h2>
-        </div>
+        <div><h2 id="updateHeading">版本更新 <span>Update center</span></h2></div>
         <span id="updateStatusBadge" class="update-badge idle">待检查</span>
       </div>
       <div class="update-meta">
@@ -45,10 +43,7 @@
         <div><span>本地核心</span><strong id="updateCoreVersion">—</strong></div>
       </div>
       <div class="update-track" aria-hidden="true"><div id="updateProgress" class="update-progress"></div></div>
-      <div class="update-progress-row" aria-live="polite">
-        <strong id="updatePercent">0%</strong>
-        <span id="updateMessage">尚未检查更新</span>
-      </div>
+      <div class="update-progress-row" aria-live="polite"><strong id="updatePercent">0%</strong><span id="updateMessage">尚未检查更新</span></div>
       <div class="update-actions">
         <button id="checkUpdateNow" class="secondary" type="button">检查更新</button>
         <button id="installUpdateNow" class="primary" type="button" hidden>立即更新</button>
@@ -62,10 +57,7 @@
       <h2 id="modelHeading">锁定模型 <span>Locked models</span></h2>
       <p class="help">这里保存“模型锁定”功能使用的模型列表。Work 模式有独立的 GPT-5.6 Sol 及以上模型规则；两个功能同时开启时会合并两边允许的模型。</p>
       <div id="modelChoices" class="choices"></div>
-      <label class="field" for="customModels">
-        <span>自定义模型标识（逗号分隔）</span>
-        <small>填写实际传输 model ID；添加后会立即显示在上方模型列表。Custom concrete model IDs, comma-separated.</small>
-      </label>
+      <label class="field" for="customModels"><span>自定义模型标识（逗号分隔）</span><small>填写实际传输 model ID；添加后会立即显示在上方模型列表。Custom concrete model IDs, comma-separated.</small></label>
       <div class="custom-model-editor">
         <input id="customModels" type="text" spellcheck="false" placeholder="例如 / e.g. gpt-6-astra-preview">
         <button id="saveCustomModels" class="primary" type="button">添加 / Add</button>
@@ -77,47 +69,29 @@
       <h2 id="reasoningHeading">允许的推理强度 <span>Allowed reasoning levels</span></h2>
       <p class="help">若正式请求顶层已经存在可识别的推理强度字段，GPTWork 会把不允许的值改为优先推理强度；不会凭空添加网页当前没有发送的字段。选择后立即同步。</p>
       <div id="reasoningChoices" class="choices"></div>
-      <label class="field" for="preferredReasoning">
-        <span>优先推理强度</span>
-        <small>Preferred reasoning level for request locking and best-effort UI alignment</small>
-      </label>
+      <label class="field" for="preferredReasoning"><span>优先推理强度</span><small>Preferred reasoning level for request locking and best-effort UI alignment</small></label>
       <select id="preferredReasoning"></select>
     </section>
 
     <section class="card" aria-labelledby="verificationHeading">
       <h2 id="verificationHeading">响应确认（可选） <span>Response verification</span></h2>
-      <label class="check-row wide">
-        <input id="networkVerification" type="checkbox">
-        <span><strong>启用响应元数据确认</strong><small>Read response metadata after a formal chat request. Missing metadata warns but does not block normal chat.</small></span>
-      </label>
-      <p class="permission-note">请求锁定本身也需要 Chrome/Edge 的“调试程序”权限。打开同一标签页的 DevTools 可能抢占调试连接；此时 GPTWork 会告警，但不会把日常聊天卡死。</p>
-      <p class="permission-note en">The request interceptor also uses the browser debugger permission. DevTools may detach GPTWork from the same tab; GPTWork fails open with a warning.</p>
-
-      <label class="check-row wide">
-        <input id="autoAlignSelection" type="checkbox">
-        <span><strong>自动对齐页面选择（尽力而为）</strong><small>Prefer GPT-6 Astra when the account exposes it; the network request lock remains authoritative.</small></span>
-      </label>
+      <label class="check-row wide"><input id="networkVerification" type="checkbox"><span><strong>启用响应元数据确认</strong><small>Read response metadata after a formal chat request. Missing metadata warns but does not block normal chat.</small></span></label>
+      <p class="permission-note">请求锁定本身也需要 Chrome/Edge 的“调试程序”权限。新版会等 ChatGPT 顶层页面加载完成后才连接调试器；页面加载期间保持分离，避免导航被调试会话影响。</p>
+      <p class="permission-note en">The request interceptor uses the browser debugger permission, but GPTWork now defers debugger attachment until the ChatGPT document has finished loading.</p>
+      <label class="check-row wide"><input id="autoAlignSelection" type="checkbox"><span><strong>自动对齐页面选择（尽力而为）</strong><small>Prefer GPT-6 Astra when the account exposes it; the network request lock remains authoritative.</small></span></label>
     </section>
 
     <section class="card" aria-labelledby="modeHeading">
       <h2 id="modeHeading">处理模式 <span>Enforcement mode</span></h2>
       <p class="help">请求锁定优先保证正常聊天。核心离线、页面识别缺失、响应字段缺失或推理强度确认异常只告警；只有与当前最新正式请求关联、且响应明确确认实际模型不在锁定列表时，强制模式才阻断后续发送。</p>
-      <label class="radio-row">
-        <input type="radio" name="mode" value="false">
-        <span><strong>提醒</strong><small>Warn — 永不因响应确认结果阻断</small></span>
-      </label>
-      <label class="radio-row">
-        <input type="radio" name="mode" value="true">
-        <span><strong>强制</strong><small>Strict — only a current confirmed response-model mismatch blocks subsequent sends</small></span>
-      </label>
+      <label class="radio-row"><input type="radio" name="mode" value="false"><span><strong>提醒</strong><small>Warn — 永不因响应确认结果阻断</small></span></label>
+      <label class="radio-row"><input type="radio" name="mode" value="true"><span><strong>强制</strong><small>Strict — only a current confirmed response-model mismatch blocks subsequent sends</small></span></label>
     </section>
 
     <section class="card status-card" aria-labelledby="statusHeading">
       <div class="status-title">
         <h2 id="statusHeading">运行状态 <span>Runtime status</span></h2>
-        <div class="status-actions">
-          <button id="autoVerify" class="primary" type="button">自动验证 / Auto verify</button>
-        </div>
+        <div class="status-actions"><button id="autoVerify" class="primary" type="button" title="使用当前 GPTWork 账号权益进行自动验证">自动验证 / Auto verify</button></div>
       </div>
       <span id="reconnect" hidden aria-hidden="true"></span>
       <span id="logs" hidden aria-hidden="true"></span>
@@ -132,28 +106,29 @@
       </div>
     </section>
 
+    <section class="card" aria-labelledby="localLogHeading">
+      <div class="status-title">
+        <div>
+          <h2 id="localLogHeading">本地诊断日志 <span>Local runtime logs</span></h2>
+          <p class="help">日志保存在浏览器本机，最多保留 2000 条。记录后台、内容脚本、调试连接、自动验证及未捕获 JavaScript 错误；敏感字段继续按现有规则脱敏。</p>
+        </div>
+        <span id="localLogCount" class="request-history-count">0 / 2000</span>
+      </div>
+      <div class="update-actions">
+        <button id="exportLocalLogs" class="primary" type="button">导出本地日志</button>
+        <button id="clearLocalLogs" class="secondary" type="button">清空本地日志</button>
+        <button id="openLocalDiagnostics" class="secondary" type="button">查看详细日志</button>
+      </div>
+      <p id="localLogMessage" class="inline-message" role="status" aria-live="polite"></p>
+      <p class="permission-note">导出格式为 JSONL，可直接发给我继续定位“页面无法加载 / Receiving end does not exist / 悬浮提示缺失”等本地问题。</p>
+    </section>
+
     <section class="card request-history-card" aria-labelledby="requestHistoryHeading">
       <div class="request-history-heading">
-        <div>
-          <h2 id="requestHistoryHeading">请求记录 <span>Request model history</span></h2>
-          <p class="help">列出最近正式聊天请求中发现的模型、实际发送模型和响应最终确认模型。这里是现有锁定/请求/响应证据的只读投影，不参与模型选择、锁定、验证或阻断决策。</p>
-        </div>
+        <div><h2 id="requestHistoryHeading">请求记录 <span>Request model history</span></h2><p class="help">列出最近正式聊天请求中发现的模型、实际发送模型和响应最终确认模型。这里是现有锁定/请求/响应证据的只读投影，不参与模型选择、锁定、验证或阻断决策。</p></div>
         <span id="requestHistoryCount" class="request-history-count">最近 0 / 100</span>
       </div>
-      <div class="request-history-table-wrap">
-        <table class="request-history-table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>发现模型</th>
-              <th>请求模型</th>
-              <th>最终模型</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody id="requestHistoryBody"></tbody>
-        </table>
-      </div>
+      <div class="request-history-table-wrap"><table class="request-history-table"><thead><tr><th>时间</th><th>发现模型</th><th>请求模型</th><th>最终模型</th><th>状态</th></tr></thead><tbody id="requestHistoryBody"></tbody></table></div>
       <p id="requestHistoryEmpty" class="request-history-empty">暂无正式请求记录 / No formal request records yet.</p>
     </section>
 
@@ -163,10 +138,12 @@
     </footer>
   </main>
   <script src="settings-shell.js"></script>
+  <script type="module" src="extension-page-error-capture.js"></script>
   <script type="module" src="options.js"></script>
   <script type="module" src="feature-toggle-controller.js"></script>
   <script type="module" src="request-history-options.js"></script>
   <script type="module" src="options-update.js"></script>
+  <script type="module" src="settings-local-logs.js"></script>
   <script src="model-catalog-options.js"></script>
 </body>
 </html>
