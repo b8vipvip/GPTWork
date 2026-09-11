@@ -3,6 +3,9 @@ import './private-context-bridge.js';
 import './private-request-hook.js';
 import './private-response-hook.js';
 import './background-local-error-capture.js';
+// Install the explicit GPTWork master lifecycle before background.js can open Native
+// Messaging or recurring runtime activity.
+import './master-runtime-safety.js';
 // Patch ChatGptNetworkMonitor before background.js instantiates it. This keeps Chrome
 // Debugger detached during top-level navigation and ignores stale legacy master state
 // when both product feature gates are off.
