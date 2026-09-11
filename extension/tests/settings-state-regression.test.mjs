@@ -4,32 +4,34 @@ import test from 'node:test';
 
 const manifestUrl = new URL('../manifest.json', import.meta.url);
 const optionsUrl = new URL('../options.js', import.meta.url);
-const enabledGuardUrl = new URL('../settings-enabled-guard.js', import.meta.url);
+const featureControllerUrl = new URL('../feature-toggle-controller.js', import.meta.url);
 const settingsShellUrl = new URL('../settings-shell.js', import.meta.url);
 const migrationUrl = new URL('../settings-migration.js', import.meta.url);
 
-test('current settings keep the global switch interactive and reconcile stale Core versions', async () => {
+test('current settings expose independent Work/model-lock gates and reconcile stale Core versions', async () => {
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   const settingsPageUrl = new URL(`../${manifest.options_ui.page}`, import.meta.url);
-  const [settingsHtml, options, enabledGuard, shell, migration] = await Promise.all([
+  const [settingsHtml, options, featureController, shell, migration] = await Promise.all([
     readFile(settingsPageUrl, 'utf8'),
     readFile(optionsUrl, 'utf8'),
-    readFile(enabledGuardUrl, 'utf8'),
+    readFile(featureControllerUrl, 'utf8'),
     readFile(settingsShellUrl, 'utf8'),
     readFile(migrationUrl, 'utf8'),
   ]);
 
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.equal(manifest.options_ui.page, 'settings-v0521.html');
-  assert.match(settingsHtml, /<input id="enabled" type="checkbox">/);
-  assert.doesNotMatch(settingsHtml, /<input id="enabled"[^>]*disabled/);
-  assert.match(settingsHtml, /<script src="settings-enabled-guard\.js"><\/script>/);
+  assert.match(settingsHtml, /id="workModeEnabled" type="checkbox"/);
+  assert.match(settingsHtml, /id="modelLockEnabled" type="checkbox"/);
+  assert.match(settingsHtml, /<input id="enabled" type="checkbox" hidden/);
+  assert.match(settingsHtml, /<script type="module" src="feature-toggle-controller\.js"><\/script>/);
+  assert.doesNotMatch(settingsHtml, /settings-enabled-guard\.js/);
+  assert.doesNotMatch(settingsHtml, /enabled-toggle-controller\.js/);
 
-  assert.match(enabledGuard, /function ensureEnabledControlInteractive\(\)/);
-  assert.match(enabledGuard, /enabled\.disabled = false/);
-  assert.match(enabledGuard, /removeAttribute\('disabled'\)/);
-  assert.match(enabledGuard, /MutationObserver\(\(\) => ensureEnabledControlInteractive\(\)\)/);
-  assert.match(enabledGuard, /window\.addEventListener\('pageshow', ensureEnabledControlInteractive\)/);
+  assert.match(featureController, /WORK_MODE_KEY = 'gptworkWorkModeEnabled'/);
+  assert.match(featureController, /MODEL_LOCK_KEY = 'gptworkModelLockEnabled'/);
+  assert.match(featureController, /requireActivation\(currentAccount\)/);
+  assert.match(featureController, /GPTLOCK_SET_ENABLED/);
 
   assert.match(options, /patchSettings\(\{ enabled: target\.checked \}\)/);
   assert.doesNotMatch(options, /elements\.save\.addEventListener/);
