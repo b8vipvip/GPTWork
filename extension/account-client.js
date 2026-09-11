@@ -97,9 +97,16 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   async function initialize() {
     await ensureIds();
     if (!token) return persist(null);
-    try { return await me(); }
-    catch (error) {
-      return persist({ authenticated: false, lastError: error.message });
+    try {
+      return await me();
+    } catch (error) {
+      // A transient transport/server failure must not turn a still-valid local session
+      // into an apparent logout. Only an explicit 401 clears the token/session inside
+      // request()/me(). Keep the last authenticated snapshot and annotate the refresh
+      // failure so the next heartbeat can recover without flashing the login UI.
+      state = { ...state, lastError: error.message };
+      await chrome.storage.local.set({ [SNAPSHOT_KEY]: state });
+      return state;
     }
   }
 
