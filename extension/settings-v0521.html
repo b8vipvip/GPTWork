@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="options.css">
   <link rel="stylesheet" href="request-history.css">
 </head>
-<body data-settings-revision="v0552-runtime-recovery-local-logs">
+<body data-settings-revision="v0554-settings-layout-history-pagination">
   <main class="shell">
     <header>
       <div>
@@ -30,27 +30,6 @@
         <span><strong>模型锁定</strong><small>启用后锁定下方“锁定模型”列表中勾选的全部模型；可与 Work 模式叠加。</small></span>
       </label>
       <input id="enabled" type="checkbox" hidden aria-hidden="true" tabindex="-1">
-    </section>
-
-    <section id="updates" class="card update-card" aria-labelledby="updateHeading">
-      <div class="update-heading">
-        <div><h2 id="updateHeading">版本更新 <span>Update center</span></h2></div>
-        <span id="updateStatusBadge" class="update-badge idle">待检查</span>
-      </div>
-      <div class="update-meta">
-        <div><span>当前扩展</span><strong id="updateCurrentVersion">—</strong></div>
-        <div><span>最新正式版</span><strong id="updateLatestVersion">—</strong></div>
-        <div><span>本地核心</span><strong id="updateCoreVersion">—</strong></div>
-      </div>
-      <div class="update-track" aria-hidden="true"><div id="updateProgress" class="update-progress"></div></div>
-      <div class="update-progress-row" aria-live="polite"><strong id="updatePercent">0%</strong><span id="updateMessage">尚未检查更新</span></div>
-      <div class="update-actions">
-        <button id="checkUpdateNow" class="secondary" type="button">检查更新</button>
-        <button id="installUpdateNow" class="primary" type="button" hidden>立即更新</button>
-        <button id="openRelease" class="secondary" type="button">打开发布页</button>
-      </div>
-      <pre id="updateLog" class="update-log">等待更新操作…</pre>
-      <p class="permission-note">从扩展弹窗点击“检查更新”会直接打开本区域并自动开始检查；发现新版且 Windows 本地核心满足安全更新基线时，会继续执行一键更新。</p>
     </section>
 
     <section class="card" aria-labelledby="modelHeading">
@@ -130,6 +109,32 @@
       </div>
       <div class="request-history-table-wrap"><table class="request-history-table"><thead><tr><th>时间</th><th>发现模型</th><th>请求模型</th><th>最终模型</th><th>状态</th></tr></thead><tbody id="requestHistoryBody"></tbody></table></div>
       <p id="requestHistoryEmpty" class="request-history-empty">暂无正式请求记录 / No formal request records yet.</p>
+      <div id="requestHistoryPagination" class="request-history-pagination" hidden>
+        <button id="requestHistoryPrev" class="secondary request-history-page-button" type="button">上一页 / Previous</button>
+        <span id="requestHistoryPageInfo" class="request-history-page-info">第 1 / 1 页</span>
+        <button id="requestHistoryNext" class="secondary request-history-page-button" type="button">下一页 / Next</button>
+      </div>
+    </section>
+
+    <section id="updates" class="card update-card" aria-labelledby="updateHeading">
+      <div class="update-heading">
+        <div><h2 id="updateHeading">版本更新 <span>Update center</span></h2></div>
+        <span id="updateStatusBadge" class="update-badge idle">待检查</span>
+      </div>
+      <div class="update-meta">
+        <div><span>当前扩展</span><strong id="updateCurrentVersion">—</strong></div>
+        <div><span>最新正式版</span><strong id="updateLatestVersion">—</strong></div>
+        <div><span>本地核心</span><strong id="updateCoreVersion">—</strong></div>
+      </div>
+      <div class="update-track" aria-hidden="true"><div id="updateProgress" class="update-progress"></div></div>
+      <div class="update-progress-row" aria-live="polite"><strong id="updatePercent">0%</strong><span id="updateMessage">尚未检查更新</span></div>
+      <div class="update-actions">
+        <button id="checkUpdateNow" class="secondary" type="button">检查更新</button>
+        <button id="installUpdateNow" class="primary" type="button" hidden>立即更新</button>
+        <button id="openRelease" class="secondary" type="button">打开发布页</button>
+      </div>
+      <pre id="updateLog" class="update-log">等待更新操作…</pre>
+      <p class="permission-note">从扩展弹窗点击“检查更新”会直接打开本区域并自动开始检查；发现新版且 Windows 本地核心满足安全更新基线时，会继续执行一键更新。</p>
     </section>
 
     <footer>
