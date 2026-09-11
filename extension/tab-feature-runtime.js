@@ -24,6 +24,7 @@ let modelLockSelection = [];
 let discoveredModels = [];
 let initialized = false;
 let initializePromise = null;
+let selectionWriteInFlight = false;
 
 function log(event, details = {}, level = 'info') {
   void appendRuntimeLog(level, 'tab-feature', event, details).catch(() => {});
@@ -40,6 +41,10 @@ function normalizeModels(values) {
   return [...new Set((Array.isArray(values) ? values : [])
     .map(normalizeConcreteModelId)
     .filter(Boolean))];
+}
+
+function sameModels(left, right) {
+  return JSON.stringify(normalizeModels(left)) === JSON.stringify(normalizeModels(right));
 }
 
 function isAtLeastSol(model) {
@@ -93,6 +98,19 @@ async function migrateLegacyFlags(storedLocal) {
   });
 }
 
+async function restoreExplicitModelSelectionForMigration(storedLocal) {
+  if (storedLocal[TAB_FEATURE_MIGRATION_KEY] === true || !modelLockSelection.length) return;
+  if (sameModels(basePolicy.lockedModels, modelLockSelection)) return;
+  basePolicy = normalizePolicy({ ...basePolicy, lockedModels: modelLockSelection });
+  selectionWriteInFlight = true;
+  try {
+    await chrome.storage.sync.set({ policy: basePolicy });
+    log('legacy_model_selection_restored', { lockedModels: modelLockSelection });
+  } finally {
+    selectionWriteInFlight = false;
+  }
+}
+
 export async function initializeTabFeatureRuntime() {
   if (initialized) return;
   if (initializePromise) return initializePromise;
@@ -116,6 +134,7 @@ export async function initializeTabFeatureRuntime() {
     basePolicy = normalizePolicy(syncStored.policy);
     modelLockSelection = normalizeModels(syncStored[MODEL_SELECTION_KEY]);
     discoveredModels = normalizeModels(syncStored[DISCOVERED_MODELS_KEY]);
+    await restoreExplicitModelSelectionForMigration(localStored);
     await migrateLegacyFlags(localStored);
     initialized = true;
   })().finally(() => {
@@ -258,6 +277,7 @@ async function featureSnapshot(tabId) {
     tabId,
     featureState,
     policy: Number.isInteger(tabId) ? effectivePolicyForTabSync(tabId) : basePolicy,
+    settings: state?.settings ?? null,
     account: state?.account ?? null,
     accountWindowAllowed: Number.isInteger(tabId) ? state?.accountWindowAllowed !== false : true,
     windowQuotaExceeded: quotaExceeded(state, tabId),
@@ -349,6 +369,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   let changed = false;
   if (changes.policy) {
     basePolicy = normalizePolicy(changes.policy.newValue);
+    if (!selectionWriteInFlight) {
+      const nextSelection = normalizeModels(basePolicy.lockedModels);
+      if (nextSelection.length) {
+        modelLockSelection = nextSelection;
+        if (!changes[MODEL_SELECTION_KEY]) {
+          selectionWriteInFlight = true;
+          void chrome.storage.sync.set({ [MODEL_SELECTION_KEY]: nextSelection })
+            .catch(() => {})
+            .finally(() => { selectionWriteInFlight = false; });
+        }
+      }
+    }
     changed = true;
   }
   if (changes[MODEL_SELECTION_KEY]) {
