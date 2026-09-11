@@ -1,5 +1,5 @@
 const POPUP_RUNTIME_KEY = 'gptlockPopupRuntimeInfo';
-const SHELL_REVISION = 'v0513-license-ui-purge-1';
+const SHELL_REVISION = 'v0552-account-ui-purge-2';
 
 const LEGACY_LICENSE_SELECTORS = [
   '.license-card',
@@ -23,6 +23,7 @@ const LEGACY_LICENSE_TEXT = [
   '重新验证',
   '退出授权',
   '获取授权码',
+  '授权额度',
   'gptlock.mv3.cn',
 ];
 
@@ -31,6 +32,14 @@ function removeNodeAndLegacyCard(node) {
   const card = node.closest('section, article, .card, .license-card');
   (card || node).remove();
   return true;
+}
+
+function sanitizeLegacyTooltips() {
+  const autoVerify = document.getElementById('autoVerify');
+  const title = autoVerify?.getAttribute('title') || '';
+  if (autoVerify && /授权码|授权额度|license\s*code/i.test(title)) {
+    autoVerify.setAttribute('title', '使用当前 GPTWork 账号权益进行自动验证 / Auto verify with account entitlement');
+  }
 }
 
 function removeLegacyLicenseUi() {
@@ -56,6 +65,7 @@ function removeLegacyLicenseUi() {
     removed = true;
   }
 
+  sanitizeLegacyTooltips();
   return removed;
 }
 
@@ -89,7 +99,7 @@ removeLegacyLicenseUi();
 void persistRuntimeFingerprint();
 
 const observer = new MutationObserver(() => removeLegacyLicenseUi());
-observer.observe(document.documentElement, { childList: true, subtree: true });
+observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['title'] });
 
 const checkUpdate = document.getElementById('checkUpdate');
 checkUpdate?.addEventListener('click', openUpdateCenter, true);
