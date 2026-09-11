@@ -15,6 +15,7 @@ const el = {
 let verificationEmail = '';
 let resetEmail = '';
 let deviceLimitDetails = null;
+let accountAuthenticated = false;
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -34,6 +35,7 @@ function localDate(value) {
 }
 
 function setMessage(text, tone = '') {
+  if (!el.authMessage) return;
   el.authMessage.textContent = text || '';
   el.authMessage.className = `auth-message ${tone}`.trim();
 }
@@ -47,12 +49,25 @@ function showPanel(name) {
     reset: el.resetForm,
     deviceReplace: el.deviceReplaceForm,
   };
-  for (const panel of Object.values(map)) panel.hidden = true;
-  map[name].hidden = false;
-  el.showLogin.classList.toggle('active', name === 'login');
-  el.showRegister.classList.toggle('active', name === 'register' || name === 'verify');
-  el.showForgot.classList.toggle('active', name === 'forgot' || name === 'reset');
+  for (const panel of Object.values(map)) if (panel) panel.hidden = true;
+  if (map[name]) map[name].hidden = false;
+  el.showLogin?.classList.toggle('active', name === 'login');
+  el.showRegister?.classList.toggle('active', name === 'register' || name === 'verify');
+  el.showForgot?.classList.toggle('active', name === 'forgot' || name === 'reset');
   setMessage('');
+}
+
+function showAuthScreen(reason = '') {
+  if (!el.authShell || !el.appShell) return;
+  el.appShell.hidden = true;
+  el.authShell.hidden = false;
+  showPanel('login');
+  if (reason) setMessage(reason, 'bad');
+}
+
+function showAppScreen() {
+  if (el.authShell) el.authShell.hidden = true;
+  if (el.appShell) el.appShell.hidden = false;
 }
 
 function renderDeviceReplacement(details) {
@@ -94,22 +109,38 @@ async function finishLogin(replaceDeviceRecordIds = []) {
 
 function renderAccount(account) {
   const authenticated = Boolean(account?.authenticated);
-  el.authShell.hidden = authenticated;
-  el.appShell.hidden = !authenticated;
-  if (!authenticated) return;
+  accountAuthenticated = authenticated;
+  showAppScreen();
+
+  if (!authenticated) {
+    if (el.accountEmail) el.accountEmail.textContent = '未登录';
+    if (el.accountTier) el.accountTier.textContent = '登录/注册后可启用功能';
+    if (el.accountExpiry) el.accountExpiry.textContent = '权益有效期 —';
+    if (el.accountUsage) el.accountUsage.textContent = '设备/窗口 —';
+    if (el.accountCenter) el.accountCenter.textContent = '登录 / 注册';
+    if (el.accountLogout) el.accountLogout.hidden = true;
+    if (el.accountUpgrade) el.accountUpgrade.hidden = true;
+    window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
+      detail: { authenticated: false, active: false },
+    }));
+    return;
+  }
 
   const user = account.user || {};
   const entitlement = account.entitlement || {};
   const sourceName = account.level?.name || entitlement.level?.name || '普通用户';
-  el.accountEmail.textContent = user.email || '—';
-  el.accountTier.textContent = sourceName;
-  el.accountExpiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
+  if (el.accountEmail) el.accountEmail.textContent = user.email || '—';
+  if (el.accountTier) el.accountTier.textContent = sourceName;
+  if (el.accountExpiry) el.accountExpiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
   const usage = entitlement.usage || {};
   const limits = entitlement.limits || {};
-  el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口 ${usage.windows ?? 0}/${limits.windows ?? 0}`;
+  if (el.accountUsage) el.accountUsage.textContent = `设备 ${usage.devices ?? 0}/${limits.devices ?? 0} · 窗口 ${usage.windows ?? 0}/${limits.windows ?? 0}`;
+  if (el.accountCenter) el.accountCenter.textContent = '账户中心';
+  if (el.accountLogout) el.accountLogout.hidden = false;
+  if (el.accountUpgrade) el.accountUpgrade.hidden = false;
   if (el.enabled) {
     if (!entitlement.active) el.enabled.title = '当前使用时长已到期，请签到、分享或升级用户等级';
-    else el.enabled.title = `启用或关闭 GPTWork；当前等级最多 ${limits.windows ?? 1} 个同时窗口`;
+    else el.enabled.title = `GPTWork 功能可用；当前等级最多 ${limits.windows ?? 1} 个同时窗口`;
   }
   window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
     detail: { authenticated, active: Boolean(entitlement.active) },
@@ -121,22 +152,21 @@ async function refreshGate() {
     const state = await sendMessage({ type: 'GPTLOCK_GET_STATE' });
     const account = state?.account || { authenticated: false };
     renderAccount(account);
-    if (!account.authenticated) showPanel('login');
     return state;
   } catch (error) {
-    el.authShell.hidden = false;
-    el.appShell.hidden = true;
-    showPanel('login');
-    setMessage(`读取账户状态失败：${error.message}`, 'bad');
+    accountAuthenticated = false;
+    showAppScreen();
+    if (el.accountEmail) el.accountEmail.textContent = '账户状态暂不可用';
+    if (el.accountTier) el.accountTier.textContent = error.message;
     return null;
   }
 }
 
-el.showLogin.addEventListener('click', () => showPanel('login'));
-el.showRegister.addEventListener('click', () => showPanel('register'));
-el.showForgot.addEventListener('click', () => showPanel('forgot'));
+el.showLogin?.addEventListener('click', () => showPanel('login'));
+el.showRegister?.addEventListener('click', () => showPanel('register'));
+el.showForgot?.addEventListener('click', () => showPanel('forgot'));
 
-el.loginForm.addEventListener('submit', (event) => {
+el.loginForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   setMessage('正在登录…');
   void finishLogin().catch((error) => {
@@ -150,7 +180,7 @@ el.loginForm.addEventListener('submit', (event) => {
   });
 });
 
-el.deviceReplaceForm.addEventListener('submit', (event) => {
+el.deviceReplaceForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   const selected = [...el.deviceReplaceList.querySelectorAll('input[type="checkbox"]:checked')].map((item) => Number(item.value));
   const required = Math.max(1, Number(deviceLimitDetails?.requiredReleaseCount || 1));
@@ -170,12 +200,12 @@ el.deviceReplaceForm.addEventListener('submit', (event) => {
   });
 });
 
-el.cancelDeviceReplace.addEventListener('click', () => {
+el.cancelDeviceReplace?.addEventListener('click', () => {
   deviceLimitDetails = null;
   showPanel('login');
 });
 
-el.registerForm.addEventListener('submit', (event) => {
+el.registerForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   if (el.registerPassword.value !== el.registerPassword2.value) {
     setMessage('两次输入的密码不一致。', 'bad');
@@ -200,7 +230,7 @@ el.registerForm.addEventListener('submit', (event) => {
     .catch((error) => setMessage(`注册失败：${error.message}`, 'bad'));
 });
 
-el.verifyForm.addEventListener('submit', (event) => {
+el.verifyForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   setMessage('正在验证邮箱…');
   void sendMessage({ type: 'GPTLOCK_ACCOUNT_VERIFY_EMAIL', email: verificationEmail, code: el.verifyCode.value.trim() })
@@ -213,7 +243,7 @@ el.verifyForm.addEventListener('submit', (event) => {
     .catch((error) => setMessage(`验证失败：${error.message}`, 'bad'));
 });
 
-el.resendVerification.addEventListener('click', () => {
+el.resendVerification?.addEventListener('click', () => {
   if (!verificationEmail) return;
   setMessage('正在重新发送验证码…');
   void sendMessage({ type: 'GPTLOCK_ACCOUNT_RESEND_VERIFICATION', email: verificationEmail })
@@ -221,7 +251,7 @@ el.resendVerification.addEventListener('click', () => {
     .catch((error) => setMessage(`发送失败：${error.message}`, 'bad'));
 });
 
-el.forgotForm.addEventListener('submit', (event) => {
+el.forgotForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   resetEmail = el.forgotEmail.value.trim();
   setMessage('正在请求重置验证码…');
@@ -234,7 +264,7 @@ el.forgotForm.addEventListener('submit', (event) => {
     .catch((error) => setMessage(`请求失败：${error.message}`, 'bad'));
 });
 
-el.resetForm.addEventListener('submit', (event) => {
+el.resetForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   setMessage('正在重置密码…');
   void sendMessage({ type: 'GPTLOCK_ACCOUNT_RESET_PASSWORD', email: resetEmail, code: el.resetCode.value.trim(), newPassword: el.resetPassword.value })
@@ -248,10 +278,16 @@ el.resetForm.addEventListener('submit', (event) => {
     .catch((error) => setMessage(`重置失败：${error.message}`, 'bad'));
 });
 
-el.accountCenter?.addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('account.html') }));
+el.accountCenter?.addEventListener('click', () => {
+  if (!accountAuthenticated) {
+    showAuthScreen('请先登录或注册 GPTWork。');
+    return;
+  }
+  void chrome.tabs.create({ url: chrome.runtime.getURL('account.html') });
+});
 el.accountUpgrade?.addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('account.html#upgrade') }));
 
-el.accountLogout.addEventListener('click', () => {
+el.accountLogout?.addEventListener('click', () => {
   void sendMessage({ type: 'GPTLOCK_ACCOUNT_LOGOUT' })
     .then(async () => {
       await refreshGate();
@@ -260,5 +296,8 @@ el.accountLogout.addEventListener('click', () => {
     .catch((error) => setMessage(`退出失败：${error.message}`, 'bad'));
 });
 
+window.addEventListener('gptlock-auth-required', (event) => {
+  showAuthScreen(event.detail?.message || '请先登录或注册 GPTWork。');
+});
 window.addEventListener('gptlock-account-refresh', () => void refreshGate());
 void refreshGate();

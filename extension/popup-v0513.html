@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="gptlock-popup-revision" content="v0550-account-actions-1">
+  <meta name="gptlock-popup-revision" content="v0551-dual-feature-gates-1">
   <title>GPTWork</title>
   <link rel="stylesheet" href="popup-v0513.css">
 </head>
-<body data-popup-revision="v0550-account-actions-1">
-  <section id="authShell" class="auth-shell" aria-live="polite">
+<body data-popup-revision="v0551-dual-feature-gates-1">
+  <section id="authShell" class="auth-shell" aria-live="polite" hidden>
     <div class="auth-brand">
       <span class="auth-logo">G</span>
       <div><p>GPTWORK</p><h1>账号登录 <small>Account</small></h1></div>
@@ -24,7 +24,7 @@
         <label>邮箱<input id="loginEmail" type="email" autocomplete="email" placeholder="name@example.com" required></label>
         <label>密码<input id="loginPassword" type="password" autocomplete="current-password" minlength="10" required></label>
         <button id="loginButton" class="primary auth-submit" type="submit">登录 GPTWork</button>
-        <p class="auth-hint">登录后才能启用请求锁定。会话令牌仅保存在本机浏览器。</p>
+        <p class="auth-hint">无需登录即可查看 GPTWork 界面；启用 Work 模式或模型锁定时会要求登录/注册。会话令牌仅保存在本机浏览器。</p>
       </form>
 
       <form id="registerForm" class="auth-panel" hidden>
@@ -68,7 +68,7 @@
     </div>
   </section>
 
-  <main id="appShell" hidden>
+  <main id="appShell">
     <header>
       <div>
         <p class="eyebrow">GPTWORK <span id="version"></span></p>
@@ -80,22 +80,31 @@
     <section class="account-card">
       <div class="account-main">
         <div class="avatar" aria-hidden="true">G</div>
-        <div><strong id="accountEmail">—</strong><div class="account-tier-row"><p id="accountTier">正在读取账户…</p><button id="accountUpgrade" class="account-upgrade" type="button">升级</button></div></div>
+        <div><strong id="accountEmail">未登录</strong><div class="account-tier-row"><p id="accountTier">登录/注册后可启用功能</p><button id="accountUpgrade" class="account-upgrade" type="button" hidden>升级</button></div></div>
       </div>
       <div class="account-meta"><div class="account-expiry-row"><span id="accountExpiry">权益有效期 —</span><div class="reward-actions"><button id="accountCheckin" class="reward-button" type="button">签到<sup>+1</sup></button><button id="accountShare" class="reward-button" type="button">分享<sup>+7</sup></button></div></div><span id="accountUsage">设备/窗口 —</span></div>
       <div class="account-actions">
-        <button id="accountCenter" class="primary" type="button">账户中心</button>
-        <button id="accountLogout" type="button">退出登录</button>
+        <button id="accountCenter" class="primary" type="button">登录 / 注册</button>
+        <button id="accountLogout" type="button" hidden>退出登录</button>
       </div>
     </section>
 
     <section class="enable-row">
-      <span><strong>启用 GPTWork</strong><small>Enable request locking</small></span>
-      <label class="switch" title="启用或关闭 GPTWork / Enable or disable GPTWork">
-        <input id="enabled" type="checkbox">
+      <span><strong>Work 模式</strong><small>自动锁定 GPT-5.6 Sol 及以上模型</small></span>
+      <label class="switch" title="启用 Work 模式 / Enable Work mode">
+        <input id="workModeEnabled" type="checkbox">
         <span aria-hidden="true"></span>
       </label>
     </section>
+
+    <section class="enable-row">
+      <span><strong>模型锁定</strong><small>锁定设置中勾选的全部模型</small></span>
+      <label class="switch" title="启用模型锁定 / Enable configured model lock">
+        <input id="modelLockEnabled" type="checkbox">
+        <span aria-hidden="true"></span>
+      </label>
+    </section>
+    <input id="enabled" type="checkbox" hidden aria-hidden="true" tabindex="-1">
 
     <section id="installHelp" class="install-help" hidden>
       <strong id="installTitle">尚未安装本地核心</strong>
@@ -132,6 +141,6 @@
   <script type="module" src="popup-rewards.js"></script>
   <script type="module" src="popup-help.js"></script>
   <script type="module" src="popup.js"></script>
-  <script type="module" src="enabled-toggle-controller.js"></script>
+  <script type="module" src="feature-toggle-controller.js"></script>
 </body>
 </html>

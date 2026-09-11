@@ -4,6 +4,8 @@ import test from 'node:test';
 import { evaluateGuard } from '../guard.js';
 import { DEFAULT_POLICY, DEFAULT_SETTINGS } from '../policy.js';
 
+const ENABLED_SETTINGS = Object.freeze({ ...DEFAULT_SETTINGS, enabled: true });
+
 function state(patch = {}) {
   return {
     phase: 'initial',
@@ -44,8 +46,8 @@ function confirmedMismatch(patch = {}) {
   };
 }
 
-test('normal initial state is request-lock ready without a probe gate', () => {
-  const guard = evaluateGuard({ state: state(), policy: DEFAULT_POLICY, settings: DEFAULT_SETTINGS });
+test('normal enabled state is request-lock ready without a probe gate', () => {
+  const guard = evaluateGuard({ state: state(), policy: DEFAULT_POLICY, settings: ENABLED_SETTINGS });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'locked');
   assert.equal(guard.status, 'lock_ready');
@@ -55,7 +57,7 @@ test('page selection mismatch is warning-only because the formal request is lock
   const guard = evaluateGuard({
     state: state({ pageObservation: { model: 'gpt-5.5', reasoning: 'high' } }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'warning');
@@ -67,7 +69,7 @@ test('missing page fields keep the network request lock ready', () => {
   const guard = evaluateGuard({
     state: state({ pageObservation: { model: null, reasoning: null } }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'locked');
@@ -77,7 +79,7 @@ test('missing page fields keep the network request lock ready', () => {
 
 test('waiting, unverified and verification errors do not interrupt chat', () => {
   for (const phase of ['waiting', 'unverified', 'error']) {
-    const guard = evaluateGuard({ state: state({ phase }), policy: DEFAULT_POLICY, settings: DEFAULT_SETTINGS });
+    const guard = evaluateGuard({ state: state({ phase }), policy: DEFAULT_POLICY, settings: ENABLED_SETTINGS });
     assert.equal(guard.canSend, true, phase);
   }
 });
@@ -90,7 +92,7 @@ test('strict mode blocks only a confirmed response model mismatch for the latest
       lastVerification: confirmedMismatch({ reasons: ['model_not_allowed', 'reasoning_missing'] }),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, false);
   assert.equal(guard.allowKind, 'blocked');
@@ -106,7 +108,7 @@ test('stale mismatch from an older turn cannot block a newer request', () => {
       lastVerification: confirmedMismatch({ verifiedAt: '2026-08-26T12:55:20.000Z' }),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'warning');
@@ -121,7 +123,7 @@ test('stale model_not_allowed reason cannot block when the verified model is now
       lastVerification: confirmedMismatch({ model: 'gpt-5.6-sol' }),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.status, 'mismatch');
@@ -135,7 +137,7 @@ test('uncorrelated mismatch evidence fails open instead of permanently blocking 
       lastVerification: confirmedMismatch({ verifiedAt: undefined }),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.status, 'mismatch');
@@ -148,14 +150,14 @@ test('reasoning-only mismatch remains warning-only even in strict mode', () => {
       lastVerification: { reason: 'reasoning_not_allowed', reasons: ['reasoning_not_allowed'] },
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'warning');
 });
 
 test('verified response remains sendable', () => {
-  const guard = evaluateGuard({ state: state({ phase: 'verified' }), policy: DEFAULT_POLICY, settings: DEFAULT_SETTINGS });
+  const guard = evaluateGuard({ state: state({ phase: 'verified' }), policy: DEFAULT_POLICY, settings: ENABLED_SETTINGS });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'locked');
   assert.equal(guard.status, 'verified');
@@ -174,7 +176,7 @@ test('completed network-backed auto verification survives later metadata-empty f
       autoVerification: verifiedAuto(),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'locked');
@@ -189,7 +191,7 @@ test('sticky auto verification does not leak into a newer request', () => {
       autoVerification: verifiedAuto(),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.status, 'waiting');
 });
@@ -203,7 +205,7 @@ test('sticky auto verification requires complete allowed backend evidence', () =
       autoVerification: verifiedAuto({ responseReasoning: null }),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.status, 'unverified');
 });
@@ -217,7 +219,7 @@ test('confirmed mismatch for the latest request overrides an earlier successful 
       autoVerification: verifiedAuto(),
     }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, false);
   assert.equal(guard.status, 'mismatch');
@@ -227,7 +229,7 @@ test('monitor or Native Core outage warns but does not block normal chat', () =>
   const monitor = evaluateGuard({
     state: state({ monitor: { attached: false, error: 'detached' } }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(monitor.canSend, true);
   assert.equal(monitor.status, 'monitor_offline');
@@ -235,7 +237,7 @@ test('monitor or Native Core outage warns but does not block normal chat', () =>
   const core = evaluateGuard({
     state: state({ core: { connected: false, error: 'host missing' } }),
     policy: DEFAULT_POLICY,
-    settings: DEFAULT_SETTINGS,
+    settings: ENABLED_SETTINGS,
   });
   assert.equal(core.canSend, true);
   assert.equal(core.status, 'core_offline');
@@ -245,7 +247,7 @@ test('response verification can be disabled while request locking remains active
   const guard = evaluateGuard({
     state: state(),
     policy: DEFAULT_POLICY,
-    settings: { ...DEFAULT_SETTINGS, networkVerificationEnabled: false },
+    settings: { ...ENABLED_SETTINGS, networkVerificationEnabled: false },
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.allowKind, 'locked');
