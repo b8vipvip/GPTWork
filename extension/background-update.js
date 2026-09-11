@@ -11,6 +11,7 @@ export const RELEASE_NOTIFICATION_URL = 'https://gptlock.mv3.cn/site/api/release
 export const CLIENT_UPDATE_POLICY_URL = 'https://gptlock.mv3.cn/site/api/client-update/config';
 export const CLIENT_CONTROL_URL = 'https://gptlock.mv3.cn/api/v1/client/control';
 export const RELEASE_CHECK_ALARM = 'gptlock-release-check';
+export const ACCOUNT_REFRESH_ALARM = 'gptlock-account-refresh';
 export const RELEASE_GENERATION_KEY = 'gptlockReleaseGeneration';
 export const AUTO_UPDATE_ATTEMPT_KEY = 'gptlockAutoUpdateAttempt';
 export const ADMIN_UPDATE_GENERATION_KEY = 'gptworkAdminUpdateGeneration';
@@ -28,6 +29,7 @@ const INSTALL_INITIAL_WAIT_MS = 8 * 1000;
 const INSTALL_POLL_MS = 3 * 1000;
 const NATIVE_TIMEOUT_MS = 12 * 1000;
 const LONG_POLL_ROUNDS = 3;
+const ACCOUNT_REFRESH_SOON_MS = 250;
 
 let updateTask = null;
 let notificationTask = null;
@@ -71,14 +73,15 @@ function getPlatformInfo(chromeApi = globalThis.chrome) {
   return new Promise((resolve) => chromeApi.runtime.getPlatformInfo((info) => resolve(info ?? {})));
 }
 
-function runtimeMessage(message, chromeApi = globalThis.chrome) {
-  return new Promise((resolve, reject) => {
-    chromeApi.runtime.sendMessage(message, (response) => {
-      const error = chromeApi.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else if (response?.ok === false) reject(new Error(response?.error || 'Extension request failed'));
-      else resolve(response?.data ?? response);
-    });
+export async function scheduleAccountRefresh(chromeApi = globalThis.chrome) {
+  if (!chromeApi?.alarms?.create) throw new Error('Account refresh alarm is unavailable');
+  // background-update.js runs in the same MV3 service-worker frame as background.js.
+  // runtime.sendMessage() does not deliver back into the sender's own frame, so using
+  // it here can produce "Receiving end does not exist" even while the worker is alive.
+  // Re-arm the existing heartbeat alarm to fire promptly and keep its 1-minute cadence.
+  await chromeApi.alarms.create(ACCOUNT_REFRESH_ALARM, {
+    when: Date.now() + ACCOUNT_REFRESH_SOON_MS,
+    periodInMinutes: AUTO_UPDATE_ALARM_MINUTES,
   });
 }
 
@@ -427,9 +430,9 @@ async function clientControlRound(chromeApi = globalThis.chrome) {
   const control = payload?.control || {};
 
   if (control.accountSync && Number(control.accountSyncGeneration || 0) > sinceAccount) {
-    await runtimeMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }, chromeApi);
+    await scheduleAccountRefresh(chromeApi);
     await chromeApi.storage.local.set({ [ACCOUNT_SYNC_GENERATION_KEY]: Number(control.accountSyncGeneration) });
-    logUpdate('info', 'admin_account_sync_applied', { generation: Number(control.accountSyncGeneration) });
+    logUpdate('info', 'admin_account_sync_scheduled', { generation: Number(control.accountSyncGeneration) });
   }
 
   if (control.forceUpdate && Number(control.updateGeneration || 0) > sinceUpdate) {
