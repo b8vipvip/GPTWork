@@ -1,7 +1,7 @@
 const SETTINGS_RUNTIME_KEY = 'gptlockSettingsRuntimeInfo';
 const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
 const MASTER_KEY = 'gptworkEnabledLocal';
-const SETTINGS_REVISION = 'v0555-settings-master-switch';
+const SETTINGS_REVISION = 'v0521-settings-state-repair-1';
 const SAFE_CORE_RECONCILE_PHASES = new Set(['idle', 'checking', 'ready', 'up_to_date', 'error']);
 const MASTER_MESSAGE_SOURCE = 'settings_master';
 let masterSyncTimers = [];
