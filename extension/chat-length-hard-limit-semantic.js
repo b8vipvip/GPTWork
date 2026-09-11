@@ -10,8 +10,14 @@
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
-  function shouldNormalizeCandidate({ text = '', classifier = null, insideConversation = false, ownNotice = false } = {}) {
-    if (ownNotice || insideConversation || typeof classifier !== 'function') return false;
+  function shouldNormalizeCandidate({
+    text = '',
+    classifier = null,
+    insideConversation = false,
+    containsConversation = false,
+    ownNotice = false,
+  } = {}) {
+    if (ownNotice || insideConversation || containsConversation || typeof classifier !== 'function') return false;
     return Boolean(classifier(normalizeText(text)));
   }
 
@@ -36,18 +42,18 @@
     for (const element of document.querySelectorAll(`p,[role="alert"],[role="status"],[${MARKER}]`)) {
       const ownNotice = Boolean(element.closest(OWN_NOTICE_SELECTOR));
       const insideConversation = Boolean(element.closest(CONVERSATION_TURN_SELECTOR));
+      const containsConversation = Boolean(element.querySelector?.(CONVERSATION_TURN_SELECTOR));
       const matches = shouldNormalizeCandidate({
         text: elementText(element),
         classifier: classify,
         insideConversation,
+        containsConversation,
         ownNotice,
       });
 
       if (matches) {
-        // The remaining-length indicator deliberately requires a semantic system notice
-        // or a nearby new-chat action. ChatGPT's current hard-limit banner can be a plain
-        // out-of-turn <p>, so normalize that system chrome to status without touching
-        // quoted/user content inside conversation turns.
+        // Keep the bounded v0.5.48 candidate set. Never scan generic buttons or walk
+        // broad ancestor chains on every ChatGPT DOM mutation.
         if (!element.getAttribute('role')) {
           element.setAttribute('role', 'status');
           element.setAttribute(MARKER, 'role-added');
