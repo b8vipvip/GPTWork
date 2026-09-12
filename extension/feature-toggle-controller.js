@@ -2,10 +2,12 @@ const workToggle = document.getElementById('workModeEnabled');
 const modelToggle = document.getElementById('modelLockEnabled');
 const messageNode = document.getElementById('message') || document.getElementById('formMessage');
 const scopeNode = document.getElementById('featureScope');
+const STATE_TIMEOUT_MS = 5000;
 
 let busy = false;
 let currentTabId = null;
 let currentAccount = { authenticated: false, entitlement: { active: false } };
+let lastFeatureState = null;
 let refreshTimers = [];
 
 function runtimeMessage(payload) {
@@ -21,6 +23,16 @@ function runtimeMessage(payload) {
       resolve(response.data);
     });
   });
+}
+
+function withTimeout(promise, ms = STATE_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(
+      () => reject(Object.assign(new Error('操作超时，请重试 / Operation timed out'), { code: 'STATE_TIMEOUT' })),
+      ms,
+    )),
+  ]);
 }
 
 function showMessage(text, tone = '') {
@@ -56,9 +68,14 @@ function setBusy(value) {
   if (modelToggle) modelToggle.disabled = busy || !Number.isInteger(currentTabId);
 }
 
-function syncVisibleToggles(featureState = {}) {
-  if (workToggle) workToggle.checked = featureState.workModeEnabled === true;
-  if (modelToggle) modelToggle.checked = featureState.modelLockEnabled === true;
+function syncVisibleToggles(featureState) {
+  if (!featureState) return;
+  lastFeatureState = {
+    workModeEnabled: featureState.workModeEnabled === true,
+    modelLockEnabled: featureState.modelLockEnabled === true,
+  };
+  if (workToggle) workToggle.checked = lastFeatureState.workModeEnabled;
+  if (modelToggle) modelToggle.checked = lastFeatureState.modelLockEnabled;
 }
 
 async function findChatGptTab() {
@@ -82,7 +99,9 @@ function renderScope(tab) {
 
 async function reconcile() {
   const tab = await findChatGptTab();
-  currentTabId = Number.isInteger(tab?.id) ? tab.id : null;
+  const nextTabId = Number.isInteger(tab?.id) ? tab.id : null;
+  if (nextTabId !== currentTabId) lastFeatureState = null;
+  currentTabId = nextTabId;
   renderScope(tab);
   if (!Number.isInteger(currentTabId)) {
     currentAccount = { authenticated: false, entitlement: { active: false } };
@@ -91,11 +110,20 @@ async function reconcile() {
     return null;
   }
 
-  const snapshot = await runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: currentTabId });
-  currentAccount = snapshot?.account || currentAccount;
-  syncVisibleToggles(snapshot?.featureState || {});
-  setBusy(false);
-  return snapshot;
+  try {
+    const snapshot = await withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: currentTabId }));
+    currentAccount = snapshot?.account || currentAccount;
+    syncVisibleToggles(snapshot?.featureState);
+    setBusy(false);
+    return snapshot;
+  } catch (error) {
+    // UI continuity only: the cached snapshot never becomes an authority and is never written
+    // back. A transient transport timeout must not paint an enabled feature as disabled.
+    if (lastFeatureState) syncVisibleToggles(lastFeatureState);
+    showMessage('状态刷新暂时延迟，已保留当前功能配置 / State refresh delayed; keeping current feature state.', 'bad');
+    setBusy(false);
+    throw error;
+  }
 }
 
 async function changeFeature(kind, desired) {
@@ -105,19 +133,20 @@ async function changeFeature(kind, desired) {
   setBusy(true);
   try {
     if (desired) requireActivation(currentAccount);
-    const snapshot = await runtimeMessage({
+    const snapshot = await withTimeout(runtimeMessage({
       type: 'GPTWORK_TAB_FEATURE_SET',
       tabId: currentTabId,
       feature: kind,
       enabled: Boolean(desired),
-    });
+    }));
     currentAccount = snapshot?.account || currentAccount;
-    syncVisibleToggles(snapshot?.featureState || {});
+    syncVisibleToggles(snapshot?.featureState);
     showMessage(desired
       ? `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前标签页启用。`
       : `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前标签页关闭。`, 'good');
   } catch (error) {
     if (target) target.checked = previous;
+    if (lastFeatureState) syncVisibleToggles(lastFeatureState);
     if (error?.code === 'WINDOW_QUOTA_EXCEEDED' || error?.message === '当前账户并发窗口超限') {
       showQuotaMessage();
     } else if (!['AUTH_REQUIRED', 'ENTITLEMENT_REQUIRED'].includes(error?.code)) {
@@ -131,10 +160,9 @@ async function changeFeature(kind, desired) {
 
 function bindFeatureToggle(toggle, kind) {
   if (!toggle) return;
-  toggle.addEventListener('change', (event) => {
-    event.stopImmediatePropagation();
+  toggle.addEventListener('change', () => {
     void changeFeature(kind, Boolean(toggle.checked));
-  }, true);
+  });
 }
 
 function scheduleReconcile() {
@@ -155,8 +183,6 @@ chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo) => {
   if (tabId === currentTabId && (changeInfo.status === 'complete' || changeInfo.url)) scheduleReconcile();
 });
 
-void reconcile().catch((error) => {
-  showMessage(`读取功能状态失败 / Failed to load feature state: ${error.message}`, 'bad');
-  syncVisibleToggles({ workModeEnabled: false, modelLockEnabled: false });
-  setBusy(false);
+void reconcile().catch(() => {
+  // reconcile() already preserves the last successful snapshot and renders a non-destructive warning.
 });
