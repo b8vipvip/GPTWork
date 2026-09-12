@@ -1,0 +1,40 @@
+name: Single Authority Refactor Helper
+
+on:
+  push:
+    branches:
+      - fix/complete-master-tab-authority
+    paths:
+      - .github/workflows/single-authority-refactor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/complete-master-tab-authority
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply single-authority refactor
+        run: node .github/scripts/single-authority-refactor.mjs
+      - name: Syntax check changed runtime
+        run: |
+          node --check extension/background.js
+          node --check extension/network-monitor.js
+          node --check extension/popup.js
+          node --check extension/tab-feature-runtime.js
+          node --check extension/master-ui-controller.js
+          node --check extension/background-entry.js
+      - name: Commit refactor result
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Refactor runtime to single authority [single-authority-refactor]"
+          git push origin HEAD:fix/complete-master-tab-authority
