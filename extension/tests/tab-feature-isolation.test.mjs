@@ -11,12 +11,19 @@ const pageSync = fs.readFileSync(new URL('../multi-window-lock-sync.js', import.
 const nativeBridge = fs.readFileSync(new URL('../../native-core/src/bridge.rs', import.meta.url), 'utf8');
 const nativeLib = fs.readFileSync(new URL('../../native-core/src/lib.rs', import.meta.url), 'utf8');
 
-test('current feature state is still keyed by tab id pending window-authority migration', () => {
+test('feature state is keyed by Chrome window while tab messages stay backward compatible', () => {
+  assert.match(runtime, /WINDOW_FEATURE_SESSION_KEY = 'gptworkWindowFeatureStatesV1'/);
+  assert.match(runtime, /resolveWindowIdForTab/);
+  assert.match(runtime, /states\.set\(windowId, next\)/);
+  assert.match(runtime, /chrome\.windows\.onRemoved\.addListener/);
+  assert.match(runtime, /pushWindowFeatureState/);
+  assert.doesNotMatch(runtime, /states\.set\(id, next\)/);
+});
+
+test('legacy tab session state is migrated once into window state', () => {
   assert.match(runtime, /TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1'/);
-  assert.match(runtime, /chrome\.storage\.session\.get/);
-  assert.match(runtime, /chrome\.storage\.session\.set/);
-  assert.match(runtime, /states\.set\(id, next\)/);
-  assert.match(runtime, /states\.delete\(Number\(tabId\)\)/);
+  assert.match(runtime, /migrateLegacyTabSession/);
+  assert.match(runtime, /chrome\.storage\.session\.remove\(TAB_FEATURE_SESSION_KEY\)/);
 });
 
 test('feature UI never writes legacy global Work or Model-lock flags', () => {
