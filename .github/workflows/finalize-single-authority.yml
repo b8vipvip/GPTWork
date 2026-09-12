@@ -1,0 +1,40 @@
+name: Finalize Single Authority Refactor
+
+on:
+  push:
+    branches:
+      - fix/complete-master-tab-authority
+    paths:
+      - .github/workflows/finalize-single-authority.yml
+      - .github/scripts/finalize-single-authority.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Apply refactor
+        run: node .github/scripts/finalize-single-authority.mjs
+      - name: Syntax check touched runtime
+        run: |
+          node --check extension/account-refresh-scheduler.js
+          node --check extension/tab-feature-runtime.js
+          node --check extension/background-update.js
+          node --check extension/background.js
+          node --test extension/tests/account-refresh-authority.test.mjs
+      - name: Commit refactor
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add extension/account-refresh-scheduler.js extension/tab-feature-runtime.js extension/background-update.js extension/background.js extension/package.json extension/tests/account-refresh-authority.test.mjs
+          git diff --cached --quiet && exit 0
+          git commit -m "Unify account refresh scheduling [single-authority]"
+          git push origin HEAD:fix/complete-master-tab-authority
