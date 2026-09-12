@@ -7,6 +7,7 @@ const settings = fs.readFileSync(new URL('../settings-v0521.html', import.meta.u
 const masterUi = fs.readFileSync(new URL('../master-ui-controller.js', import.meta.url), 'utf8');
 const settingsShell = fs.readFileSync(new URL('../settings-shell.js', import.meta.url), 'utf8');
 const masterRuntime = fs.readFileSync(new URL('../master-runtime-safety.js', import.meta.url), 'utf8');
+const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
 const backgroundEntry = fs.readFileSync(new URL('../background-entry.js', import.meta.url), 'utf8');
 const floatingMaster = fs.readFileSync(new URL('../floating-ui-master-state.js', import.meta.url), 'utf8');
 const recovery = fs.readFileSync(new URL('../content-runtime-recovery.js', import.meta.url), 'utf8');
@@ -49,40 +50,45 @@ test('Work and Model lock no longer overwrite the explicit master state', () => 
   assert.match(settings, /每个窗口\/标签可以保持不同状态/);
 });
 
-test('master off hard-stops Native Messaging, debugger sessions, alarms, badges, and floating UI', () => {
-  assert.match(masterRuntime, /connectNative/);
-  assert.match(masterRuntime, /nativePorts/);
-  assert.match(masterRuntime, /port\.disconnect\(\)/);
+test('master safety does not monkeypatch Chrome APIs and still performs fail-open cleanup', () => {
+  assert.doesNotMatch(masterRuntime, /patchFunction\(/);
+  assert.doesNotMatch(masterRuntime, /chrome\.runtime\.connectNative\s*=/);
+  assert.doesNotMatch(masterRuntime, /\.addListener\s*=/);
   assert.match(masterRuntime, /chrome\.debugger\.detach/);
   assert.match(masterRuntime, /chrome\.alarms\.clear\(RECONNECT_ALARM\)/);
   assert.match(masterRuntime, /chrome\.alarms\.clear\(ACCOUNT_REFRESH_ALARM\)/);
   assert.match(masterRuntime, /setBadgeText\(\{ tabId: tab\.id, text: '' \}\)/);
   assert.match(masterRuntime, /GPTLOCK_MASTER_RUNTIME_STATE/);
+  assert.match(masterRuntime, /apiMonkeypatches: false/);
   assert.match(floatingMaster, /gptlock-indicator-host/);
   assert.match(floatingMaster, /gptlock-model-indicator-host/);
   assert.match(floatingMaster, /removeFloatingUi/);
 });
 
-test('window removal cleanup remains active while master is disabled', () => {
-  assert.match(masterRuntime, /windowRemovedLifecycleAlwaysOn = true/);
-  assert.doesNotMatch(masterRuntime, /patchWindowCreatedEvent\(chrome\.windows\?\.onRemoved/);
+test('window lifecycle listeners remain native registrations while master is disabled', () => {
+  assert.match(masterRuntime, /windowLifecycleAlwaysOn: true/);
+  assert.doesNotMatch(masterRuntime, /chrome\.windows\?\.onCreated/);
+  assert.match(background, /chrome\.windows\.onCreated\.addListener/);
+  assert.match(background, /chrome\.windows\.onRemoved\.addListener/);
 });
 
-test('master and tab guards are installed before background can open the native runtime', () => {
+test('master and window guards are installed before background can open the native runtime', () => {
   const masterIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
-  const tabIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
+  const windowIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
   assert.ok(masterIndex >= 0);
-  assert.ok(tabIndex > masterIndex);
-  assert.ok(backgroundIndex > tabIndex);
+  assert.ok(windowIndex > masterIndex);
+  assert.ok(backgroundIndex > windowIndex);
 });
 
-test('content recovery stays off with the master disabled and resumes when it is enabled', () => {
+test('content recovery stays off with the master disabled and lifecycle supervisor loads first', () => {
   assert.match(recovery, /MASTER_KEY = 'gptworkEnabledLocal'/);
   assert.match(recovery, /reason: 'master_disabled'/);
   assert.match(recovery, /master_enabled/);
-  assert.equal(manifest.content_scripts[0].js[0], 'content-local-error-capture.js');
-  assert.equal(manifest.content_scripts[0].js[1], 'floating-ui-master-state.js');
+  const scripts = manifest.content_scripts[0].js;
+  assert.equal(scripts[0], 'content-runtime-lifecycle.js');
+  assert.equal(scripts[1], 'content-local-error-capture.js');
+  assert.equal(scripts[2], 'floating-ui-master-state.js');
 });
 
 test('floating model UI strips visible recent-request suffixes', () => {
