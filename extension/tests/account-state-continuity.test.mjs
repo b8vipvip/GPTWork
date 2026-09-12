@@ -27,10 +27,12 @@ test('account UI renders cached identity before a live state request can time ou
   assert.doesNotMatch(gate, /catch \(error\) \{\s*accountAuthenticated = false;/s);
 });
 
-test('feature-state timeout keeps saved switches instead of painting them disabled', async () => {
+test('per-tab feature-state timeout preserves the last successful UI snapshot without writing it back', async () => {
   const controller = await source('feature-toggle-controller.js');
-  assert.match(controller, /const flags = await featureFlags\(\);\s*syncVisibleToggles\(flags\);\s*scheduleConfiguredModelRender\(\);/s);
-  assert.match(controller, /State refresh delayed; keeping saved feature state\./);
-  assert.match(controller, /withTimeout\(runtimeMessage\('GPTLOCK_GET_STATE'\)\)/);
-  assert.doesNotMatch(controller, /syncVisibleToggles\(\{ workModeEnabled: false, modelLockEnabled: false \}\)/);
+  assert.match(controller, /let lastFeatureState = null;/);
+  assert.match(controller, /withTimeout\(runtimeMessage\(\{ type: 'GPTWORK_TAB_FEATURE_GET'/);
+  assert.match(controller, /if \(lastFeatureState\) syncVisibleToggles\(lastFeatureState\);/);
+  assert.match(controller, /State refresh delayed; keeping current feature state\./);
+  assert.match(controller, /cached snapshot never becomes an authority and is never written/);
+  assert.doesNotMatch(controller, /chrome\.storage\.(?:local|sync|session)\.set/);
 });
