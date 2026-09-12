@@ -1,5 +1,6 @@
 import { normalizeConcreteModelId, normalizePolicy } from './policy.js';
 import { appendRuntimeLog } from './runtime-log.js';
+import { scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
 export const TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1';
 export const TAB_FEATURE_MIGRATION_KEY = 'gptworkTabFeatureMigrationV1';
@@ -265,10 +266,6 @@ async function pushFeatureState(tabId, featureState = null) {
   } catch {}
 }
 
-async function refreshBackgroundRuntime() {
-  try { await runtimeMessage({ type: 'GPTLOCK_ACCOUNT_REFRESH' }); } catch {}
-}
-
 async function featureSnapshot(tabId) {
   const state = await backgroundState(tabId);
   const featureState = Number.isInteger(tabId) ? await getTabFeatureState(tabId) : normalizeState(null);
@@ -309,7 +306,7 @@ async function handleFeatureMessage(message, sender) {
     if (!patch) throw Object.assign(new Error('未知功能开关'), { code: 'INVALID_FEATURE' });
     const featureState = await setTabFeatureState(tabId, patch);
     await pushFeatureState(tabId, featureState);
-    await refreshBackgroundRuntime();
+    await scheduleAccountRefresh();
     return featureSnapshot(tabId);
   }
 
@@ -326,7 +323,7 @@ async function handleFeatureMessage(message, sender) {
       }
     }
     await chrome.storage.local.set({ [MASTER_KEY]: desired });
-    await refreshBackgroundRuntime();
+    await scheduleAccountRefresh();
     log('master_changed', { enabled: desired, tabId });
     return { ...(await featureSnapshot(tabId)), masterEnabled: desired };
   }

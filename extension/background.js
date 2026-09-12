@@ -22,6 +22,7 @@ import {
   lockConfigurationForTabSync,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
+import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
@@ -32,7 +33,6 @@ const AUTO_VERIFY_POLL_MS = 200;
 const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
 const DIAGNOSTIC_SSE_STORAGE_KEY = 'autoVerificationSseCapture';
-const ACCOUNT_REFRESH_ALARM = 'gptlock-account-refresh';
 const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 
 let nativePort = null;
