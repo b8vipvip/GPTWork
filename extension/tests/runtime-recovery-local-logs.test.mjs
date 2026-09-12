@@ -5,6 +5,7 @@ import test from 'node:test';
 const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
 const entry = fs.readFileSync(new URL('../background-entry.js', import.meta.url), 'utf8');
 const recovery = fs.readFileSync(new URL('../content-runtime-recovery.js', import.meta.url), 'utf8');
+const lifecycle = fs.readFileSync(new URL('../content-runtime-lifecycle.js', import.meta.url), 'utf8');
 const monitor = fs.readFileSync(new URL('../network-monitor.js', import.meta.url), 'utf8');
 const contentErrorCapture = fs.readFileSync(new URL('../content-local-error-capture.js', import.meta.url), 'utf8');
 const popup = fs.readFileSync(new URL('../popup-v0513.html', import.meta.url), 'utf8');
@@ -18,9 +19,19 @@ test('network monitor is loaded directly without the removed legacy safety monke
   assert.match(monitor, /tab\.status === 'loading'|attachedTabs/);
 });
 
+test('terminal lifecycle supervisor loads before every other content runtime script', () => {
+  assert.equal(manifest.content_scripts[0].js[0], 'content-runtime-lifecycle.js');
+  assert.match(lifecycle, /Extension context invalidated/i);
+  assert.match(lifecycle, /health_check_context_invalidated/);
+  assert.match(lifecycle, /runtime_replaced/);
+  assert.match(lifecycle, /observers\.clear\(\)/);
+  assert.match(lifecycle, /removeTrackedListeners/);
+  assert.match(lifecycle, /restorePatchedGlobals/);
+});
+
 test('existing ChatGPT tabs use bounded recovery after real install or update events', () => {
   assert.ok(manifest.permissions.includes('scripting'));
-  assert.equal(manifest.content_scripts[0].js[0], 'content-local-error-capture.js');
+  assert.equal(manifest.content_scripts[0].js[1], 'content-local-error-capture.js');
   assert.match(recovery, /GPTLOCK_COLLECT_PAGE_STATE/);
   assert.match(recovery, /contentRuntimeConfirmedMissing/);
   assert.match(recovery, /chrome\.scripting\.executeScript/);
