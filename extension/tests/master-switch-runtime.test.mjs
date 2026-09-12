@@ -63,6 +63,11 @@ test('master off hard-stops Native Messaging, debugger sessions, alarms, badges,
   assert.match(floatingMaster, /removeFloatingUi/);
 });
 
+test('window removal cleanup remains active while master is disabled', () => {
+  assert.match(masterRuntime, /windowRemovedLifecycleAlwaysOn = true/);
+  assert.doesNotMatch(masterRuntime, /patchWindowCreatedEvent\(chrome\.windows\?\.onRemoved/);
+});
+
 test('master and tab guards are installed before background can open the native runtime', () => {
   const masterIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
   const tabIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
