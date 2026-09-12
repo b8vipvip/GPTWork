@@ -100,8 +100,7 @@
   }
 
   if (masterToggle) {
-    masterToggle.addEventListener('change', (event) => {
-      event.stopImmediatePropagation();
+    masterToggle.addEventListener('change', () => {
       void changeMaster(Boolean(masterToggle.checked));
     }, true);
   }

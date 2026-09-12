@@ -114,9 +114,9 @@ export class ChatGptNetworkMonitor {
     return { tabId };
   }
 
-  configuration() {
+  configuration(tabId) {
     try {
-      return this.getLockConfiguration?.() ?? {};
+      return this.getLockConfiguration?.(tabId) ?? {};
     } catch {
       return {};
     }
@@ -313,7 +313,7 @@ export class ChatGptNetworkMonitor {
     let rewrite = null;
     try {
       const postData = await this.pausedPostData(tabId, params);
-      rewrite = rewriteConversationPostData(postData, this.configuration());
+      rewrite = rewriteConversationPostData(postData, this.configuration(tabId));
       await this.continuePaused(tabId, requestId, rewrite.changed ? rewrite.postData : null);
       this.onRewrite?.(tabId, {
         endpoint,
@@ -371,7 +371,7 @@ export class ChatGptNetworkMonitor {
     const request = params.request ?? {};
     const requestId = String(params.requestId);
     if (isChatGptConversationRequest(request.url, request.method)) {
-      const configuration = this.configuration();
+      const configuration = this.configuration(tabId);
       const record = {
         tabId,
         requestId,

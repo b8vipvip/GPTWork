@@ -17,6 +17,11 @@ import {
   sanitizeLogValue,
 } from './runtime-log.js';
 import { createAccountClient } from './account-client.js';
+import {
+  effectivePolicyForTabSync,
+  lockConfigurationForTabSync,
+  tabFeatureEnabledSync,
+} from './tab-feature-runtime.js';
 
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
@@ -212,12 +217,19 @@ function accountAllowsState(state) {
   return allowed.includes(windowKey) && !denied.includes(windowKey);
 }
 function effectiveSettingsForState(state) {
-  return { ...currentSettings, enabled: Boolean(currentSettings.enabled && accountAllowsState(state)) };
+  return {
+    ...currentSettings,
+    enabled: Boolean(
+      currentSettings.enabled
+        && accountAllowsState(state)
+        && tabFeatureEnabledSync(state?.tabId),
+    ),
+  };
 }
 function guardFor(state) {
   return evaluateGuard({
     state,
-    policy: currentPolicy,
+    policy: effectivePolicyForTabSync(state?.tabId),
     settings: effectiveSettingsForState(state),
     inScope: isChatGptUrl(state.url),
   });
@@ -283,7 +295,7 @@ async function broadcastTabState(tabId) {
     await chrome.tabs.sendMessage(tabId, {
       type: 'GPTLOCK_GUARD_STATE',
       state: publicTabState(state),
-      policy: currentPolicy,
+      policy: effectivePolicyForTabSync(tabId),
       settings: effectiveSettingsForState(state),
     });
   } catch {
@@ -432,8 +444,9 @@ async function syncPolicy() {
   return result;
 }
 
-async function verifyObservation(observation) {
+async function verifyObservation(observation, policy = currentPolicy) {
   const result = await sendNative('verify', {
+    policy,
     observation: {
       model: observation.model ?? null,
       reasoning: observation.reasoning ?? null,
@@ -506,7 +519,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       evidenceSource: 'network_response_metadata',
       capturedAt: evidence.capturedAt,
       requestId: `cdp-${tabId}-${evidence.requestId}`,
-    });
+    }, effectivePolicyForTabSync(tabId));
     state.lastVerification = result;
     state.evidenceIssue = diagnoseEvidenceIssue(evidence, result);
     state.lastError = evidence.bodyError || (evidence.conflicts?.model || evidence.conflicts?.reasoning
@@ -541,13 +554,11 @@ async function applyNetworkEvidence(tabId, evidence) {
 }
 
 const networkMonitor = new ChatGptNetworkMonitor({
-  getLockConfiguration() {
-    return {
-      lockedModels: currentPolicy.lockedModels,
-      allowedReasoningLevels: currentPolicy.allowedReasoningLevels,
+  getLockConfiguration(tabId) {
+    return lockConfigurationForTabSync(tabId, {
       preferredReasoning: currentSettings.preferredReasoning,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
-    };
+    });
   },
   onStatus(tabId, monitor) {
     const state = ensureTabState(tabId);
@@ -669,8 +680,9 @@ async function configureTab(tab) {
   if (!tab?.id || !isChatGptUrl(tab.url ?? '')) return;
   const state = ensureTabState(tab.id, tab.url);
   state.windowId = Number.isInteger(tab.windowId) ? tab.windowId : null;
-  if (effectiveSettingsForState(state).enabled) await networkMonitor.attach(tab.id);
-  else await networkMonitor.detach(tab.id);
+  const enabled = effectiveSettingsForState(state).enabled;
+  if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
+  else await networkMonitor.attach(tab.id);
   await broadcastTabState(tab.id);
   return state;
 }
@@ -815,17 +827,19 @@ function resetVerificationAttempt(state) {
 }
 
 function requestLockConfirmed(state) {
+  const policy = effectivePolicyForTabSync(state?.tabId);
   return Boolean(
     state.lastRequest?.model
-      && currentPolicy.lockedModels.includes(state.lastRequest.model),
+      && policy.lockedModels.includes(state.lastRequest.model),
   );
 }
 
 function verificationOutcome(state, { timedOut = false } = {}) {
   const verification = state.lastVerification;
   const reasons = Array.isArray(verification?.reasons) ? verification.reasons : [];
+  const policy = effectivePolicyForTabSync(state?.tabId);
   const modelAllowed = Boolean(
-    verification?.model && currentPolicy.lockedModels.includes(verification.model),
+    verification?.model && policy.lockedModels.includes(verification.model),
   );
   if (verification?.verdict === 'verified') return { outcome: 'verified', reason: null };
   if (reasons.includes('model_not_allowed')) {
@@ -1304,8 +1318,16 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   applyConfigurationChange({ policyChanged, settingsChanged });
 });
 
+const TAB_FEATURE_MESSAGE_TYPES = new Set([
+  'GPTWORK_TAB_FEATURE_GET',
+  'GPTWORK_TAB_FEATURE_SET',
+  'GPTWORK_MASTER_STATUS',
+  'GPTWORK_MASTER_SET',
+]);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || !message || typeof message.type !== 'string') return false;
+  if (TAB_FEATURE_MESSAGE_TYPES.has(message.type)) return false;
 
   const run = async () => {
     switch (message.type) {
@@ -1319,8 +1341,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await collectPageObservation(tabId, state);
         }
         return {
-          policy: currentPolicy,
-          settings: currentSettings,
+          policy: state ? effectivePolicyForTabSync(state.tabId) : currentPolicy,
+          settings: state ? effectiveSettingsForState(state) : currentSettings,
           nativeStatus: nativeStatus ?? { connected: false },
           tabState: state ? publicTabState(state) : null,
           extensionVersion: chrome.runtime.getManifest().version,
@@ -1328,25 +1350,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           accountWindowAllowed: state ? accountAllowsState(state) : false,
         };
       }
-      case 'GPTLOCK-LICENSE-GET':
-      case 'GPTLOCK_LICENSE_GET':
-        // Never synthesize an active legacy License from account entitlement. A stale
-        // cached UI must see the License system as removed, not as a quota-bearing grant.
-        return {
-          authorized: false,
-          status: 'removed',
-          legacyUi: true,
-          accountRequired: true,
-          licenseRequired: false,
-          license: null,
-          lastError: '授权码系统已移除；请使用 GPTWork 账号权益。若仍看到授权码界面，请关闭旧页面并从扩展重新打开设置。',
-        };
-      case 'GPTLOCK-LICENSE-ACTIVATE':
-      case 'GPTLOCK_LICENSE_ACTIVATE':
-        throw Object.assign(new Error('授权码验证已停用；GPTWork 当前使用账号登录。检测到旧版弹窗资源，请关闭弹窗并重新打开，必要时完全重启浏览器。'), { code: 'LICENSE_UI_STALE' });
-      case 'GPTLOCK-LICENSE-CLEAR':
-      case 'GPTLOCK_LICENSE_CLEAR':
-        return { cleared: true, legacyUi: true, accountRequired: true, licenseRequired: false };
       case 'GPTLOCK_ACCOUNT_CONFIG':
         return accountClient.config();
       case 'GPTLOCK_ACCOUNT_REGISTER':
@@ -1406,26 +1409,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await initialize();
         logRuntime('info', 'native', 'manual_reconnect_completed');
         return { ok: true };
-      }
-      case 'GPTLOCK_SET_ENABLED': {
-        if (message.enabled) {
-          const tabId = sender.tab?.id ?? await activeTabId();
-          const state = tabId === null ? null : tabStates.get(tabId);
-          if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
-        }
-        const desired = Boolean(message.enabled);
-        localEnabledOverride = desired;
-        currentSettings = normalizeSettings({
-          ...currentSettings,
-          enabled: desired,
-        });
-        await chrome.storage.local.set({ [LOCAL_ENABLED_KEY]: desired });
-        logRuntime('info', 'settings', 'global_enabled_changed', {
-          enabled: currentSettings.enabled,
-          persistence: 'local',
-        });
-        await configureOpenTabs();
-        return { settings: currentSettings };
       }
       case 'GPTLOCK_PAGE_OBSERVATION': {
         if (!sender.tab?.id) throw new Error('Page observation requires a tab');
@@ -1554,8 +1537,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return { recorded: true };
       }
-      case 'GPTLOCK_VERIFY':
-        return verifyObservation(message.observation ?? {});
+      case 'GPTLOCK_VERIFY': {
+        const policy = sender.tab?.id
+          ? effectivePolicyForTabSync(sender.tab.id)
+          : currentPolicy;
+        return verifyObservation(message.observation ?? {}, policy);
+      }
       case 'GPTLOCK_GET_RUNTIME_LOGS':
         return { logs: await getRuntimeLogs() };
       case 'GPTLOCK_CLEAR_RUNTIME_LOGS':

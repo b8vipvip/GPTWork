@@ -334,10 +334,7 @@ async function handleFeatureMessage(message, sender) {
   throw new Error(`Unsupported tab feature message: ${message.type}`);
 }
 
-// Register the per-tab authority before background.js, then shield these private message
-// types from the legacy catch-all GPTLOCK receiver so exactly one listener responds.
-const originalAddListener = chrome.runtime.onMessage.addListener.bind(chrome.runtime.onMessage);
-originalAddListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!FEATURE_MESSAGE_TYPES.has(message?.type)) return false;
   handleFeatureMessage(message, sender).then(
     (data) => sendResponse({ ok: true, data }),
@@ -349,16 +346,6 @@ originalAddListener((message, sender, sendResponse) => {
   );
   return true;
 });
-
-try {
-  chrome.runtime.onMessage.addListener = (listener) => originalAddListener((message, sender, sendResponse) => {
-    if (FEATURE_MESSAGE_TYPES.has(message?.type)) return false;
-    return listener(message, sender, sendResponse);
-  });
-} catch {
-  // Chrome currently exposes writable event methods. If that changes, the static tests
-  // and runtime logs make the incompatibility visible rather than silently sharing state.
-}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabState(tabId).catch(() => {});
