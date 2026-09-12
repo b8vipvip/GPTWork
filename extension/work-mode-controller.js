@@ -1,7 +1,6 @@
 (() => {
   const NOTICE_ID = 'gptwork-work-mode-guidance-host';
   const MODEL_INDICATOR_ID = 'gptlock-model-indicator-host';
-  const WORK_MODE_KEY = 'gptworkWorkModeEnabled';
   const WORK_LABEL = /^(?:工作|work)$/i;
   const CHAT_LABEL = /^(?:聊天|chat)$/i;
   const WORK_TITLE_SUFFIX = /[·•]\s*(?:工作|work)\s*$/i;
@@ -15,8 +14,8 @@
   const GUIDANCE_TEXT = '无需手动选择工作模式，在聊天模式直接发消息或任务后GPT自动以工作模式处理问题';
   const REFRESH_DELAY_MS = 120;
 
-  // Fail inert. A fresh or logged-out install must never manipulate ChatGPT before
-  // both the local Work feature preference and the background account gate agree.
+  // Fail inert. Work selection is now owned by this ChatGPT tab, while the background
+  // account/master gate remains a separate prerequisite.
   let workModeSelected = false;
   let backgroundAllowed = false;
   let enabled = false;
@@ -215,13 +214,12 @@
       syncEnabled();
       scheduleRefresh();
     }
+    if (message?.type === 'GPTWORK_TAB_FEATURE_STATE') {
+      workModeSelected = message.featureState?.workModeEnabled === true;
+      syncEnabled();
+      scheduleRefresh();
+    }
     return false;
-  });
-
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !changes[WORK_MODE_KEY]) return;
-    workModeSelected = changes[WORK_MODE_KEY].newValue === true;
-    syncEnabled();
   });
 
   new MutationObserver(scheduleRefresh).observe(document.documentElement, {
@@ -238,12 +236,15 @@
     if (!document.hidden) scheduleRefresh();
   });
 
-  chrome.storage.local.get(WORK_MODE_KEY, (stored) => {
-    if (!chrome.runtime.lastError) workModeSelected = stored?.[WORK_MODE_KEY] === true;
+  chrome.runtime.sendMessage({ type: 'GPTWORK_TAB_FEATURE_GET' }, (featureResponse) => {
+    if (!chrome.runtime.lastError && featureResponse?.ok) {
+      workModeSelected = featureResponse.data?.featureState?.workModeEnabled === true;
+    }
     chrome.runtime.sendMessage({ type: 'GPTLOCK_GET_STATE' }, (response) => {
       if (!chrome.runtime.lastError && response?.ok) {
         const account = response.data?.account;
         backgroundAllowed = response.data?.settings?.enabled === true
+          && response.data?.accountWindowAllowed !== false
           && account?.authenticated === true
           && account?.entitlement?.active === true;
       }

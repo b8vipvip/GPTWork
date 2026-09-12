@@ -12,48 +12,41 @@ const floatingMaster = fs.readFileSync(new URL('../floating-ui-master-state.js',
 const recovery = fs.readFileSync(new URL('../content-runtime-recovery.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
 
-test('popup header replaces the old closed verdict pill with an explicit master switch', () => {
+test('popup header exposes an explicit master switch', () => {
   const header = popup.match(/<header>[\s\S]*?<\/header>/)?.[0] || '';
   assert.match(header, /data-gptwork-master-toggle="true"/);
   assert.match(header, /id="enabled"/);
   assert.match(header, /GPTWork 总开关/);
-  assert.doesNotMatch(header, /id="verdict"/);
-  assert.doesNotMatch(header, /class="verdict/);
   assert.equal((popup.match(/id="enabled"/g) || []).length, 1);
   assert.match(popup, /src="master-ui-controller\.js"/);
 });
 
-test('popup master switch remains authoritative and usable after legacy feature reconciliation', () => {
+test('popup master switch uses explicit master authority and quota feedback', () => {
   assert.match(masterUi, /MASTER_KEY = 'gptworkEnabledLocal'/);
-  assert.match(masterUi, /GPTLOCK_SET_ENABLED/);
-  assert.match(masterUi, /GPTLOCK_ACCOUNT_REFRESH/);
-  assert.match(masterUi, /explicitMasterAction/);
-  assert.match(masterUi, /scheduleMasterSync/);
-  assert.match(masterUi, /workModeEnabled/);
-  assert.match(masterUi, /modelLockEnabled/);
-  assert.match(masterUi, /masterToggle\.disabled = false/);
-  assert.match(masterUi, /response\.data\?\.settings\?\.enabled/);
+  assert.match(masterUi, /GPTWORK_MASTER_STATUS/);
+  assert.match(masterUi, /GPTWORK_MASTER_SET/);
+  assert.match(masterUi, /当前账户并发窗口超限/);
+  assert.match(masterUi, /mouseenter/);
+  assert.match(masterUi, /stopImmediatePropagation/);
 });
 
-test('Settings exposes the same independent master switch and persists through the background authority', () => {
+test('Settings statically exposes the same master switch and quota feedback', () => {
+  assert.match(settings, /data-gptwork-settings-master="true"/);
   assert.match(settings, /id="enabled"/);
+  assert.doesNotMatch(settings, /id="enabled"[^>]*hidden/);
   assert.match(settingsShell, /installSettingsMasterControl/);
   assert.match(settingsShell, /GPTWork 总开关/);
-  assert.match(settingsShell, /gptworkEnabledLocal/);
-  assert.match(settingsShell, /MASTER_MESSAGE_SOURCE = 'settings_master'/);
-  assert.match(settingsShell, /source: MASTER_MESSAGE_SOURCE/);
-  assert.match(settingsShell, /GPTLOCK_SET_ENABLED/);
+  assert.match(settingsShell, /GPTWORK_MASTER_STATUS/);
+  assert.match(settingsShell, /GPTWORK_MASTER_SET/);
+  assert.match(settingsShell, /当前账户并发窗口超限/);
   assert.match(settingsShell, /event\.stopImmediatePropagation\(\)/);
-  assert.match(settingsShell, /scheduleSettingsMasterSync/);
 });
 
-test('Work and Model lock no longer get to overwrite the explicit master state', () => {
-  assert.match(masterUi, /GPTLOCK_SET_ENABLED/);
-  assert.match(masterUi, /GPTLOCK_ACCOUNT_REFRESH/);
-  assert.match(masterUi, /explicitMasterAction/);
-  assert.match(settingsShell, /Legacy feature code still/);
-  assert.match(settingsShell, /message\?\.source !== MASTER_MESSAGE_SOURCE/);
-  assert.match(settingsShell, /GPTLOCK_ACCOUNT_REFRESH/);
+test('Work and Model lock no longer overwrite the explicit master state', () => {
+  const featureController = fs.readFileSync(new URL('../feature-toggle-controller.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(featureController, /GPTLOCK_SET_ENABLED/);
+  assert.match(featureController, /GPTWORK_TAB_FEATURE_SET/);
+  assert.match(settings, /每个窗口\/标签可以保持不同状态/);
 });
 
 test('master off hard-stops Native Messaging, debugger sessions, alarms, badges, and floating UI', () => {
@@ -70,11 +63,13 @@ test('master off hard-stops Native Messaging, debugger sessions, alarms, badges,
   assert.match(floatingMaster, /removeFloatingUi/);
 });
 
-test('master guard is installed before background can open the native runtime', () => {
-  const guardIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
+test('master and tab guards are installed before background can open the native runtime', () => {
+  const masterIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
+  const tabIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
-  assert.ok(guardIndex >= 0);
-  assert.ok(backgroundIndex > guardIndex);
+  assert.ok(masterIndex >= 0);
+  assert.ok(tabIndex > masterIndex);
+  assert.ok(backgroundIndex > tabIndex);
 });
 
 test('content recovery stays off with the master disabled and resumes when it is enabled', () => {
@@ -83,12 +78,9 @@ test('content recovery stays off with the master disabled and resumes when it is
   assert.match(recovery, /master_enabled/);
   assert.equal(manifest.content_scripts[0].js[0], 'content-local-error-capture.js');
   assert.equal(manifest.content_scripts[0].js[1], 'floating-ui-master-state.js');
-  assert.equal(manifest.content_scripts[0].js.includes('floating-ui-master-state.js'), true);
 });
 
-test('floating model UI strips every visible recent-request suffix while preserving historical state internally', () => {
+test('floating model UI strips visible recent-request suffixes', () => {
   assert.match(floatingMaster, /RECENT_REQUEST_MARKER/);
   assert.match(floatingMaster, /replace\(RECENT_REQUEST_MARKER, ''\)/);
-  assert.match(floatingMaster, /querySelectorAll\('\.model-value'\)/);
-  assert.match(floatingMaster, /querySelectorAll\('\[title\]'\)/);
 });

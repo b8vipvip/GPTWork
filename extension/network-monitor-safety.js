@@ -1,20 +1,20 @@
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { appendRuntimeLog } from './runtime-log.js';
+import { getTabFeatureState } from './tab-feature-runtime.js';
 
-const WORK_MODE_KEY = 'gptworkWorkModeEnabled';
-const MODEL_LOCK_KEY = 'gptworkModelLockEnabled';
 const originalAttach = ChatGptNetworkMonitor.prototype.attach;
 
 function log(event, details = {}, level = 'info') {
   void appendRuntimeLog(level, 'network-safety', event, details).catch(() => {});
 }
 
-async function featureGateEnabled() {
+async function featureGateEnabled(tabId) {
   try {
-    const stored = await chrome.storage.local.get([WORK_MODE_KEY, MODEL_LOCK_KEY]);
-    return stored[WORK_MODE_KEY] === true || stored[MODEL_LOCK_KEY] === true;
+    const state = await getTabFeatureState(tabId);
+    return state.workModeEnabled === true || state.modelLockEnabled === true;
   } catch (error) {
     log('feature_gate_read_failed', {
+      tabId,
       error: error instanceof Error ? error.message : String(error),
     }, 'warn');
     return false;
@@ -34,9 +34,6 @@ ChatGptNetworkMonitor.prototype.attach = async function safeAttach(tabId) {
   }
 
   // Never attach Chrome Debugger while the top-level ChatGPT document is loading.
-  // The previous behavior could attach from the tabs.onUpdated URL event before the
-  // page finished navigation, leaving that tab in a bad debugger/network state. The
-  // existing tabs.onUpdated status=complete path will call attach again afterwards.
   if (tab?.status === 'loading') {
     if (this.isAttached?.(tabId)) {
       try {
@@ -52,10 +49,9 @@ ChatGptNetworkMonitor.prototype.attach = async function safeAttach(tabId) {
     return false;
   }
 
-  // Work mode / Model Lock are the product-level source of truth. A stale legacy
-  // gptworkEnabledLocal=true value must never be enough to attach a debugger after
-  // the extension is disabled/re-enabled from chrome://extensions.
-  if (!(await featureGateEnabled())) {
+  // Work mode / Model Lock are tab-scoped. A feature enabled in another window/tab
+  // must never be enough to attach a debugger to this tab.
+  if (!(await featureGateEnabled(tabId))) {
     if (this.isAttached?.(tabId)) {
       try { await this.detach(tabId); } catch {}
     }
