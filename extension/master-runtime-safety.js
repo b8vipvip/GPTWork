@@ -50,7 +50,7 @@ const alarmCreatePatched = patchFunction(chrome.alarms, 'create', (original) => 
   return original(name, alarmInfo);
 });
 
-function patchWindowEvent(event, eventName) {
+function patchWindowCreatedEvent(event) {
   if (!event || typeof event.addListener !== 'function') return false;
   return patchFunction(event, 'addListener', (original) => (listener, ...rest) => {
     if (typeof listener !== 'function') return original(listener, ...rest);
@@ -59,11 +59,14 @@ function patchWindowEvent(event, eventName) {
       return listener(...args);
     };
     return original(guarded, ...rest);
-  }) || (log('warn', 'window_event_guard_unavailable', { eventName }), false);
+  }) || (log('warn', 'window_event_guard_unavailable', { eventName: 'onCreated' }), false);
 }
 
-const windowCreatedPatched = patchWindowEvent(chrome.windows?.onCreated, 'onCreated');
-const windowRemovedPatched = patchWindowEvent(chrome.windows?.onRemoved, 'onRemoved');
+// Only feature-producing window creation is master-gated. Destructive lifecycle
+// events such as windows.onRemoved must remain unpatched so every subsystem can
+// release window state while GPTWork is disabled.
+const windowCreatedPatched = patchWindowCreatedEvent(chrome.windows?.onCreated);
+const windowRemovedLifecycleAlwaysOn = true;
 
 async function clearRuntimeAlarms() {
   await Promise.allSettled([
@@ -187,5 +190,5 @@ log('info', 'master_runtime_guard_installed', {
   connectNativePatched,
   alarmCreatePatched,
   windowCreatedPatched,
-  windowRemovedPatched,
+  windowRemovedLifecycleAlwaysOn,
 });
