@@ -20,6 +20,8 @@ const CONTENT_SCRIPT_FILES = [
 ];
 
 const recoveryByTab = new Map();
+const RECOVERY_CONFIRM_DELAY_MS = 120;
+const UPDATE_RECOVERY_GAP_MS = 80;
 
 function isChatGptUrl(value) {
   try {
@@ -34,6 +36,10 @@ function log(level, event, details = {}) {
   void appendRuntimeLog(level, 'content-recovery', event, details).catch(() => {});
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function masterRuntimeEnabled() {
   try {
     const stored = await chrome.storage.local.get(MASTER_KEY);
@@ -45,11 +51,15 @@ async function masterRuntimeEnabled() {
 
 function sendTabMessage(tabId, message) {
   return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, message, (response) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve(response);
-    });
+    try {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        const error = chrome.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else resolve(response);
+      });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
 
@@ -62,6 +72,27 @@ async function contentRuntimeReady(tabId) {
   }
 }
 
+async function contentRuntimeConfirmedMissing(tabId) {
+  if (await contentRuntimeReady(tabId)) return false;
+  await sleep(RECOVERY_CONFIRM_DELAY_MS);
+  return !(await contentRuntimeReady(tabId));
+}
+
+async function currentRecoverableTab(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!isChatGptUrl(tab?.url || '')) return { tab: null, reason: 'outside_scope' };
+    if (tab.status === 'loading') return { tab: null, reason: 'tab_loading' };
+    return { tab, reason: null };
+  } catch (error) {
+    return {
+      tab: null,
+      reason: 'tab_lookup_failed',
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function ensureContentRuntime(tabId, reason = 'unspecified') {
   if (!Number.isInteger(tabId)) return { ready: false, injected: false, reason: 'invalid_tab' };
   if (recoveryByTab.has(tabId)) return recoveryByTab.get(tabId);
@@ -71,29 +102,42 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       return { ready: false, injected: false, reason: 'master_disabled' };
     }
 
-    let tab;
-    try {
-      tab = await chrome.tabs.get(tabId);
-    } catch (error) {
-      return { ready: false, injected: false, reason: 'tab_lookup_failed', error: error.message };
+    const initial = await currentRecoverableTab(tabId);
+    if (!initial.tab) {
+      if (initial.reason === 'tab_loading') {
+        log('info', 'content_recovery_deferred_loading', { tabId, reason });
+      }
+      return {
+        ready: false,
+        injected: false,
+        reason: initial.reason,
+        ...(initial.error ? { error: initial.error } : {}),
+      };
     }
-    if (!isChatGptUrl(tab?.url || '')) return { ready: false, injected: false, reason: 'outside_scope' };
-    if (tab.status === 'loading') {
-      log('info', 'content_recovery_deferred_loading', { tabId, reason });
-      return { ready: false, injected: false, reason: 'tab_loading' };
-    }
-    if (await contentRuntimeReady(tabId)) return { ready: true, injected: false, reason: 'already_ready' };
 
-    // Re-check immediately before injection in case the user turned the master off
-    // while this recovery task was looking up the tab.
+    if (!await contentRuntimeConfirmedMissing(tabId)) {
+      return { ready: true, injected: false, reason: 'already_ready' };
+    }
+
+    // The tab can navigate or the master can be switched off while the two-step
+    // receiver probe is running. Re-check both immediately before injection.
     if (!await masterRuntimeEnabled()) {
       return { ready: false, injected: false, reason: 'master_disabled' };
     }
+    const beforeInjection = await currentRecoverableTab(tabId);
+    if (!beforeInjection.tab) {
+      return {
+        ready: false,
+        injected: false,
+        reason: beforeInjection.reason,
+        ...(beforeInjection.error ? { error: beforeInjection.error } : {}),
+      };
+    }
 
-    log('warn', 'content_runtime_missing', {
+    log('warn', 'content_runtime_missing_confirmed', {
       tabId,
       reason,
-      status: tab.status ?? null,
+      status: beforeInjection.tab.status ?? null,
       extensionVersion: chrome.runtime.getManifest().version,
     });
 
@@ -120,11 +164,15 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       if (!await masterRuntimeEnabled()) {
         return { ready: false, injected: true, reason: 'master_disabled' };
       }
+      const current = await currentRecoverableTab(tabId);
+      if (!current.tab) {
+        return { ready: false, injected: true, reason: current.reason };
+      }
       if (await contentRuntimeReady(tabId)) {
         log('info', 'content_runtime_recovered', { tabId, reason, attempt });
         return { ready: true, injected: true, reason: 'recovered' };
       }
-      await new Promise((resolve) => setTimeout(resolve, 120 * attempt));
+      await sleep(120 * attempt);
     }
 
     log('error', 'content_runtime_injected_but_unreachable', { tabId, reason });
@@ -141,10 +189,22 @@ async function recoverOpenTabs(reason) {
   try {
     tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
   } catch (error) {
-    log('warn', 'content_recovery_query_failed', { reason, error: error.message });
+    log('warn', 'content_recovery_query_failed', {
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return;
   }
-  await Promise.allSettled(tabs.map((tab) => ensureContentRuntime(tab.id, reason)));
+
+  // Deliberately recover one tab at a time. An extension update can leave dozens of
+  // already-open ChatGPT tabs without a current receiver; injecting all of them in a
+  // Promise.all burst can create a CPU/memory/debugger storm across every window.
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab.id)) continue;
+    if (!await masterRuntimeEnabled()) break;
+    await ensureContentRuntime(tab.id, reason);
+    await sleep(UPDATE_RECOVERY_GAP_MS);
+  }
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -162,6 +222,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[MASTER_KEY].newValue === true) void recoverOpenTabs('master_enabled');
 });
 
-// Wait until background.js has registered its GPTLOCK_* receiver before injecting
-// content.js, because content.js immediately requests GPTLOCK_GET_STATE on startup.
-setTimeout(() => void recoverOpenTabs('service_worker_start'), 250);
+chrome.runtime.onInstalled.addListener((details) => {
+  if (!['install', 'update'].includes(details?.reason)) return;
+  void recoverOpenTabs(`extension_${details.reason}`);
+});
+
+// IMPORTANT: do not sweep and re-inject all open tabs merely because an MV3 service
+// worker started. Service workers are routinely suspended and restarted; that event is
+// not evidence that the extension was updated. Targeted tab activation/navigation and
+// runtime.onInstalled are sufficient recovery triggers.
