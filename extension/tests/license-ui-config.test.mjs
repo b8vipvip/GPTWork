@@ -8,7 +8,7 @@ const popupShell = new URL('../popup-v0513-shell.js', import.meta.url);
 const popupCss = new URL('../popup-v0513.css', import.meta.url);
 const settingsShell = new URL('../settings-shell.js', import.meta.url);
 
-test('default popup and settings use cache-proof entrypoints with no legacy license controls', async () => {
+test('default popup and settings expose account UI without legacy product-license compatibility', async () => {
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   assert.equal(manifest.action.default_popup, 'popup-v0513.html');
   assert.equal(manifest.options_ui.page, 'settings-v0521.html');
@@ -16,7 +16,7 @@ test('default popup and settings use cache-proof entrypoints with no legacy lice
 
   const defaultPopup = new URL(`../${manifest.action.default_popup}`, import.meta.url);
   const settingsPage = new URL(`../${manifest.options_ui.page}`, import.meta.url);
-  const [html, settingsHtml, js, shell, css, settingsGuard] = await Promise.all([
+  const [html, settingsHtml, js, shell, css, settingsRuntime] = await Promise.all([
     readFile(defaultPopup, 'utf8'),
     readFile(settingsPage, 'utf8'),
     readFile(popupJs, 'utf8'),
@@ -31,32 +31,25 @@ test('default popup and settings use cache-proof entrypoints with no legacy lice
   assert.match(html, /id="accountCenter"/);
   assert.match(html, /popup-v0513-shell\.js/);
   assert.match(html, /popup-v0513\.css/);
-  assert.doesNotMatch(html, /授权验证 \/ License/);
-  assert.doesNotMatch(html, /licensePurchase|licenseActivate|licenseCode/);
-  assert.doesNotMatch(html, /GPTL-/);
-  assert.doesNotMatch(html, /<button id="reconnect"/);
-  assert.doesNotMatch(html, /<button id="logs"/);
-  assert.doesNotMatch(js, /GPTLOCK_LICENSE_ACTIVATE/);
-
-  assert.doesNotMatch(settingsHtml, /授权验证 \/ License/);
-  assert.doesNotMatch(settingsHtml, /licensePurchase|licenseActivate|licenseCode/);
-  assert.doesNotMatch(settingsHtml, /GPTL-/);
+  assert.match(settingsHtml, /GPTWork 总开关/);
+  assert.match(settingsHtml, /data-gptwork-master-toggle="true"/);
   assert.match(settingsHtml, /settings-shell\.js/);
 
-  assert.match(shell, /SHELL_REVISION = 'v0513-license-ui-purge-1'/);
-  assert.match(shell, /input\[placeholder\^="GPTL-" i\]/);
-  assert.match(shell, /授权验证/);
+  for (const source of [html, settingsHtml, js, shell, css, settingsRuntime]) {
+    assert.doesNotMatch(source, /GPTL-/);
+    assert.doesNotMatch(source, /GPTLOCK-LICENSE|GPTLOCK_LICENSE/);
+    assert.doesNotMatch(source, /LICENSE_UI_STALE/);
+    assert.doesNotMatch(source, /licensePurchase|licenseActivate|licenseCode/);
+    assert.doesNotMatch(source, /验证授权码|获取授权码|授权验证 \/ License/);
+  }
+
+  assert.match(shell, /SHELL_REVISION = 'v0513-single-authority-1'/);
   assert.match(shell, /gptlockPopupRuntimeInfo/);
   assert.match(shell, /getManifest\(\)\.options_ui\?\.page/);
   assert.match(shell, /#updates-auto/);
 
-  assert.match(settingsGuard, /SETTINGS_REVISION = 'v0521-settings-state-repair-1'/);
-  assert.match(settingsGuard, /input\[placeholder\^="GPTL-" i\]/);
-  assert.match(settingsGuard, /授权验证 \/ License/);
-  assert.match(settingsGuard, /gptlockUiUpdateStatus/);
-  assert.match(settingsGuard, /SAFE_CORE_RECONCILE_PHASES/);
-
-  assert.match(css, /input\[placeholder\^="GPTL-" i\]/);
-  assert.match(css, /section:has\(input\[placeholder\^="GPTL-" i\]\)/);
+  assert.match(settingsRuntime, /SETTINGS_REVISION = 'v0521-single-authority-1'/);
+  assert.match(settingsRuntime, /gptlockUiUpdateStatus/);
+  assert.match(settingsRuntime, /SAFE_CORE_RECONCILE_PHASES/);
   assert.match(css, /grid-template-columns:\s*repeat\(4,/);
 });

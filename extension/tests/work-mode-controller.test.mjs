@@ -5,13 +5,14 @@ import test from 'node:test';
 const source = await readFile(new URL('../work-mode-controller.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.meta.url), 'utf8'));
 
-test('Work controller is inert until both feature selection and background account gate allow it', () => {
-  assert.match(source, /WORK_MODE_KEY = 'gptworkWorkModeEnabled'/);
+test('Work controller is inert until current-tab selection and background gate allow it', () => {
   assert.match(source, /let workModeSelected = false/);
   assert.match(source, /let backgroundAllowed = false/);
   assert.match(source, /enabled = Boolean\(workModeSelected && backgroundAllowed\)/);
-  assert.match(source, /account\?\.authenticated === true/);
-  assert.match(source, /account\?\.entitlement\?\.active === true/);
+  assert.match(source, /GPTWORK_TAB_FEATURE_GET/);
+  assert.match(source, /GPTWORK_TAB_FEATURE_STATE/);
+  assert.match(source, /accountWindowAllowed/);
+  assert.doesNotMatch(source, /gptworkWorkModeEnabled/);
 });
 
 test('new-chat Work clicks are guided back to Chat only when Work handling is enabled', () => {

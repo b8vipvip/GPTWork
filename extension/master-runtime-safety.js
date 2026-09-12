@@ -3,82 +3,21 @@ import { appendRuntimeLog } from './runtime-log.js';
 const MASTER_KEY = 'gptworkEnabledLocal';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const ACCOUNT_REFRESH_ALARM = 'gptlock-account-refresh';
-const MASTER_RUNTIME_ALARMS = new Set([RECONNECT_ALARM, ACCOUNT_REFRESH_ALARM]);
 const CHATGPT_URL = 'https://chatgpt.com/*';
 
 let masterEnabled = false;
 let masterResolved = false;
 let restartTimer = null;
-const nativePorts = new Set();
 
 function log(level, event, details = {}) {
   void appendRuntimeLog(level, 'master-runtime', event, details).catch(() => {});
 }
-
-function patchFunction(target, key, factory) {
-  try {
-    const original = target?.[key];
-    if (typeof original !== 'function') return false;
-    const patched = factory(original.bind(target));
-    target[key] = patched;
-    return target[key] === patched;
-  } catch (error) {
-    log('warn', 'api_patch_failed', {
-      key,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-}
-
-const connectNativePatched = patchFunction(chrome.runtime, 'connectNative', (original) => (...args) => {
-  if (!masterEnabled) {
-    throw new Error('GPTWork master switch is off / GPTWork 总开关已关闭');
-  }
-  const port = original(...args);
-  nativePorts.add(port);
-  try {
-    port.onDisconnect.addListener(() => nativePorts.delete(port));
-  } catch {
-    // Best effort tracking only.
-  }
-  return port;
-});
-
-const alarmCreatePatched = patchFunction(chrome.alarms, 'create', (original) => (name, alarmInfo) => {
-  if (!masterEnabled && MASTER_RUNTIME_ALARMS.has(String(name || ''))) return undefined;
-  return original(name, alarmInfo);
-});
-
-function patchWindowEvent(event, eventName) {
-  if (!event || typeof event.addListener !== 'function') return false;
-  return patchFunction(event, 'addListener', (original) => (listener, ...rest) => {
-    if (typeof listener !== 'function') return original(listener, ...rest);
-    const guarded = (...args) => {
-      if (!masterEnabled) return undefined;
-      return listener(...args);
-    };
-    return original(guarded, ...rest);
-  }) || (log('warn', 'window_event_guard_unavailable', { eventName }), false);
-}
-
-const windowCreatedPatched = patchWindowEvent(chrome.windows?.onCreated, 'onCreated');
-const windowRemovedPatched = patchWindowEvent(chrome.windows?.onRemoved, 'onRemoved');
 
 async function clearRuntimeAlarms() {
   await Promise.allSettled([
     chrome.alarms.clear(RECONNECT_ALARM),
     chrome.alarms.clear(ACCOUNT_REFRESH_ALARM),
   ]);
-}
-
-function disconnectNativePorts() {
-  const ports = [...nativePorts];
-  nativePorts.clear();
-  for (const port of ports) {
-    try { port.disconnect(); } catch {}
-  }
-  return ports.length;
 }
 
 async function stopTabRuntime(tab) {
@@ -97,7 +36,7 @@ async function hardStopRuntime(reason = 'master_disabled') {
   clearTimeout(restartTimer);
   restartTimer = null;
   await clearRuntimeAlarms();
-  const disconnectedPorts = disconnectNativePorts();
+
   let tabs = [];
   try {
     tabs = await chrome.tabs.query({ url: CHATGPT_URL });
@@ -122,7 +61,6 @@ async function hardStopRuntime(reason = 'master_disabled') {
   log('info', 'master_runtime_stopped', {
     reason,
     tabs: tabs.length,
-    disconnectedNativePorts: disconnectedPorts,
   });
 }
 
@@ -184,8 +122,6 @@ chrome.storage.local.get(MASTER_KEY, (stored) => {
 });
 
 log('info', 'master_runtime_guard_installed', {
-  connectNativePatched,
-  alarmCreatePatched,
-  windowCreatedPatched,
-  windowRemovedPatched,
+  apiMonkeypatches: false,
+  windowLifecycleAlwaysOn: true,
 });

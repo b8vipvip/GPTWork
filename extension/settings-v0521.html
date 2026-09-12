@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="options.css">
   <link rel="stylesheet" href="request-history.css">
 </head>
-<body data-settings-revision="v0554-settings-layout-history-pagination">
+<body data-settings-revision="v0556-master-tab-isolation">
   <main class="shell">
     <header>
       <div>
@@ -20,16 +20,20 @@
 
     <section class="card" aria-labelledby="globalHeading">
       <h2 id="globalHeading">功能开关 <span>Feature gates</span></h2>
-      <p class="help">两个功能可独立或同时启用。首次安装默认都关闭；未登录时仍可查看设置，但启用功能或修改锁定模型会提示先登录/注册。</p>
+      <p class="help">GPTWork 总开关控制整个扩展运行；Work 模式和模型锁定只作用于当前 ChatGPT 标签页，每个窗口/标签可以保持不同状态。</p>
+      <label class="check-row wide" data-gptwork-settings-master="true" title="GPTWork 总开关 / GPTWork master switch">
+        <input id="enabled" data-gptwork-master-toggle="true" type="checkbox" aria-label="GPTWork 总开关">
+        <span><strong>GPTWork 总开关</strong><small>关闭后立即停止 GPTWork；重新开启时会保留各 ChatGPT 标签页各自的 Work/模型锁定状态。</small></span>
+      </label>
+      <p id="featureScope" class="permission-note">正在定位当前 ChatGPT 标签页…</p>
       <label class="check-row wide">
         <input id="workModeEnabled" type="checkbox">
-        <span><strong>Work 模式</strong><small>启用后自动锁定 GPT-5.6 Sol 及以上模型；已识别到的更高版本模型会自动纳入。</small></span>
+        <span><strong>Work 模式</strong><small>仅当前 ChatGPT 标签页生效。启用后自动锁定 GPT-5.6 Sol 及以上模型；其他标签页不会跟随切换。</small></span>
       </label>
       <label class="check-row wide">
         <input id="modelLockEnabled" type="checkbox">
-        <span><strong>模型锁定</strong><small>启用后锁定下方“锁定模型”列表中勾选的全部模型；可与 Work 模式叠加。</small></span>
+        <span><strong>模型锁定</strong><small>仅当前 ChatGPT 标签页生效。启用后锁定下方“锁定模型”列表；可与当前标签页的 Work 模式叠加。</small></span>
       </label>
-      <input id="enabled" type="checkbox" hidden aria-hidden="true" tabindex="-1">
     </section>
 
     <section class="card" aria-labelledby="modelHeading">
@@ -139,7 +143,7 @@
 
     <footer>
       <p id="formMessage" role="status" aria-live="polite"></p>
-      <p class="permission-note">Work 模式与模型锁定为本机独立开关；模型列表及其余配置继续同步。未登录状态不会接管 ChatGPT 请求。</p>
+      <p class="permission-note">GPTWork 总开关为全局开关；Work 模式与模型锁定按 ChatGPT 标签页隔离，每个窗口/标签可以不同。模型列表及其余配置继续同步。</p>
     </footer>
   </main>
   <script src="settings-shell.js"></script>

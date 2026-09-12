@@ -23,7 +23,6 @@ const elements = {
   monitor: document.getElementById('monitor'),
   pageState: document.getElementById('pageState'),
   responseState: document.getElementById('responseState'),
-  enabled: document.getElementById('enabled'),
   autoVerify: document.getElementById('autoVerify'),
   reconnect: document.getElementById('reconnect'),
   logs: document.getElementById('logs'),
@@ -236,8 +235,6 @@ function render(state) {
   const auto = tab?.autoVerification;
   const autoApplies = autoVerificationAppliesToLatestRequest(auto, tab);
   const autoEvidenceConfirmed = hasConfirmedAutoEvidence(auto, state.policy, tab);
-  const enabled = state.settings?.enabled !== false;
-  elements.enabled.checked = enabled;
   elements.native.textContent = native.connected
     ? `已连接 / Online${native.version ? ` · ${native.version}` : ''}`
     : `离线 / Offline${native.lastError ? ` · ${native.lastError}` : ''}`;
@@ -468,18 +465,6 @@ async function installUpdate() {
   }
 }
 
-
-elements.enabled.addEventListener('change', () => {
-  elements.enabled.disabled = true;
-  elements.message.textContent = elements.enabled.checked
-    ? '正在启用请求锁定 / Enabling…'
-    : '正在关闭 GPTWork / Disabling…';
-  void sendMessage({ type: 'GPTLOCK_SET_ENABLED', enabled: elements.enabled.checked })
-    .then(load)
-    .then(() => { elements.message.textContent = elements.enabled.checked ? 'GPTWork 已启用 / Enabled.' : 'GPTWork 已关闭 / Disabled.'; })
-    .catch((error) => { elements.message.textContent = error.message; })
-    .finally(() => { void load(); window.dispatchEvent(new CustomEvent('gptlock-account-refresh')); });
-});
 
 elements.autoVerify.addEventListener('click', () => {
   elements.message.textContent = '正在自动验证；证据不足会自动跟踪后续流并重试一次 / Auto verification is running…';

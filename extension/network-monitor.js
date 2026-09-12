@@ -94,6 +94,8 @@ export class ChatGptNetworkMonitor {
     this.onStreamData = onStreamData;
     this.getLockConfiguration = getLockConfiguration;
     this.attachedTabs = new Set();
+    this.attachTasks = new Map();
+    this.detachTasks = new Map();
     this.requests = new Map();
     this.handoffs = new Map();
     this.webSockets = new Map();
@@ -114,15 +116,15 @@ export class ChatGptNetworkMonitor {
     return { tabId };
   }
 
-  configuration() {
+  configuration(tabId) {
     try {
-      return this.getLockConfiguration?.() ?? {};
+      return this.getLockConfiguration?.(tabId) ?? {};
     } catch {
       return {};
     }
   }
 
-  async attach(tabId) {
+  async performAttach(tabId) {
     if (this.attachedTabs.has(tabId)) return true;
     const target = this.target(tabId);
     try {
@@ -156,12 +158,48 @@ export class ChatGptNetworkMonitor {
     }
   }
 
-  async detach(tabId) {
+  async attach(tabId) {
+    // A detach requested while an earlier attach is still running wins first. Any new
+    // attach waits for that detach, then starts a fresh lifecycle instead of returning
+    // the stale in-flight attach Promise.
+    const pendingDetach = this.detachTasks.get(tabId);
+    if (pendingDetach) {
+      try { await pendingDetach; } catch {}
+    }
+    if (this.attachedTabs.has(tabId)) return true;
+    const existing = this.attachTasks.get(tabId);
+    if (existing) return existing;
+
+    const task = this.performAttach(tabId).finally(() => {
+      if (this.attachTasks.get(tabId) === task) this.attachTasks.delete(tabId);
+    });
+    this.attachTasks.set(tabId, task);
+    return task;
+  }
+
+  async performDetach(tabId) {
     this.attachedTabs.delete(tabId);
     this.dropTabRequests(tabId);
     try { await debuggerCall('sendCommand', this.target(tabId), 'Fetch.disable', {}); } catch {}
     try { await debuggerCall('detach', this.target(tabId)); } catch {}
     this.onStatus(tabId, { attached: false, error: null });
+  }
+
+  async detach(tabId) {
+    const existing = this.detachTasks.get(tabId);
+    if (existing) return existing;
+
+    const task = (async () => {
+      const pendingAttach = this.attachTasks.get(tabId);
+      if (pendingAttach) {
+        try { await pendingAttach; } catch {}
+      }
+      await this.performDetach(tabId);
+    })().finally(() => {
+      if (this.detachTasks.get(tabId) === task) this.detachTasks.delete(tabId);
+    });
+    this.detachTasks.set(tabId, task);
+    return task;
   }
 
   isAttached(tabId) {
@@ -313,7 +351,7 @@ export class ChatGptNetworkMonitor {
     let rewrite = null;
     try {
       const postData = await this.pausedPostData(tabId, params);
-      rewrite = rewriteConversationPostData(postData, this.configuration());
+      rewrite = rewriteConversationPostData(postData, this.configuration(tabId));
       await this.continuePaused(tabId, requestId, rewrite.changed ? rewrite.postData : null);
       this.onRewrite?.(tabId, {
         endpoint,
@@ -371,7 +409,7 @@ export class ChatGptNetworkMonitor {
     const request = params.request ?? {};
     const requestId = String(params.requestId);
     if (isChatGptConversationRequest(request.url, request.method)) {
-      const configuration = this.configuration();
+      const configuration = this.configuration(tabId);
       const record = {
         tabId,
         requestId,
