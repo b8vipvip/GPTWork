@@ -2,6 +2,7 @@ import { normalizeConcreteModelId, normalizePolicy } from './policy.js';
 import { appendRuntimeLog } from './runtime-log.js';
 import { scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
+export const WINDOW_FEATURE_SESSION_KEY = 'gptworkWindowFeatureStatesV1';
 export const TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1';
 export const TAB_FEATURE_MIGRATION_KEY = 'gptworkTabFeatureMigrationV1';
 export const LEGACY_WORK_MODE_KEY = 'gptworkWorkModeEnabled';
@@ -19,10 +20,14 @@ const FEATURE_MESSAGE_TYPES = new Set([
   'GPTWORK_MASTER_SET',
 ]);
 
+// Feature authority is window-scoped. tabWindowIds is only a routing cache so
+// existing tab-oriented message APIs remain backward compatible.
 const states = new Map();
+const tabWindowIds = new Map();
 let basePolicy = normalizePolicy(null);
 let modelLockSelection = [];
 let discoveredModels = [];
+let masterEnabled = false;
 let initialized = false;
 let initializePromise = null;
 let selectionWriteInFlight = false;
@@ -66,24 +71,66 @@ function workModels() {
   ])];
 }
 
+function rememberTabWindow(tab) {
+  if (!Number.isInteger(tab?.id) || !Number.isInteger(tab?.windowId)) return null;
+  tabWindowIds.set(tab.id, tab.windowId);
+  return tab.windowId;
+}
+
+export async function resolveWindowIdForTab(tabId) {
+  const id = Number(tabId);
+  if (!Number.isInteger(id)) return null;
+  const cached = tabWindowIds.get(id);
+  if (Number.isInteger(cached)) return cached;
+  try {
+    const tab = await chrome.tabs.get(id);
+    return rememberTabWindow(tab);
+  } catch {
+    return null;
+  }
+}
+
 function serializedStates() {
-  return Object.fromEntries([...states.entries()].map(([tabId, value]) => [String(tabId), normalizeState(value)]));
+  return Object.fromEntries([...states.entries()].map(([windowId, value]) => [String(windowId), normalizeState(value)]));
 }
 
 async function persistStates() {
-  await chrome.storage.session.set({ [TAB_FEATURE_SESSION_KEY]: serializedStates() });
+  await chrome.storage.session.set({ [WINDOW_FEATURE_SESSION_KEY]: serializedStates() });
 }
 
-async function migrateLegacyFlags(storedLocal) {
+async function migrateLegacyTabSession(legacyMap, tabs) {
+  if (!legacyMap || typeof legacyMap !== 'object') return 0;
+  let migratedWindows = 0;
+  const orderedTabs = [...tabs].sort((left, right) => {
+    if (Boolean(right.active) !== Boolean(left.active)) return Number(right.active) - Number(left.active);
+    return Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0);
+  });
+  for (const tab of orderedTabs) {
+    if (!Number.isInteger(tab?.id) || !Number.isInteger(tab?.windowId)) continue;
+    if (states.has(tab.windowId)) continue;
+    const legacyState = legacyMap[String(tab.id)];
+    if (!legacyState || typeof legacyState !== 'object') continue;
+    states.set(tab.windowId, normalizeState(legacyState));
+    migratedWindows += 1;
+  }
+  if (migratedWindows > 0) await persistStates();
+  try { await chrome.storage.session.remove(TAB_FEATURE_SESSION_KEY); } catch {}
+  log('tab_session_migrated_to_windows', { migratedWindows });
+  return migratedWindows;
+}
+
+async function migrateLegacyFlags(storedLocal, tabs) {
   if (storedLocal[TAB_FEATURE_MIGRATION_KEY] === true) return;
   const legacy = normalizeState({
     workModeEnabled: storedLocal[LEGACY_WORK_MODE_KEY] === true,
     modelLockEnabled: storedLocal[LEGACY_MODEL_LOCK_KEY] === true,
   });
   if (legacy.workModeEnabled || legacy.modelLockEnabled) {
-    const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
-    for (const tab of tabs) {
-      if (Number.isInteger(tab.id)) states.set(tab.id, legacy);
+    const windowIds = new Set(tabs
+      .map((tab) => Number(tab?.windowId))
+      .filter(Number.isInteger));
+    for (const windowId of windowIds) {
+      if (!states.has(windowId)) states.set(windowId, legacy);
     }
     await persistStates();
   }
@@ -95,7 +142,7 @@ async function migrateLegacyFlags(storedLocal) {
   log('legacy_feature_flags_migrated', {
     workModeEnabled: legacy.workModeEnabled,
     modelLockEnabled: legacy.modelLockEnabled,
-    migratedTabCount: states.size,
+    migratedWindowCount: states.size,
   });
 }
 
@@ -116,27 +163,35 @@ export async function initializeTabFeatureRuntime() {
   if (initialized) return;
   if (initializePromise) return initializePromise;
   initializePromise = (async () => {
-    const [sessionStored, localStored, syncStored] = await Promise.all([
-      chrome.storage.session.get(TAB_FEATURE_SESSION_KEY),
+    const [sessionStored, localStored, syncStored, tabs] = await Promise.all([
+      chrome.storage.session.get([WINDOW_FEATURE_SESSION_KEY, TAB_FEATURE_SESSION_KEY]),
       chrome.storage.local.get([
         TAB_FEATURE_MIGRATION_KEY,
         LEGACY_WORK_MODE_KEY,
         LEGACY_MODEL_LOCK_KEY,
+        MASTER_KEY,
       ]),
       chrome.storage.sync.get(['policy', MODEL_SELECTION_KEY, DISCOVERED_MODELS_KEY]),
+      chrome.tabs.query({ url: 'https://chatgpt.com/*' }),
     ]);
-    const sessionMap = sessionStored[TAB_FEATURE_SESSION_KEY];
-    if (sessionMap && typeof sessionMap === 'object') {
-      for (const [key, value] of Object.entries(sessionMap)) {
-        const tabId = Number(key);
-        if (Number.isInteger(tabId)) states.set(tabId, normalizeState(value));
+
+    for (const tab of tabs) rememberTabWindow(tab);
+
+    const windowMap = sessionStored[WINDOW_FEATURE_SESSION_KEY];
+    if (windowMap && typeof windowMap === 'object') {
+      for (const [key, value] of Object.entries(windowMap)) {
+        const windowId = Number(key);
+        if (Number.isInteger(windowId)) states.set(windowId, normalizeState(value));
       }
     }
+
+    await migrateLegacyTabSession(sessionStored[TAB_FEATURE_SESSION_KEY], tabs);
     basePolicy = normalizePolicy(syncStored.policy);
     modelLockSelection = normalizeModels(syncStored[MODEL_SELECTION_KEY]);
     discoveredModels = normalizeModels(syncStored[DISCOVERED_MODELS_KEY]);
+    masterEnabled = localStored[MASTER_KEY] === true;
     await restoreExplicitModelSelectionForMigration(localStored);
-    await migrateLegacyFlags(localStored);
+    await migrateLegacyFlags(localStored, tabs);
     initialized = true;
   })().finally(() => {
     initializePromise = null;
@@ -145,21 +200,25 @@ export async function initializeTabFeatureRuntime() {
 }
 
 export function tabFeatureStateSync(tabId) {
-  return normalizeState(states.get(Number(tabId)));
+  const windowId = tabWindowIds.get(Number(tabId));
+  if (!Number.isInteger(windowId)) return normalizeState(null);
+  return normalizeState(states.get(windowId));
 }
 
 export async function getTabFeatureState(tabId) {
   await initializeTabFeatureRuntime();
-  return tabFeatureStateSync(tabId);
+  const windowId = await resolveWindowIdForTab(tabId);
+  return Number.isInteger(windowId) ? normalizeState(states.get(windowId)) : normalizeState(null);
 }
 
 export function tabFeatureEnabledSync(tabId) {
+  if (!masterEnabled) return false;
   const state = tabFeatureStateSync(tabId);
   return state.workModeEnabled || state.modelLockEnabled;
 }
 
 export function effectivePolicyForTabSync(tabId) {
-  const feature = tabFeatureStateSync(tabId);
+  const feature = masterEnabled ? tabFeatureStateSync(tabId) : normalizeState(null);
   const active = [];
   if (feature.workModeEnabled) active.push(...workModels());
   if (feature.modelLockEnabled) {
@@ -184,17 +243,29 @@ async function setTabFeatureState(tabId, patch) {
   await initializeTabFeatureRuntime();
   const id = Number(tabId);
   if (!Number.isInteger(id)) throw Object.assign(new Error('没有打开的 ChatGPT 标签页'), { code: 'NO_CHATGPT_TAB' });
-  const next = normalizeState({ ...tabFeatureStateSync(id), ...patch });
-  states.set(id, next);
+  const windowId = await resolveWindowIdForTab(id);
+  if (!Number.isInteger(windowId)) throw Object.assign(new Error('无法确定 ChatGPT 所在窗口'), { code: 'NO_CHATGPT_WINDOW' });
+  const next = normalizeState({ ...states.get(windowId), ...patch });
+  states.set(windowId, next);
   await persistStates();
-  log('tab_feature_changed', { tabId: id, ...next });
+  log('window_feature_changed', { tabId: id, windowId, ...next });
   return next;
 }
 
 async function removeTabState(tabId) {
+  tabWindowIds.delete(Number(tabId));
+}
+
+async function removeWindowState(windowId) {
   await initializeTabFeatureRuntime();
-  if (!states.delete(Number(tabId))) return;
-  await persistStates();
+  const id = Number(windowId);
+  if (!Number.isInteger(id)) return;
+  let changed = states.delete(id);
+  for (const [tabId, rememberedWindowId] of tabWindowIds.entries()) {
+    if (rememberedWindowId === id) tabWindowIds.delete(tabId);
+  }
+  if (changed) await persistStates();
+  log('window_feature_removed', { windowId: id, changed });
 }
 
 function isChatGptUrl(value) {
@@ -210,11 +281,18 @@ async function targetTabId(preferred = null, sender = null) {
   if (Number.isInteger(preferred)) {
     try {
       const tab = await chrome.tabs.get(preferred);
-      if (isChatGptUrl(tab?.url)) return preferred;
+      if (isChatGptUrl(tab?.url)) {
+        rememberTabWindow(tab);
+        return preferred;
+      }
     } catch {}
   }
-  if (Number.isInteger(sender?.tab?.id) && isChatGptUrl(sender.tab.url)) return sender.tab.id;
+  if (Number.isInteger(sender?.tab?.id) && isChatGptUrl(sender.tab.url)) {
+    rememberTabWindow(sender.tab);
+    return sender.tab.id;
+  }
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  tabs.forEach(rememberTabWindow);
   tabs.sort((left, right) => {
     if (Boolean(right.active) !== Boolean(left.active)) return Number(right.active) - Number(left.active);
     return Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0);
@@ -266,21 +344,41 @@ async function pushFeatureState(tabId, featureState = null) {
   } catch {}
 }
 
+async function pushWindowFeatureState(windowId, featureState = null) {
+  if (!Number.isInteger(windowId)) return;
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ windowId, url: 'https://chatgpt.com/*' });
+  } catch {}
+  for (const tab of tabs) rememberTabWindow(tab);
+  await Promise.allSettled(tabs
+    .filter((tab) => Number.isInteger(tab.id))
+    .map((tab) => pushFeatureState(tab.id, featureState)));
+}
+
+async function pushAllFeatureStates() {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' }); } catch {}
+  for (const tab of tabs) rememberTabWindow(tab);
+  await Promise.allSettled(tabs
+    .filter((tab) => Number.isInteger(tab.id))
+    .map((tab) => pushFeatureState(tab.id)));
+}
+
 async function featureSnapshot(tabId) {
   const state = await backgroundState(tabId);
+  const windowId = Number.isInteger(tabId) ? await resolveWindowIdForTab(tabId) : null;
   const featureState = Number.isInteger(tabId) ? await getTabFeatureState(tabId) : normalizeState(null);
-  const masterStored = await chrome.storage.local.get(MASTER_KEY);
   return {
     tabId,
+    windowId,
     featureState,
     policy: Number.isInteger(tabId) ? effectivePolicyForTabSync(tabId) : basePolicy,
     settings: state?.settings ?? null,
     account: state?.account ?? null,
     accountWindowAllowed: Number.isInteger(tabId) ? state?.accountWindowAllowed !== false : true,
     windowQuotaExceeded: quotaExceeded(state, tabId),
-    masterEnabled: typeof masterStored[MASTER_KEY] === 'boolean'
-      ? masterStored[MASTER_KEY]
-      : state?.settings?.enabled === true,
+    masterEnabled,
   };
 }
 
@@ -305,7 +403,8 @@ async function handleFeatureMessage(message, sender) {
         : null;
     if (!patch) throw Object.assign(new Error('未知功能开关'), { code: 'INVALID_FEATURE' });
     const featureState = await setTabFeatureState(tabId, patch);
-    await pushFeatureState(tabId, featureState);
+    const windowId = await resolveWindowIdForTab(tabId);
+    await pushWindowFeatureState(windowId, featureState);
     await scheduleAccountRefresh();
     return featureSnapshot(tabId);
   }
@@ -322,7 +421,9 @@ async function handleFeatureMessage(message, sender) {
         throw Object.assign(new Error(WINDOW_QUOTA_MESSAGE), { code: 'WINDOW_QUOTA_EXCEEDED' });
       }
     }
+    masterEnabled = desired;
     await chrome.storage.local.set({ [MASTER_KEY]: desired });
+    await pushAllFeatureStates();
     await scheduleAccountRefresh();
     log('master_changed', { enabled: desired, tabId });
     return { ...(await featureSnapshot(tabId)), masterEnabled: desired };
@@ -344,11 +445,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+chrome.tabs.onCreated.addListener((tab) => {
+  rememberTabWindow(tab);
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabState(tabId).catch(() => {});
 });
 
+if (chrome.tabs.onAttached?.addListener) {
+  chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
+    if (Number.isInteger(tabId) && Number.isInteger(attachInfo?.newWindowId)) {
+      tabWindowIds.set(tabId, attachInfo.newWindowId);
+      void pushFeatureState(tabId).catch(() => {});
+    }
+  });
+}
+
+if (chrome.tabs.onDetached?.addListener) {
+  chrome.tabs.onDetached.addListener((tabId) => {
+    tabWindowIds.delete(Number(tabId));
+  });
+}
+
+// Lifecycle cleanup must always run, even while the global master switch is off.
+chrome.windows.onRemoved.addListener((windowId) => {
+  void removeWindowState(windowId).catch(() => {});
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes[MASTER_KEY]) {
+    masterEnabled = changes[MASTER_KEY].newValue === true;
+    void pushAllFeatureStates().catch(() => {});
+    return;
+  }
   if (areaName !== 'sync') return;
   let changed = false;
   if (changes.policy) {
@@ -376,9 +506,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     changed = true;
   }
   if (!changed) return;
-  void chrome.tabs.query({ url: 'https://chatgpt.com/*' }).then((tabs) => Promise.all(
-    tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => pushFeatureState(tab.id)),
-  )).catch(() => {});
+  void pushAllFeatureStates().catch(() => {});
 });
 
 void initializeTabFeatureRuntime().catch((error) => {
