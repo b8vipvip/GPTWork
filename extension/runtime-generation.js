@@ -1,4 +1,4 @@
-export const RUNTIME_GENERATION = '0.5.56-tab-isolation-r3';
+export const RUNTIME_GENERATION = '0.5.56-tab-isolation-r4';
 export const RUNTIME_GENERATION_MESSAGE = 'GPTWORK_RUNTIME_GENERATION_GET';
 
 function isServiceWorkerContext() {
