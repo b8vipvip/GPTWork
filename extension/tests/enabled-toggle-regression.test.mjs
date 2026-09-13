@@ -22,11 +22,12 @@ test('popup and settings expose independent Work and model-lock feature gates', 
   }
 });
 
-test('feature controller authenticates then changes the current ChatGPT window authority', () => {
-  assert.match(controller, /requireActivation\(currentAccount\)/);
+test('feature controller delegates authentication and entitlement to current ChatGPT window runtime authority', () => {
+  assert.doesNotMatch(controller, /function requireActivation|requireActivation\(currentAccount\)/);
+  assert.match(controller, /background\/window runtime is the sole[\s\S]*entitlement \+ quota authority/);
   assert.match(controller, /GPTWORK_TAB_FEATURE_GET/);
   assert.match(controller, /GPTWORK_TAB_FEATURE_SET/);
-  assert.match(controller, /tabId: currentTabId/);
+  assert.match(controller, /tabId: targetTabId/);
   assert.match(controller, /feature: kind/);
   assert.match(controller, /currentWindow:\s*true/);
   assert.match(controller, /窗口内的 ChatGPT 标签页共享状态/);
