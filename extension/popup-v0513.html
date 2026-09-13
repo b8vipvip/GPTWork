@@ -106,6 +106,12 @@
       <label class="switch" title="启用模型锁定 / Enable configured model lock"><input id="modelLockEnabled" type="checkbox"><span aria-hidden="true"></span></label>
     </section>
 
+    <section id="updateRuntimeProgress" class="install-help" aria-live="polite" hidden>
+      <strong id="updateRuntimeProgressTitle">GPTWork 更新进行中 / Updating</strong>
+      <p id="updateRuntimeProgressDetail">正在准备…</p>
+      <progress id="updateRuntimeProgressBar" max="100" value="0" style="width:100%"></progress>
+    </section>
+
     <section id="installHelp" class="install-help" hidden>
       <strong id="installTitle">尚未安装本地核心</strong><p id="installDetail"></p>
       <button id="installCore" type="button">下载并安装本地核心<br><small>Download installer</small></button>
