@@ -38,11 +38,16 @@ test('master storage transition is the single fan-out and OFF pushes an immediat
   assert.match(masterSet, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: false \}\)/);
   assert.match(masterSet, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: true \}\)/);
   assert.doesNotMatch(masterSet, /pushAllFeatureStates\(/);
+  assert.doesNotMatch(masterSet, /scheduleAccountRefresh\(/);
 
   const offBranch = masterSet.match(/if \(!desired\) \{([\s\S]*?)\n    \}\n\n    const state = await backgroundState/)?.[1] || '';
   assert.match(offBranch, /masterEnabled = false/);
   assert.match(offBranch, /disabledMasterSnapshot\(tabId\)/);
   assert.doesNotMatch(offBranch, /backgroundState\(|entitlementError\(|quotaExceeded\(/);
+
+  const enablePersist = masterSet.indexOf("await chrome.storage.local.set({ [MASTER_KEY]: true })");
+  const enableMemory = masterSet.indexOf('masterEnabled = true', enablePersist);
+  assert.ok(enablePersist >= 0 && enableMemory > enablePersist, 'Master ON must become active only after local persistence succeeds');
 
   const push = runtime.match(/async function pushFeatureState\(tabId, featureState = null\) \{([\s\S]*?)\n\}/)?.[0] || '';
   assert.match(push, /if \(masterEnabled\) return/);
