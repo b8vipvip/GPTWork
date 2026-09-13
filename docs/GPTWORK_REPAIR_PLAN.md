@@ -21,12 +21,12 @@
 | R3 | P0 | content runtime 恢复策略过于激进 | **已实现并通过自动化测试**。仅 install/update 执行受控恢复；逐 tab 串行、二次探测、Master/URL/loading 再确认 | 普通 SW 唤醒不批量重注入，真正 install/update 才恢复且无并发风暴 |
 | R4 | P0 | 旧 runtime terminal invalidation 不完整 | **已实现并通过自动化测试，真机回归待 Stage 5**。上一 generation 会清 Timer/Interval/RAF/Observer/EventListener；同步异常、Promise rejection、callback `runtime.lastError` 的真实 context invalidation 都触发单向 shutdown；`Receiving end does not exist` 保持非 terminal | 上下文失效后旧 runtime 永久停止重连/轮询/阻断/DOM 对齐，不再形成旧 generation 重试风暴 |
 | R5 | P1 | Work/模型锁必须按窗口隔离 | **已实现并通过自动化测试**。权威状态按 `windowId` 存储；同窗口共享、跨窗口独立，tab 移动后重新绑定目标窗口，窗口关闭清理 | 两窗口各多标签互不影响，tab 跨窗口移动立即采用目标窗口状态 |
-| R6 | P1 | Master 职责不纯、关闭语义不完整 | **已实现并通过自动化测试**。不再 monkey patch Chrome API；Native、alarms、Debugger、badge、content shutdown 均由显式 Master 生命周期控制 | Master OFF 即时停工/fail-open，生命周期清理 listener 永远有效，ON/OFF 全窗口一致 |
+| R6 | P1 | Master 职责不纯、关闭语义不完整 | **已实现并通过自动化测试**。旧 `master-runtime-safety.js` 已从入口和仓库移除；`background.js` 成为 Native、alarms、Debugger、badge 与 Master OFF cleanup 的唯一运行时生命周期 authority | Master OFF 即时停工/fail-open，生命周期清理 listener 永远有效，ON/OFF 全窗口一致且不存在重复 cleanup authority |
 | R7 | P1 | Master 与窗口功能状态耦合错误 | **已实现并通过自动化测试**。Master 与 window Work/Model Lock 分离；设置页 Master 只有 `master-ui-controller.js` 一个写入方 | Master=OFF 一票否决；Master=ON 时由各窗口 feature state 决定功能，不再以 tab 功能状态冒充全局关闭 |
 | R8 | P1 | 旧授权码/产品 License 体系残留 | **已清理并由 forbidden-token 测试保护**。删除 `native-status.js`、设置迁移、popup/CSS 等真实运行时残留；账号登录/订阅权益/窗口额度保留 | 生产扩展/UI/迁移不再存在旧产品授权码激活、校验、清除、旧 storage/message 逻辑 |
 | R9 | P1 | `Unexpected token 'import'` 注入路径 | **已闭环并通过自动化测试**。动态 recovery 列表与 manifest classic content scripts 同源，测试逐文件禁止顶层 `import/export` | `executeScript({files})` 只注入 classic-safe 文件，module 仅通过 module graph 加载 |
-| R10 | P1 | CI 必须全绿 | **Extension checks 已在 CI #701 通过**；最终 head 仍需等待全部 Windows/Linux/Native/Private Engine/Store/Boundary 检查完成 | PR 最终 head 的全部必需 GitHub Actions 为绿色 |
-| R11 | P2 | 命名/描述可能误导为 tab-level authority | **代码注释与主要回归测试已明确 window authority**。`tab-feature-runtime.js` 文件名及 `GPTWORK_TAB_FEATURE_*` 消息名暂保留为兼容表面，不代表 tab 级存储语义；PR 最终描述在 Stage 5 收尾 | PR 描述、计划、测试语义明确 window-level；兼容命名有明确说明，不再被理解为 tab authority |
+| R10 | P1 | CI 必须全绿 | **扩展专项此前已恢复全绿**；删除重复 Master runtime authority 后，最终 head 重新执行完整 CI/Store/Boundary 验证 | PR 最终 head 的全部必需 GitHub Actions 为绿色 |
+| R11 | P2 | 命名/描述可能误导为 tab-level authority | **代码注释、计划和主要回归测试已明确 window authority**。`tab-feature-runtime.js` 文件名及 `GPTWORK_TAB_FEATURE_*` 消息名暂保留为兼容表面，不代表 tab 级存储语义；PR 最终描述在 Stage 5 收尾 | PR 描述、计划、测试语义明确 window-level；兼容命名有明确说明，不再被理解为 tab authority |
 
 ## 分阶段实施
 
@@ -52,6 +52,7 @@
 - `sendMessage` 同步 invalidation、Promise 异步 rejection、callback `runtime.lastError` 的 terminal invalidation 都立即 shutdown；普通 `Receiving end does not exist` 不误判为 terminal。
 - dynamic injection 与 manifest classic content script 列表绑定，并有 module/classic 防回归测试。
 - `background.js` Native/reconnect/account heartbeat/Debugger 全部显式 Master-gated；全 tab debugger 配置串行化；initialize single-flight。
+- 删除重复的 `master-runtime-safety.js` cleanup authority；Master OFF 的 Native/alarms/debugger/badge 清理由 `background.js` 单点负责。
 
 待验收：真实 Chrome 多窗口下 disable/re-enable/update/reload 的 P0 人工矩阵。
 
@@ -75,8 +76,9 @@
 
 已完成：
 
-- `master-runtime-safety.js` 不再 monkey patch `connectNative`、alarms、window listener 等 Chrome API。
-- Master OFF：断开 Native Port、拒绝 pending request、清 reconnect/account alarms、逐 tab detach debugger、清 badge，并通知 content fail-open。
+- 删除旧 `master-runtime-safety.js` 运行时层，避免 Master OFF 时与 `background.js` 同时执行第二轮 debugger detach/alarm cleanup。
+- `background.js` 是 Native Messaging、reconnect/account alarms、Debugger、badge 和 Master OFF shutdown 的唯一后台生命周期 authority。
+- Master OFF：断开 Native Port、拒绝 pending request、清 reconnect/account alarms、逐 tab detach debugger、清 badge；content/window feature state 通过既有 Master/window authority fail-open。
 - Native connect/send/reconnect 与 account heartbeat 都有 Master 显式门控。
 - 生命周期 listener 在 Master OFF 时仍保留，可继续完成 tab/window 清理。
 - `master-ui-controller.js` 为 Master UI 唯一写入方；旧 `options.js -> patchSettings({enabled})` 双写路径已删除。
@@ -100,9 +102,8 @@
 
 自动化状态：
 
-- Extension checks：已通过 CI #701。
-- Private Core Boundary：最新同 head 检查已通过。
-- Store Package 与 CI 内 Windows/Linux/Native/Private Engine 构建：等待最终 head 全部完成后确认。
+- Extension checks：此前修复后已全绿；最终 head 正在重新验证。
+- Private Core Boundary、Store Package、Windows/Linux/Native/Private Engine：最终 head 必须全部完成并保持绿色。
 
 真实 Chrome 人工回归矩阵至少包括：
 
