@@ -22,13 +22,13 @@
 | R2 | P0 | Debugger attach 并发竞态 | **已实现并有自动化护栏**。同一 tab attach/detach single-flight | 同一 tab 任意时刻最多一个 attach/detach 生命周期，导航/关闭/Master OFF 清理完整 |
 | R3 | P0 | content runtime 恢复策略过于激进 | **已实现并有自动化护栏**。仅真实 install/update 受控恢复；逐 tab 串行、二次探测 | 普通 SW 唤醒不批量重注入，真正 install/update 才恢复且无并发风暴 |
 | R4 | P0 | 旧 runtime terminal invalidation 不完整 | **已实现并有自动化护栏，真机待验收**。同步异常、Promise rejection、callback `runtime.lastError` 的真实 context invalidation 都触发 terminal shutdown | 失效 generation 永久停止重连/轮询/阻断/DOM 对齐 |
-| R5 | P1 | Work/模型锁应按 ChatGPT 标签页独立，而非按窗口共享 | **已改为真正 per-tab authority，当前 head 正重新跑 CI**。状态使用 `gptworkTabFeatureStatesV2` 按 `tabId` 保存；临时 window state 仅做一次迁移源 | 同一 Chrome 窗口 tab A/B 可保持相反状态；关闭 tab 清理；跨窗口移动时该 tab 保留原状态且不影响目标窗口其他 tab |
+| R5 | P1 | Work/模型锁应按 ChatGPT 标签页独立，而非按窗口共享 | **已改为真正 per-tab authority，自动化已通过**。状态使用 `gptworkTabFeatureStatesV2` 按 `tabId` 保存；临时 window state 仅做一次迁移源 | 同一 Chrome 窗口 tab A/B 可保持相反状态；关闭 tab 清理；跨窗口移动时该 tab 保留原状态且不影响目标窗口其他 tab |
 | R6 | P1 | Master 职责不纯、关闭语义不完整 | **已实现并有自动化护栏**。删除重复 Master runtime cleanup；`background.js` 单点负责 Native/alarms/Debugger/badge/Master OFF | Master OFF 即时停工/fail-open，ON/OFF 全局一致，无重复 cleanup authority |
 | R7 | P1 | Master 与功能状态耦合/双写 | **已实现并有自动化护栏**。Master 与 per-tab Work/Model 分离；设置页/Popup 使用同一 Master UI controller | Master=OFF 一票否决但不销毁各 tab feature 选择；ON 后恢复各 tab 自身选择 |
 | R8 | P1 | 旧授权码/产品 License 体系残留 | **已清理并由 forbidden-token 测试保护** | 生产扩展/UI/迁移不再存在旧产品授权码激活/校验/清除逻辑 |
 | R9 | P1 | `Unexpected token 'import'` 注入路径 | **已闭环并有自动化护栏** | 动态注入只使用 manifest 中 classic-safe content scripts |
-| R10 | P1 | CI 必须全绿 | **上一稳定 head 全绿；本次 per-tab + generation 修复的最终 head 待重新验证** | PR 最终 head 的 CI / Store Package / Private Core Boundary 全部 success |
-| R11 | P1 | 安装器原地替换扩展文件后，新 Popup/Settings 与旧 MV3 Worker 协议错代 | **已加入单一 generation barrier，当前 head 正重新验证**。新扩展页面在发送 Master/feature 命令前比较 worker generation，不一致只触发一次 extension reload | 原地升级保持 Chrome 打开时，不再出现 `Unsupported extension message: GPTWORK_MASTER_SET` / `GPTWORK_TAB_FEATURE_SET`；无 reload storm |
+| R10 | P1 | CI 必须全绿 | **当前 head `f08ae6b1` 全绿**：CI #754、Store Package #208、Private Core Boundary #398 均 success | PR 最终 head 的 CI / Store Package / Private Core Boundary 全部 success |
+| R11 | P1 | 安装器原地替换扩展文件后，新 Popup/Settings 与旧 MV3 Worker 协议错代 | **已加入单一 generation barrier，自动化已通过，真机待验收**。新扩展页面在发送 Master/feature 命令前比较 worker generation，不一致只触发一次 extension reload | 原地升级保持 Chrome 打开时，不再出现 `Unsupported extension message: GPTWORK_MASTER_SET` / `GPTWORK_TAB_FEATURE_SET`；无 reload storm |
 
 ## 分阶段实施
 
@@ -56,7 +56,7 @@
 
 ### Stage 2 — P1：真正的标签页级功能隔离
 
-状态：**实现完成；最终 head CI 正重新验证**
+状态：**实现与自动化完成；真实 Chrome 待验收**
 
 已完成：
 
@@ -87,7 +87,7 @@
 
 ### Stage 5 — 真机回归、最终 CI、合并与正式发布
 
-状态：**进行中**
+状态：**进行中；当前 head 自动化全绿**
 
 本阶段已通过实机发现并修复：
 
@@ -122,10 +122,10 @@
 - [x] Stage 0：修复计划、owner 边界、验收标准
 - [x] Stage 1：P0 代码修复与自动化护栏
 - [ ] Stage 1：真实 Chrome disable/update 多窗口生命周期验收
-- [x] Stage 2：per-tab 功能隔离实现
+- [x] Stage 2：per-tab 功能隔离实现与自动化
 - [x] Stage 3：Master / background lifecycle 单一权威
 - [x] Stage 4：旧 License 清理与 forbidden-token 自动化
-- [ ] Stage 5：本次最终 head 全量 CI
+- [x] Stage 5：当前 head `f08ae6b1` 全量 CI / Store / Boundary 全绿
 - [ ] Stage 5：真机回归
 - [ ] Stage 5：合并 + 正式发布
 
