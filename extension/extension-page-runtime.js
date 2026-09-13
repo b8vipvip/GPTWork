@@ -7,6 +7,39 @@ function never() {
   return new Promise(() => {});
 }
 
+async function bestEffortPrepareReload() {
+  // A generation mismatch is transport skew, not a business-state transition. Ask the
+  // currently running worker to execute its single lifecycle shutdown path before the
+  // one permitted reload. Older workers may not know this message; that is a one-time
+  // upgrade fallback, not a compatibility decision stack.
+  await new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, 900);
+    try {
+      chrome.runtime.sendMessage({
+        type: 'GPTWORK_PREPARE_RELOAD',
+        reason: 'runtime_generation_mismatch',
+      }, () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        void chrome.runtime.lastError;
+        resolve(true);
+      });
+    } catch {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(false);
+      }
+    }
+  });
+}
+
 function requestWorkerGeneration() {
   return new Promise((resolve) => {
     try {
@@ -39,6 +72,7 @@ export function ensureRuntimeGeneration() {
     // Reload exactly once, then stop this page generation permanently; no retry loop.
     if (!reloadRequested) {
       reloadRequested = true;
+      await bestEffortPrepareReload();
       try { chrome.runtime.reload(); } catch {}
     }
     return never();
