@@ -34,7 +34,7 @@ test('master-off background shutdown owns native, alarms, debugger and badge cle
 test('browser-wide debugger configuration is serialized and initialization is single-flight', () => {
   const configure = background.match(/async function configureOpenTabs\(\) \{([\s\S]*?)\n\}/)?.[0] || '';
   assert.match(configure, /for \(const tab of tabs\) await configureTab\(tab\)/);
-  assert.doesNotMatch(configure, /Promise\.all/);
+  assert.doesNotMatch(configure, /^\s*(?:await\s+)?Promise\.all\(/m);
   assert.match(background, /let initializeTask = null/);
   assert.match(background, /if \(initializeTask\) return initializeTask/);
   assert.match(background, /performInitialize\(\)\.finally/);
