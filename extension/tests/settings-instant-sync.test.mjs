@@ -24,8 +24,10 @@ test('custom model button is Add-only and custom models are rendered in the choi
 
 test('window feature gates use runtime authority while remaining settings use immediate patch writes', () => {
   assert.match(featureController, /GPTWORK_TAB_FEATURE_SET/);
-  assert.match(featureController, /tabId:\s*currentTabId/);
+  assert.match(featureController, /const targetTabId = currentTabId/);
+  assert.match(featureController, /tabId:\s*targetTabId/);
   assert.match(featureController, /feature:\s*kind/);
+  assert.doesNotMatch(featureController, /requireActivation\(/);
   assert.doesNotMatch(featureController, /GPTLOCK_SET_ENABLED/);
   assert.doesNotMatch(featureController, /chrome\.storage\.local\.set/);
   assert.match(optionsSource, /document\.addEventListener\('change', persistFromChange\)/);
