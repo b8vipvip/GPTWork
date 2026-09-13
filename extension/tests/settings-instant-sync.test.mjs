@@ -10,8 +10,8 @@ const contentSource = await readFile(new URL('../content.js', import.meta.url), 
 test('settings page no longer depends on a bottom Save & sync action', () => {
   assert.doesNotMatch(settingsHtml, /id="save"/);
   assert.doesNotMatch(settingsHtml, /保存并同步\s*\/\s*Save &amp; sync/);
-  assert.match(settingsHtml, /Work 模式和模型锁定按 ChatGPT 窗口隔离/);
-  assert.match(settingsHtml, /同一窗口内的标签页共享状态/);
+  assert.match(settingsHtml, /Work 模式和模型锁定按 ChatGPT 标签页隔离/);
+  assert.match(settingsHtml, /同一 Chrome 窗口里的不同 ChatGPT 标签页也可以保持不同状态/);
   assert.match(settingsHtml, /模型列表及其余配置继续同步/);
 });
 
@@ -22,11 +22,12 @@ test('custom model button is Add-only and custom models are rendered in the choi
   assert.match(optionsSource, /persistModelSelection/);
 });
 
-test('window feature gates use runtime authority while remaining settings use immediate patch writes', () => {
+test('tab feature gates use runtime authority while remaining settings use immediate patch writes', () => {
   assert.match(featureController, /GPTWORK_TAB_FEATURE_SET/);
   assert.match(featureController, /const targetTabId = currentTabId/);
   assert.match(featureController, /tabId:\s*targetTabId/);
   assert.match(featureController, /feature:\s*kind/);
+  assert.match(featureController, /exact tabId, never windowId/);
   assert.doesNotMatch(featureController, /requireActivation\(/);
   assert.doesNotMatch(featureController, /GPTLOCK_SET_ENABLED/);
   assert.doesNotMatch(featureController, /chrome\.storage\.local\.set/);
