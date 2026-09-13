@@ -100,7 +100,11 @@
   }
 
   if (masterToggle) {
-    masterToggle.addEventListener('change', () => {
+    masterToggle.addEventListener('change', (event) => {
+      // This controller is the single writer for the explicit Master switch. Stop
+      // legacy/page-level change delegates from observing #enabled and issuing a
+      // second, conflicting storage or runtime write.
+      event.stopImmediatePropagation();
       void changeMaster(Boolean(masterToggle.checked));
     }, true);
   }
