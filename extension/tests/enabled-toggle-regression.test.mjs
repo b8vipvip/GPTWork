@@ -43,16 +43,14 @@ test('unauthenticated popup remains visible and protected actions can open login
   assert.match(popup, /<section id="authShell"[^>]*hidden/);
 });
 
-test('master and window feature authorities load before the main background runtime', () => {
-  const masterIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
+test('window feature authority loads before the sole background lifecycle authority', () => {
   const windowIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
   const recoveryIndex = backgroundEntry.indexOf("import './content-runtime-recovery.js'");
   const updaterIndex = backgroundEntry.indexOf("import './background-update.js'");
-  assert.ok(masterIndex >= 0);
-  assert.ok(windowIndex > masterIndex);
+  assert.ok(windowIndex >= 0);
   assert.ok(backgroundIndex > windowIndex);
   assert.ok(recoveryIndex > backgroundIndex);
   assert.ok(updaterIndex > recoveryIndex);
-  assert.doesNotMatch(backgroundEntry, /tab-feature-network-policy\.js/);
+  assert.doesNotMatch(backgroundEntry, /master-runtime-safety\.js|tab-feature-network-policy\.js/);
 });
