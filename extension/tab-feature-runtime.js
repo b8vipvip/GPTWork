@@ -12,6 +12,7 @@ export const WINDOW_QUOTA_MESSAGE = '当前账户并发窗口超限';
 
 const MODEL_SELECTION_KEY = 'gptworkModelLockSelection';
 const DISCOVERED_MODELS_KEY = 'discoveredModels';
+const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';
 const BASE_WORK_MODELS = Object.freeze(['gpt-6-astra', 'gpt-5.6-sol']);
 const FEATURE_MESSAGE_TYPES = new Set([
   'GPTWORK_TAB_FEATURE_GET',
@@ -300,26 +301,45 @@ async function targetTabId(preferred = null, sender = null) {
   return Number.isInteger(tabs[0]?.id) ? tabs[0].id : null;
 }
 
-function runtimeMessage(message) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(message, (response) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else if (!response?.ok) reject(Object.assign(new Error(response?.error || 'Extension request failed'), {
-        code: response?.code || null,
-      }));
-      else resolve(response.data);
-    });
-  });
+function accountAllowsWindow(account, windowId) {
+  if (account?.authenticated !== true || account?.entitlement?.active !== true) return false;
+  if (!Number.isInteger(windowId)) return true;
+  const windowKey = `chrome:${windowId}`;
+  const allowed = Array.isArray(account.allowedWindowKeys) ? account.allowedWindowKeys : [];
+  const denied = Array.isArray(account.deniedWindowKeys) ? account.deniedWindowKeys : [];
+  if (!allowed.length && !denied.length) return true;
+  return allowed.includes(windowKey) && !denied.includes(windowKey);
 }
 
 async function backgroundState(tabId) {
-  return runtimeMessage({ type: 'GPTLOCK_GET_STATE', ...(Number.isInteger(tabId) ? { tabId } : {}) });
+  // tab-feature-runtime and background.js execute inside the same MV3 service-worker
+  // context. chrome.runtime.sendMessage() is for crossing extension contexts; using it
+  // here to ask background.js for GPTLOCK_GET_STATE can leave this listener waiting for
+  // a response from its own context, which makes Master/feature status and SET appear
+  // frozen in popup/settings. account-client persists this snapshot before login or
+  // heartbeat returns, so read that single account snapshot directly and derive only
+  // the window quota needed by this window-scoped feature authority.
+  const stored = await chrome.storage.local.get(ACCOUNT_SNAPSHOT_KEY);
+  const account = stored?.[ACCOUNT_SNAPSHOT_KEY] ?? {
+    authenticated: false,
+    authorized: false,
+    allowedWindowKeys: [],
+    deniedWindowKeys: [],
+  };
+  const windowId = Number.isInteger(tabId) ? await resolveWindowIdForTab(tabId) : null;
+  return {
+    account,
+    accountWindowAllowed: accountAllowsWindow(account, windowId),
+    settings: { enabled: masterEnabled },
+  };
 }
 
 function entitlementError(state) {
   const account = state?.account;
-  if (account?.authenticated !== true || account?.entitlement?.active !== true) {
+  if (account?.authenticated !== true) {
+    return Object.assign(new Error('请先登录或注册 GPTWork'), { code: 'AUTH_REQUIRED' });
+  }
+  if (account?.entitlement?.active !== true) {
     return Object.assign(new Error('当前账号没有有效权益'), { code: 'ENTITLEMENT_REQUIRED' });
   }
   return null;
