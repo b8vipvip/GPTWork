@@ -19,7 +19,8 @@ test('master toggle is local runtime state and never directly consumes sync writ
   assert.match(masterUi, /GPTWORK_MASTER_SET/);
   assert.doesNotMatch(masterUi, /chrome\.storage\.sync\.set/);
   assert.match(runtime, /MASTER_KEY = 'gptworkEnabledLocal'/);
-  assert.match(runtime, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: desired \}\)/);
+  assert.match(runtime, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: false \}\)/);
+  assert.match(runtime, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: true \}\)/);
   const masterBlock = runtime.match(/if \(message\.type === 'GPTWORK_MASTER_SET'\) \{([\s\S]*?)\n  \}\n\n  throw new Error/);
   assert.ok(masterBlock, 'master setter must remain explicit');
   assert.doesNotMatch(masterBlock[1], /chrome\.storage\.sync\.set/);
