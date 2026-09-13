@@ -47,7 +47,11 @@ test('Work and Model lock no longer overwrite the explicit master state', () => 
   const featureController = fs.readFileSync(new URL('../feature-toggle-controller.js', import.meta.url), 'utf8');
   assert.doesNotMatch(featureController, /GPTLOCK_SET_ENABLED/);
   assert.match(featureController, /GPTWORK_TAB_FEATURE_SET/);
-  assert.match(settings, /每个窗口\/标签可以保持不同状态/);
+  assert.match(settings, /按 ChatGPT 窗口隔离/);
+  assert.match(settings, /同一窗口内(?:的)?标签页共享状态/);
+  assert.match(settings, /不同窗口可以(?:保持)?不同状态|不同窗口可以不同/);
+  assert.doesNotMatch(settings, /每个窗口\/标签可以保持不同状态/);
+  assert.doesNotMatch(settings, /仅当前 ChatGPT 标签页生效/);
 });
 
 test('master safety does not monkeypatch Chrome APIs and still performs fail-open cleanup', () => {
