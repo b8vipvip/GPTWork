@@ -32,7 +32,9 @@ test('terminal lifecycle supervisor loads before every other content runtime scr
 
   const invalidationBody = lifecycle.match(/function isInvalidationError\(error\) \{([\s\S]*?)\n  \}\n\n  function removeTrackedListeners/);
   assert.ok(invalidationBody, 'terminal invalidation matcher must stay explicit');
-  assert.doesNotMatch(invalidationBody[1], /Receiving end does not exist/i);
+  const returnExpression = invalidationBody[1].match(/return\s+([^;]+);/)?.[1] || '';
+  assert.match(returnExpression, /extension context invalidated/i);
+  assert.doesNotMatch(returnExpression, /Receiving end does not exist/i);
 });
 
 test('runtime messaging wrapper is generation-owned and restored before reinjection', () => {
