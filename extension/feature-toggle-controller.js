@@ -9,6 +9,7 @@ let currentTabId = null;
 let currentAccount = { authenticated: false, entitlement: { active: false } };
 let lastFeatureState = null;
 let refreshTimers = [];
+let reconcileGeneration = 0;
 
 function runtimeMessage(payload) {
   return new Promise((resolve, reject) => {
@@ -50,16 +51,8 @@ function promptAuthentication(text = '请先登录或注册 GPTWork 后再启用
   window.dispatchEvent(new CustomEvent('gptlock-auth-required', { detail: { message: text } }));
 }
 
-function requireActivation(account = currentAccount) {
-  if (!account?.authenticated) {
-    promptAuthentication();
-    throw Object.assign(new Error('请先登录或注册 GPTWork'), { code: 'AUTH_REQUIRED' });
-  }
-  if (!account?.entitlement?.active) {
-    const text = '当前使用时长已到期，请签到、分享或升级后再启用此功能。';
-    showMessage(text, 'bad');
-    throw Object.assign(new Error(text), { code: 'ENTITLEMENT_REQUIRED' });
-  }
+function showEntitlementRequired() {
+  showMessage('当前使用时长已到期，请签到、分享或升级后再启用此功能。', 'bad');
 }
 
 function setBusy(value) {
@@ -109,7 +102,10 @@ function renderScope(tab) {
 }
 
 async function reconcile() {
+  const generation = ++reconcileGeneration;
   const tab = await findChatGptTab();
+  if (generation !== reconcileGeneration) return null;
+
   const nextTabId = Number.isInteger(tab?.id) ? tab.id : null;
   if (nextTabId !== currentTabId) lastFeatureState = null;
   currentTabId = nextTabId;
@@ -121,13 +117,19 @@ async function reconcile() {
     return null;
   }
 
+  const targetTabId = currentTabId;
   try {
-    const snapshot = await withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: currentTabId }));
+    const snapshot = await withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: targetTabId }));
+    // Multiple focus/pageshow/account events can overlap. Only the newest reconciliation
+    // may update cached UI state; an older unauthenticated response must never overwrite
+    // a newer post-login account snapshot.
+    if (generation !== reconcileGeneration || targetTabId !== currentTabId) return snapshot;
     currentAccount = snapshot?.account || currentAccount;
     syncVisibleToggles(snapshot?.featureState);
     setBusy(false);
     return snapshot;
   } catch (error) {
+    if (generation !== reconcileGeneration) return null;
     // UI continuity only: the cached snapshot never becomes an authority and is never written
     // back. A transient transport timeout must not paint an enabled feature as disabled.
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
@@ -141,12 +143,15 @@ async function changeFeature(kind, desired) {
   if (busy || !Number.isInteger(currentTabId)) return;
   const target = kind === 'work' ? workToggle : modelToggle;
   const previous = !desired;
+  const targetTabId = currentTabId;
   setBusy(true);
   try {
-    if (desired) requireActivation(currentAccount);
+    // Do not authorize from currentAccount. It is a display cache and can legitimately
+    // lag behind a just-completed login. The background/window runtime is the sole
+    // entitlement + quota authority and will reject the SET when access is not valid.
     const snapshot = await withTimeout(runtimeMessage({
       type: 'GPTWORK_TAB_FEATURE_SET',
-      tabId: currentTabId,
+      tabId: targetTabId,
       feature: kind,
       enabled: Boolean(desired),
     }));
@@ -160,10 +165,19 @@ async function changeFeature(kind, desired) {
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
     if (error?.code === 'WINDOW_QUOTA_EXCEEDED' || error?.message === '当前账户并发窗口超限') {
       showQuotaMessage();
-    } else if (!['AUTH_REQUIRED', 'ENTITLEMENT_REQUIRED'].includes(error?.code)) {
+    } else if (error?.code === 'AUTH_REQUIRED') {
+      promptAuthentication();
+    } else if (error?.code === 'ENTITLEMENT_REQUIRED') {
+      // Older runtime builds use ENTITLEMENT_REQUIRED for both "not logged in" and
+      // "entitlement inactive". Re-read the authoritative snapshot before choosing UI.
+      const snapshot = await reconcile().catch(() => null);
+      const account = snapshot?.account || currentAccount;
+      if (account?.authenticated) showEntitlementRequired();
+      else promptAuthentication();
+    } else {
       showMessage(`切换失败 / Toggle failed: ${error.message}`, 'bad');
     }
-    await reconcile().catch(() => {});
+    if (!['ENTITLEMENT_REQUIRED'].includes(error?.code)) await reconcile().catch(() => {});
   } finally {
     setBusy(false);
   }
