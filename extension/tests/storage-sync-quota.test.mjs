@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const catalog = await readFile(new URL('../model-catalog.js', import.meta.url), 'utf8');
-const controller = await readFile(new URL('../enabled-toggle-controller.js', import.meta.url), 'utf8');
+const masterUi = await readFile(new URL('../master-ui-controller.js', import.meta.url), 'utf8');
+const runtime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
 
 test('model evidence refreshes do not perform the same sync write every 1.2 seconds', () => {
   assert.match(catalog, /lastRememberedFingerprint/);
@@ -14,8 +15,12 @@ test('model evidence refreshes do not perform the same sync write every 1.2 seco
   assert.match(catalog, /modelDiscoveryRetryAt = Date\.now\(\) \+ 60_000/);
 });
 
-test('master toggle itself never directly consumes chrome.storage.sync write quota', () => {
-  assert.match(controller, /chrome\.storage\.local\.set/);
-  assert.doesNotMatch(controller, /chrome\.storage\.sync\.set/);
-  assert.match(controller, /MAX_WRITE_OPERATIONS_PER_HOUR/);
+test('master toggle is local runtime state and never directly consumes sync write quota', () => {
+  assert.match(masterUi, /GPTWORK_MASTER_SET/);
+  assert.doesNotMatch(masterUi, /chrome\.storage\.sync\.set/);
+  assert.match(runtime, /MASTER_KEY = 'gptworkEnabledLocal'/);
+  assert.match(runtime, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: desired \}\)/);
+  const masterBlock = runtime.match(/if \(message\.type === 'GPTWORK_MASTER_SET'\) \{([\s\S]*?)\n  \}\n\n  throw new Error/);
+  assert.ok(masterBlock, 'master setter must remain explicit');
+  assert.doesNotMatch(masterBlock[1], /chrome\.storage\.sync\.set/);
 });
