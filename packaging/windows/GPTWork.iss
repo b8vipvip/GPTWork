@@ -151,7 +151,7 @@ begin
   WasPaused := False;
   BackupName := FileName + '.install-backup';
 
-  ; Recover a manifest left paused by an interrupted older setup attempt.
+  // Recover a manifest left paused by an interrupted older setup attempt.
   if FileExists(BackupName) and not FileExists(FileName) then
   begin
     if not RenameFile(BackupName, FileName) then
@@ -161,7 +161,7 @@ begin
     end;
   end;
 
-  ; If both exist, the live manifest wins and the stale backup can be discarded.
+  // If both exist, the live manifest wins and the stale backup can be discarded.
   if FileExists(BackupName) and FileExists(FileName) then
   begin
     if not DeleteFile(BackupName) then
@@ -284,8 +284,8 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
 
-  ; Temporarily hide Native Messaging manifests before killing the old host. Otherwise an
-  ; open Chrome/Edge extension can reconnect in the tiny gap before [Files] replaces the EXE.
+  // Temporarily hide Native Messaging manifests before killing the old host. Otherwise an
+  // open Chrome/Edge extension can reconnect in the tiny gap before [Files] replaces the EXE.
   if not PauseNativeMessaging then
   begin
     Result := '无法暂停 GPTWork 浏览器本地连接，请完全退出浏览器后重试 / Could not pause GPTWork Native Messaging; fully exit the browser and retry.';
