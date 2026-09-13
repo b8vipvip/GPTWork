@@ -78,23 +78,34 @@ function syncVisibleToggles(featureState) {
   if (modelToggle) modelToggle.checked = lastFeatureState.modelLockEnabled;
 }
 
-async function findChatGptTab() {
-  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
-  tabs.sort((left, right) => {
+function sortChatGptTabs(tabs) {
+  return [...tabs].sort((left, right) => {
     if (Boolean(right.active) !== Boolean(left.active)) return Number(right.active) - Number(left.active);
     return Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0);
   });
-  return tabs.find((tab) => Number.isInteger(tab.id)) || null;
+}
+
+async function findChatGptTab() {
+  // The feature authority is window-scoped. Prefer a ChatGPT tab from the browser
+  // window containing this popup/settings page, then fall back to the most recently
+  // used ChatGPT tab only when the current window has no ChatGPT tab at all.
+  const sameWindowTabs = await chrome.tabs.query({ currentWindow: true, url: 'https://chatgpt.com/*' });
+  const sameWindow = sortChatGptTabs(sameWindowTabs).find((tab) => Number.isInteger(tab.id));
+  if (sameWindow) return sameWindow;
+
+  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  return sortChatGptTabs(tabs).find((tab) => Number.isInteger(tab.id)) || null;
 }
 
 function renderScope(tab) {
   if (!scopeNode) return;
   if (!tab?.id) {
-    scopeNode.textContent = '当前没有打开的 ChatGPT 标签页；Work 模式和模型锁定只会修改当前目标标签页。';
+    scopeNode.textContent = '当前没有打开的 ChatGPT 窗口；Work 模式和模型锁定会在选定的 ChatGPT 窗口内共享状态。';
     return;
   }
   const title = String(tab.title || 'ChatGPT').replace(/\s+/g, ' ').trim().slice(0, 80);
-  scopeNode.textContent = `当前标签页：${title}（Tab ${tab.id}）。Work 模式和模型锁定仅作用于此标签页，不会同步到其他窗口/标签。`;
+  const windowLabel = Number.isInteger(tab.windowId) ? `Window ${tab.windowId}` : '当前窗口';
+  scopeNode.textContent = `当前窗口：${title}（${windowLabel}）。Work 模式和模型锁定在此窗口内的 ChatGPT 标签页共享状态，不会同步到其他窗口。`;
 }
 
 async function reconcile() {
@@ -142,8 +153,8 @@ async function changeFeature(kind, desired) {
     currentAccount = snapshot?.account || currentAccount;
     syncVisibleToggles(snapshot?.featureState);
     showMessage(desired
-      ? `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前标签页启用。`
-      : `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前标签页关闭。`, 'good');
+      ? `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前窗口启用，同一窗口内标签页共享状态。`
+      : `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前窗口关闭，同一窗口内标签页共享状态。`, 'good');
   } catch (error) {
     if (target) target.checked = previous;
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
