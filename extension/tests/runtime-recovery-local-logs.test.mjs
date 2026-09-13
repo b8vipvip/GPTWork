@@ -27,6 +27,8 @@ test('terminal lifecycle supervisor loads before every other content runtime scr
   assert.match(lifecycle, /observers\.clear\(\)/);
   assert.match(lifecycle, /removeTrackedListeners/);
   assert.match(lifecycle, /restorePatchedGlobals/);
+  assert.match(lifecycle, /chrome-extension:\\\/\\\/invalid/);
+  assert.match(lifecycle, /const terminal = isInvalidationError\(error\)/);
 });
 
 test('existing ChatGPT tabs use bounded recovery after real install or update events', () => {
@@ -52,6 +54,10 @@ test('dynamic recovery only injects classic content-script files declared by the
   assert.ok(files.length > 0);
   assert.ok(files.every((file) => file.endsWith('.js')));
   assert.ok(files.every((file) => !file.includes('background') && !file.includes('runtime-recovery')));
+  for (const file of files) {
+    const source = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /^\s*(?:import|export)\s/m, `${file} must stay classic-script compatible`);
+  }
 });
 
 test('content errors are persisted to the same bounded local runtime log buffer', () => {
