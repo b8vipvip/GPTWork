@@ -35,7 +35,8 @@ test('current settings expose master plus independent window-scoped Work/model-l
   assert.match(featureController, /GPTWORK_TAB_FEATURE_GET/);
   assert.match(featureController, /GPTWORK_TAB_FEATURE_SET/);
   assert.match(featureController, /currentWindow:\s*true/);
-  assert.match(featureController, /requireActivation\(currentAccount\)/);
+  assert.match(featureController, /background\/window runtime is the sole[\s\S]*entitlement \+ quota authority/);
+  assert.doesNotMatch(featureController, /function requireActivation|requireActivation\(currentAccount\)/);
   assert.doesNotMatch(featureController, /GPTLOCK_SET_ENABLED/);
   assert.doesNotMatch(featureController, /gptworkWorkModeEnabled/);
   assert.doesNotMatch(featureController, /gptworkModelLockEnabled/);
