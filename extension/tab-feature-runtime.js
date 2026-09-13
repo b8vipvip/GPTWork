@@ -2,8 +2,9 @@ import { normalizeConcreteModelId, normalizePolicy } from './policy.js';
 import { appendRuntimeLog } from './runtime-log.js';
 import { scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
+export const TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV2';
+export const LEGACY_TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1';
 export const WINDOW_FEATURE_SESSION_KEY = 'gptworkWindowFeatureStatesV1';
-export const TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1';
 export const TAB_FEATURE_MIGRATION_KEY = 'gptworkTabFeatureMigrationV1';
 export const LEGACY_WORK_MODE_KEY = 'gptworkWorkModeEnabled';
 export const LEGACY_MODEL_LOCK_KEY = 'gptworkModelLockEnabled';
@@ -21,8 +22,9 @@ const FEATURE_MESSAGE_TYPES = new Set([
   'GPTWORK_MASTER_SET',
 ]);
 
-// Feature authority is window-scoped. tabWindowIds is only a routing cache so
-// existing tab-oriented message APIs remain backward compatible.
+// Work/Model state is owned by the concrete ChatGPT tab. It is intentionally not
+// inherited from windowId: two ChatGPT tabs in the same Chrome window must be able to
+// hold different states. windowId is used only for account concurrency authorization.
 const states = new Map();
 const tabWindowIds = new Map();
 let basePolicy = normalizePolicy(null);
@@ -92,32 +94,58 @@ export async function resolveWindowIdForTab(tabId) {
 }
 
 function serializedStates() {
-  return Object.fromEntries([...states.entries()].map(([windowId, value]) => [String(windowId), normalizeState(value)]));
+  return Object.fromEntries([...states.entries()].map(([tabId, value]) => [String(tabId), normalizeState(value)]));
 }
 
 async function persistStates() {
-  await chrome.storage.session.set({ [WINDOW_FEATURE_SESSION_KEY]: serializedStates() });
+  await chrome.storage.session.set({ [TAB_FEATURE_SESSION_KEY]: serializedStates() });
 }
 
-async function migrateLegacyTabSession(legacyMap, tabs) {
-  if (!legacyMap || typeof legacyMap !== 'object') return 0;
-  let migratedWindows = 0;
-  const orderedTabs = [...tabs].sort((left, right) => {
-    if (Boolean(right.active) !== Boolean(left.active)) return Number(right.active) - Number(left.active);
-    return Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0);
-  });
-  for (const tab of orderedTabs) {
-    if (!Number.isInteger(tab?.id) || !Number.isInteger(tab?.windowId)) continue;
-    if (states.has(tab.windowId)) continue;
-    const legacyState = legacyMap[String(tab.id)];
-    if (!legacyState || typeof legacyState !== 'object') continue;
-    states.set(tab.windowId, normalizeState(legacyState));
-    migratedWindows += 1;
+function openTabIds(tabs) {
+  return new Set(tabs
+    .map((tab) => Number(tab?.id))
+    .filter(Number.isInteger));
+}
+
+async function migrateLegacySession(sessionStored, tabs) {
+  const liveTabIds = openTabIds(tabs);
+  const currentMap = sessionStored[TAB_FEATURE_SESSION_KEY];
+  if (currentMap && typeof currentMap === 'object') {
+    for (const [key, value] of Object.entries(currentMap)) {
+      const tabId = Number(key);
+      if (liveTabIds.has(tabId)) states.set(tabId, normalizeState(value));
+    }
   }
-  if (migratedWindows > 0) await persistStates();
-  try { await chrome.storage.session.remove(TAB_FEATURE_SESSION_KEY); } catch {}
-  log('tab_session_migrated_to_windows', { migratedWindows });
-  return migratedWindows;
+
+  const legacyTabMap = sessionStored[LEGACY_TAB_FEATURE_SESSION_KEY];
+  if (legacyTabMap && typeof legacyTabMap === 'object') {
+    for (const [key, value] of Object.entries(legacyTabMap)) {
+      const tabId = Number(key);
+      if (liveTabIds.has(tabId) && !states.has(tabId)) states.set(tabId, normalizeState(value));
+    }
+  }
+
+  // The temporary window-scoped implementation was not the intended product model.
+  // When upgrading from it, copy the window value into each currently open tab once;
+  // from that point forward every tab owns its state independently.
+  const legacyWindowMap = sessionStored[WINDOW_FEATURE_SESSION_KEY];
+  if (legacyWindowMap && typeof legacyWindowMap === 'object') {
+    for (const tab of tabs) {
+      if (!Number.isInteger(tab?.id) || !Number.isInteger(tab?.windowId) || states.has(tab.id)) continue;
+      const value = legacyWindowMap[String(tab.windowId)];
+      if (value && typeof value === 'object') states.set(tab.id, normalizeState(value));
+    }
+  }
+
+  await persistStates();
+  try {
+    await chrome.storage.session.remove([LEGACY_TAB_FEATURE_SESSION_KEY, WINDOW_FEATURE_SESSION_KEY]);
+  } catch {}
+  log('legacy_feature_scope_migrated_to_tabs', {
+    tabCount: states.size,
+    hadLegacyTabState: Boolean(legacyTabMap && typeof legacyTabMap === 'object'),
+    hadLegacyWindowState: Boolean(legacyWindowMap && typeof legacyWindowMap === 'object'),
+  });
 }
 
 async function migrateLegacyFlags(storedLocal, tabs) {
@@ -127,11 +155,8 @@ async function migrateLegacyFlags(storedLocal, tabs) {
     modelLockEnabled: storedLocal[LEGACY_MODEL_LOCK_KEY] === true,
   });
   if (legacy.workModeEnabled || legacy.modelLockEnabled) {
-    const windowIds = new Set(tabs
-      .map((tab) => Number(tab?.windowId))
-      .filter(Number.isInteger));
-    for (const windowId of windowIds) {
-      if (!states.has(windowId)) states.set(windowId, legacy);
+    for (const tab of tabs) {
+      if (Number.isInteger(tab?.id) && !states.has(tab.id)) states.set(tab.id, legacy);
     }
     await persistStates();
   }
@@ -143,7 +168,7 @@ async function migrateLegacyFlags(storedLocal, tabs) {
   log('legacy_feature_flags_migrated', {
     workModeEnabled: legacy.workModeEnabled,
     modelLockEnabled: legacy.modelLockEnabled,
-    migratedWindowCount: states.size,
+    migratedTabCount: states.size,
   });
 }
 
@@ -165,7 +190,11 @@ export async function initializeTabFeatureRuntime() {
   if (initializePromise) return initializePromise;
   initializePromise = (async () => {
     const [sessionStored, localStored, syncStored, tabs] = await Promise.all([
-      chrome.storage.session.get([WINDOW_FEATURE_SESSION_KEY, TAB_FEATURE_SESSION_KEY]),
+      chrome.storage.session.get([
+        TAB_FEATURE_SESSION_KEY,
+        LEGACY_TAB_FEATURE_SESSION_KEY,
+        WINDOW_FEATURE_SESSION_KEY,
+      ]),
       chrome.storage.local.get([
         TAB_FEATURE_MIGRATION_KEY,
         LEGACY_WORK_MODE_KEY,
@@ -177,16 +206,7 @@ export async function initializeTabFeatureRuntime() {
     ]);
 
     for (const tab of tabs) rememberTabWindow(tab);
-
-    const windowMap = sessionStored[WINDOW_FEATURE_SESSION_KEY];
-    if (windowMap && typeof windowMap === 'object') {
-      for (const [key, value] of Object.entries(windowMap)) {
-        const windowId = Number(key);
-        if (Number.isInteger(windowId)) states.set(windowId, normalizeState(value));
-      }
-    }
-
-    await migrateLegacyTabSession(sessionStored[TAB_FEATURE_SESSION_KEY], tabs);
+    await migrateLegacySession(sessionStored, tabs);
     basePolicy = normalizePolicy(syncStored.policy);
     modelLockSelection = normalizeModels(syncStored[MODEL_SELECTION_KEY]);
     discoveredModels = normalizeModels(syncStored[DISCOVERED_MODELS_KEY]);
@@ -201,15 +221,14 @@ export async function initializeTabFeatureRuntime() {
 }
 
 export function tabFeatureStateSync(tabId) {
-  const windowId = tabWindowIds.get(Number(tabId));
-  if (!Number.isInteger(windowId)) return normalizeState(null);
-  return normalizeState(states.get(windowId));
+  const id = Number(tabId);
+  if (!Number.isInteger(id)) return normalizeState(null);
+  return normalizeState(states.get(id));
 }
 
 export async function getTabFeatureState(tabId) {
   await initializeTabFeatureRuntime();
-  const windowId = await resolveWindowIdForTab(tabId);
-  return Number.isInteger(windowId) ? normalizeState(states.get(windowId)) : normalizeState(null);
+  return tabFeatureStateSync(tabId);
 }
 
 export function tabFeatureEnabledSync(tabId) {
@@ -244,29 +263,21 @@ async function setTabFeatureState(tabId, patch) {
   await initializeTabFeatureRuntime();
   const id = Number(tabId);
   if (!Number.isInteger(id)) throw Object.assign(new Error('没有打开的 ChatGPT 标签页'), { code: 'NO_CHATGPT_TAB' });
-  const windowId = await resolveWindowIdForTab(id);
-  if (!Number.isInteger(windowId)) throw Object.assign(new Error('无法确定 ChatGPT 所在窗口'), { code: 'NO_CHATGPT_WINDOW' });
-  const next = normalizeState({ ...states.get(windowId), ...patch });
-  states.set(windowId, next);
+  const next = normalizeState({ ...states.get(id), ...patch });
+  states.set(id, next);
   await persistStates();
-  log('window_feature_changed', { tabId: id, windowId, ...next });
+  log('tab_feature_changed', { tabId: id, ...next });
   return next;
 }
 
-async function removeTabState(tabId) {
-  tabWindowIds.delete(Number(tabId));
-}
-
-async function removeWindowState(windowId) {
+async function removeTabState(tabId, reason = 'tab_removed') {
   await initializeTabFeatureRuntime();
-  const id = Number(windowId);
+  const id = Number(tabId);
   if (!Number.isInteger(id)) return;
+  tabWindowIds.delete(id);
   const changed = states.delete(id);
-  for (const [tabId, rememberedWindowId] of tabWindowIds.entries()) {
-    if (rememberedWindowId === id) tabWindowIds.delete(tabId);
-  }
   if (changed) await persistStates();
-  log('window_feature_removed', { windowId: id, changed });
+  log('tab_feature_removed', { tabId: id, reason, changed });
 }
 
 function isChatGptUrl(value) {
@@ -292,12 +303,14 @@ async function targetTabId(preferred = null, sender = null) {
     rememberTabWindow(sender.tab);
     return sender.tab.id;
   }
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (Number.isInteger(active?.id) && isChatGptUrl(active?.url)) {
+    rememberTabWindow(active);
+    return active.id;
+  }
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
   tabs.forEach(rememberTabWindow);
-  tabs.sort((left, right) => {
-    if (Boolean(right.active) !== Boolean(left.active)) return Number(right.active) - Number(left.active);
-    return Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0);
-  });
+  tabs.sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0));
   return Number.isInteger(tabs[0]?.id) ? tabs[0].id : null;
 }
 
@@ -312,13 +325,9 @@ function accountAllowsWindow(account, windowId) {
 }
 
 async function backgroundState(tabId) {
-  // tab-feature-runtime and background.js execute inside the same MV3 service-worker
-  // context. chrome.runtime.sendMessage() is for crossing extension contexts; using it
-  // here to ask background.js for GPTLOCK_GET_STATE can leave this listener waiting for
-  // a response from its own context, which makes Master/feature status and SET appear
-  // frozen in popup/settings. account-client persists this snapshot before login or
-  // heartbeat returns, so read that single account snapshot directly and derive only
-  // the window quota needed by this window-scoped feature authority.
+  // The account client persists the authoritative snapshot before login/heartbeat
+  // resolves. Feature state stays tab-scoped; windowId is consulted only for the
+  // account's concurrent-window allowance.
   const stored = await chrome.storage.local.get(ACCOUNT_SNAPSHOT_KEY);
   const account = stored?.[ACCOUNT_SNAPSHOT_KEY] ?? {
     authenticated: false,
@@ -384,18 +393,6 @@ async function pushFeatureState(tabId, featureState = null) {
   } catch {}
 }
 
-async function pushWindowFeatureState(windowId, featureState = null) {
-  if (!Number.isInteger(windowId)) return;
-  let tabs = [];
-  try {
-    tabs = await chrome.tabs.query({ windowId, url: 'https://chatgpt.com/*' });
-  } catch {}
-  for (const tab of tabs) rememberTabWindow(tab);
-  await Promise.allSettled(tabs
-    .filter((tab) => Number.isInteger(tab.id))
-    .map((tab) => pushFeatureState(tab.id, featureState)));
-}
-
 async function pushAllFeatureStates() {
   let tabs = [];
   try { tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' }); } catch {}
@@ -459,8 +456,7 @@ async function handleFeatureMessage(message, sender) {
         : null;
     if (!patch) throw Object.assign(new Error('未知功能开关'), { code: 'INVALID_FEATURE' });
     const featureState = await setTabFeatureState(tabId, patch);
-    const windowId = await resolveWindowIdForTab(tabId);
-    await pushWindowFeatureState(windowId, featureState);
+    await pushFeatureState(tabId, featureState);
     await scheduleAccountRefresh();
     return featureSnapshot(tabId);
   }
@@ -470,9 +466,6 @@ async function handleFeatureMessage(message, sender) {
   if (message.type === 'GPTWORK_MASTER_SET') {
     const desired = message.enabled === true;
     if (!desired) {
-      // Master OFF is always allowed and must not depend on account/native/background
-      // state. Persist the local authority first; storage.onChanged performs the one
-      // content fan-out and background.js independently performs runtime cleanup.
       masterEnabled = false;
       await chrome.storage.local.set({ [MASTER_KEY]: false });
       log('master_changed', { enabled: false, tabId });
@@ -485,12 +478,8 @@ async function handleFeatureMessage(message, sender) {
     if (quotaExceeded(state, tabId)) {
       throw Object.assign(new Error(WINDOW_QUOTA_MESSAGE), { code: 'WINDOW_QUOTA_EXCEEDED' });
     }
-    // Enabling is fail-closed: do not make the in-memory authority true unless the
-    // canonical local Master state has been persisted successfully.
     await chrome.storage.local.set({ [MASTER_KEY]: true });
     masterEnabled = true;
-    // storage.onChanged is the single fan-out trigger for Master transitions. Keeping
-    // an explicit push here as well would broadcast every open ChatGPT tab twice.
     log('master_changed', { enabled: true, tabId });
     return { ...(await featureSnapshot(tabId)), masterEnabled: true };
   }
@@ -519,10 +508,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabState(tabId).catch(() => {});
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (Number.isInteger(tab?.windowId)) rememberTabWindow(tab);
+  if (changeInfo.url && !isChatGptUrl(changeInfo.url)) {
+    void removeTabState(tabId, 'left_chatgpt').catch(() => {});
+  }
+});
+
 if (chrome.tabs.onAttached?.addListener) {
   chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
     if (Number.isInteger(tabId) && Number.isInteger(attachInfo?.newWindowId)) {
       tabWindowIds.set(tabId, attachInfo.newWindowId);
+      // Moving a tab does not adopt another tab's state. The same tab keeps its own
+      // Work/Model choices and only its quota window identity changes.
       void pushFeatureState(tabId).catch(() => {});
     }
   });
@@ -533,11 +531,6 @@ if (chrome.tabs.onDetached?.addListener) {
     tabWindowIds.delete(Number(tabId));
   });
 }
-
-// Lifecycle cleanup must always run, even while the global master switch is off.
-chrome.windows.onRemoved.addListener((windowId) => {
-  void removeWindowState(windowId).catch(() => {});
-});
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes[MASTER_KEY]) {
