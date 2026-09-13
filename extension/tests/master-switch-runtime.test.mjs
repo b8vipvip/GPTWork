@@ -22,7 +22,7 @@ test('popup header exposes an explicit master switch', () => {
   assert.match(popup, /src="master-ui-controller\.js"/);
 });
 
-test('popup master switch uses explicit master authority and quota feedback', () => {
+test('popup master switch uses explicit master authority and blocks duplicate writers', () => {
   assert.match(masterUi, /MASTER_KEY = 'gptworkEnabledLocal'/);
   assert.match(masterUi, /GPTWORK_MASTER_STATUS/);
   assert.match(masterUi, /GPTWORK_MASTER_SET/);
@@ -31,16 +31,16 @@ test('popup master switch uses explicit master authority and quota feedback', ()
   assert.match(masterUi, /stopImmediatePropagation/);
 });
 
-test('Settings statically exposes the same master switch and quota feedback', () => {
+test('Settings exposes the same master switch through the shared controller', () => {
   assert.match(settings, /data-gptwork-settings-master="true"/);
   assert.match(settings, /id="enabled"/);
   assert.doesNotMatch(settings, /id="enabled"[^>]*hidden/);
-  assert.match(settingsShell, /installSettingsMasterControl/);
-  assert.match(settingsShell, /GPTWork 总开关/);
-  assert.match(settingsShell, /GPTWORK_MASTER_STATUS/);
-  assert.match(settingsShell, /GPTWORK_MASTER_SET/);
-  assert.match(settingsShell, /当前账户并发窗口超限/);
-  assert.match(settingsShell, /event\.stopImmediatePropagation\(\)/);
+  assert.match(settingsShell, /import\('\.\/master-ui-controller\.js'\)/);
+  assert.match(settingsShell, /only settings-page master writer/);
+  assert.match(masterUi, /GPTWORK_MASTER_STATUS/);
+  assert.match(masterUi, /GPTWORK_MASTER_SET/);
+  assert.match(masterUi, /当前账户并发窗口超限/);
+  assert.match(masterUi, /event\.stopImmediatePropagation\(\)/);
 });
 
 test('Work and Model lock no longer overwrite the explicit master state', () => {
