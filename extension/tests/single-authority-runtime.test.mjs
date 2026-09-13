@@ -35,11 +35,27 @@ test('master and per-tab feature state have explicit non-overlapping owners', ()
   assert.doesNotMatch(files['background-entry.js'], /master-runtime-safety|tab-feature-network-policy|network-monitor-safety/);
 });
 
-test('extension pages cross one runtime-generation barrier before feature/master commands', () => {
-  assert.match(files['runtime-generation.js'], /RUNTIME_GENERATION_KEY = 'gptworkRuntimeGeneration'/);
-  assert.match(files['background-entry.js'], /markRuntimeGeneration/);
+test('extension pages verify the actual service-worker generation before feature/master commands', () => {
+  assert.match(files['runtime-generation.js'], /RUNTIME_GENERATION_MESSAGE = 'GPTWORK_RUNTIME_GENERATION_GET'/);
+  assert.match(files['runtime-generation.js'], /ServiceWorkerGlobalScope/);
+  assert.match(files['runtime-generation.js'], /sendResponse\(\{ ok: true, data: \{ generation: RUNTIME_GENERATION \} \}\)/);
+  assert.doesNotMatch(files['runtime-generation.js'], /chrome\.storage/);
+
+  assert.match(files['background-entry.js'], /^import '\.\/runtime-generation\.js';/);
+  assert.doesNotMatch(files['background-entry.js'], /markRuntimeGeneration|RUNTIME_GENERATION_KEY/);
+
+  assert.match(files['extension-page-runtime.js'], /requestWorkerGeneration\(\)/);
+  assert.match(files['extension-page-runtime.js'], /chrome\.runtime\.sendMessage\(\{ type: RUNTIME_GENERATION_MESSAGE \}/);
+  assert.match(files['extension-page-runtime.js'], /workerGeneration === RUNTIME_GENERATION/);
   assert.match(files['extension-page-runtime.js'], /chrome\.runtime\.reload\(\)/);
-  assert.match(files['extension-page-runtime.js'], /runtimeMessage\(payload\)/);
+  assert.match(files['extension-page-runtime.js'], /return never\(\)/);
+  assert.doesNotMatch(files['extension-page-runtime.js'], /chrome\.storage/);
+
+  assert.ok(
+    files['extension-page-runtime.js'].indexOf('await ensureRuntimeGeneration();')
+      < files['extension-page-runtime.js'].indexOf('chrome.runtime.sendMessage(payload'),
+    'business messages must cross the generation barrier first',
+  );
   assert.match(files['master-ui-controller.js'], /extension-page-runtime\.js/);
   assert.match(files['feature-toggle-controller.js'], /extension-page-runtime\.js/);
 });
