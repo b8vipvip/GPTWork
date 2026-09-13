@@ -23,6 +23,7 @@
     MutationObserver: globalThis.MutationObserver,
     addEventListener: globalThis.EventTarget?.prototype?.addEventListener,
     removeEventListener: globalThis.EventTarget?.prototype?.removeEventListener,
+    sendMessage: globalThis.chrome?.runtime?.sendMessage,
   };
 
   const timeouts = new Set();
@@ -83,6 +84,9 @@
       }
       if (globalThis.EventTarget?.prototype?.removeEventListener === trackedRemoveEventListener) {
         globalThis.EventTarget.prototype.removeEventListener = original.removeEventListener;
+      }
+      if (globalThis.chrome?.runtime?.sendMessage === trackedSendMessage && typeof original.sendMessage === 'function') {
+        globalThis.chrome.runtime.sendMessage = original.sendMessage;
       }
     } catch {}
   }
@@ -224,6 +228,35 @@
     return original.removeEventListener.call(this, type, listener, options);
   }
 
+  function trackedSendMessage(...args) {
+    if (!checkAlive('send_message_context_invalidated')) {
+      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+      const response = { ok: false, error: 'Extension context invalidated', terminal: true };
+      if (callback) {
+        queueMicrotask(() => callback(response));
+        return undefined;
+      }
+      return Promise.resolve(response);
+    }
+    try {
+      return original.sendMessage.apply(globalThis.chrome.runtime, args);
+    } catch (error) {
+      const terminal = isInvalidationError(error);
+      if (terminal) shutdown('send_message_context_invalidated');
+      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+      const response = {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        terminal,
+      };
+      if (callback) {
+        queueMicrotask(() => callback(response));
+        return undefined;
+      }
+      return Promise.resolve(response);
+    }
+  }
+
   try {
     window.setTimeout = trackedSetTimeout;
     window.clearTimeout = trackedClearTimeout;
@@ -242,37 +275,13 @@
 
   // Wrap runtime messaging once for this isolated world. The wrapper turns a terminal
   // invalidation into a one-way shutdown instead of allowing every listener/timer to
-  // independently throw and retry against an invalid extension context.
+  // independently throw and retry against an invalid extension context. It is restored
+  // only when this generation still owns the wrapper, so a newer generation is never
+  // clobbered by stale shutdown work.
   try {
-    const originalSendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
-    chrome.runtime.sendMessage = (...args) => {
-      if (!checkAlive('send_message_context_invalidated')) {
-        const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-        const response = { ok: false, error: 'Extension context invalidated', terminal: true };
-        if (callback) {
-          queueMicrotask(() => callback(response));
-          return undefined;
-        }
-        return Promise.resolve(response);
-      }
-      try {
-        return originalSendMessage(...args);
-      } catch (error) {
-        const terminal = isInvalidationError(error);
-        if (terminal) shutdown('send_message_context_invalidated');
-        const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-        const response = {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-          terminal,
-        };
-        if (callback) {
-          queueMicrotask(() => callback(response));
-          return undefined;
-        }
-        return Promise.resolve(response);
-      }
-    };
+    if (typeof original.sendMessage === 'function') {
+      globalThis.chrome.runtime.sendMessage = trackedSendMessage;
+    }
   } catch {}
 
   globalThis[RUNTIME_KEY] = {
