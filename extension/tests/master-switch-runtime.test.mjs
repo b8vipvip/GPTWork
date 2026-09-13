@@ -6,7 +6,6 @@ const popup = fs.readFileSync(new URL('../popup-v0513.html', import.meta.url), '
 const settings = fs.readFileSync(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const masterUi = fs.readFileSync(new URL('../master-ui-controller.js', import.meta.url), 'utf8');
 const settingsShell = fs.readFileSync(new URL('../settings-shell.js', import.meta.url), 'utf8');
-const masterRuntime = fs.readFileSync(new URL('../master-runtime-safety.js', import.meta.url), 'utf8');
 const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
 const backgroundEntry = fs.readFileSync(new URL('../background-entry.js', import.meta.url), 'utf8');
 const floatingMaster = fs.readFileSync(new URL('../floating-ui-master-state.js', import.meta.url), 'utf8');
@@ -54,35 +53,32 @@ test('Work and Model lock no longer overwrite the explicit master state', () => 
   assert.doesNotMatch(settings, /仅当前 ChatGPT 标签页生效/);
 });
 
-test('master safety does not monkeypatch Chrome APIs and still performs fail-open cleanup', () => {
-  assert.doesNotMatch(masterRuntime, /patchFunction\(/);
-  assert.doesNotMatch(masterRuntime, /chrome\.runtime\.connectNative\s*=/);
-  assert.doesNotMatch(masterRuntime, /\.addListener\s*=/);
-  assert.match(masterRuntime, /chrome\.debugger\.detach/);
-  assert.match(masterRuntime, /chrome\.alarms\.clear\(RECONNECT_ALARM\)/);
-  assert.match(masterRuntime, /chrome\.alarms\.clear\(ACCOUNT_REFRESH_ALARM\)/);
-  assert.match(masterRuntime, /setBadgeText\(\{ tabId: tab\.id, text: '' \}\)/);
-  assert.match(masterRuntime, /GPTLOCK_MASTER_RUNTIME_STATE/);
-  assert.match(masterRuntime, /apiMonkeypatches: false/);
+test('background is the sole master runtime cleanup authority', () => {
+  const stop = background.match(/async function stopBackgroundRuntime\([^)]*\) \{([\s\S]*?)\n\}/)?.[0] || '';
+  assert.match(stop, /chrome\.alarms\.clear\(RECONNECT_ALARM\)/);
+  assert.match(stop, /chrome\.alarms\.clear\(ACCOUNT_REFRESH_ALARM\)/);
+  assert.match(stop, /networkMonitor\.detach\(tabId\)/);
+  assert.match(stop, /setBadgeText\(\{ tabId, text: '' \}\)/);
+  assert.doesNotMatch(background, /chrome\.runtime\.connectNative\s*=/);
+  assert.doesNotMatch(backgroundEntry, /master-runtime-safety\.js/);
+  assert.equal(fs.existsSync(new URL('../master-runtime-safety.js', import.meta.url)), false);
   assert.match(floatingMaster, /gptlock-indicator-host/);
   assert.match(floatingMaster, /gptlock-model-indicator-host/);
   assert.match(floatingMaster, /removeFloatingUi/);
 });
 
 test('window lifecycle listeners remain native registrations while master is disabled', () => {
-  assert.match(masterRuntime, /windowLifecycleAlwaysOn: true/);
-  assert.doesNotMatch(masterRuntime, /chrome\.windows\?\.onCreated/);
   assert.match(background, /chrome\.windows\.onCreated\.addListener/);
   assert.match(background, /chrome\.windows\.onRemoved\.addListener/);
+  assert.doesNotMatch(background, /\.addListener\s*=/);
 });
 
-test('master and window guards are installed before background can open the native runtime', () => {
-  const masterIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
+test('window authority is installed before the sole background lifecycle authority', () => {
   const windowIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
-  assert.ok(masterIndex >= 0);
-  assert.ok(windowIndex > masterIndex);
+  assert.ok(windowIndex >= 0);
   assert.ok(backgroundIndex > windowIndex);
+  assert.doesNotMatch(backgroundEntry, /master-runtime-safety\.js/);
 });
 
 test('content recovery stays off with the master disabled and lifecycle supervisor loads first', () => {
