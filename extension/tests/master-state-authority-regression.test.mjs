@@ -7,6 +7,7 @@ const options = fs.readFileSync(new URL('../options.js', import.meta.url), 'utf8
 const masterUi = fs.readFileSync(new URL('../master-ui-controller.js', import.meta.url), 'utf8');
 const pageRuntime = fs.readFileSync(new URL('../extension-page-runtime.js', import.meta.url), 'utf8');
 const generation = fs.readFileSync(new URL('../runtime-generation.js', import.meta.url), 'utf8');
+const backgroundEntry = fs.readFileSync(new URL('../background-entry.js', import.meta.url), 'utf8');
 
 test('tab feature authority reads account snapshot directly and never self-messages the MV3 worker', () => {
   assert.match(runtime, /ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot'/);
@@ -31,10 +32,17 @@ test('settings never repaints the local Master switch from synced settings', () 
   assert.match(masterUi, /changes\[MASTER_KEY\]\.newValue === true/);
 });
 
-test('extension pages use one generation barrier before Master or feature protocol calls', () => {
-  assert.match(generation, /RUNTIME_GENERATION_KEY = 'gptworkRuntimeGeneration'/);
+test('extension pages use one direct service-worker generation barrier before Master or feature protocol calls', () => {
+  assert.match(generation, /RUNTIME_GENERATION_MESSAGE = 'GPTWORK_RUNTIME_GENERATION_GET'/);
+  assert.match(generation, /ServiceWorkerGlobalScope/);
+  assert.doesNotMatch(generation, /chrome\.storage/);
   assert.match(pageRuntime, /await ensureRuntimeGeneration\(\)/);
+  assert.match(pageRuntime, /requestWorkerGeneration\(\)/);
+  assert.match(pageRuntime, /workerGeneration === RUNTIME_GENERATION/);
   assert.match(pageRuntime, /chrome\.runtime\.reload\(\)/);
+  assert.doesNotMatch(pageRuntime, /chrome\.storage/);
+  assert.match(backgroundEntry, /^import '\.\/runtime-generation\.js';/);
+  assert.doesNotMatch(backgroundEntry, /markRuntimeGeneration/);
   assert.match(masterUi, /import\('\.\/extension-page-runtime\.js'\)/);
 });
 
