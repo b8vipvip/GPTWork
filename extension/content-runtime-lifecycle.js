@@ -329,6 +329,18 @@
     shutdown,
   };
 
+  // The background lifecycle authority can quiesce every content generation before an
+  // extension reload/update. Respond first so the service worker can continue its one
+  // shutdown sequence, then make this content generation terminal.
+  try {
+    globalThis.chrome?.runtime?.onMessage?.addListener?.((message, _sender, sendResponse) => {
+      if (message?.type !== 'GPTWORK_CONTENT_PREPARE_RELOAD') return false;
+      try { sendResponse({ ok: true, data: { quiesced: true } }); } catch {}
+      queueMicrotask(() => shutdown('extension_reload_prepare'));
+      return false;
+    });
+  } catch {}
+
   // Use the original interval so shutdown can always clear this watchdog even after the
   // tracked timer APIs have been restored or the extension context has become invalid.
   healthTimer = original.setInterval(() => {
