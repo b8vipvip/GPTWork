@@ -29,6 +29,19 @@ test('terminal lifecycle supervisor loads before every other content runtime scr
   assert.match(lifecycle, /restorePatchedGlobals/);
   assert.match(lifecycle, /chrome-extension:\\\/\\\/invalid/);
   assert.match(lifecycle, /const terminal = isInvalidationError\(error\)/);
+
+  const invalidationBody = lifecycle.match(/function isInvalidationError\(error\) \{([\s\S]*?)\n  \}\n\n  function removeTrackedListeners/);
+  assert.ok(invalidationBody, 'terminal invalidation matcher must stay explicit');
+  assert.doesNotMatch(invalidationBody[1], /Receiving end does not exist/i);
+});
+
+test('runtime messaging wrapper is generation-owned and restored before reinjection', () => {
+  assert.match(lifecycle, /sendMessage:\s*globalThis\.chrome\?\.runtime\?\.sendMessage/);
+  assert.match(lifecycle, /function trackedSendMessage\(\.\.\.args\)/);
+  assert.match(lifecycle, /chrome\?\.runtime\?\.sendMessage === trackedSendMessage/);
+  assert.match(lifecycle, /chrome\.runtime\.sendMessage = original\.sendMessage/);
+  assert.match(lifecycle, /chrome\.runtime\.sendMessage = trackedSendMessage/);
+  assert.match(lifecycle, /original\.sendMessage\.apply\(globalThis\.chrome\.runtime, args\)/);
 });
 
 test('existing ChatGPT tabs use bounded recovery after real install or update events', () => {
