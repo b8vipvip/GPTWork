@@ -328,10 +328,10 @@ function persistFromChange(event) {
     void queueWrite(() => patchSettings({ preferredReasoning })).catch(() => void load().catch(() => {}));
     return;
   }
-  if (target === elements.enabled) {
-    void queueWrite(() => patchSettings({ enabled: target.checked })).catch(() => void load().catch(() => {}));
-    return;
-  }
+  // #enabled is owned exclusively by master-ui-controller.js. Its capture-phase
+  // listener stops propagation before this generic settings delegate, so do not
+  // mirror the Master switch into sync settings or create a second writer here.
+  if (target === elements.enabled) return;
   if (target === elements.networkVerification) {
     void queueWrite(() => patchSettings({ networkVerificationEnabled: target.checked })).catch(() => void load().catch(() => {}));
     return;
