@@ -1,5 +1,3 @@
-import { runtimeMessage } from './extension-page-runtime.js';
-
 (() => {
   const MASTER_KEY = 'gptworkEnabledLocal';
   const QUOTA_MESSAGE = '当前账户并发窗口超限';
@@ -10,6 +8,12 @@ import { runtimeMessage } from './extension-page-runtime.js';
   let quotaExceeded = false;
   let syncTimers = [];
   let toastTimer = null;
+  let runtimeModulePromise = null;
+
+  function runtimeMessage(payload) {
+    if (!runtimeModulePromise) runtimeModulePromise = import('./extension-page-runtime.js');
+    return runtimeModulePromise.then((runtime) => runtime.runtimeMessage(payload));
+  }
 
   function clearSyncTimers() {
     for (const timer of syncTimers) clearTimeout(timer);
