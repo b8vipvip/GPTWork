@@ -260,7 +260,7 @@ async function removeWindowState(windowId) {
   await initializeTabFeatureRuntime();
   const id = Number(windowId);
   if (!Number.isInteger(id)) return;
-  let changed = states.delete(id);
+  const changed = states.delete(id);
   for (const [tabId, rememberedWindowId] of tabWindowIds.entries()) {
     if (rememberedWindowId === id) tabWindowIds.delete(tabId);
   }
@@ -455,7 +455,6 @@ async function handleFeatureMessage(message, sender) {
       // content fan-out and background.js independently performs runtime cleanup.
       masterEnabled = false;
       await chrome.storage.local.set({ [MASTER_KEY]: false });
-      await scheduleAccountRefresh();
       log('master_changed', { enabled: false, tabId });
       return disabledMasterSnapshot(tabId);
     }
@@ -466,11 +465,12 @@ async function handleFeatureMessage(message, sender) {
     if (quotaExceeded(state, tabId)) {
       throw Object.assign(new Error(WINDOW_QUOTA_MESSAGE), { code: 'WINDOW_QUOTA_EXCEEDED' });
     }
+    // Enabling is fail-closed: do not make the in-memory authority true unless the
+    // canonical local Master state has been persisted successfully.
+    await chrome.storage.local.set({ [MASTER_KEY]: true });
     masterEnabled = true;
     // storage.onChanged is the single fan-out trigger for Master transitions. Keeping
     // an explicit push here as well would broadcast every open ChatGPT tab twice.
-    await chrome.storage.local.set({ [MASTER_KEY]: true });
-    await scheduleAccountRefresh();
     log('master_changed', { enabled: true, tabId });
     return { ...(await featureSnapshot(tabId)), masterEnabled: true };
   }
