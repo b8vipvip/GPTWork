@@ -22,12 +22,14 @@ test('popup and settings expose independent Work and model-lock feature gates', 
   }
 });
 
-test('feature controller authenticates then changes only the current ChatGPT tab', () => {
+test('feature controller authenticates then changes the current ChatGPT window authority', () => {
   assert.match(controller, /requireActivation\(currentAccount\)/);
   assert.match(controller, /GPTWORK_TAB_FEATURE_GET/);
   assert.match(controller, /GPTWORK_TAB_FEATURE_SET/);
   assert.match(controller, /tabId: currentTabId/);
   assert.match(controller, /feature: kind/);
+  assert.match(controller, /currentWindow:\s*true/);
+  assert.match(controller, /窗口内的 ChatGPT 标签页共享状态/);
   assert.doesNotMatch(controller, /gptworkWorkModeEnabled/);
   assert.doesNotMatch(controller, /gptworkModelLockEnabled/);
   assert.doesNotMatch(controller, /GPTLOCK_SET_ENABLED/);
@@ -41,13 +43,16 @@ test('unauthenticated popup remains visible and protected actions can open login
   assert.match(popup, /<section id="authShell"[^>]*hidden/);
 });
 
-test('tab isolation authority is installed before the legacy background receiver', () => {
-  const tabRuntimeIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
-  const policyIndex = backgroundEntry.indexOf("import './tab-feature-network-policy.js'");
+test('master and window feature authorities load before the main background runtime', () => {
+  const masterIndex = backgroundEntry.indexOf("import './master-runtime-safety.js'");
+  const windowIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
+  const recoveryIndex = backgroundEntry.indexOf("import './content-runtime-recovery.js'");
   const updaterIndex = backgroundEntry.indexOf("import './background-update.js'");
-  assert.ok(tabRuntimeIndex >= 0);
-  assert.ok(policyIndex > tabRuntimeIndex);
-  assert.ok(backgroundIndex > policyIndex);
-  assert.ok(updaterIndex > backgroundIndex);
+  assert.ok(masterIndex >= 0);
+  assert.ok(windowIndex > masterIndex);
+  assert.ok(backgroundIndex > windowIndex);
+  assert.ok(recoveryIndex > backgroundIndex);
+  assert.ok(updaterIndex > recoveryIndex);
+  assert.doesNotMatch(backgroundEntry, /tab-feature-network-policy\.js/);
 });
