@@ -8,7 +8,7 @@ import {
 } from '../account-refresh-scheduler.js';
 
 const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
-const masterSafety = fs.readFileSync(new URL('../master-runtime-safety.js', import.meta.url), 'utf8');
+const backgroundEntry = fs.readFileSync(new URL('../background-entry.js', import.meta.url), 'utf8');
 
 test('native runtime cannot connect or reconnect while master is off', () => {
   assert.match(background, /function masterRuntimeEnabled\(\)/);
@@ -20,14 +20,14 @@ test('native runtime cannot connect or reconnect while master is off', () => {
   assert.match(background, /if \(policyChanged && masterRuntimeEnabled\(\)\)/);
 });
 
-test('master-off background shutdown owns native, alarms, debugger and badge cleanup', () => {
+test('master-off background shutdown solely owns native, alarms, debugger and badge cleanup', () => {
   const stop = background.match(/async function stopBackgroundRuntime\([^)]*\) \{([\s\S]*?)\n\}/)?.[0] || '';
   assert.match(stop, /nativePort = null/);
   assert.match(stop, /chrome\.alarms\.clear\(RECONNECT_ALARM\)/);
   assert.match(stop, /chrome\.alarms\.clear\(ACCOUNT_REFRESH_ALARM\)/);
   assert.match(stop, /networkMonitor\.detach\(tabId\)/);
   assert.match(stop, /setBadgeText\(\{ tabId, text: '' \}\)/);
-  assert.match(masterSafety, /hardStopRuntime/);
+  assert.doesNotMatch(backgroundEntry, /master-runtime-safety\.js/);
   assert.doesNotMatch(background, /chrome\.runtime\.connectNative\s*=/);
 });
 
