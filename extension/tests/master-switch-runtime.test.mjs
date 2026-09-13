@@ -25,6 +25,7 @@ test('popup master switch uses explicit master authority and blocks duplicate wr
   assert.match(masterUi, /MASTER_KEY = 'gptworkEnabledLocal'/);
   assert.match(masterUi, /GPTWORK_MASTER_STATUS/);
   assert.match(masterUi, /GPTWORK_MASTER_SET/);
+  assert.match(masterUi, /extension-page-runtime\.js/);
   assert.match(masterUi, /当前账户并发窗口超限/);
   assert.match(masterUi, /mouseenter/);
   assert.match(masterUi, /stopImmediatePropagation/);
@@ -42,15 +43,14 @@ test('Settings exposes the same master switch through the shared controller', ()
   assert.match(masterUi, /event\.stopImmediatePropagation\(\)/);
 });
 
-test('Work and Model lock no longer overwrite the explicit master state', () => {
+test('Work and Model lock are independent per-tab state and never overwrite Master', () => {
   const featureController = fs.readFileSync(new URL('../feature-toggle-controller.js', import.meta.url), 'utf8');
   assert.doesNotMatch(featureController, /GPTLOCK_SET_ENABLED/);
   assert.match(featureController, /GPTWORK_TAB_FEATURE_SET/);
-  assert.match(settings, /按 ChatGPT 窗口隔离/);
-  assert.match(settings, /同一窗口内(?:的)?标签页共享状态/);
-  assert.match(settings, /不同窗口可以(?:保持)?不同状态|不同窗口可以不同/);
-  assert.doesNotMatch(settings, /每个窗口\/标签可以保持不同状态/);
-  assert.doesNotMatch(settings, /仅当前 ChatGPT 标签页生效/);
+  assert.match(settings, /按 ChatGPT 标签页隔离/);
+  assert.match(settings, /仅当前 ChatGPT 标签页生效/);
+  assert.match(settings, /同一 Chrome 窗口里的不同 ChatGPT 标签页也可以保持不同状态/);
+  assert.doesNotMatch(settings, /同一窗口内(?:的)?标签页共享状态/);
 });
 
 test('background is the sole master runtime cleanup authority', () => {
@@ -73,11 +73,12 @@ test('window lifecycle listeners remain native registrations while master is dis
   assert.doesNotMatch(background, /\.addListener\s*=/);
 });
 
-test('window authority is installed before the sole background lifecycle authority', () => {
-  const windowIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
+test('tab feature authority is installed before the sole background lifecycle authority', () => {
+  const tabIndex = backgroundEntry.indexOf("import './tab-feature-runtime.js'");
   const backgroundIndex = backgroundEntry.indexOf("import './background.js'");
-  assert.ok(windowIndex >= 0);
-  assert.ok(backgroundIndex > windowIndex);
+  assert.ok(tabIndex >= 0);
+  assert.ok(backgroundIndex > tabIndex);
+  assert.match(backgroundEntry, /tabs in the same Chrome window never inherit/);
   assert.doesNotMatch(backgroundEntry, /master-runtime-safety\.js/);
 });
 
