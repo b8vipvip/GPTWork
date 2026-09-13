@@ -1,3 +1,5 @@
+import { runtimeMessage } from './extension-page-runtime.js';
+
 const workToggle = document.getElementById('workModeEnabled');
 const modelToggle = document.getElementById('modelLockEnabled');
 const messageNode = document.getElementById('message') || document.getElementById('formMessage');
@@ -10,21 +12,6 @@ let currentAccount = { authenticated: false, entitlement: { active: false } };
 let lastFeatureState = null;
 let refreshTimers = [];
 let reconcileGeneration = 0;
-
-function runtimeMessage(payload) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(payload, (response) => {
-      const error = chrome.runtime.lastError;
-      if (error) return reject(new Error(error.message));
-      if (!response?.ok) {
-        const requestError = new Error(response?.error || 'Extension request failed');
-        requestError.code = response?.code || null;
-        return reject(requestError);
-      }
-      resolve(response.data);
-    });
-  });
-}
 
 function withTimeout(promise, ms = STATE_TIMEOUT_MS) {
   return Promise.race([
@@ -72,16 +59,16 @@ function syncVisibleToggles(featureState) {
 }
 
 function sortChatGptTabs(tabs) {
-  return [...tabs].sort((left, right) => {
-    if (Boolean(right.active) !== Boolean(left.active)) return Number(right.active) - Number(left.active);
-    return Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0);
-  });
+  return [...tabs].sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0));
 }
 
 async function findChatGptTab() {
-  // The feature authority is window-scoped. Prefer a ChatGPT tab from the browser
-  // window containing this popup/settings page, then fall back to the most recently
-  // used ChatGPT tab only when the current window has no ChatGPT tab at all.
+  // Popup: bind to the active browser tab only when that tab is ChatGPT. Settings is
+  // itself a browser tab, so it falls back to the most recently used ChatGPT tab. In
+  // both cases the resulting feature state belongs to that exact tabId, never windowId.
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (Number.isInteger(active?.id) && /^https:\/\/chatgpt\.com\//.test(String(active.url || ''))) return active;
+
   const sameWindowTabs = await chrome.tabs.query({ currentWindow: true, url: 'https://chatgpt.com/*' });
   const sameWindow = sortChatGptTabs(sameWindowTabs).find((tab) => Number.isInteger(tab.id));
   if (sameWindow) return sameWindow;
@@ -93,12 +80,11 @@ async function findChatGptTab() {
 function renderScope(tab) {
   if (!scopeNode) return;
   if (!tab?.id) {
-    scopeNode.textContent = '当前没有打开的 ChatGPT 窗口；Work 模式和模型锁定会在选定的 ChatGPT 窗口内共享状态。';
+    scopeNode.textContent = '当前没有可用的 ChatGPT 标签页；Work 模式和模型锁定仅绑定具体 ChatGPT 标签页，不会按窗口共享。';
     return;
   }
   const title = String(tab.title || 'ChatGPT').replace(/\s+/g, ' ').trim().slice(0, 80);
-  const windowLabel = Number.isInteger(tab.windowId) ? `Window ${tab.windowId}` : '当前窗口';
-  scopeNode.textContent = `当前窗口：${title}（${windowLabel}）。Work 模式和模型锁定在此窗口内的 ChatGPT 标签页共享状态，不会同步到其他窗口。`;
+  scopeNode.textContent = `当前标签页：${title}（Tab ${tab.id}）。Work 模式和模型锁定只对这个 ChatGPT 标签页生效，同一 Chrome 窗口中的其他 ChatGPT 标签页不会共享状态。`;
 }
 
 async function reconcile() {
@@ -120,9 +106,6 @@ async function reconcile() {
   const targetTabId = currentTabId;
   try {
     const snapshot = await withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: targetTabId }));
-    // Multiple focus/pageshow/account events can overlap. Only the newest reconciliation
-    // may update cached UI state; an older unauthenticated response must never overwrite
-    // a newer post-login account snapshot.
     if (generation !== reconcileGeneration || targetTabId !== currentTabId) return snapshot;
     currentAccount = snapshot?.account || currentAccount;
     syncVisibleToggles(snapshot?.featureState);
@@ -130,10 +113,8 @@ async function reconcile() {
     return snapshot;
   } catch (error) {
     if (generation !== reconcileGeneration) return null;
-    // UI continuity only: the cached snapshot never becomes an authority and is never written
-    // back. A transient transport timeout must not paint an enabled feature as disabled.
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
-    showMessage('状态刷新暂时延迟，已保留当前功能配置 / State refresh delayed; keeping current feature state.', 'bad');
+    showMessage('状态刷新暂时延迟，已保留当前标签页功能配置 / State refresh delayed; keeping this tab state.', 'bad');
     setBusy(false);
     throw error;
   }
@@ -146,9 +127,8 @@ async function changeFeature(kind, desired) {
   const targetTabId = currentTabId;
   setBusy(true);
   try {
-    // Do not authorize from currentAccount. It is a display cache and can legitimately
-    // lag behind a just-completed login. The background/window runtime is the sole
-    // entitlement + quota authority and will reject the SET when access is not valid.
+    // UI is not an authorization authority. The tab runtime validates the current
+    // persisted account entitlement and the target tab's window quota before enabling.
     const snapshot = await withTimeout(runtimeMessage({
       type: 'GPTWORK_TAB_FEATURE_SET',
       tabId: targetTabId,
@@ -158,8 +138,8 @@ async function changeFeature(kind, desired) {
     currentAccount = snapshot?.account || currentAccount;
     syncVisibleToggles(snapshot?.featureState);
     showMessage(desired
-      ? `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前窗口启用，同一窗口内标签页共享状态。`
-      : `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前窗口关闭，同一窗口内标签页共享状态。`, 'good');
+      ? `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前 ChatGPT 标签页启用；其他标签页不受影响。`
+      : `${kind === 'work' ? 'Work 模式' : '模型锁定'}已在当前 ChatGPT 标签页关闭；其他标签页不受影响。`, 'good');
   } catch (error) {
     if (target) target.checked = previous;
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
@@ -168,8 +148,6 @@ async function changeFeature(kind, desired) {
     } else if (error?.code === 'AUTH_REQUIRED') {
       promptAuthentication();
     } else if (error?.code === 'ENTITLEMENT_REQUIRED') {
-      // Older runtime builds use ENTITLEMENT_REQUIRED for both "not logged in" and
-      // "entitlement inactive". Re-read the authoritative snapshot before choosing UI.
       const snapshot = await reconcile().catch(() => null);
       const account = snapshot?.account || currentAccount;
       if (account?.authenticated) showEntitlementRequired();
@@ -209,5 +187,5 @@ chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo) => {
 });
 
 void reconcile().catch(() => {
-  // reconcile() already preserves the last successful snapshot and renders a non-destructive warning.
+  // reconcile() already preserves the last successful tab snapshot and renders a warning.
 });
