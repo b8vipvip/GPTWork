@@ -45,7 +45,12 @@
 
   function isInvalidationError(error) {
     const message = error instanceof Error ? error.message : String(error || '');
-    return /extension context invalidated|context invalidated|receiving end does not exist/i.test(message);
+    // A missing message receiver is not proof that this content-script generation is
+    // invalid. During service-worker startup or page navigation Chrome can transiently
+    // report "Receiving end does not exist" while chrome.runtime.id is still healthy.
+    // Only true extension-context invalidation is terminal here; the health watchdog
+    // separately detects a missing/throwing runtime.id.
+    return /extension context invalidated|context invalidated|chrome-extension:\/\/invalid\//i.test(message);
   }
 
   function removeTrackedListeners() {
@@ -253,12 +258,13 @@
       try {
         return originalSendMessage(...args);
       } catch (error) {
-        if (isInvalidationError(error)) shutdown('send_message_context_invalidated');
+        const terminal = isInvalidationError(error);
+        if (terminal) shutdown('send_message_context_invalidated');
         const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
         const response = {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
-          terminal: isInvalidationError(error),
+          terminal,
         };
         if (callback) {
           queueMicrotask(() => callback(response));
