@@ -23,11 +23,11 @@ test('current settings expose master plus independent window-scoped Work/model-l
 
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.equal(manifest.options_ui.page, 'settings-v0521.html');
-  assert.match(settingsHtml, /id="enabled" type="checkbox"/);
+  assert.match(settingsHtml, /<input\b(?=[^>]*\bid="enabled")(?=[^>]*\btype="checkbox")[^>]*>/);
   assert.doesNotMatch(settingsHtml, /id="enabled"[^>]*hidden/);
   assert.match(settingsHtml, /data-gptwork-settings-master="true"/);
-  assert.match(settingsHtml, /id="workModeEnabled" type="checkbox"/);
-  assert.match(settingsHtml, /id="modelLockEnabled" type="checkbox"/);
+  assert.match(settingsHtml, /<input\b(?=[^>]*\bid="workModeEnabled")(?=[^>]*\btype="checkbox")[^>]*>/);
+  assert.match(settingsHtml, /<input\b(?=[^>]*\bid="modelLockEnabled")(?=[^>]*\btype="checkbox")[^>]*>/);
   assert.match(settingsHtml, /<script type="module" src="feature-toggle-controller\.js"><\/script>/);
   assert.doesNotMatch(settingsHtml, /settings-enabled-guard\.js/);
   assert.doesNotMatch(settingsHtml, /enabled-toggle-controller\.js/);
