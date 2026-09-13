@@ -335,11 +335,31 @@ function quotaExceeded(state, tabId) {
 async function pushFeatureState(tabId, featureState = null) {
   if (!Number.isInteger(tabId)) return;
   const state = featureState || await getTabFeatureState(tabId);
+  const policy = effectivePolicyForTabSync(tabId);
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: 'GPTWORK_TAB_FEATURE_STATE',
       featureState: state,
-      policy: effectivePolicyForTabSync(tabId),
+      policy,
+    });
+  } catch {}
+  if (masterEnabled) return;
+  // Master OFF must fail open immediately in already-loaded content scripts. Do not
+  // leave a previously cached blocking guard alive until its heartbeat expires.
+  try {
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'GPTLOCK_GUARD_STATE',
+      state: {
+        phase: 'initial',
+        guard: {
+          canSend: true,
+          allowKind: 'disabled',
+          status: 'disabled',
+          reason: 'gptlock_disabled',
+        },
+      },
+      policy,
+      settings: { enabled: false },
     });
   } catch {}
 }
@@ -422,8 +442,9 @@ async function handleFeatureMessage(message, sender) {
       }
     }
     masterEnabled = desired;
+    // storage.onChanged is the single fan-out trigger for Master transitions. Keeping
+    // the explicit push here as well would broadcast every open ChatGPT tab twice.
     await chrome.storage.local.set({ [MASTER_KEY]: desired });
-    await pushAllFeatureStates();
     await scheduleAccountRefresh();
     log('master_changed', { enabled: desired, tabId });
     return { ...(await featureSnapshot(tabId)), masterEnabled: desired };
