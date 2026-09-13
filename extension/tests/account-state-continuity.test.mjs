@@ -46,17 +46,17 @@ test('per-tab feature-state timeout preserves the last successful UI snapshot wi
   assert.match(controller, /let lastFeatureState = null;/);
   assert.match(controller, /withTimeout\(runtimeMessage\(\{ type: 'GPTWORK_TAB_FEATURE_GET'/);
   assert.match(controller, /if \(lastFeatureState\) syncVisibleToggles\(lastFeatureState\);/);
-  assert.match(controller, /State refresh delayed; keeping current feature state\./);
-  assert.match(controller, /cached snapshot never becomes an authority and is never written/);
+  assert.match(controller, /State refresh delayed; keeping this tab state\./);
   assert.doesNotMatch(controller, /chrome\.storage\.(?:local|sync|session)\.set/);
 });
 
 test('feature toggles never reject from a stale cached account before asking runtime authority', async () => {
   const controller = await source('feature-toggle-controller.js');
-  assert.match(controller, /The background\/window runtime is the sole[\s\S]*entitlement \+ quota authority/);
+  assert.match(controller, /UI is not an authorization authority\.[\s\S]*tab runtime validates the current[\s\S]*account entitlement[\s\S]*target tab's window quota/);
   assert.doesNotMatch(controller, /function requireActivation/);
   const changeFeature = controller.match(/async function changeFeature[\s\S]*?function bindFeatureToggle/)?.[0] ?? '';
   assert.match(changeFeature, /GPTWORK_TAB_FEATURE_SET/);
+  assert.match(changeFeature, /tabId: targetTabId/);
   assert.doesNotMatch(changeFeature, /requireActivation\(/);
   assert.match(changeFeature, /error\?\.code === 'ENTITLEMENT_REQUIRED'/);
   assert.match(changeFeature, /const snapshot = await reconcile\(\)\.catch/);
