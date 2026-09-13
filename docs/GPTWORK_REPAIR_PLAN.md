@@ -12,7 +12,7 @@
 2. **标签页功能状态（Tab Feature State）**：`tab-feature-runtime.js` 独占 `tabId -> {workModeEnabled, modelLockEnabled}` 的读写与 `GPTWORK_TAB_FEATURE_GET/SET`。两个 ChatGPT 标签页即使位于同一个 Chrome 窗口也互不共享；移动标签页时该标签页保留自己的状态。
 3. **账号权益与并发窗口额度（Entitlement/Window Quota）**：只负责回答“当前账号/当前窗口是否允许启用”，不拥有 Master 或 Work/Model 状态。窗口额度继续按 Chrome `windowId` 计数，但功能状态绝不按 `windowId` 保存。
 4. **后台请求执行（Enforcement）**：`background.js`/network monitor 只消费 Master、目标 tab feature state、账号可用性和策略，不反向写 Work/Model 开关。
-5. **更新代际一致性（Runtime Generation）**：`runtime-generation.js` + `extension-page-runtime.js` 只处理“新页面文件 + 旧 Service Worker”协议错代；它不拥有任何业务开关。发现代际不一致时只执行一次 `chrome.runtime.reload()`，禁止用重试/兼容分支叠加旧新协议。
+5. **更新代际一致性（Runtime Generation）**：`runtime-generation.js` 是 MV3 Service Worker 唯一 generation responder；`extension-page-runtime.js` 在发送任何 Master/feature 命令前直接询问“当前实际运行的 worker”代际。它不读取 storage marker、不借业务状态推断、不拥有任何业务开关。代际不一致或旧 worker 不认识握手消息时，只执行一次 `chrome.runtime.reload()`，旧页面 generation 随即终止，不叠加重试/兼容路径。
 
 ## 问题与当前收敛状态
 
@@ -27,8 +27,8 @@
 | R7 | P1 | Master 与功能状态耦合/双写 | **已实现并有自动化护栏**。Master 与 per-tab Work/Model 分离；设置页/Popup 使用同一 Master UI controller | Master=OFF 一票否决但不销毁各 tab feature 选择；ON 后恢复各 tab 自身选择 |
 | R8 | P1 | 旧授权码/产品 License 体系残留 | **已清理并由 forbidden-token 测试保护** | 生产扩展/UI/迁移不再存在旧产品授权码激活/校验/清除逻辑 |
 | R9 | P1 | `Unexpected token 'import'` 注入路径 | **已闭环并有自动化护栏** | 动态注入只使用 manifest 中 classic-safe content scripts |
-| R10 | P1 | CI 必须全绿 | **当前 head `f08ae6b1` 全绿**：CI #754、Store Package #208、Private Core Boundary #398 均 success | PR 最终 head 的 CI / Store Package / Private Core Boundary 全部 success |
-| R11 | P1 | 安装器原地替换扩展文件后，新 Popup/Settings 与旧 MV3 Worker 协议错代 | **已加入单一 generation barrier，自动化已通过，真机待验收**。新扩展页面在发送 Master/feature 命令前比较 worker generation，不一致只触发一次 extension reload | 原地升级保持 Chrome 打开时，不再出现 `Unsupported extension message: GPTWORK_MASTER_SET` / `GPTWORK_TAB_FEATURE_SET`；无 reload storm |
+| R10 | P1 | CI 必须全绿 | **代码 head `e6471625` 全绿**：CI #760、Store Package #214、Private Core Boundary #404 均 success；本文件更新后的最终 head 仍需再次确认 | PR 最终 head 的 CI / Store Package / Private Core Boundary 全部 success |
+| R11 | P1 | 安装器原地替换扩展文件后，新 Popup/Settings 与旧 MV3 Worker 协议错代 | **已收敛为直接 worker generation 握手，自动化已通过，真机待验收**。新页面发送 Master/feature 命令前直接询问当前实际 worker；旧 worker 不支持握手或代际不同即只 reload 一次，旧页面停止，不使用 storage marker | 原地升级保持 Chrome 打开时，不再出现 `Unsupported extension message: GPTWORK_MASTER_SET` / `GPTWORK_TAB_FEATURE_SET`；无 reload storm |
 
 ## 分阶段实施
 
@@ -87,14 +87,14 @@
 
 ### Stage 5 — 真机回归、最终 CI、合并与正式发布
 
-状态：**进行中；当前 head 自动化全绿**
+状态：**进行中；代码 head 自动化全绿，真实 Chrome 待验收**
 
 本阶段已通过实机发现并修复：
 
 - Windows 原地更新时 Native Core 被 Chromium 重新拉起导致替换竞态。
 - 登录后 startup hydration 覆盖新 session / stale UI 错误要求再次登录。
 - Master/Work/Model 开关卡住与 Settings/Popup Master 不一致。
-- 原地替换扩展文件时新页面命令打到旧 Service Worker，出现 `Unsupported extension message`；现由单一 runtime generation barrier 处理。
+- 原地替换扩展文件时新页面命令打到旧 Service Worker，出现 `Unsupported extension message`；现使用单一直接 worker-generation 握手，不再依赖 storage marker。
 - 产品语义纠正：Work/Model 必须 per-tab，不得按 window 共享。
 
 真实 Chrome 人工回归矩阵：
@@ -125,7 +125,8 @@
 - [x] Stage 2：per-tab 功能隔离实现与自动化
 - [x] Stage 3：Master / background lifecycle 单一权威
 - [x] Stage 4：旧 License 清理与 forbidden-token 自动化
-- [x] Stage 5：当前 head `f08ae6b1` 全量 CI / Store / Boundary 全绿
+- [x] Stage 5：代码 head `e6471625` 全量 CI / Store / Boundary 全绿
+- [ ] Stage 5：文档更新后最终 head CI / Store / Boundary 再确认
 - [ ] Stage 5：真机回归
 - [ ] Stage 5：合并 + 正式发布
 
