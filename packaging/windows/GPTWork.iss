@@ -44,9 +44,11 @@ VersionInfoDescription=GPTWork Installer
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [InstallDelete]
-; Extension UI files are code, not user data. Remove the old snapshot before copying the
-; new release so deleted/renamed legacy files can never survive an in-place update.
-Type: filesandordirs; Name: "{app}\extension"
+; Never recursively delete the live extension directory while Chrome/Edge may still be
+; executing that generation. New files are copied to extension.next and swapped only
+; after the complete payload exists. These two directories are transaction scratch space.
+Type: filesandordirs; Name: "{app}\extension.next"
+Type: filesandordirs; Name: "{app}\extension.previous"
 Type: files; Name: "{app}\bin\gptlock-core.exe"
 Type: files; Name: "{app}\bin\gptlock-engine.exe"
 Type: files; Name: "{app}\tools\Update-GPTLock.ps1"
@@ -57,7 +59,7 @@ Source: "..\..\native-core\target\release\gptwork-core.exe"; DestDir: "{app}\bin
 #if PrivateEnginePath != ""
 Source: "{#PrivateEnginePath}"; DestDir: "{app}\bin"; DestName: "gptwork-engine.exe"; Flags: ignoreversion
 #endif
-Source: "..\..\extension\*"; DestDir: "{app}\extension"; Excludes: "tests\*,README.md,package.json"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\extension\*"; DestDir: "{app}\extension.next"; Excludes: "tests\*,README.md,package.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Update-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Repair-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 
@@ -83,6 +85,7 @@ var
   ChromeManifestPaused: Boolean;
   EdgeManifestPaused: Boolean;
   NativeMessagingPaused: Boolean;
+  ExtensionSwapped: Boolean;
   InstallCompleted: Boolean;
 
 function JsonEscape(Value: String): String;
@@ -151,7 +154,6 @@ begin
   WasPaused := False;
   BackupName := FileName + '.install-backup';
 
-  // Recover a manifest left paused by an interrupted older setup attempt.
   if FileExists(BackupName) and not FileExists(FileName) then
   begin
     if not RenameFile(BackupName, FileName) then
@@ -161,7 +163,6 @@ begin
     end;
   end;
 
-  // If both exist, the live manifest wins and the stale backup can be discarded.
   if FileExists(BackupName) and FileExists(FileName) then
   begin
     if not DeleteFile(BackupName) then
@@ -242,6 +243,97 @@ begin
   NativeMessagingPaused := False;
 end;
 
+function RecoverInterruptedExtensionSwap(): Boolean;
+var
+  LiveDir: String;
+  NextDir: String;
+  PreviousDir: String;
+begin
+  LiveDir := ExpandConstant('{app}\extension');
+  NextDir := ExpandConstant('{app}\extension.next');
+  PreviousDir := ExpandConstant('{app}\extension.previous');
+  Result := True;
+
+  if (not DirExists(LiveDir)) and DirExists(PreviousDir) then
+  begin
+    if not RenameFile(PreviousDir, LiveDir) then
+    begin
+      Result := False;
+      exit;
+    end;
+  end;
+
+  if DirExists(LiveDir) and DirExists(PreviousDir) then
+    if not DelTree(PreviousDir, True, True, True) then
+    begin
+      Result := False;
+      exit;
+    end;
+
+  if DirExists(NextDir) then
+    if not DelTree(NextDir, True, True, True) then
+      Result := False;
+end;
+
+function SwapExtensionPayload(): Boolean;
+var
+  LiveDir: String;
+  NextDir: String;
+  PreviousDir: String;
+begin
+  LiveDir := ExpandConstant('{app}\extension');
+  NextDir := ExpandConstant('{app}\extension.next');
+  PreviousDir := ExpandConstant('{app}\extension.previous');
+  Result := False;
+
+  if not FileExists(NextDir + '\manifest.json') then
+    exit;
+
+  if DirExists(PreviousDir) and not DelTree(PreviousDir, True, True, True) then
+    exit;
+
+  if DirExists(LiveDir) then
+  begin
+    if not RenameFile(LiveDir, PreviousDir) then
+      exit;
+  end;
+
+  if not RenameFile(NextDir, LiveDir) then
+  begin
+    if (not DirExists(LiveDir)) and DirExists(PreviousDir) then
+      RenameFile(PreviousDir, LiveDir);
+    exit;
+  end;
+
+  ExtensionSwapped := True;
+  Result := True;
+end;
+
+procedure RollbackExtensionSwap;
+var
+  LiveDir: String;
+  PreviousDir: String;
+begin
+  if not ExtensionSwapped then
+    exit;
+  LiveDir := ExpandConstant('{app}\extension');
+  PreviousDir := ExpandConstant('{app}\extension.previous');
+  if DirExists(PreviousDir) then
+  begin
+    if DirExists(LiveDir) then
+      DelTree(LiveDir, True, True, True);
+    RenameFile(PreviousDir, LiveDir);
+  end;
+  ExtensionSwapped := False;
+end;
+
+procedure FinishExtensionSwap;
+begin
+  if DirExists(ExpandConstant('{app}\extension.previous')) then
+    DelTree(ExpandConstant('{app}\extension.previous'), True, True, True);
+  ExtensionSwapped := False;
+end;
+
 function StopInstalledCoreProcesses(): Boolean;
 var
   CorePath: String;
@@ -284,8 +376,12 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
 
-  // Temporarily hide Native Messaging manifests before killing the old host. Otherwise an
-  // open Chrome/Edge extension can reconnect in the tiny gap before [Files] replaces the EXE.
+  if not RecoverInterruptedExtensionSwap then
+  begin
+    Result := '无法恢复上次 GPTWork 扩展更新事务，请完全退出浏览器后重试 / Could not recover the previous GPTWork extension update transaction.';
+    exit;
+  end;
+
   if not PauseNativeMessaging then
   begin
     Result := '无法暂停 GPTWork 浏览器本地连接，请完全退出浏览器后重试 / Could not pause GPTWork Native Messaging; fully exit the browser and retry.';
@@ -344,18 +440,24 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    if not SwapExtensionPayload then
+      RaiseException('无法原子切换 GPTWork 扩展目录；旧扩展保持不变。请关闭占用扩展目录的程序后重试 / Could not atomically swap the GPTWork extension payload.');
+
     RemoveUnselectedBrowserRegistration;
     if ChromeSelected() then
       WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'), '{#ChromeStoreExtensionId}');
     if EdgeSelected() then
       WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'), '{#EdgeStoreExtensionId}');
     FinishNativeMessagingPause;
+    FinishExtensionSwap;
     InstallCompleted := True;
   end;
 end;
 
 procedure DeinitializeSetup;
 begin
+  if not InstallCompleted then
+    RollbackExtensionSwap;
   if NativeMessagingPaused and not InstallCompleted then
     RestorePausedNativeMessaging;
 end;
