@@ -1,3 +1,5 @@
+import { runtimeMessage } from './extension-page-runtime.js';
+
 (() => {
   const MASTER_KEY = 'gptworkEnabledLocal';
   const QUOTA_MESSAGE = '当前账户并发窗口超限';
@@ -8,21 +10,6 @@
   let quotaExceeded = false;
   let syncTimers = [];
   let toastTimer = null;
-
-  function runtimeMessage(payload) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(payload, (response) => {
-        const error = chrome.runtime.lastError;
-        if (error) return reject(new Error(error.message));
-        if (!response?.ok) {
-          const requestError = new Error(response?.error || 'Extension request failed');
-          requestError.code = response?.code || null;
-          return reject(requestError);
-        }
-        resolve(response.data);
-      });
-    });
-  }
 
   function clearSyncTimers() {
     for (const timer of syncTimers) clearTimeout(timer);
@@ -71,7 +58,7 @@
       applyMasterValue(snapshot?.masterEnabled === true);
       applyQuotaUi(snapshot?.windowQuotaExceeded === true);
     } catch {
-      // Keep the last visible state; storage/background synchronization can recover it.
+      // Keep the last visible state; runtime generation and storage synchronization can recover it.
     }
   }
 
