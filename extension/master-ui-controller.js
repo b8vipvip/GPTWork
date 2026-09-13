@@ -1,6 +1,8 @@
 (() => {
   const MASTER_KEY = 'gptworkEnabledLocal';
   const QUOTA_MESSAGE = '当前账户并发窗口超限';
+  const AUTH_MESSAGE = '请先登录或注册 GPTWork 后再启用此功能。';
+  const ENTITLEMENT_MESSAGE = '当前使用时长已到期，请签到、分享或升级后再启用此功能。';
   const masterToggle = document.querySelector('#enabled[data-gptwork-master-toggle="true"]');
   const masterHost = masterToggle?.closest('.master-toggle') || masterToggle?.parentElement || null;
   let quotaExceeded = false;
@@ -27,22 +29,26 @@
     syncTimers = [];
   }
 
-  function quotaToast() {
+  function masterToast(text = QUOTA_MESSAGE) {
     let node = document.getElementById('gptwork-master-quota-toast');
     if (!node) {
       node = document.createElement('div');
       node.id = 'gptwork-master-quota-toast';
-      node.style.cssText = 'position:fixed;right:16px;top:68px;z-index:2147483647;max-width:230px;padding:6px 9px;border:1px solid rgba(220,38,38,.22);border-radius:8px;background:rgba(254,242,242,.98);color:#b91c1c;box-shadow:0 8px 24px rgba(15,23,42,.14);font:600 11px/1.4 system-ui,sans-serif;pointer-events:none;opacity:0;transform:translateY(-2px);transition:opacity .12s ease,transform .12s ease';
-      node.textContent = QUOTA_MESSAGE;
+      node.style.cssText = 'position:fixed;right:16px;top:68px;z-index:2147483647;max-width:280px;padding:6px 9px;border:1px solid rgba(220,38,38,.22);border-radius:8px;background:rgba(254,242,242,.98);color:#b91c1c;box-shadow:0 8px 24px rgba(15,23,42,.14);font:600 11px/1.4 system-ui,sans-serif;pointer-events:none;opacity:0;transform:translateY(-2px);transition:opacity .12s ease,transform .12s ease';
       document.body.append(node);
     }
+    node.textContent = text;
     clearTimeout(toastTimer);
     node.style.opacity = '1';
     node.style.transform = 'translateY(0)';
     toastTimer = setTimeout(() => {
       node.style.opacity = '0';
       node.style.transform = 'translateY(-2px)';
-    }, 1800);
+    }, 2200);
+  }
+
+  function quotaToast() {
+    masterToast(QUOTA_MESSAGE);
   }
 
   function applyQuotaUi(exceeded) {
@@ -93,6 +99,13 @@
       if (error?.code === 'WINDOW_QUOTA_EXCEEDED' || error?.message === QUOTA_MESSAGE) {
         applyQuotaUi(true);
         quotaToast();
+      } else if (error?.code === 'AUTH_REQUIRED') {
+        masterToast(AUTH_MESSAGE);
+        window.dispatchEvent(new CustomEvent('gptlock-auth-required', { detail: { message: AUTH_MESSAGE } }));
+      } else if (error?.code === 'ENTITLEMENT_REQUIRED') {
+        masterToast(ENTITLEMENT_MESSAGE);
+      } else {
+        masterToast(`总开关切换失败：${error?.message || '未知错误'}`);
       }
     } finally {
       scheduleMasterSync();
