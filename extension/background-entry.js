@@ -1,4 +1,4 @@
-import { markRuntimeGeneration } from './runtime-generation.js';
+import './runtime-generation.js';
 import './settings-migration.js';
 import './private-context-bridge.js';
 import './private-request-hook.js';
@@ -18,8 +18,3 @@ import './model-availability-runtime.js';
 // ordinary MV3 service-worker wake must never fan out reinjection across open tabs.
 import './content-runtime-recovery.js';
 import './background-update.js';
-
-// Persist only after the complete worker module graph has loaded successfully. Newly
-// opened extension pages compare this marker with their own bundle generation and force
-// one extension reload if an installer replaced files under a still-running old worker.
-void markRuntimeGeneration();
