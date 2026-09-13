@@ -9,9 +9,10 @@ const masterUi = fs.readFileSync(new URL('../master-ui-controller.js', import.me
 test('window feature authority does not self-message the MV3 service worker for account state', () => {
   assert.match(runtime, /ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot'/);
   const backgroundState = runtime.match(/async function backgroundState\(tabId\) \{([\s\S]*?)\n\}/)?.[0] || '';
+  const executableState = backgroundState.replace(/^\s*\/\/.*$/gm, '');
   assert.match(backgroundState, /chrome\.storage\.local\.get\(ACCOUNT_SNAPSHOT_KEY\)/);
   assert.match(backgroundState, /accountAllowsWindow\(account, windowId\)/);
-  assert.doesNotMatch(backgroundState, /chrome\.runtime\.sendMessage|GPTLOCK_GET_STATE/);
+  assert.doesNotMatch(executableState, /chrome\.runtime\.sendMessage|GPTLOCK_GET_STATE/);
   assert.doesNotMatch(runtime, /function runtimeMessage\(message\)/);
 });
 
