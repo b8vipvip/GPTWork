@@ -3,14 +3,12 @@ import './private-context-bridge.js';
 import './private-request-hook.js';
 import './private-response-hook.js';
 import './background-local-error-capture.js';
-// Install the explicit GPTWork master lifecycle before background.js can open Native
-// Messaging or recurring runtime activity.
-import './master-runtime-safety.js';
-// Own Work/Model-lock state by Chrome windowId. Tabs in the same ChatGPT window share
-// state; moving a tab adopts the destination window's state. Historical tab-oriented
-// message names remain only as a compatibility protocol for extension pages.
+// Own Work/Model-lock state by Chrome windowId before background.js starts. Tabs in the
+// same ChatGPT window share state; moving a tab adopts the destination window's state.
+// Historical tab-oriented message names remain only as a compatibility protocol.
 import './tab-feature-runtime.js';
-// Register GPTLOCK_* runtime message handlers before recovery/update helpers start.
+// background.js is the single lifecycle authority for Native Messaging, alarms,
+// debugger attach/detach, badge cleanup, and Master OFF shutdown.
 import './background.js';
 // Derive optimistic higher-model availability from trusted response metadata and keep
 // unavailable models out of the active lock policy without changing ChatGPT traffic.
