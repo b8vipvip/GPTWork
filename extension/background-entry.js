@@ -1,21 +1,20 @@
+import './runtime-generation.js';
 import './settings-migration.js';
 import './private-context-bridge.js';
 import './private-request-hook.js';
 import './private-response-hook.js';
 import './background-local-error-capture.js';
-// Install the explicit GPTWork master lifecycle before background.js can open Native
-// Messaging or recurring runtime activity.
-import './master-runtime-safety.js';
-// Patch ChatGptNetworkMonitor before background.js instantiates it. This keeps Chrome
-// Debugger detached during top-level navigation and ignores stale legacy master state
-// when both product feature gates are off.
-import './network-monitor-safety.js';
-// Register GPTLOCK_* runtime message handlers before recovery/update helpers start.
+// Work/Model-lock state is owned by the concrete ChatGPT tab. windowId is used only
+// for account concurrency quota checks; tabs in the same Chrome window never inherit
+// or share one another's feature state.
+import './tab-feature-runtime.js';
+// background.js is the single lifecycle authority for Native Messaging, alarms,
+// debugger attach/detach, badge cleanup, and Master OFF shutdown.
 import './background.js';
 // Derive optimistic higher-model availability from trusted response metadata and keep
 // unavailable models out of the active lock policy without changing ChatGPT traffic.
 import './model-availability-runtime.js';
-// Re-inject the current content runtime into already-open ChatGPT tabs after an
-// extension reload/update. This restores auto verification and the floating status UI.
+// Recover missing content runtimes only for real install/update lifecycle events. An
+// ordinary MV3 service-worker wake must never fan out reinjection across open tabs.
 import './content-runtime-recovery.js';
 import './background-update.js';

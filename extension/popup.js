@@ -1,19 +1,6 @@
 import { classifyNativeError, nativeHelp, RELEASES_URL } from './native-status.js';
-import {
-  compareVersions,
-  fetchLatestRelease,
-  RELIABLE_WINDOWS_UPDATER_MIN_CORE_VERSION,
-  supportsReliableWindowsOneClickUpdate,
-  WINDOWS_DOWNLOAD_FILENAME,
-} from './update-manager.js';
 
-const NATIVE_HOST = 'com.gptlock.core';
 const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
-const DOWNLOAD_TIMEOUT_MS = 3 * 60 * 1000;
-const INSTALL_TIMEOUT_MS = 3 * 60 * 1000;
-const INSTALL_INITIAL_WAIT_MS = 10 * 1000;
-const INSTALL_POLL_MS = 5 * 1000;
-
 const elements = {
   version: document.getElementById('version'),
   verdict: document.getElementById('verdict'),
@@ -23,7 +10,6 @@ const elements = {
   monitor: document.getElementById('monitor'),
   pageState: document.getElementById('pageState'),
   responseState: document.getElementById('responseState'),
-  enabled: document.getElementById('enabled'),
   autoVerify: document.getElementById('autoVerify'),
   reconnect: document.getElementById('reconnect'),
   logs: document.getElementById('logs'),
@@ -37,12 +23,14 @@ const elements = {
   updateDetail: document.getElementById('updateDetail'),
   checkUpdate: document.getElementById('checkUpdate'),
   installUpdate: document.getElementById('installUpdate'),
+  updateRuntimeProgress: document.getElementById('updateRuntimeProgress'),
+  updateRuntimeProgressTitle: document.getElementById('updateRuntimeProgressTitle'),
+  updateRuntimeProgressDetail: document.getElementById('updateRuntimeProgressDetail'),
+  updateRuntimeProgressBar: document.getElementById('updateRuntimeProgressBar'),
 };
 
 let lastState = null;
-let latestRelease = null;
-let updateBusy = false;
-let platform = null;
+let updateStatus = null;
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -53,90 +41,6 @@ function sendMessage(message) {
       else resolve(response.data);
     });
   });
-}
-
-function getPlatformInfo() {
-  return new Promise((resolve) => {
-    chrome.runtime.getPlatformInfo((info) => resolve(info ?? {}));
-  });
-}
-
-function downloadFile(options) {
-  return new Promise((resolve, reject) => {
-    chrome.downloads.download(options, (downloadId) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else if (!Number.isInteger(downloadId)) reject(new Error('Browser did not start the installer download / 浏览器未启动安装器下载'));
-      else resolve(downloadId);
-    });
-  });
-}
-
-function findDownload(downloadId) {
-  return new Promise((resolve, reject) => {
-    chrome.downloads.search({ id: downloadId }, (items) => {
-      const error = chrome.runtime.lastError;
-      if (error) reject(new Error(error.message));
-      else resolve(items?.[0] ?? null);
-    });
-  });
-}
-
-function nativeRequest(type, payload = {}) {
-  return new Promise((resolve, reject) => {
-    const id = `popup-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    let settled = false;
-    let port;
-    const finish = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { port?.disconnect(); } catch {}
-      callback(value);
-    };
-    const timer = setTimeout(() => {
-      finish(reject, new Error(`Native request timed out: ${type}`));
-    }, 12000);
-
-    try {
-      port = chrome.runtime.connectNative(NATIVE_HOST);
-      port.onMessage.addListener((response) => {
-        if (String(response?.id) !== id) return;
-        if (response.ok) finish(resolve, response.data);
-        else finish(reject, new Error(response?.error?.messageZhCn || response?.error?.messageEn || 'Native request failed'));
-      });
-      port.onDisconnect.addListener(() => {
-        if (settled) return;
-        finish(reject, new Error(chrome.runtime.lastError?.message || 'Native host disconnected'));
-      });
-      port.postMessage({ id, type, ...payload });
-    } catch (error) {
-      finish(reject, error instanceof Error ? error : new Error(String(error)));
-    }
-  });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForDownload(downloadId) {
-  const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const item = await findDownload(downloadId);
-    if (item?.state === 'complete') {
-      if (item.danger && !['safe', 'accepted'].includes(item.danger)) {
-        throw new Error(`浏览器安全检查阻止安装器：${item.danger} / Browser blocked the installer`);
-      }
-      if (!item.filename) throw new Error('Downloaded installer path is unavailable / 无法取得下载后的安装器路径');
-      return item;
-    }
-    if (item?.state === 'interrupted') {
-      throw new Error(`安装器下载中断：${item.error || 'unknown'} / Installer download interrupted`);
-    }
-    await sleep(350);
-  }
-  throw new Error('安装器下载超时 / Installer download timed out');
 }
 
 function valuePair(model, reasoning) {
@@ -178,66 +82,58 @@ function autoReasonText(auto) {
   return reasons[auto?.reason] || auto?.reason || null;
 }
 
-function renderUpdate(release = latestRelease) {
+function renderUpdateStatus(next = updateStatus) {
+  updateStatus = next || updateStatus;
   const currentVersion = chrome.runtime.getManifest().version;
   elements.currentVersion.textContent = currentVersion;
   elements.installUpdate.hidden = true;
-  elements.installUpdate.disabled = updateBusy;
-  elements.checkUpdate.disabled = updateBusy;
-
-  if (!release) {
-    elements.updateDetail.textContent = `当前版本 ${currentVersion} · 点击检查最新版本`;
-    return;
-  }
-  if (release.updateAvailable) {
-    const nativeVersion = lastState?.nativeStatus?.version ?? null;
-    const canOneClick = platform?.os === 'win'
-      && Boolean(lastState?.nativeStatus?.connected)
-      && supportsReliableWindowsOneClickUpdate(nativeVersion);
-    if (canOneClick) {
-      elements.updateDetail.textContent = `当前 ${currentVersion} · 最新 ${release.latestVersion} · Core ${nativeVersion} 支持安全一键更新`;
-      elements.installUpdate.textContent = '立即更新';
-    } else if (platform?.os === 'win') {
-      elements.updateDetail.textContent = `当前 ${currentVersion} · 最新 ${release.latestVersion} · Core ${nativeVersion || '未知'} 低于安全更新基线 ${RELIABLE_WINDOWS_UPDATER_MIN_CORE_VERSION}；需一次性从发布页安装`;
-      elements.installUpdate.textContent = '打开发布页';
-    } else {
-      elements.updateDetail.textContent = `当前 ${currentVersion} · 最新 ${release.latestVersion} · 当前系统请从发布页安装`;
-      elements.installUpdate.textContent = '打开发布页';
+  const transientPhases = ['checking', 'downloading', 'verifying', 'quiescing', 'installing', 'reloading', 'recovering'];
+  const showProgress = Boolean(updateStatus && (transientPhases.includes(updateStatus.phase) || updateStatus.phase === 'error'));
+  if (elements.updateRuntimeProgress) elements.updateRuntimeProgress.hidden = !showProgress;
+  if (showProgress) {
+    const percent = Math.max(0, Math.min(100, Math.round(Number(updateStatus.percent) || 0)));
+    if (elements.updateRuntimeProgressBar) elements.updateRuntimeProgressBar.value = percent;
+    if (elements.updateRuntimeProgressTitle) {
+      elements.updateRuntimeProgressTitle.textContent = updateStatus.phase === 'error'
+        ? 'GPTWork 更新尚未完成 / Update incomplete'
+        : `GPTWork 更新恢复中 ${percent}% / Updating`;
     }
-    elements.installUpdate.hidden = false;
+    if (elements.updateRuntimeProgressDetail) {
+      elements.updateRuntimeProgressDetail.textContent = updateStatus.message || '正在等待全部功能恢复正常…';
+    }
+  }
+  if (!updateStatus) {
+    elements.updateDetail.textContent = `当前版本 ${currentVersion}`;
     return;
   }
-  const comparison = compareVersions(currentVersion, release.latestVersion);
-  elements.updateDetail.textContent = comparison === 1
-    ? `当前 ${currentVersion} · 公开正式版 ${release.latestVersion} · 当前版本较新`
-    : `当前 ${currentVersion} · 已是最新正式版`;
+  const transient = transientPhases.includes(updateStatus.phase);
+  if (transient) {
+    elements.updateDetail.textContent = updateStatus.message || `GPTWork 更新进行中 ${updateStatus.percent || 0}%`;
+    elements.message.textContent = updateStatus.message || elements.message.textContent;
+  } else if (updateStatus.phase === 'complete') {
+    elements.updateDetail.textContent = updateStatus.message || 'GPTWork 已全部恢复正常';
+  } else if (updateStatus.phase === 'error') {
+    elements.updateDetail.textContent = updateStatus.message || 'GPTWork 更新尚未全部完成';
+  }
 }
 
 async function renderStoredUpdateStatus() {
   const stored = await chrome.storage.local.get(UPDATE_STATUS_KEY);
-  const status = stored[UPDATE_STATUS_KEY];
-  if (!status?.targetVersion) return;
-  const currentVersion = chrome.runtime.getManifest().version;
-  if (status.phase === 'installing') {
-    elements.updateDetail.textContent = `正在安装 ${status.targetVersion} · 若弹窗关闭，安装仍会继续`;
-  } else if (status.phase === 'complete' && compareVersions(currentVersion, status.targetVersion) === -1) {
-    elements.updateDetail.textContent = `本地核心已更新到 ${status.targetVersion}，但扩展仍是 ${currentVersion}；请完全重启浏览器以加载新扩展文件`;
-  }
+  renderUpdateStatus(stored[UPDATE_STATUS_KEY] || null);
 }
 
 function render(state) {
   lastState = state;
-  renderUpdate(latestRelease);
+  renderUpdateStatus(updateStatus);
   elements.version.textContent = state.extensionVersion || '';
   elements.currentVersion.textContent = state.extensionVersion || chrome.runtime.getManifest().version;
   const native = state.nativeStatus ?? {};
+  const enabled = state.settings?.enabled === true;
   const tab = state.tabState;
   const guard = tab?.guard;
   const auto = tab?.autoVerification;
   const autoApplies = autoVerificationAppliesToLatestRequest(auto, tab);
   const autoEvidenceConfirmed = hasConfirmedAutoEvidence(auto, state.policy, tab);
-  const enabled = state.settings?.enabled !== false;
-  elements.enabled.checked = enabled;
   elements.native.textContent = native.connected
     ? `已连接 / Online${native.version ? ` · ${native.version}` : ''}`
     : `离线 / Offline${native.lastError ? ` · ${native.lastError}` : ''}`;
@@ -320,166 +216,13 @@ function render(state) {
   const rawReason = guard?.reason && !evidenceDetail && !autoEvidenceConfirmed ? guard.reason : null;
   elements.guardDetail.textContent = [detail, rewriteDetail, evidenceDetail, rawReason].filter(Boolean).join(' · ');
   elements.autoVerify.disabled = !tab || !enabled;
-  renderUpdate();
+  renderUpdateStatus(updateStatus);
 }
 
 async function load() {
   render(await sendMessage({ type: 'GPTLOCK_GET_STATE' }));
   await renderStoredUpdateStatus();
 }
-
-async function checkUpdate() {
-  if (updateBusy) return null;
-  updateBusy = true;
-  renderUpdate();
-  elements.message.textContent = '正在通过浏览器检查 GitHub 正式版本 / Checking GitHub release…';
-  try {
-    platform ??= await getPlatformInfo();
-    latestRelease = await fetchLatestRelease(chrome.runtime.getManifest().version);
-    renderUpdate(latestRelease);
-    elements.message.textContent = latestRelease.updateAvailable
-      ? `发现新版本 ${latestRelease.latestVersion} / Update available.`
-      : `当前已是最新版本 ${chrome.runtime.getManifest().version} / Up to date.`;
-    return latestRelease;
-  } catch (error) {
-    elements.message.textContent = `检查更新失败 / Update check failed: ${error.message}`;
-    throw error;
-  } finally {
-    updateBusy = false;
-    renderUpdate(latestRelease);
-  }
-}
-
-async function waitForInstalledCore(targetVersion) {
-  await sleep(INSTALL_INITIAL_WAIT_MS);
-  const deadline = Date.now() + INSTALL_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      await sendMessage({ type: 'GPTLOCK_RECONNECT' });
-      const state = await sendMessage({ type: 'GPTLOCK_GET_STATE' });
-      const nativeVersion = state?.nativeStatus?.version;
-      if (state?.nativeStatus?.connected && compareVersions(nativeVersion, targetVersion) >= 0) {
-        return state;
-      }
-    } catch {
-      // The installer may still be replacing the core executable. Retry below.
-    }
-    await sleep(INSTALL_POLL_MS);
-  }
-  throw new Error('等待新版本本地核心启动超时；安装可能已完成，请完全重启浏览器 / Timed out waiting for updated core');
-}
-
-async function installUpdate() {
-  if (updateBusy) return;
-  updateBusy = true;
-  elements.checkUpdate.disabled = true;
-  elements.installUpdate.disabled = true;
-  try {
-    platform ??= await getPlatformInfo();
-    const release = latestRelease?.updateAvailable
-      ? latestRelease
-      : await fetchLatestRelease(chrome.runtime.getManifest().version);
-    latestRelease = release;
-    renderUpdate(release);
-    if (!release.updateAvailable) {
-      elements.message.textContent = '当前已经是最新版本 / Already up to date.';
-      return;
-    }
-    if (platform.os !== 'win') {
-      await chrome.tabs.create({ url: release.releaseUrl || RELEASES_URL });
-      window.close();
-      return;
-    }
-    const state = lastState || await sendMessage({ type: 'GPTLOCK_GET_STATE' });
-    if (!state?.nativeStatus?.connected) {
-      throw new Error('本地核心离线，无法执行一键安装；请先点击“重新连接”或运行一次安装器修复 / Native Core is offline');
-    }
-    if (!supportsReliableWindowsOneClickUpdate(state.nativeStatus.version)) {
-      elements.message.textContent = `当前 Core ${state.nativeStatus.version || '未知'} 低于安全更新基线 ${RELIABLE_WINDOWS_UPDATER_MIN_CORE_VERSION}；请完成一次性手工升级。`;
-      await chrome.tabs.create({ url: release.releaseUrl || RELEASES_URL });
-      window.close();
-      return;
-    }
-
-    elements.updateDetail.textContent = `正在下载 ${release.latestVersion} 安装器…`;
-    elements.message.textContent = '浏览器正在下载官方 GitHub Release 安装器 / Downloading installer…';
-    await chrome.storage.local.set({
-      [UPDATE_STATUS_KEY]: {
-        phase: 'downloading',
-        targetVersion: release.latestVersion,
-        startedAt: new Date().toISOString(),
-      },
-    });
-    const downloadId = await downloadFile({
-      url: release.installer.url,
-      filename: WINDOWS_DOWNLOAD_FILENAME,
-      conflictAction: 'overwrite',
-      saveAs: false,
-    });
-    const download = await waitForDownload(downloadId);
-
-    elements.updateDetail.textContent = `安装器下载完成，正在校验 SHA-256 并准备静默安装 ${release.latestVersion}…`;
-    elements.message.textContent = '正在由本地核心校验安装器并启动更新 / Verifying installer…';
-    const prepared = await nativeRequest('prepare_update', {
-      update: {
-        installerPath: download.filename,
-        expectedSha256: release.installer.sha256,
-        targetVersion: release.latestVersion,
-      },
-    });
-    await chrome.storage.local.set({
-      [UPDATE_STATUS_KEY]: {
-        phase: 'installing',
-        targetVersion: release.latestVersion,
-        startedAt: new Date().toISOString(),
-        installRoot: prepared?.installRoot ?? null,
-      },
-    });
-    elements.updateDetail.textContent = `正在后台安装 ${release.latestVersion}；GPTWork Core 会短暂断开并自动恢复`;
-    elements.message.textContent = '更新已启动，请保持此弹窗打开；完成后扩展会自动重新加载 / Installing…';
-
-    const updatedState = await waitForInstalledCore(release.latestVersion);
-    await chrome.storage.local.set({
-      [UPDATE_STATUS_KEY]: {
-        phase: 'complete',
-        targetVersion: release.latestVersion,
-        completedAt: new Date().toISOString(),
-        nativeVersion: updatedState?.nativeStatus?.version ?? null,
-      },
-    });
-    elements.updateDetail.textContent = `已安装 ${release.latestVersion}，正在重新加载扩展…`;
-    elements.message.textContent = '更新完成 / Update complete. Reloading extension…';
-    await sleep(900);
-    chrome.runtime.reload();
-  } catch (error) {
-    await chrome.storage.local.set({
-      [UPDATE_STATUS_KEY]: {
-        phase: 'error',
-        targetVersion: latestRelease?.latestVersion ?? null,
-        failedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
-      },
-    }).catch(() => {});
-    elements.message.textContent = `更新失败 / Update failed: ${error.message}`;
-    elements.updateDetail.textContent = '一键更新未完成；不会修改模型锁定配置，可重新检查更新后再试。';
-  } finally {
-    updateBusy = false;
-    renderUpdate(latestRelease);
-  }
-}
-
-
-elements.enabled.addEventListener('change', () => {
-  elements.enabled.disabled = true;
-  elements.message.textContent = elements.enabled.checked
-    ? '正在启用请求锁定 / Enabling…'
-    : '正在关闭 GPTWork / Disabling…';
-  void sendMessage({ type: 'GPTLOCK_SET_ENABLED', enabled: elements.enabled.checked })
-    .then(load)
-    .then(() => { elements.message.textContent = elements.enabled.checked ? 'GPTWork 已启用 / Enabled.' : 'GPTWork 已关闭 / Disabled.'; })
-    .catch((error) => { elements.message.textContent = error.message; })
-    .finally(() => { void load(); window.dispatchEvent(new CustomEvent('gptlock-account-refresh')); });
-});
 
 elements.autoVerify.addEventListener('click', () => {
   elements.message.textContent = '正在自动验证；证据不足会自动跟踪后续流并重试一次 / Auto verification is running…';
@@ -508,11 +251,9 @@ elements.reconnect.addEventListener('click', () => {
 });
 
 elements.checkUpdate.addEventListener('click', () => {
-  void checkUpdate().catch(() => {});
-});
-
-elements.installUpdate.addEventListener('click', () => {
-  void installUpdate();
+  // Update execution has one authority in the service worker. The popup only opens the
+  // settings update center, which renders the persisted background progress.
+  void sendMessage({ type: 'GPTLOCK_OPEN_OPTIONS' }).then(() => window.close());
 });
 
 elements.installCore.addEventListener('click', () => {
@@ -527,7 +268,13 @@ elements.logs.addEventListener('click', () => {
   void sendMessage({ type: 'GPTLOCK_OPEN_DIAGNOSTICS' }).then(() => window.close());
 });
 
-void Promise.all([load(), getPlatformInfo().then((info) => { platform = info; renderUpdate(); })]).catch((error) => {
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes[UPDATE_STATUS_KEY]?.newValue) {
+    renderUpdateStatus(changes[UPDATE_STATUS_KEY].newValue);
+  }
+});
+
+void load().catch((error) => {
   elements.guardTitle.textContent = '读取失败 / Failed to load';
   elements.guardDetail.textContent = error.message;
   elements.verdict.textContent = '错误';

@@ -115,17 +115,3 @@ function runMigration() {
 runMigration();
 chrome.runtime.onInstalled.addListener(runMigration);
 chrome.runtime.onStartup.addListener(runMigration);
-
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (!message || typeof message.type !== 'string') return false;
-  if (![
-    'GPTLOCK-LICENSE-GET',
-    'GPTLOCK_LICENSE_GET',
-    'GPTLOCK-LICENSE-ACTIVATE',
-    'GPTLOCK_LICENSE_ACTIVATE',
-    'GPTLOCK-LICENSE-CLEAR',
-    'GPTLOCK_LICENSE_CLEAR',
-  ].includes(message.type)) return false;
-  if (sender.tab) void redirectLegacySettingsTab(sender.tab).catch(() => {});
-  return false;
-});

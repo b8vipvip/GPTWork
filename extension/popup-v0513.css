@@ -1,32 +1,6 @@
 @import url('./popup.css');
 
-/*
- * v0.5.13 deliberately uses a brand-new stylesheet URL. Some Windows/Chrome
- * installations have demonstrated a mixed popup resource state where the new
- * action layout is visible while a pre-account License card is still rendered.
- * Keep the purge rules in this uniquely named resource so they cannot be lost
- * behind a cached popup.css from an older installation.
- */
-.license-card,
-[class~="license-card"],
-[id^="license" i],
-[class^="license-" i],
-[class*=" license-" i],
-input[placeholder^="GPTL-" i],
-section:has(input[placeholder^="GPTL-" i]),
-article:has(input[placeholder^="GPTL-" i]) {
-  display: none !important;
-  visibility: hidden !important;
-  width: 0 !important;
-  height: 0 !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  overflow: hidden !important;
-}
-
-/* Cache-proof compact toolbar: verify, update, local help, settings. */
+/* Compact toolbar: verify, update, local help, settings. */
 .actions {
   display: grid !important;
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;

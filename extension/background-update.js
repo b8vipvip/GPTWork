@@ -6,12 +6,12 @@ import {
   WINDOWS_DOWNLOAD_FILENAME,
 } from './update-manager.js';
 import { appendRuntimeLog } from './runtime-log.js';
+import { ACCOUNT_REFRESH_ALARM, scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
 export const RELEASE_NOTIFICATION_URL = 'https://gptlock.mv3.cn/site/api/releases/notifications';
 export const CLIENT_UPDATE_POLICY_URL = 'https://gptlock.mv3.cn/site/api/client-update/config';
 export const CLIENT_CONTROL_URL = 'https://gptlock.mv3.cn/api/v1/client/control';
 export const RELEASE_CHECK_ALARM = 'gptlock-release-check';
-export const ACCOUNT_REFRESH_ALARM = 'gptlock-account-refresh';
 export const RELEASE_GENERATION_KEY = 'gptlockReleaseGeneration';
 export const AUTO_UPDATE_ATTEMPT_KEY = 'gptlockAutoUpdateAttempt';
 export const ADMIN_UPDATE_GENERATION_KEY = 'gptworkAdminUpdateGeneration';
@@ -29,7 +29,6 @@ const INSTALL_INITIAL_WAIT_MS = 8 * 1000;
 const INSTALL_POLL_MS = 3 * 1000;
 const NATIVE_TIMEOUT_MS = 12 * 1000;
 const LONG_POLL_ROUNDS = 3;
-const ACCOUNT_REFRESH_SOON_MS = 250;
 
 let updateTask = null;
 let notificationTask = null;
@@ -71,18 +70,6 @@ export function shouldAutoInstall({ platformOs, nativeConnected, nativeVersion }
 
 function getPlatformInfo(chromeApi = globalThis.chrome) {
   return new Promise((resolve) => chromeApi.runtime.getPlatformInfo((info) => resolve(info ?? {})));
-}
-
-export async function scheduleAccountRefresh(chromeApi = globalThis.chrome) {
-  if (!chromeApi?.alarms?.create) throw new Error('Account refresh alarm is unavailable');
-  // background-update.js runs in the same MV3 service-worker frame as background.js.
-  // runtime.sendMessage() does not deliver back into the sender's own frame, so using
-  // it here can produce "Receiving end does not exist" even while the worker is alive.
-  // Re-arm the existing heartbeat alarm to fire promptly and keep its 1-minute cadence.
-  await chromeApi.alarms.create(ACCOUNT_REFRESH_ALARM, {
-    when: Date.now() + ACCOUNT_REFRESH_SOON_MS,
-    periodInMinutes: AUTO_UPDATE_ALARM_MINUTES,
-  });
 }
 
 function nativeRequest(type, payload = {}, chromeApi = globalThis.chrome, timeoutMs = NATIVE_TIMEOUT_MS) {

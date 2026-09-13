@@ -16,6 +16,20 @@ test('transient account initialization failures preserve the last authenticated 
   assert.doesNotMatch(client, /catch \(error\) \{\s*return persist\(\{ authenticated: false, lastError: error\.message \}\);/s);
 });
 
+test('account client serializes startup hydration before accepting a new login session', async () => {
+  const client = await source('account-client.js');
+  assert.match(client, /let sessionHydrated = false;/);
+  assert.match(client, /let hydratePromise = null;/);
+  assert.match(client, /let initializePromise = null;/);
+  assert.match(client, /if \(!sessionHydrated\) \{[\s\S]*token = typeof stored\[SESSION_KEY\]/);
+  assert.match(client, /A stale storage\.get[\s\S]*must never overwrite a newer in-memory token\/snapshot/);
+  const login = client.match(/async function login[\s\S]*?async function logout/)?.[0] ?? '';
+  assert.match(login, /await initialize\(\);/);
+  assert.ok(login.indexOf('await initialize();') < login.indexOf("request('/api/v1/auth/login'"));
+  assert.match(login, /sessionHydrated = true;/);
+  assert.match(login, /initialized = true;/);
+});
+
 test('account UI renders cached identity before a live state request can time out', async () => {
   const gate = await source('auth-gate.js');
   assert.match(gate, /const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';/);
@@ -27,10 +41,30 @@ test('account UI renders cached identity before a live state request can time ou
   assert.doesNotMatch(gate, /catch \(error\) \{\s*accountAuthenticated = false;/s);
 });
 
-test('feature-state timeout keeps saved switches instead of painting them disabled', async () => {
+test('per-tab feature-state timeout preserves the last successful UI snapshot without writing it back', async () => {
   const controller = await source('feature-toggle-controller.js');
-  assert.match(controller, /const flags = await featureFlags\(\);\s*syncVisibleToggles\(flags\);\s*scheduleConfiguredModelRender\(\);/s);
-  assert.match(controller, /State refresh delayed; keeping saved feature state\./);
-  assert.match(controller, /withTimeout\(runtimeMessage\('GPTLOCK_GET_STATE'\)\)/);
-  assert.doesNotMatch(controller, /syncVisibleToggles\(\{ workModeEnabled: false, modelLockEnabled: false \}\)/);
+  assert.match(controller, /let lastFeatureState = null;/);
+  assert.match(controller, /withTimeout\(runtimeMessage\(\{ type: 'GPTWORK_TAB_FEATURE_GET'/);
+  assert.match(controller, /if \(lastFeatureState\) syncVisibleToggles\(lastFeatureState\);/);
+  assert.match(controller, /State refresh delayed; keeping this tab state\./);
+  assert.doesNotMatch(controller, /chrome\.storage\.(?:local|sync|session)\.set/);
+});
+
+test('feature toggles never reject from a stale cached account before asking runtime authority', async () => {
+  const controller = await source('feature-toggle-controller.js');
+  assert.match(controller, /UI is not an authorization authority\.[\s\S]*tab runtime validates the current[\s\S]*account entitlement[\s\S]*target tab's window quota/);
+  assert.doesNotMatch(controller, /function requireActivation/);
+  const changeFeature = controller.match(/async function changeFeature[\s\S]*?function bindFeatureToggle/)?.[0] ?? '';
+  assert.match(changeFeature, /GPTWORK_TAB_FEATURE_SET/);
+  assert.match(changeFeature, /tabId: targetTabId/);
+  assert.doesNotMatch(changeFeature, /requireActivation\(/);
+  assert.match(changeFeature, /error\?\.code === 'ENTITLEMENT_REQUIRED'/);
+  assert.match(changeFeature, /const snapshot = await reconcile\(\)\.catch/);
+});
+
+test('overlapping account reconciliations cannot let an older logged-out response win after login', async () => {
+  const controller = await source('feature-toggle-controller.js');
+  assert.match(controller, /let reconcileGeneration = 0;/);
+  assert.match(controller, /const generation = \+\+reconcileGeneration;/);
+  assert.match(controller, /if \(generation !== reconcileGeneration \|\| targetTabId !== currentTabId\) return snapshot;/);
 });

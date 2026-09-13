@@ -75,7 +75,22 @@ impl AppState {
     }
 
     pub fn verify(&self, request: VerificationRequest) -> Result<VerificationResult> {
-        let (policy, revision) = self.policy()?;
+        self.verify_with_policy(request, None)
+    }
+
+    pub fn verify_with_policy(
+        &self,
+        request: VerificationRequest,
+        policy_override: Option<Policy>,
+    ) -> Result<VerificationResult> {
+        let (policy, revision) = match policy_override {
+            Some(policy) => {
+                let policy = policy.normalized()?;
+                let revision = policy.revision()?;
+                (policy, revision)
+            }
+            None => self.policy()?,
+        };
         let result = verifier::verify(&policy, &revision, request);
         self.audit.record_verification(&result)?;
         self.store.save_last_verification(&result)?;

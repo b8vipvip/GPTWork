@@ -133,15 +133,20 @@ fn handle_message(state: &Arc<AppState>, message: Value) -> Value {
             .and_then(|value| serde_json::from_value::<Policy>(value).map_err(Into::into))
             .and_then(|policy| state.set_policy(policy, "native_messaging"))
             .map(|(policy, revision)| json!({ "policy": policy, "revision": revision })),
-        "verify" => message
-            .get("observation")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("observation is required / 缺少 observation"))
-            .and_then(|value| {
-                serde_json::from_value::<VerificationRequest>(value).map_err(Into::into)
-            })
-            .and_then(|request| state.verify(request))
-            .and_then(|result| serde_json::to_value(result).map_err(Into::into)),
+        "verify" => (|| -> Result<Value> {
+            let request_value = message
+                .get("observation")
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("observation is required / 缺少 observation"))?;
+            let request = serde_json::from_value::<VerificationRequest>(request_value)?;
+            let policy_override = message
+                .get("policy")
+                .cloned()
+                .map(serde_json::from_value::<Policy>)
+                .transpose()?;
+            let result = state.verify_with_policy(request, policy_override)?;
+            Ok(serde_json::to_value(result)?)
+        })(),
         "prepare_update" => message
             .get("update")
             .cloned()
@@ -304,6 +309,34 @@ mod tests {
             }),
         );
         assert_eq!(response["ok"], false);
+    }
+
+    #[test]
+    fn verification_accepts_policy_override_without_persisting_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = AppState::initialize(ConfigStore::at(directory.path().to_path_buf())).unwrap();
+        let before = state.policy().unwrap().0;
+        let response = handle_message(
+            &state,
+            json!({
+                "id": "tab-policy",
+                "type": "verify",
+                "policy": {
+                    "lockedModels": ["gpt-6-astra"],
+                    "allowedReasoningLevels": ["high"],
+                    "strictMode": true
+                },
+                "observation": {
+                    "model": "gpt-6-astra",
+                    "reasoning": "high",
+                    "evidenceSource": "network_response_metadata",
+                    "requestId": "cdp-123-1"
+                }
+            }),
+        );
+        assert_eq!(response["ok"], true);
+        assert_eq!(response["data"]["verdict"], "verified");
+        assert_eq!(state.policy().unwrap().0, before);
     }
 
     #[test]

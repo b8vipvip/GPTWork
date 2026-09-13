@@ -38,15 +38,31 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   let deviceId = '';
   let browserInstanceId = '';
   let state = normalizeAccount(null);
+  let sessionHydrated = false;
+  let hydratePromise = null;
+  let initializePromise = null;
+  let initialized = false;
 
   async function ensureIds() {
-    const stored = await chrome.storage.local.get([DEVICE_KEY, BROWSER_KEY, SESSION_KEY, SNAPSHOT_KEY]);
-    deviceId = typeof stored[DEVICE_KEY] === 'string' && stored[DEVICE_KEY] ? stored[DEVICE_KEY] : randomId('device');
-    browserInstanceId = typeof stored[BROWSER_KEY] === 'string' && stored[BROWSER_KEY] ? stored[BROWSER_KEY] : randomId('browser');
-    token = typeof stored[SESSION_KEY] === 'string' ? stored[SESSION_KEY] : '';
-    state = normalizeAccount(stored[SNAPSHOT_KEY]);
-    await chrome.storage.local.set({ [DEVICE_KEY]: deviceId, [BROWSER_KEY]: browserInstanceId });
-    return { deviceId, browserInstanceId };
+    if (sessionHydrated && deviceId && browserInstanceId) return { deviceId, browserInstanceId };
+    if (hydratePromise) return hydratePromise;
+    hydratePromise = (async () => {
+      const stored = await chrome.storage.local.get([DEVICE_KEY, BROWSER_KEY, SESSION_KEY, SNAPSHOT_KEY]);
+      deviceId = deviceId || (typeof stored[DEVICE_KEY] === 'string' && stored[DEVICE_KEY] ? stored[DEVICE_KEY] : randomId('device'));
+      browserInstanceId = browserInstanceId || (typeof stored[BROWSER_KEY] === 'string' && stored[BROWSER_KEY] ? stored[BROWSER_KEY] : randomId('browser'));
+      // Session hydration is one-shot for this background generation. A stale storage.get
+      // that started before login must never overwrite a newer in-memory token/snapshot.
+      if (!sessionHydrated) {
+        token = typeof stored[SESSION_KEY] === 'string' ? stored[SESSION_KEY] : '';
+        state = normalizeAccount(stored[SNAPSHOT_KEY]);
+        sessionHydrated = true;
+      }
+      await chrome.storage.local.set({ [DEVICE_KEY]: deviceId, [BROWSER_KEY]: browserInstanceId });
+      return { deviceId, browserInstanceId };
+    })().finally(() => {
+      hydratePromise = null;
+    });
+    return hydratePromise;
   }
 
   async function persist(next) {
@@ -95,24 +111,37 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   }
 
   async function initialize() {
-    await ensureIds();
-    if (!token) return persist(null);
+    if (initialized) return state;
+    if (initializePromise) return initializePromise;
+    initializePromise = (async () => {
+      await ensureIds();
+      if (!token) return persist(null);
+      try {
+        return await me();
+      } catch (error) {
+        // A transient transport/server failure must not turn a still-valid local session
+        // into an apparent logout. Only an explicit 401 clears the token/session inside
+        // request()/me(). Keep the last authenticated snapshot and annotate the refresh
+        // failure so the next heartbeat can recover without flashing the login UI.
+        state = { ...state, lastError: error.message };
+        await chrome.storage.local.set({ [SNAPSHOT_KEY]: state });
+        return state;
+      }
+    })();
     try {
-      return await me();
-    } catch (error) {
-      // A transient transport/server failure must not turn a still-valid local session
-      // into an apparent logout. Only an explicit 401 clears the token/session inside
-      // request()/me(). Keep the last authenticated snapshot and annotate the refresh
-      // failure so the next heartbeat can recover without flashing the login UI.
-      state = { ...state, lastError: error.message };
-      await chrome.storage.local.set({ [SNAPSHOT_KEY]: state });
-      return state;
+      const result = await initializePromise;
+      initialized = true;
+      return result;
+    } finally {
+      initializePromise = null;
     }
   }
 
   async function clearSession() {
     token = '';
     state = normalizeAccount(null);
+    sessionHydrated = true;
+    initialized = true;
     await chrome.storage.local.remove([SESSION_KEY, SNAPSHOT_KEY]);
     return state;
   }
@@ -138,15 +167,22 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   }
 
   async function login(email, password, replaceDeviceRecordIds = []) {
+    // Login is serialized behind the one-time session hydration. This prevents an
+    // in-flight startup initialize()/me() from later clearing or overwriting a newly
+    // issued session token after an extension update/service-worker restart.
+    await initialize();
     const identity = await clientIdentity({ email, password, replaceDeviceRecordIds });
     const data = await request('/api/v1/auth/login', { method: 'POST', body: identity });
     token = String(data.sessionToken || '');
     if (!token) throw new Error('登录响应缺少会话令牌');
+    sessionHydrated = true;
+    initialized = true;
     await chrome.storage.local.set({ [SESSION_KEY]: token });
     return persist(data.account);
   }
 
   async function logout() {
+    await initialize();
     try { if (token) await request('/api/v1/account/logout', { method: 'POST', body: {}, auth: true }); }
     catch {}
     return clearSession();
@@ -165,6 +201,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   }
 
   async function me() {
+    await ensureIds();
     if (!token) return persist(null);
     try {
       const data = await request('/api/v1/account/me', { auth: true });
@@ -176,6 +213,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   }
 
   async function heartbeat(windowKeys = []) {
+    await initialize();
     if (!token) return persist(null);
     const identity = await clientIdentity({ windowKeys });
     try {
@@ -194,22 +232,27 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   }
 
   async function security() {
+    await initialize();
     return request('/api/v1/account/security', { auth: true });
   }
 
   async function releaseDevice(deviceRecordId) {
+    await initialize();
     return request('/api/v1/account/devices/release', { method: 'POST', body: { deviceRecordId }, auth: true });
   }
 
   async function revokeSession(sessionId) {
+    await initialize();
     return request('/api/v1/account/sessions/revoke', { method: 'POST', body: { sessionId }, auth: true });
   }
 
   async function revokeOtherSessions() {
+    await initialize();
     return request('/api/v1/account/sessions/revoke-others', { method: 'POST', body: {}, auth: true });
   }
 
   async function changePassword(currentPassword, newPassword) {
+    await initialize();
     const data = await request('/api/v1/account/change-password', {
       method: 'POST', body: { currentPassword, newPassword }, auth: true,
     });
@@ -217,12 +260,14 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   }
 
   async function createOrder(planCode, paymentMethod) {
+    await initialize();
     return request('/api/v1/account/orders', {
       method: 'POST', body: { planCode, paymentMethod }, auth: true,
     });
   }
 
   async function getOrder(orderId) {
+    await initialize();
     return request(`/api/v1/account/orders/${encodeURIComponent(orderId)}`, { auth: true });
   }
 

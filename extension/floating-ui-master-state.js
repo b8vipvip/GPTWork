@@ -1,6 +1,5 @@
 (() => {
   const MASTER_KEY = 'gptworkEnabledLocal';
-  const GPTWORK_MESSAGE_PREFIX = 'GPTLOCK_';
   const RECENT_REQUEST_MARKER = /\s*·\s*最近请求/g;
   const FLOATING_HOST_IDS = [
     'gptlock-indicator-host',
@@ -53,42 +52,6 @@
     watchModelIndicator();
   }
 
-  function disabledResponse(message) {
-    if (message?.type === 'GPTLOCK_GET_STATE') {
-      return {
-        ok: true,
-        data: {
-          policy: null,
-          settings: { enabled: false },
-          nativeStatus: { connected: false },
-          tabState: null,
-          accountWindowAllowed: false,
-        },
-      };
-    }
-    return { ok: true, data: null };
-  }
-
-  // Content scripts share one isolated world. Suppress GPTWork runtime chatter while
-  // the master switch is off so periodic observers cannot keep waking the service worker.
-  try {
-    const originalSendMessage = chrome.runtime.sendMessage.bind(chrome.runtime);
-    chrome.runtime.sendMessage = (message, ...args) => {
-      if (!masterResolved || masterEnabled || !String(message?.type || '').startsWith(GPTWORK_MESSAGE_PREFIX)) {
-        return originalSendMessage(message, ...args);
-      }
-      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-      const response = disabledResponse(message);
-      if (callback) {
-        queueMicrotask(() => callback(response));
-        return undefined;
-      }
-      return Promise.resolve(response);
-    };
-  } catch {
-    // The visual and background hard-stop paths still apply if the API is read-only.
-  }
-
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type !== 'GPTLOCK_MASTER_RUNTIME_STATE') return false;
     masterEnabled = message.enabled === true;
@@ -108,7 +71,9 @@
   pageObserver.observe(document.documentElement, { childList: true, subtree: true });
 
   chrome.storage.local.get(MASTER_KEY, (stored) => {
-    masterEnabled = !chrome.runtime.lastError && stored?.[MASTER_KEY] === true;
+    let runtimeError = null;
+    try { runtimeError = chrome.runtime.lastError; } catch {}
+    masterEnabled = !runtimeError && stored?.[MASTER_KEY] === true;
     masterResolved = true;
     maintainUiPolicy();
   });

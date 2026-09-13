@@ -27,7 +27,7 @@ test('service worker migrates already-open legacy settings tabs to the current p
   assert.match(migration, /chrome\.tabs\.update\(tab\.id, \{ url: replacementUrl\(tab\.url\) \}\)/);
   assert.match(migration, /chrome\.runtime\.onInstalled\.addListener\(runMigration\)/);
   assert.match(migration, /chrome\.runtime\.onStartup\.addListener\(runMigration\)/);
-  assert.match(migration, /GPTLOCK-LICENSE-GET/);
+  assert.doesNotMatch(migration, /GPTLOCK[_-]LICENSE|licenseKey|licenseCode/);
 
   await assert.rejects(access(legacySettingsUrl));
 });

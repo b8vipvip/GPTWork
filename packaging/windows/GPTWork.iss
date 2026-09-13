@@ -80,6 +80,10 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 [Code]
 var
   BrowserPage: TInputOptionWizardPage;
+  ChromeManifestPaused: Boolean;
+  EdgeManifestPaused: Boolean;
+  NativeMessagingPaused: Boolean;
+  InstallCompleted: Boolean;
 
 function JsonEscape(Value: String): String;
 begin
@@ -139,6 +143,105 @@ begin
     Result := 'Edge';
 end;
 
+function PauseNativeManifest(FileName: String; var WasPaused: Boolean): Boolean;
+var
+  BackupName: String;
+begin
+  Result := True;
+  WasPaused := False;
+  BackupName := FileName + '.install-backup';
+
+  // Recover a manifest left paused by an interrupted older setup attempt.
+  if FileExists(BackupName) and not FileExists(FileName) then
+  begin
+    if not RenameFile(BackupName, FileName) then
+    begin
+      Result := False;
+      exit;
+    end;
+  end;
+
+  // If both exist, the live manifest wins and the stale backup can be discarded.
+  if FileExists(BackupName) and FileExists(FileName) then
+  begin
+    if not DeleteFile(BackupName) then
+    begin
+      Result := False;
+      exit;
+    end;
+  end;
+
+  if FileExists(FileName) then
+  begin
+    if not RenameFile(FileName, BackupName) then
+    begin
+      Result := False;
+      exit;
+    end;
+    WasPaused := True;
+  end;
+end;
+
+procedure RestorePausedNativeMessaging;
+var
+  ChromeManifest: String;
+  EdgeManifest: String;
+begin
+  ChromeManifest := ExpandConstant('{app}\native-messaging\chrome.json');
+  EdgeManifest := ExpandConstant('{app}\native-messaging\edge.json');
+
+  if ChromeManifestPaused and FileExists(ChromeManifest + '.install-backup') and
+     not FileExists(ChromeManifest) then
+    RenameFile(ChromeManifest + '.install-backup', ChromeManifest);
+  if EdgeManifestPaused and FileExists(EdgeManifest + '.install-backup') and
+     not FileExists(EdgeManifest) then
+    RenameFile(EdgeManifest + '.install-backup', EdgeManifest);
+
+  ChromeManifestPaused := False;
+  EdgeManifestPaused := False;
+  NativeMessagingPaused := False;
+end;
+
+function PauseNativeMessaging: Boolean;
+var
+  ChromeManifest: String;
+  EdgeManifest: String;
+begin
+  if NativeMessagingPaused then
+  begin
+    Result := True;
+    exit;
+  end;
+
+  ChromeManifest := ExpandConstant('{app}\native-messaging\chrome.json');
+  EdgeManifest := ExpandConstant('{app}\native-messaging\edge.json');
+
+  if not PauseNativeManifest(ChromeManifest, ChromeManifestPaused) then
+  begin
+    Result := False;
+    exit;
+  end;
+
+  if not PauseNativeManifest(EdgeManifest, EdgeManifestPaused) then
+  begin
+    RestorePausedNativeMessaging;
+    Result := False;
+    exit;
+  end;
+
+  NativeMessagingPaused := True;
+  Result := True;
+end;
+
+procedure FinishNativeMessagingPause;
+begin
+  DeleteFile(ExpandConstant('{app}\native-messaging\chrome.json.install-backup'));
+  DeleteFile(ExpandConstant('{app}\native-messaging\edge.json.install-backup'));
+  ChromeManifestPaused := False;
+  EdgeManifestPaused := False;
+  NativeMessagingPaused := False;
+end;
+
 function StopInstalledCoreProcesses(): Boolean;
 var
   CorePath: String;
@@ -156,15 +259,16 @@ begin
   Script :=
     '$ErrorActionPreference=''Stop''; ' +
     '$targets=@([IO.Path]::GetFullPath(''' + CorePath + '''),[IO.Path]::GetFullPath(''' + EnginePath + '''),[IO.Path]::GetFullPath(''' + LegacyCorePath + '''),[IO.Path]::GetFullPath(''' + LegacyEnginePath + ''')); ' +
-    '$deadline=(Get-Date).AddSeconds(8); ' +
+    '$deadline=(Get-Date).AddSeconds(10); $quietSince=$null; ' +
     'do { ' +
     '$matches=@(Get-Process -Name ''gptwork-core'',''gptwork-engine'',''gptlock-core'',''gptlock-engine'' -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -and ($targets -contains [IO.Path]::GetFullPath($_.Path)) } catch { $false } }); ' +
-    'foreach ($p in $matches) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }; ' +
+    'if ($matches.Count -gt 0) { ' +
+    'foreach ($p in $matches) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }; $quietSince=$null ' +
+    '} elseif ($null -eq $quietSince) { $quietSince=Get-Date ' +
+    '} elseif (((Get-Date)-$quietSince).TotalMilliseconds -ge 1000) { exit 0 }; ' +
     'Start-Sleep -Milliseconds 150; ' +
-    '$remaining=@(Get-Process -Name ''gptwork-core'',''gptwork-engine'',''gptlock-core'',''gptlock-engine'' -ErrorAction SilentlyContinue | Where-Object { try { $_.Path -and ($targets -contains [IO.Path]::GetFullPath($_.Path)) } catch { $false } }); ' +
-    'if ($remaining.Count -eq 0) { exit 0 } ' +
     '} while ((Get-Date) -lt $deadline); ' +
-    'throw ''GPTWork core processes still running after retry window''';
+    'throw ''GPTWork core processes still running or respawning after retry window''';
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"';
   Result := Exec(
     ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
@@ -179,13 +283,25 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+
+  // Temporarily hide Native Messaging manifests before killing the old host. Otherwise an
+  // open Chrome/Edge extension can reconnect in the tiny gap before [Files] replaces the EXE.
+  if not PauseNativeMessaging then
+  begin
+    Result := '无法暂停 GPTWork 浏览器本地连接，请完全退出浏览器后重试 / Could not pause GPTWork Native Messaging; fully exit the browser and retry.';
+    exit;
+  end;
+
   if FileExists(ExpandConstant('{app}\bin\gptwork-core.exe')) or
      FileExists(ExpandConstant('{app}\bin\gptwork-engine.exe')) or
      FileExists(ExpandConstant('{app}\bin\gptlock-core.exe')) or
      FileExists(ExpandConstant('{app}\bin\gptlock-engine.exe')) then
   begin
     if not StopInstalledCoreProcesses() then
+    begin
+      RestorePausedNativeMessaging;
       Result := '无法停止正在运行的 GPTWork 本地核心，请完全退出浏览器后重试 / Could not stop the running GPTWork core; fully exit the browser and retry.';
+    end;
   end;
 end;
 
@@ -233,5 +349,13 @@ begin
       WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'), '{#ChromeStoreExtensionId}');
     if EdgeSelected() then
       WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'), '{#EdgeStoreExtensionId}');
+    FinishNativeMessagingPause;
+    InstallCompleted := True;
   end;
+end;
+
+procedure DeinitializeSetup;
+begin
+  if NativeMessagingPaused and not InstallCompleted then
+    RestorePausedNativeMessaging;
 end;

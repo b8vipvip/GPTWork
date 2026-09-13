@@ -28,6 +28,7 @@
 
   let policy = null;
   let settings = null;
+  let featureEnabled = false;
   let timer = null;
   let pending = false;
   let attempts = 0;
@@ -91,11 +92,8 @@
   }
 
   async function chooseExact(selectors, desired, normalize) {
-    const trigger = selectors
-      .flatMap((selector) => [...document.querySelectorAll(selector)])
-      .find(visible);
+    const trigger = selectors.flatMap((selector) => [...document.querySelectorAll(selector)]).find(visible);
     if (!trigger) return { changed: false, retry: true };
-
     trigger.click();
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     const candidate = menuCandidates().find((element) =>
@@ -112,9 +110,7 @@
 
   function desiredReasoning() {
     const allowed = Array.isArray(policy?.allowedReasoningLevels) ? policy.allowedReasoningLevels : [];
-    return allowed.includes(settings?.preferredReasoning)
-      ? settings.preferredReasoning
-      : allowed[0] || null;
+    return allowed.includes(settings?.preferredReasoning) ? settings.preferredReasoning : allowed[0] || null;
   }
 
   function disarmWakeObserver() {
@@ -152,7 +148,7 @@
   async function alignNow() {
     timer = null;
     if (syncing || !pending) return;
-    if (settings?.enabled === false) {
+    if (!featureEnabled || settings?.enabled === false) {
       finishSync();
       return;
     }
@@ -166,19 +162,16 @@
       const desiredModel = normalizeModel(policy?.lockedModels?.[0]);
       const preferred = normalizeReasoning(desiredReasoning());
       let retry = false;
-
       const currentModel = currentValue(MODEL_SELECTORS, normalizeModel);
       if (desiredModel && currentModel !== desiredModel) {
         const result = await chooseExact(MODEL_SELECTORS, desiredModel, normalizeModel);
         retry ||= result.retry;
       }
-
       const currentReasoning = currentValue(REASONING_SELECTORS, normalizeReasoning);
       if (preferred && currentReasoning !== preferred) {
         const result = await chooseExact(REASONING_SELECTORS, preferred, normalizeReasoning);
         retry ||= result.retry;
       }
-
       const finalModel = currentValue(MODEL_SELECTORS, normalizeModel);
       const finalReasoning = currentValue(REASONING_SELECTORS, normalizeReasoning);
       const modelAligned = !desiredModel || finalModel === desiredModel;
@@ -190,13 +183,9 @@
         }));
         return;
       }
-
       attempts += 1;
-      if (retry && attempts < MAX_ACTIVE_ATTEMPTS) {
-        scheduleRetry();
-      } else if (retry) {
-        armWakeObserver();
-      }
+      if (retry && attempts < MAX_ACTIVE_ATTEMPTS) scheduleRetry();
+      else if (retry) armWakeObserver();
     } finally {
       syncing = false;
     }
@@ -209,6 +198,10 @@
   }
 
   function requestForcedSync({ resetAttempts = true } = {}) {
+    if (!featureEnabled) {
+      finishSync();
+      return;
+    }
     pending = true;
     if (resetAttempts) attempts = 0;
     disarmWakeObserver();
@@ -216,37 +209,55 @@
     timer = window.setTimeout(() => void alignNow(), 80);
   }
 
-  function loadCurrentConfiguration() {
-    chrome.storage.sync.get(['policy', 'settings'], (stored) => {
-      if (chrome.runtime.lastError) return;
-      policy = stored.policy || policy;
-      settings = stored.settings || settings;
+  function applySnapshot(snapshot, { forceSync = false } = {}) {
+    if (!snapshot) return;
+    policy = snapshot.policy || policy;
+    settings = snapshot.settings || settings;
+    const features = snapshot.featureState || {};
+    featureEnabled = Boolean(
+      (features.workModeEnabled || features.modelLockEnabled)
+      && snapshot.masterEnabled !== false
+      && snapshot.account?.authenticated === true
+      && snapshot.account?.entitlement?.active === true
+      && snapshot.accountWindowAllowed !== false,
+    );
+    if (featureEnabled && forceSync) requestForcedSync();
+    else if (!featureEnabled) finishSync();
+  }
+
+  function refreshTabConfiguration({ forceSync = false } = {}) {
+    chrome.runtime.sendMessage({ type: 'GPTWORK_TAB_FEATURE_GET' }, (response) => {
+      if (chrome.runtime.lastError || !response?.ok) return;
+      applySnapshot(response.data, { forceSync });
     });
   }
 
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === 'GPTWORK_TAB_FEATURE_STATE') {
+      policy = message.policy || policy;
+      const features = message.featureState || {};
+      featureEnabled = Boolean(features.workModeEnabled || features.modelLockEnabled);
+      refreshTabConfiguration({ forceSync: true });
+    }
+    if (message?.type === 'GPTLOCK_GUARD_STATE') {
+      settings = message.settings || settings;
+      if (message.settings?.enabled === false) finishSync();
+    }
+    return false;
+  });
+
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'sync') return;
-    const policyChanged = Boolean(changes.policy?.newValue);
-    const settingsChanged = Boolean(changes.settings?.newValue);
-    if (!policyChanged && !settingsChanged) return;
-    if (policyChanged) policy = changes.policy.newValue;
-    if (settingsChanged) settings = changes.settings.newValue;
-
-    const lockChanged = policyChanged
-      && JSON.stringify(changes.policy.oldValue?.lockedModels || []) !== JSON.stringify(changes.policy.newValue?.lockedModels || []);
-    const reasoningChanged = policyChanged
-      && JSON.stringify(changes.policy.oldValue?.allowedReasoningLevels || []) !== JSON.stringify(changes.policy.newValue?.allowedReasoningLevels || []);
-    const preferredChanged = settingsChanged
-      && changes.settings.oldValue?.preferredReasoning !== changes.settings.newValue?.preferredReasoning;
-
-    if (lockChanged || reasoningChanged || preferredChanged) requestForcedSync();
+    if (changes.policy || changes.settings || changes.discoveredModels || changes.gptworkModelLockSelection) {
+      refreshTabConfiguration({ forceSync: true });
+    }
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && pending) requestForcedSync({ resetAttempts: false });
+    if (!document.hidden) refreshTabConfiguration({ forceSync: pending || featureEnabled });
   });
-  window.addEventListener('popstate', () => pending && requestForcedSync({ resetAttempts: false }));
-  window.addEventListener('hashchange', () => pending && requestForcedSync({ resetAttempts: false }));
+  window.addEventListener('popstate', () => refreshTabConfiguration({ forceSync: pending || featureEnabled }));
+  window.addEventListener('hashchange', () => refreshTabConfiguration({ forceSync: pending || featureEnabled }));
 
-  loadCurrentConfiguration();
+  refreshTabConfiguration({ forceSync: false });
 })();
