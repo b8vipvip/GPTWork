@@ -10,10 +10,11 @@ const files = Object.fromEntries(await Promise.all([
   'background-entry.js',
 ].map(async (name) => [name, await readFile(new URL(`../${name}`, import.meta.url), 'utf8')])));
 
-test('master and per-tab state have single explicit owners', () => {
+test('master and window feature state have single explicit owners', () => {
   assert.match(files['master-ui-controller.js'], /GPTWORK_MASTER_SET/);
   assert.match(files['tab-feature-runtime.js'], /GPTWORK_MASTER_SET/);
   assert.match(files['tab-feature-runtime.js'], /GPTWORK_TAB_FEATURE_SET/);
+  assert.match(files['tab-feature-runtime.js'], /WINDOW_FEATURE_SESSION_KEY/);
   assert.match(files['tab-feature-runtime.js'], /chrome\.storage\.session/);
 
   assert.doesNotMatch(files['popup.js'], /GPTLOCK_SET_ENABLED|GPTWORK_MASTER_SET/);
@@ -26,5 +27,5 @@ test('master and per-tab state have single explicit owners', () => {
     assert.doesNotMatch(source, /chrome\.runtime\.onMessage\.addListener\s*=/);
     assert.doesNotMatch(source, /ChatGptNetworkMonitor\.prototype/);
   }
-  assert.doesNotMatch(files['background-entry.js'], /tab-feature-network-policy|network-monitor-safety/);
+  assert.doesNotMatch(files['background-entry.js'], /master-runtime-safety|tab-feature-network-policy|network-monitor-safety/);
 });
