@@ -33,6 +33,24 @@ test('feature UI never writes legacy global Work or Model-lock flags', () => {
   assert.doesNotMatch(controller, /GPTLOCK_SET_ENABLED/);
 });
 
+test('master storage transition is the single fan-out and OFF pushes an immediate fail-open guard', () => {
+  const masterSet = runtime.match(/if \(message\.type === 'GPTWORK_MASTER_SET'\) \{([\s\S]*?)\n  \}\n\n  throw new Error/)?.[1] || '';
+  assert.match(masterSet, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: desired \}\)/);
+  assert.doesNotMatch(masterSet, /pushAllFeatureStates\(/);
+
+  const push = runtime.match(/async function pushFeatureState\(tabId, featureState = null\) \{([\s\S]*?)\n\}/)?.[0] || '';
+  assert.match(push, /if \(masterEnabled\) return/);
+  assert.match(push, /type: 'GPTLOCK_GUARD_STATE'/);
+  assert.match(push, /canSend: true/);
+  assert.match(push, /allowKind: 'disabled'/);
+  assert.match(push, /status: 'disabled'/);
+  assert.match(push, /settings: \{ enabled: false \}/);
+
+  const storageListener = runtime.match(/chrome\.storage\.onChanged\.addListener\(\(changes, areaName\) => \{([\s\S]*?)\n\}\);/)?.[0] || '';
+  assert.match(storageListener, /changes\[MASTER_KEY\]/);
+  assert.match(storageListener, /pushAllFeatureStates\(\)/);
+});
+
 test('background derives debugger configuration from the target tab policy directly', () => {
   assert.match(background, /lockConfigurationForTabSync/);
   assert.match(background, /getLockConfiguration\(tabId\)/);
