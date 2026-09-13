@@ -245,7 +245,8 @@ async function applyState(state) {
     const mode = document.querySelector(`input[name="mode"][value="${policy.strictMode}"]`);
     if (mode) mode.checked = true;
     elements.preferredReasoning.value = settings.preferredReasoning;
-    elements.enabled.checked = settings.enabled;
+    // #enabled is local-only Master authority and is rendered exclusively by
+    // master-ui-controller.js. Never repaint it from legacy/synced settings.enabled.
     elements.networkVerification.checked = settings.networkVerificationEnabled;
     elements.autoAlignSelection.checked = settings.autoAlignSelection;
     renderStatus(state.nativeStatus);
