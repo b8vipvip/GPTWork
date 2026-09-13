@@ -3,13 +3,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
-  ACCOUNT_REFRESH_ALARM,
   AUTO_UPDATE_ALARM_MINUTES,
   RELEASE_NOTIFICATION_URL,
   releaseNotificationUrl,
-  scheduleAccountRefresh,
   shouldAutoInstall,
 } from '../background-update.js';
+import {
+  ACCOUNT_REFRESH_ALARM,
+  ACCOUNT_REFRESH_PERIOD_MINUTES,
+  scheduleAccountRefresh,
+} from '../account-refresh-scheduler.js';
 
 const ROOT = new URL('../', import.meta.url);
 
@@ -44,7 +47,8 @@ test('account control refresh re-arms the shared heartbeat alarm instead of self
   await scheduleAccountRefresh(chromeApi);
   assert.equal(created.length, 1);
   assert.equal(created[0].name, ACCOUNT_REFRESH_ALARM);
-  assert.equal(created[0].info.periodInMinutes, AUTO_UPDATE_ALARM_MINUTES);
+  assert.equal(created[0].info.periodInMinutes, ACCOUNT_REFRESH_PERIOD_MINUTES);
+  assert.equal(ACCOUNT_REFRESH_PERIOD_MINUTES, AUTO_UPDATE_ALARM_MINUTES);
   assert.ok(created[0].info.when >= before);
   assert.ok(created[0].info.when <= Date.now() + 1_000);
 
