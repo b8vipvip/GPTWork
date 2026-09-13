@@ -1,5 +1,5 @@
 export const RUNTIME_GENERATION_KEY = 'gptworkRuntimeGeneration';
-export const RUNTIME_GENERATION = '0.5.57-tab-isolation-r1';
+export const RUNTIME_GENERATION = '0.5.56-tab-isolation-r2';
 
 export async function markRuntimeGeneration() {
   await chrome.storage.local.set({
