@@ -18,7 +18,7 @@ test('legacy License stays removed while user-level window quota gates GPTWork',
   assert.match(gate, /windowId/);
   assert.match(gate, /allowedWindowKeys/);
   assert.match(gate, /deniedWindowKeys/);
-  assert.match(background, /authorized: false,[\s\S]*status: 'removed',[\s\S]*license: null/);
+  assert.doesNotMatch(background, /GPTLOCK_LICENSE|GPTLOCK-LICENSE|licenseCode|licenseActivate|licenseKey|status:\s*'removed'|license:\s*null/);
   assert.match(auth, /当前等级最多 .*同时窗口/);
   assert.match(accountSystem, /const remaining = Math\.max\(0, Number\(entitlement\.limits\.windows \|\| 1\) - occupiedByOtherSessions\);/);
   assert.match(accountSystem, /const allowed = entitlement\.active \? requested\.slice\(0, remaining\) : \[\];/);
