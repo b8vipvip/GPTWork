@@ -33,10 +33,15 @@ const elements = {
   installCore: document.getElementById('installCore'),
 };
 
+const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
+const UPDATE_TRANSIENT_PHASES = new Set(['checking', 'downloading', 'verifying', 'quiescing', 'installing', 'reloading', 'recovering']);
+
 const knownModelIds = new Set(KNOWN_MODELS.map((model) => model.id));
 let writeQueue = Promise.resolve();
 let applyingRemoteState = false;
 let messageTimer = null;
+let updateRecoveryActive = false;
+let lastNativeStatus = null;
 
 function checkbox(container, name, id, label, detail = '', dataset = {}) {
   const existing = [...container.querySelectorAll(`input[name="${name}"]`)]
@@ -200,16 +205,22 @@ function concreteSelectedModels() {
 }
 
 function renderStatus(nativeStatus = {}) {
+  lastNativeStatus = nativeStatus || {};
   const connected = Boolean(nativeStatus.connected);
+  const recovering = !connected && updateRecoveryActive;
   elements.connectionBadge.className = `badge ${connected ? 'online' : 'offline'}`;
   elements.connectionBadge.textContent = connected
     ? '本地核心已连接 / Core online'
-    : '本地核心离线 / Core offline';
+    : recovering
+      ? 'GPTWork 更新恢复中 / Recovering'
+      : '本地核心离线 / Core offline';
   elements.nativeStatus.textContent = connected
     ? `已连接 / Connected${nativeStatus.policyRevision ? ` · ${nativeStatus.policyRevision}` : ''}`
-    : `${nativeStatus.lastError || '未连接 / Not connected'} · 请求锁定器可独立运行`;
-  elements.installHelp.hidden = connected;
-  if (!connected) {
+    : recovering
+      ? '更新尚未完成：正在恢复本地核心、页面运行时和请求锁定器 / Update recovery in progress'
+      : `${nativeStatus.lastError || '未连接 / Not connected'} · 请求锁定器可独立运行`;
+  elements.installHelp.hidden = connected || recovering;
+  if (!connected && !recovering) {
     const help = nativeHelp(nativeStatus.errorCode || classifyNativeError(nativeStatus.lastError));
     elements.installTitle.textContent = help.title;
     elements.installDetail.textContent = `${help.detail} 本地核心离线不会把日常聊天卡死；扩展仍会尝试网络层请求锁定。`;
@@ -256,7 +267,11 @@ async function applyState(state) {
 }
 
 async function load() {
-  const state = await sendMessage({ type: 'GPTLOCK_GET_STATE' });
+  const [state, stored] = await Promise.all([
+    sendMessage({ type: 'GPTLOCK_GET_STATE' }),
+    chrome.storage.local.get(UPDATE_STATUS_KEY),
+  ]);
+  updateRecoveryActive = UPDATE_TRANSIENT_PHASES.has(stored?.[UPDATE_STATUS_KEY]?.phase);
   await applyState(state);
 }
 
@@ -401,9 +416,21 @@ elements.installCore.addEventListener('click', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'sync' || (!changes.policy && !changes.settings)) return;
-  window.setTimeout(() => void load().catch(() => {}), 0);
+  if (areaName === 'local') {
+    if (changes[UPDATE_STATUS_KEY]) {
+      updateRecoveryActive = UPDATE_TRANSIENT_PHASES.has(changes[UPDATE_STATUS_KEY].newValue?.phase);
+      renderStatus(lastNativeStatus || {});
+    }
+    if (changes.nativeStatus?.newValue) renderStatus(changes.nativeStatus.newValue);
+    return;
+  }
+  if (areaName === 'sync' && (changes.policy || changes.settings)) {
+    window.setTimeout(() => void load().catch(() => {}), 0);
+  }
 });
+
+window.addEventListener('focus', () => void load().catch(() => {}));
+window.addEventListener('pageshow', () => void load().catch(() => {}));
 
 void load().catch((error) => {
   renderStatus({ connected: false, lastError: error.message });
