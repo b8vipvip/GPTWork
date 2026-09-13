@@ -402,6 +402,22 @@ async function featureSnapshot(tabId) {
   };
 }
 
+async function disabledMasterSnapshot(tabId) {
+  const windowId = Number.isInteger(tabId) ? await resolveWindowIdForTab(tabId) : null;
+  const featureState = Number.isInteger(tabId) ? await getTabFeatureState(tabId) : normalizeState(null);
+  return {
+    tabId,
+    windowId,
+    featureState,
+    policy: Number.isInteger(tabId) ? effectivePolicyForTabSync(tabId) : basePolicy,
+    settings: { enabled: false },
+    account: null,
+    accountWindowAllowed: true,
+    windowQuotaExceeded: false,
+    masterEnabled: false,
+  };
+}
+
 async function handleFeatureMessage(message, sender) {
   const tabId = await targetTabId(message.tabId, sender);
   if (message.type === 'GPTWORK_TAB_FEATURE_GET') return featureSnapshot(tabId);
@@ -433,21 +449,30 @@ async function handleFeatureMessage(message, sender) {
 
   if (message.type === 'GPTWORK_MASTER_SET') {
     const desired = message.enabled === true;
-    const state = await backgroundState(tabId);
-    if (desired) {
-      const denied = entitlementError(state);
-      if (denied) throw denied;
-      if (quotaExceeded(state, tabId)) {
-        throw Object.assign(new Error(WINDOW_QUOTA_MESSAGE), { code: 'WINDOW_QUOTA_EXCEEDED' });
-      }
+    if (!desired) {
+      // Master OFF is always allowed and must not depend on account/native/background
+      // state. Persist the local authority first; storage.onChanged performs the one
+      // content fan-out and background.js independently performs runtime cleanup.
+      masterEnabled = false;
+      await chrome.storage.local.set({ [MASTER_KEY]: false });
+      await scheduleAccountRefresh();
+      log('master_changed', { enabled: false, tabId });
+      return disabledMasterSnapshot(tabId);
     }
-    masterEnabled = desired;
+
+    const state = await backgroundState(tabId);
+    const denied = entitlementError(state);
+    if (denied) throw denied;
+    if (quotaExceeded(state, tabId)) {
+      throw Object.assign(new Error(WINDOW_QUOTA_MESSAGE), { code: 'WINDOW_QUOTA_EXCEEDED' });
+    }
+    masterEnabled = true;
     // storage.onChanged is the single fan-out trigger for Master transitions. Keeping
-    // the explicit push here as well would broadcast every open ChatGPT tab twice.
-    await chrome.storage.local.set({ [MASTER_KEY]: desired });
+    // an explicit push here as well would broadcast every open ChatGPT tab twice.
+    await chrome.storage.local.set({ [MASTER_KEY]: true });
     await scheduleAccountRefresh();
-    log('master_changed', { enabled: desired, tabId });
-    return { ...(await featureSnapshot(tabId)), masterEnabled: desired };
+    log('master_changed', { enabled: true, tabId });
+    return { ...(await featureSnapshot(tabId)), masterEnabled: true };
   }
 
   throw new Error(`Unsupported tab feature message: ${message.type}`);
