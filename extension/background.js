@@ -41,10 +41,24 @@ let currentPolicy = DEFAULT_POLICY;
 let currentSettings = DEFAULT_SETTINGS;
 let localEnabledOverride = null;
 let coreConnection = { connected: false, error: null };
+let initializeTask = null;
 const pendingRequests = new Map();
 const tabStates = new Map();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
+
+function masterRuntimeEnabled() {
+  return localEnabledOverride === true && currentSettings.enabled === true;
+}
+
+async function masterStorageEnabled() {
+  try {
+    const stored = await chrome.storage.local.get(LOCAL_ENABLED_KEY);
+    return stored?.[LOCAL_ENABLED_KEY] === true;
+  } catch {
+    return false;
+  }
+}
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
@@ -129,7 +143,6 @@ async function finalizeAutoVerificationStreamCapture(tabId, completedAt) {
 async function clearAutoVerificationStreamCapture() {
   await chrome.storage.local.remove(DIAGNOSTIC_SSE_STORAGE_KEY);
 }
-
 
 function isChatGptUrl(value) {
   try {
@@ -216,6 +229,7 @@ function accountAllowsState(state) {
   if (!allowed.length && !denied.length) return true;
   return allowed.includes(windowKey) && !denied.includes(windowKey);
 }
+
 function effectiveSettingsForState(state) {
   return {
     ...currentSettings,
@@ -226,6 +240,7 @@ function effectiveSettingsForState(state) {
     ),
   };
 }
+
 function guardFor(state) {
   return evaluateGuard({
     state,
@@ -289,6 +304,10 @@ async function updateTabBadge(state) {
 async function broadcastTabState(tabId) {
   const state = tabStates.get(tabId);
   if (!state) return;
+  if (!masterRuntimeEnabled()) {
+    try { await chrome.action.setBadgeText({ tabId, text: '' }); } catch {}
+    return;
+  }
   state.updatedAt = new Date().toISOString();
   await updateTabBadge(state);
   try {
@@ -356,8 +375,10 @@ async function writeNativeStatus(patch) {
   return next;
 }
 
-function scheduleReconnect() {
+async function scheduleReconnect() {
+  if (!await masterStorageEnabled()) return false;
   chrome.alarms.create(RECONNECT_ALARM, { delayInMinutes: 0.5 });
+  return true;
 }
 
 function rejectPending(error) {
@@ -369,7 +390,43 @@ function rejectPending(error) {
   pendingRequests.clear();
 }
 
+async function markNativeStopped() {
+  try {
+    const { nativeStatus = {} } = await chrome.storage.local.get('nativeStatus');
+    await chrome.storage.local.set({
+      nativeStatus: {
+        ...nativeStatus,
+        connected: false,
+        lastError: null,
+        errorCode: null,
+      },
+    });
+  } catch {}
+  coreConnection = { connected: false, error: null };
+  for (const state of tabStates.values()) state.core = coreConnection;
+}
+
+async function stopBackgroundRuntime(reason = 'master_disabled') {
+  const port = nativePort;
+  nativePort = null;
+  rejectPending(new Error('GPTWork master disabled'));
+  try { port?.disconnect(); } catch {}
+  await Promise.allSettled([
+    chrome.alarms.clear(RECONNECT_ALARM),
+    chrome.alarms.clear(ACCOUNT_REFRESH_ALARM),
+  ]);
+  await markNativeStopped();
+  for (const tabId of [...tabStates.keys()]) {
+    try { await networkMonitor.detach(tabId); } catch {}
+    try { await chrome.action.setBadgeText({ tabId, text: '' }); } catch {}
+  }
+  logRuntime('info', 'extension', 'background_runtime_stopped', { reason, tabs: tabStates.size });
+}
+
 function connectNative() {
+  if (!masterRuntimeEnabled()) {
+    throw Object.assign(new Error('GPTWork master disabled'), { code: 'MASTER_DISABLED' });
+  }
   if (nativePort) return nativePort;
   try {
     const port = chrome.runtime.connectNative(NATIVE_HOST);
@@ -396,22 +453,31 @@ function connectNative() {
       const detail = chrome.runtime.lastError?.message || 'Native host disconnected';
       nativePort = null;
       rejectPending(new Error(detail));
-      void writeNativeStatus({ connected: false, lastError: detail });
-      scheduleReconnect();
-      logRuntime('warn', 'native', 'disconnected', { error: detail });
+      if (masterRuntimeEnabled()) {
+        void writeNativeStatus({ connected: false, lastError: detail });
+        void scheduleReconnect();
+        logRuntime('warn', 'native', 'disconnected', { error: detail });
+      } else {
+        void markNativeStopped();
+      }
     });
     void writeNativeStatus({ connected: true, lastError: null, lastSeenAt: new Date().toISOString() });
     return port;
   } catch (error) {
     const detail = errorText(error);
-    void writeNativeStatus({ connected: false, lastError: detail });
-    scheduleReconnect();
-    logRuntime('error', 'native', 'connect_failed', { error: detail });
+    if (masterRuntimeEnabled()) {
+      void writeNativeStatus({ connected: false, lastError: detail });
+      void scheduleReconnect();
+      logRuntime('error', 'native', 'connect_failed', { error: detail });
+    }
     throw error;
   }
 }
 
 function sendNative(type, payload = {}) {
+  if (!masterRuntimeEnabled()) {
+    return Promise.reject(Object.assign(new Error('GPTWork master disabled'), { code: 'MASTER_DISABLED' }));
+  }
   const port = connectNative();
   const id = `${Date.now()}-${++requestSequence}`;
   return new Promise((resolve, reject) => {
@@ -512,6 +578,7 @@ async function applyNetworkEvidence(tabId, evidence) {
     evidence.rawResponseBody = null;
   }
   state.lastEvidenceDiagnostics = evidence.diagnostics ?? null;
+  if (!masterRuntimeEnabled()) return;
   try {
     const result = await verifyObservation({
       model: evidence.conflicts?.model ? null : evidence.model,
@@ -657,7 +724,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       canceled: failure.canceled,
       error: failure.error,
     });
-    if (failure.downstream) return;
+    if (failure.downstream || !masterRuntimeEnabled()) return;
     void applyNetworkEvidence(tabId, {
       requestId: failure.requestId,
       capturedAt: new Date().toISOString(),
@@ -680,6 +747,11 @@ async function configureTab(tab) {
   if (!tab?.id || !isChatGptUrl(tab.url ?? '')) return;
   const state = ensureTabState(tab.id, tab.url);
   state.windowId = Number.isInteger(tab.windowId) ? tab.windowId : null;
+  if (!masterRuntimeEnabled()) {
+    await networkMonitor.detach(tab.id);
+    try { await chrome.action.setBadgeText({ tabId: tab.id, text: '' }); } catch {}
+    return state;
+  }
   const enabled = effectiveSettingsForState(state).enabled;
   if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
   else await networkMonitor.attach(tab.id);
@@ -689,7 +761,10 @@ async function configureTab(tab) {
 
 async function configureOpenTabs() {
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
-  await Promise.all(tabs.map((tab) => configureTab(tab)));
+  // Keep browser-wide debugger work bounded. Concurrent account/window refreshes may
+  // share per-tab single-flight tasks in ChatGptNetworkMonitor, while each sweep itself
+  // advances one tab at a time instead of attaching every window in a Promise.all burst.
+  for (const tab of tabs) await configureTab(tab);
 }
 
 async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
@@ -712,6 +787,10 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
 }
 
 async function refreshNativeCore({ tolerateFailure = false } = {}) {
+  if (!masterRuntimeEnabled()) {
+    await markNativeStopped();
+    return { connected: false, error: null, status: null, reason: 'master_disabled' };
+  }
   try {
     await sendNative('ping');
     await syncPolicy();
@@ -733,12 +812,24 @@ async function refreshNativeCore({ tolerateFailure = false } = {}) {
   }
 }
 
-async function initialize() {
+async function performInitialize() {
   logRuntime('info', 'extension', 'initialize_started', {
     version: chrome.runtime.getManifest().version,
   });
   accountState = await accountClient.initialize();
   await ensureConfiguration();
+  if (!masterRuntimeEnabled()) {
+    await stopBackgroundRuntime('initialize_master_disabled');
+    await configureOpenTabs();
+    logRuntime('info', 'extension', 'initialize_completed', {
+      enabled: false,
+      responseVerificationEnabled: currentSettings.networkVerificationEnabled,
+      coreConnected: false,
+      accountAuthenticated: Boolean(accountState?.authenticated),
+      reason: 'master_disabled',
+    });
+    return;
+  }
   await refreshNativeCore({ tolerateFailure: true });
   await refreshAccountHeartbeat({ reconfigure: false });
   await configureOpenTabs();
@@ -747,7 +838,16 @@ async function initialize() {
     enabled: currentSettings.enabled,
     responseVerificationEnabled: currentSettings.networkVerificationEnabled,
     coreConnected: coreConnection.connected,
+    accountAuthenticated: Boolean(accountState?.authenticated),
   });
+}
+
+function initialize() {
+  if (initializeTask) return initializeTask;
+  initializeTask = performInitialize().finally(() => {
+    initializeTask = null;
+  });
+  return initializeTask;
 }
 
 async function activeTabId() {
@@ -923,7 +1023,7 @@ function probeText(attempt) {
 }
 
 async function autoVerify(tabId) {
-  if (!currentSettings.enabled) throw new Error('GPTWork is disabled / GPTWork 已关闭');
+  if (!masterRuntimeEnabled()) throw new Error('GPTWork is disabled / GPTWork 已关闭');
   const tab = await chrome.tabs.get(tabId);
   if (!isChatGptUrl(tab.url ?? '')) throw new Error('Open chatgpt.com first / 请先打开 chatgpt.com');
   const state = ensureTabState(tabId, tab.url);
@@ -1239,12 +1339,28 @@ chrome.runtime.onInstalled.addListener(() => void initialize());
 chrome.runtime.onStartup.addListener(() => void initialize());
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === RECONNECT_ALARM) void initialize();
-  if (alarm.name === ACCOUNT_REFRESH_ALARM) void refreshAccountHeartbeat();
+  if (alarm.name === RECONNECT_ALARM) {
+    void masterStorageEnabled().then((enabled) => {
+      if (enabled) return initialize();
+      return chrome.alarms.clear(RECONNECT_ALARM);
+    });
+  }
+  if (alarm.name === ACCOUNT_REFRESH_ALARM) {
+    void masterStorageEnabled().then((enabled) => {
+      if (enabled) return refreshAccountHeartbeat();
+      return chrome.alarms.clear(ACCOUNT_REFRESH_ALARM);
+    });
+  }
 });
 
-chrome.windows.onCreated.addListener(() => void refreshAccountHeartbeat());
-chrome.windows.onRemoved.addListener(() => void refreshAccountHeartbeat());
+// Keep native window lifecycle listeners registered at all times, but do not turn a
+// Master-OFF state into account heartbeats or debugger sweeps.
+chrome.windows.onCreated.addListener(() => {
+  if (masterRuntimeEnabled()) void refreshAccountHeartbeat();
+});
+chrome.windows.onRemoved.addListener(() => {
+  if (masterRuntimeEnabled()) void refreshAccountHeartbeat();
+});
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url && !isChatGptUrl(changeInfo.url)) {
@@ -1263,7 +1379,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 function applyConfigurationChange({ policyChanged = false, settingsChanged = false, localEnabledChanged = false } = {}) {
-  if (policyChanged) {
+  if (policyChanged && masterRuntimeEnabled()) {
     void syncPolicy().catch(async (error) => {
       await writeNativeStatus({ connected: false, lastError: errorText(error) });
     });
@@ -1288,7 +1404,12 @@ function applyConfigurationChange({ policyChanged = false, settingsChanged = fal
     state.evidenceIssue = null;
     state.lastError = null;
     state.autoVerification = null;
-    void broadcastTabState(state.tabId);
+    if (masterRuntimeEnabled()) void broadcastTabState(state.tabId);
+  }
+  if (localEnabledChanged) {
+    if (masterRuntimeEnabled()) void initialize();
+    else void stopBackgroundRuntime('master_disabled');
+    return;
   }
   void configureOpenTabs();
 }
@@ -1337,7 +1458,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : sender.tab?.id ?? await activeTabId();
         const { nativeStatus } = await chrome.storage.local.get('nativeStatus');
         const state = tabId === null ? null : tabStates.get(tabId);
-        if (tabId !== null && state && isChatGptUrl(state.url)) {
+        if (masterRuntimeEnabled() && tabId !== null && state && isChatGptUrl(state.url)) {
           await collectPageObservation(tabId, state);
         }
         return {
@@ -1402,6 +1523,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GPTLOCK_ACCOUNT_GET_ORDER':
         return accountClient.getOrder(message.orderId);
       case 'GPTLOCK_RECONNECT': {
+        if (!await masterStorageEnabled()) return { skipped: true, reason: 'master_disabled' };
         const previousPort = nativePort;
         nativePort = null;
         rejectPending(new Error('Native host reconnect requested'));
