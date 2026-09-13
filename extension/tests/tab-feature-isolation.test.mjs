@@ -35,8 +35,14 @@ test('feature UI never writes legacy global Work or Model-lock flags', () => {
 
 test('master storage transition is the single fan-out and OFF pushes an immediate fail-open guard', () => {
   const masterSet = runtime.match(/if \(message\.type === 'GPTWORK_MASTER_SET'\) \{([\s\S]*?)\n  \}\n\n  throw new Error/)?.[1] || '';
-  assert.match(masterSet, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: desired \}\)/);
+  assert.match(masterSet, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: false \}\)/);
+  assert.match(masterSet, /chrome\.storage\.local\.set\(\{ \[MASTER_KEY\]: true \}\)/);
   assert.doesNotMatch(masterSet, /pushAllFeatureStates\(/);
+
+  const offBranch = masterSet.match(/if \(!desired\) \{([\s\S]*?)\n    \}\n\n    const state = await backgroundState/)?.[1] || '';
+  assert.match(offBranch, /masterEnabled = false/);
+  assert.match(offBranch, /disabledMasterSnapshot\(tabId\)/);
+  assert.doesNotMatch(offBranch, /backgroundState\(|entitlementError\(|quotaExceeded\(/);
 
   const push = runtime.match(/async function pushFeatureState\(tabId, featureState = null\) \{([\s\S]*?)\n\}/)?.[0] || '';
   assert.match(push, /if \(masterEnabled\) return/);
