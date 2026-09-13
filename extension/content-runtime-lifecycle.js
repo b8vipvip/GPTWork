@@ -44,14 +44,26 @@
     }
   }
 
+  function errorText(error) {
+    return error instanceof Error ? error.message : String(error?.message || error || '');
+  }
+
   function isInvalidationError(error) {
-    const message = error instanceof Error ? error.message : String(error || '');
+    const message = errorText(error);
     // A missing message receiver is not proof that this content-script generation is
     // invalid. During service-worker startup or page navigation Chrome can transiently
     // report "Receiving end does not exist" while chrome.runtime.id is still healthy.
     // Only true extension-context invalidation is terminal here; the health watchdog
     // separately detects a missing/throwing runtime.id.
     return /extension context invalidated|context invalidated|chrome-extension:\/\/invalid\//i.test(message);
+  }
+
+  function terminalFailure(error) {
+    return {
+      ok: false,
+      error: errorText(error) || 'Extension context invalidated',
+      terminal: true,
+    };
   }
 
   function removeTrackedListeners() {
@@ -229,31 +241,57 @@
   }
 
   function trackedSendMessage(...args) {
+    const callbackIndex = typeof args[args.length - 1] === 'function' ? args.length - 1 : -1;
+    const callback = callbackIndex >= 0 ? args[callbackIndex] : null;
+
     if (!checkAlive('send_message_context_invalidated')) {
-      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-      const response = { ok: false, error: 'Extension context invalidated', terminal: true };
+      const response = terminalFailure('Extension context invalidated');
       if (callback) {
         queueMicrotask(() => callback(response));
         return undefined;
       }
       return Promise.resolve(response);
     }
+
+    if (callback) {
+      const forwardedArgs = [...args];
+      forwardedArgs[callbackIndex] = (...callbackArgs) => {
+        let runtimeError = null;
+        try { runtimeError = globalThis.chrome?.runtime?.lastError || null; } catch {}
+        if (runtimeError && isInvalidationError(runtimeError)) {
+          const response = terminalFailure(runtimeError);
+          shutdown('send_message_async_context_invalidated');
+          callback(response);
+          return;
+        }
+        callback(...callbackArgs);
+      };
+      try {
+        return original.sendMessage.apply(globalThis.chrome.runtime, forwardedArgs);
+      } catch (error) {
+        const terminal = isInvalidationError(error);
+        if (terminal) {
+          shutdown('send_message_context_invalidated');
+          queueMicrotask(() => callback(terminalFailure(error)));
+          return undefined;
+        }
+        throw error;
+      }
+    }
+
     try {
-      return original.sendMessage.apply(globalThis.chrome.runtime, args);
+      const result = original.sendMessage.apply(globalThis.chrome.runtime, args);
+      if (!result || typeof result.then !== 'function') return result;
+      return result.catch((error) => {
+        if (!isInvalidationError(error)) throw error;
+        shutdown('send_message_async_context_invalidated');
+        return terminalFailure(error);
+      });
     } catch (error) {
       const terminal = isInvalidationError(error);
-      if (terminal) shutdown('send_message_context_invalidated');
-      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
-      const response = {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-        terminal,
-      };
-      if (callback) {
-        queueMicrotask(() => callback(response));
-        return undefined;
-      }
-      return Promise.resolve(response);
+      if (!terminal) throw error;
+      shutdown('send_message_context_invalidated');
+      return Promise.resolve(terminalFailure(error));
     }
   }
 
