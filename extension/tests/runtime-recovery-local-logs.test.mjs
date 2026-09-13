@@ -28,22 +28,25 @@ test('terminal lifecycle supervisor loads before every other content runtime scr
   assert.match(lifecycle, /removeTrackedListeners/);
   assert.match(lifecycle, /restorePatchedGlobals/);
   assert.match(lifecycle, /chrome-extension:\\\/\\\/invalid/);
-  assert.match(lifecycle, /const terminal = isInvalidationError\(error\)/);
 
-  const invalidationBody = lifecycle.match(/function isInvalidationError\(error\) \{([\s\S]*?)\n  \}\n\n  function removeTrackedListeners/);
+  const invalidationBody = lifecycle.match(/function isInvalidationError\(error\) \{([\s\S]*?)\n  \}\n\n  function terminalFailure/);
   assert.ok(invalidationBody, 'terminal invalidation matcher must stay explicit');
   const returnExpression = invalidationBody[1].match(/return\s+([^;]+);/)?.[1] || '';
   assert.match(returnExpression, /extension context invalidated/i);
   assert.doesNotMatch(returnExpression, /Receiving end does not exist/i);
 });
 
-test('runtime messaging wrapper is generation-owned and restored before reinjection', () => {
+test('runtime messaging wrapper is generation-owned and stops on synchronous or asynchronous invalidation', () => {
   assert.match(lifecycle, /sendMessage:\s*globalThis\.chrome\?\.runtime\?\.sendMessage/);
   assert.match(lifecycle, /function trackedSendMessage\(\.\.\.args\)/);
   assert.match(lifecycle, /chrome\?\.runtime\?\.sendMessage === trackedSendMessage/);
   assert.match(lifecycle, /chrome\.runtime\.sendMessage = original\.sendMessage/);
   assert.match(lifecycle, /chrome\.runtime\.sendMessage = trackedSendMessage/);
+  assert.match(lifecycle, /original\.sendMessage\.apply\(globalThis\.chrome\.runtime, forwardedArgs\)/);
   assert.match(lifecycle, /original\.sendMessage\.apply\(globalThis\.chrome\.runtime, args\)/);
+  assert.match(lifecycle, /result\.catch\(\(error\) =>/);
+  assert.match(lifecycle, /send_message_async_context_invalidated/);
+  assert.match(lifecycle, /globalThis\.chrome\?\.runtime\?\.lastError/);
 });
 
 test('existing ChatGPT tabs use bounded recovery after real install or update events', () => {
