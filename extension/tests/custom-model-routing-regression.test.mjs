@@ -47,19 +47,22 @@ test('settings expose an immediate custom model Add action without verbose routi
   assert.match(optionsJs, /自动路由标识，不是具体模型/);
 });
 
-test('model discovery schema v3 removes routing aliases before persistence or auto-lock', () => {
+test('model discovery schema v3 removes routing aliases before persistence', () => {
   assert.match(catalog, /DISCOVERY_SCHEMA_VERSION = 3/);
   assert.match(catalog, /NON_CONCRETE_MODEL_IDS = new Set\(\['auto'\]\)/);
   assert.match(catalog, /const model = normalizeConcreteModelId\(value\)/);
-  // Keep this semantic so a harmless local alias for the stored array does not weaken the invariant.
   assert.match(catalog, /const legacy = [^;]*\.map\(normalizeConcreteModelId\)\.filter\(Boolean\)/);
 
   assert.match(catalogOptions, /DISCOVERY_SCHEMA_VERSION = 3/);
   assert.match(catalogOptions, /NON_CONCRETE_MODEL_IDS = new Set\(\['auto'\]\)/);
   assert.match(catalogOptions, /\.map\(normalizeConcreteModelId\)/);
+});
 
-  assert.match(autoLock, /NON_CONCRETE_MODEL_IDS = new Set\(\['auto'\]\)/);
-  assert.match(autoLock, /\.map\(normalizeConcreteModelId\)/);
+test('legacy model-auto-lock content shim stays inert under window-scoped background authority', () => {
+  assert.match(autoLock, /compatibility file/i);
+  assert.match(autoLock, /window-scoped|window/i);
+  assert.doesNotMatch(autoLock, /chrome\.storage\.(?:sync|local)\.(?:set|remove)/);
+  assert.doesNotMatch(autoLock, /lockedModels\s*=/);
 });
 
 test('extension startup purges historical auto discovery and lock state without opening Settings', () => {
