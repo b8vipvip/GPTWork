@@ -1,4 +1,4 @@
-import { RUNTIME_GENERATION, RUNTIME_GENERATION_KEY } from './runtime-generation.js';
+import { RUNTIME_GENERATION, RUNTIME_GENERATION_MESSAGE } from './runtime-generation.js';
 
 let generationReadyPromise = null;
 let reloadRequested = false;
@@ -7,18 +7,36 @@ function never() {
   return new Promise(() => {});
 }
 
+function requestWorkerGeneration() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: RUNTIME_GENERATION_MESSAGE }, (response) => {
+        const error = chrome.runtime.lastError;
+        if (error || response?.ok !== true) {
+          resolve(null);
+          return;
+        }
+        resolve(response?.data?.generation ?? null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 export function ensureRuntimeGeneration() {
   if (generationReadyPromise) return generationReadyPromise;
   generationReadyPromise = (async () => {
-    const stored = await chrome.storage.local.get(RUNTIME_GENERATION_KEY);
-    if (stored?.[RUNTIME_GENERATION_KEY] === RUNTIME_GENERATION) return true;
+    // Ask the service worker that is actually handling messages which bundle generation
+    // it is running. This is the sole update-skew decision: extension pages never infer
+    // worker freshness from storage or from business-state responses.
+    const workerGeneration = await requestWorkerGeneration();
+    if (workerGeneration === RUNTIME_GENERATION) return true;
 
-    // Installer updates replace the unpacked extension files in place. Chrome can keep
-    // the previous MV3 service-worker generation alive while newly opened extension
-    // pages already execute the new files. That produces protocol skew such as a new
-    // popup sending GPTWORK_MASTER_SET to an old worker that reports it unsupported.
-    // One centralized generation barrier reloads the extension before any feature or
-    // Master controller is allowed to send runtime commands.
+    // In-place installer updates can leave the previous MV3 worker alive while a newly
+    // opened popup/settings page already executes the replacement files. Old workers
+    // either report a different generation or reject this handshake as unsupported.
+    // Reload exactly once, then stop this page generation permanently; no retry loop.
     if (!reloadRequested) {
       reloadRequested = true;
       try { chrome.runtime.reload(); } catch {}
