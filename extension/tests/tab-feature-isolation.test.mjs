@@ -11,24 +11,36 @@ const pageSync = fs.readFileSync(new URL('../multi-window-lock-sync.js', import.
 const nativeBridge = fs.readFileSync(new URL('../../native-core/src/bridge.rs', import.meta.url), 'utf8');
 const nativeLib = fs.readFileSync(new URL('../../native-core/src/lib.rs', import.meta.url), 'utf8');
 
-test('feature state is keyed by Chrome window while tab messages stay backward compatible', () => {
+test('feature state is keyed by concrete ChatGPT tab and never shared by windowId', () => {
+  assert.match(runtime, /TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV2'/);
+  assert.match(runtime, /states\.set\(id, next\)/);
+  assert.match(runtime, /states\.get\(id\)/);
+  assert.match(runtime, /tab_feature_changed/);
+  assert.doesNotMatch(runtime, /states\.set\(windowId, next\)/);
+  assert.doesNotMatch(runtime, /pushWindowFeatureState/);
+  assert.doesNotMatch(runtime, /chrome\.windows\.onRemoved\.addListener/);
+});
+
+test('temporary window-scoped state migrates once into independent per-tab copies', () => {
+  assert.match(runtime, /LEGACY_TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1'/);
   assert.match(runtime, /WINDOW_FEATURE_SESSION_KEY = 'gptworkWindowFeatureStatesV1'/);
-  assert.match(runtime, /resolveWindowIdForTab/);
-  assert.match(runtime, /states\.set\(windowId, next\)/);
-  assert.match(runtime, /chrome\.windows\.onRemoved\.addListener/);
-  assert.match(runtime, /pushWindowFeatureState/);
-  assert.doesNotMatch(runtime, /states\.set\(id, next\)/);
+  assert.match(runtime, /legacy_feature_scope_migrated_to_tabs/);
+  assert.match(runtime, /states\.set\(tab\.id, normalizeState\(value\)\)/);
+  assert.match(runtime, /chrome\.storage\.session\.remove\(\[LEGACY_TAB_FEATURE_SESSION_KEY, WINDOW_FEATURE_SESSION_KEY\]\)/);
 });
 
-test('legacy tab session state is migrated once into window state', () => {
-  assert.match(runtime, /TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1'/);
-  assert.match(runtime, /migrateLegacyTabSession/);
-  assert.match(runtime, /chrome\.storage\.session\.remove\(TAB_FEATURE_SESSION_KEY\)/);
+test('moving a tab keeps that tabs own feature state instead of adopting destination window state', () => {
+  const attached = runtime.match(/chrome\.tabs\.onAttached\.addListener\([\s\S]*?\n  \}\);/)?.[0] || '';
+  assert.match(attached, /pushFeatureState\(tabId\)/);
+  assert.match(attached, /same tab keeps its own/);
+  assert.doesNotMatch(attached, /states\.set\(|states\.get\(attachInfo\.newWindowId\)/);
 });
 
-test('feature UI never writes legacy global Work or Model-lock flags', () => {
+test('feature UI targets one exact tab and never writes legacy global Work or Model-lock flags', () => {
   assert.match(controller, /GPTWORK_TAB_FEATURE_GET/);
   assert.match(controller, /GPTWORK_TAB_FEATURE_SET/);
+  assert.match(controller, /Tab \$\{tab\.id\}/);
+  assert.match(controller, /其他标签页不受影响/);
   assert.doesNotMatch(controller, /chrome\.storage\.local\.set/);
   assert.doesNotMatch(controller, /GPTLOCK_SET_ENABLED/);
 });
@@ -85,7 +97,8 @@ test('content-side Work handling and page alignment consume feature messages', (
   assert.match(pageSync, /GPTWORK_TAB_FEATURE_STATE/);
 });
 
-test('quota denial uses the exact requested Chinese message', () => {
+test('quota denial remains window-based even though feature state is tab-based', () => {
   assert.match(runtime, /WINDOW_QUOTA_MESSAGE = '当前账户并发窗口超限'/);
+  assert.match(runtime, /accountAllowsWindow/);
   assert.match(runtime, /WINDOW_QUOTA_EXCEEDED/);
 });
