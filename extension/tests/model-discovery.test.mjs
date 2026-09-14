@@ -42,6 +42,13 @@ test('legacy polluted Sol fragments are migrated out of discoveries and locked p
   assert.match(optionsSource, /removeDuplicateDiscoveredRows/);
 });
 
+test('locked model cards distinguish manually added models from automatically discovered models', () => {
+  assert.match(optionsSource, /手动添加 \/ Manual/);
+  assert.match(optionsSource, /自动获取 \/ Auto discovered/);
+  assert.match(optionsSource, /function sourceDetail/);
+  assert.match(optionsSource, /function labelChoiceSources/);
+  assert.match(optionsSource, /evidenceLabel\(model, evidence\)/);
+});
 
 test('trusted network evidence can restore a future model that resembles a legacy artifact', () => {
   assert.match(catalogSource, /function hasTrustedNetworkEvidence/);
