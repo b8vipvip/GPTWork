@@ -62,9 +62,12 @@ test('website account sessions are isolated from extension device quota', async 
   assert.match(source, /\/site\/api\/account\/devices\/release/);
 });
 
-test('extension release button is routed to the GPTWork product site', async () => {
-  const source = await readFile(new URL('../options-update.js', import.meta.url), 'utf8');
-  assert.match(source, /GPTLOCK_PRODUCT_SITE_URL/);
-  assert.match(source, /https:\/\/gptlock\.mv3\.cn\//);
-  assert.match(source, /chrome\.tabs\.create\(\{ url: GPTLOCK_PRODUCT_SITE_URL \}\)/);
+test('extension release button uses the managed GPTWork release destination', async () => {
+  const [source, manager] = await Promise.all([
+    readFile(new URL('../options-update.js', import.meta.url), 'utf8'),
+    readFile(new URL('../update-manager.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(manager, /export const RELEASES_URL = 'https:\/\/gptlock\.mv3\.cn\/releases'/);
+  assert.match(source, /release\?\.releaseUrl \|\| RELEASES_URL/);
+  assert.match(source, /chrome\.tabs\.create\(\{ url: release\?\.releaseUrl \|\| RELEASES_URL \}\)/);
 });
