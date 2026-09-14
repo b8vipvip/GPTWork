@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="gptlock-popup-revision" content="v0553-master-switch-header">
+  <meta name="gptlock-popup-revision" content="v0561-module-navigation">
   <title>GPTWork</title>
   <link rel="stylesheet" href="popup-v0513.css">
   <link rel="stylesheet" href="popup-master.css">
 </head>
-<body data-popup-revision="v0553-master-switch-header">
+<body data-popup-revision="v0561-module-navigation">
   <section id="authShell" class="auth-shell" aria-live="polite" hidden>
     <div class="auth-brand">
       <span class="auth-logo">G</span>
@@ -87,7 +87,8 @@
     <section class="account-card">
       <div class="account-main">
         <div class="avatar" aria-hidden="true">G</div>
-        <div><strong id="accountEmail">未登录</strong><div class="account-tier-row"><p id="accountTier">登录/注册后可启用功能</p><button id="accountUpgrade" class="account-upgrade" type="button" hidden>升级</button></div></div>
+        <div class="account-identity"><strong id="accountEmail">未登录</strong><div class="account-tier-row"><p id="accountTier">登录/注册后可启用功能</p><button id="accountUpgrade" class="account-upgrade" type="button" hidden>升级</button></div></div>
+        <button id="options" class="account-settings-button" type="button" title="设置 / Settings">设置</button>
       </div>
       <div class="account-meta"><div class="account-expiry-row"><span id="accountExpiry">权益有效期 —</span><div class="reward-actions"><button id="accountCheckin" class="reward-button" type="button">签到<sup>+1</sup></button><button id="accountShare" class="reward-button" type="button">分享<sup>+7</sup></button></div></div><span id="accountUsage">设备/窗口 —</span></div>
       <div class="account-actions">
@@ -130,9 +131,8 @@
 
     <div class="actions" aria-label="GPTWork 快捷操作">
       <button id="autoVerify" type="button" class="primary auto" title="使用当前 GPTWork 账号权益进行自动验证 / Auto verify with account entitlement">自动验证</button>
-      <button id="checkUpdate" type="button" title="打开设置中的版本更新中心">检查更新</button>
+      <button id="checkUpdate" type="button" title="打开独立版本更新中心">检查更新</button>
       <button id="help" type="button" title="使用帮助 / Help">使用帮助</button>
-      <button id="options" type="button" title="设置 / Settings">设置</button>
     </div>
     <span id="reconnect" hidden aria-hidden="true"></span><span id="logs" hidden aria-hidden="true"></span>
     <button id="installUpdate" type="button" hidden aria-hidden="true" tabindex="-1">立即更新</button>
@@ -145,6 +145,7 @@
   <script type="module" src="auth-gate.js"></script>
   <script type="module" src="popup-rewards.js"></script>
   <script type="module" src="popup-help.js"></script>
+  <script type="module" src="popup-navigation.js"></script>
   <script type="module" src="popup.js"></script>
   <script type="module" src="feature-toggle-controller.js"></script>
 </body>
