@@ -20,6 +20,9 @@ test('popup exposes only the four user-facing actions and keeps reconnect/log co
   assert.match(html, /id="reconnect" hidden/);
   assert.match(html, /id="logs" hidden/);
   assert.match(css, /grid-template-columns:\s*repeat\(4,/);
+  assert.match(css, /max-width:\s*390px/);
+  assert.match(css, /overflow-wrap:\s*anywhere/);
+  assert.match(css, /word-break:\s*break-word/);
 });
 
 test('settings page is the interactive update client while the service worker owns execution', async () => {

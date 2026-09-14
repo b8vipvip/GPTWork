@@ -23,3 +23,23 @@
 .actions button small {
   display: none !important;
 }
+
+/* Recovery/error text can contain compact JSON without natural break points. Keep the
+   action popup at its designed width and wrap diagnostic text instead of widening UI. */
+html, body {
+  width: 390px !important;
+  max-width: 390px !important;
+  overflow-x: hidden !important;
+}
+
+#appShell,
+.install-help,
+.install-help p {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.install-help p {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}

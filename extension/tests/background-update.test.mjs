@@ -51,6 +51,16 @@ test('100 percent is written only after recovery readiness, never immediately af
   assert.match(recovery, /phase: 'complete', percent: 100/);
 });
 
+test('a timed-out installed update self-heals once runtime readiness becomes true', () => {
+  assert.match(source, /function installedRecoveryErrorCanSelfHeal/);
+  assert.match(source, /detail\.includes\('更新已安装但功能恢复超时'\)/);
+  assert.match(source, /async function reconcileInstalledRecovery/);
+  assert.match(source, /const readiness = await runtimeReadiness\(status\.targetVersion, chromeApi\)/);
+  assert.match(source, /if \(!readiness\.ready\) return false/);
+  assert.match(source, /phase: 'complete', percent: 100, targetVersion: status\.targetVersion/);
+  assert.match(source, /await reconcileInstalledRecovery\(currentVersion, status, chromeApi\)/);
+});
+
 test('account control refresh re-arms the shared heartbeat alarm instead of self-messaging', async () => {
   const created = [];
   const chromeApi = {

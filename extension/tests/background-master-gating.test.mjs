@@ -38,6 +38,11 @@ test('browser-wide debugger configuration is serialized and initialization is si
   assert.match(background, /let initializeTask = null/);
   assert.match(background, /if \(initializeTask\) return initializeTask/);
   assert.match(background, /performInitialize\(\)\.finally/);
+  assert.match(background, /async function initializeAfterCurrentTask\(\)/);
+  assert.match(background, /const current = initializeTask/);
+  assert.match(background, /try \{ await current; \} catch \{\}/);
+  assert.match(background, /if \(!masterRuntimeEnabled\(\)\) return;/);
+  assert.match(background, /if \(masterRuntimeEnabled\(\)\) void initializeAfterCurrentTask\(\)/);
 });
 
 test('account heartbeat scheduler refuses to re-arm after master is disabled', async () => {
