@@ -87,7 +87,13 @@
     <section class="account-card">
       <div class="account-main">
         <div class="avatar" aria-hidden="true">G</div>
-        <div class="account-identity"><strong id="accountEmail">未登录</strong><div class="account-tier-row"><p id="accountTier">登录/注册后可启用功能</p><button id="accountUpgrade" class="account-upgrade" type="button" hidden>升级</button></div></div>
+        <div class="account-identity">
+          <strong id="accountEmail">未登录</strong>
+          <div class="account-tier-row">
+            <span class="account-tier-display"><span class="account-tier-prefix">等级：</span><span id="accountTier">登录/注册后可启用功能</span></span>
+            <button id="accountUpgrade" class="account-upgrade" type="button" hidden>升级</button>
+          </div>
+        </div>
         <button id="options" class="account-settings-button" type="button" title="设置 / Settings">设置</button>
       </div>
       <div class="account-meta"><div class="account-expiry-row"><span id="accountExpiry">权益有效期 —</span><div class="reward-actions"><button id="accountCheckin" class="reward-button" type="button">签到<sup>+1</sup></button><button id="accountShare" class="reward-button" type="button">分享<sup>+7</sup></button></div></div><span id="accountUsage">设备/窗口 —</span></div>
