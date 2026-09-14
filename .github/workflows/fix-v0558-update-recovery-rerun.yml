@@ -1,0 +1,72 @@
+name: Apply v0.5.58 update recovery fix
+
+on:
+  push:
+    branches:
+      - fix/v0.5.58-update-recovery
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v0.5.58-update-recovery
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reuse patch script and correct regression test syntax
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/fix-v0558-update-recovery.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "          PY\n"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          block = workflow[start:end]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in block.splitlines()) + '\n'
+          Path('/tmp/apply-fix.py').write_text(script, encoding='utf-8')
+          PY
+
+          python3 /tmp/apply-fix.py
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('extension/tests/update-single-authority.test.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = "  assert.match(background, /TAB_FEATURE_MESSAGE_TYPES\\.has\\(message\\.type\\) \\|\\| UPDATE_MESSAGE_TYPES\\.has\\(message\\.type\\)/);\n}\n\ntest('Windows Setup"
+          new = "  assert.match(background, /TAB_FEATURE_MESSAGE_TYPES\\.has\\(message\\.type\\) \\|\\| UPDATE_MESSAGE_TYPES\\.has\\(message\\.type\\)/);\n});\n\ntest('Windows Setup"
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one malformed test closure, got {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          rm .github/workflows/fix-v0558-update-recovery.yml
+          rm .github/workflows/fix-v0558-update-recovery-rerun.yml
+          git diff --check
+
+      - name: Run focused regression tests
+        run: >-
+          node --test
+          extension/tests/background-master-gating.test.mjs
+          extension/tests/background-update.test.mjs
+          extension/tests/update-single-authority.test.mjs
+          extension/tests/popup-update-center.test.mjs
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: recover updater after in-place reload'
+          git push origin HEAD:fix/v0.5.58-update-recovery
