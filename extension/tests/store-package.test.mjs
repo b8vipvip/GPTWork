@@ -32,12 +32,18 @@ for (const fixture of [
       assert.equal(manifest.permissions.includes('downloads'), false);
       assert.equal(existsSync(join(root, 'background-update.js')), false);
       assert.equal(existsSync(join(root, 'options-update.js')), false);
+      assert.equal(existsSync(join(root, 'update-entry.js')), false);
       assert.equal(existsSync(join(root, 'background-entry-store.js')), true);
       assert.equal(existsSync(join(root, 'store-update-page.js')), true);
 
       const settings = readFileSync(join(root, 'settings-v0521.html'), 'utf8');
-      assert.match(settings, /store-update-page\.js/);
-      assert.doesNotMatch(settings, /options-update\.js/);
+      assert.doesNotMatch(settings, /options-update\.js|store-update-page\.js/);
+
+      const updatePage = readFileSync(join(root, 'update.html'), 'utf8');
+      assert.match(updatePage, /store-update-page\.js/);
+      assert.doesNotMatch(updatePage, /update-entry\.js|options-update\.js/);
+      assert.match(updatePage, /data-gptwork-module="update"/);
+      assert.match(updatePage, /module-nav\.js/);
 
       const channel = readFileSync(join(root, 'distribution-channel.js'), 'utf8');
       assert.match(channel, new RegExp(`DISTRIBUTION_CHANNEL = ["']${fixture.channel}["']`));
@@ -57,6 +63,8 @@ test('store package can be built before official store ids exist', () => {
     const channel = readFileSync(join(root, 'distribution-channel.js'), 'utf8');
     assert.match(channel, /STORE_EXTENSION_ID = ["']{2}/);
     assert.match(channel, /STORE_LISTING_URL = ["']{2}/);
+    const updatePage = readFileSync(join(root, 'update.html'), 'utf8');
+    assert.match(updatePage, /store-update-page\.js/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

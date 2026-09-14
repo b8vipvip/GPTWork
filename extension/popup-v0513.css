@@ -1,20 +1,22 @@
 @import url('./popup.css');
 
-/* Compact toolbar: verify, update, local help, settings. */
+/* Primary popup actions stay separate from the status table and fill the full width. */
 .actions {
   display: grid !important;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   align-items: stretch !important;
-  gap: 6px !important;
+  gap: 8px !important;
+  margin-top: 14px !important;
 }
 
 .actions button {
   min-width: 0 !important;
   width: 100% !important;
-  padding: 8px 3px !important;
-  border-radius: 9px !important;
-  font-size: 10.5px !important;
-  line-height: 1.1 !important;
+  min-height: 38px !important;
+  padding: 10px 6px !important;
+  border-radius: 10px !important;
+  font-size: 11.5px !important;
+  line-height: 1.15 !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: clip !important;
@@ -22,6 +24,24 @@
 
 .actions button small {
   display: none !important;
+}
+
+.account-main > .account-identity {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.account-settings-button {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-left: auto;
+  padding: 6px 10px !important;
+  border: 1px solid #dbe3ef !important;
+  border-radius: 9px !important;
+  background: #f8fafc !important;
+  color: #1d4ed8 !important;
+  font-size: 10px !important;
+  line-height: 1.1 !important;
 }
 
 /* Recovery/error text can contain compact JSON without natural break points. Keep the

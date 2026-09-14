@@ -31,6 +31,7 @@ function shouldInclude(relativePath) {
     'package.json',
     'background-update.js',
     'options-update.js',
+    'update-entry.js',
     'distribution-channel.js',
     'manifest.json',
   ].includes(normalized)) return false;
@@ -78,14 +79,14 @@ manifest.background = {
 };
 writeFileSync(join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
-const settingsPath = join(outputDir, 'settings-v0521.html');
-const settings = readFileSync(settingsPath, 'utf8');
-const storeSettings = settings.replace(
-  '<script type="module" src="options-update.js"></script>',
+const updatePagePath = join(outputDir, 'update.html');
+const updatePage = readFileSync(updatePagePath, 'utf8');
+const storeUpdatePage = updatePage.replace(
+  '<script type="module" src="update-entry.js"></script>',
   '<script type="module" src="store-update-page.js"></script>',
 );
-if (storeSettings === settings) throw new Error('Could not replace standalone update module in store settings page');
-writeFileSync(settingsPath, storeSettings, 'utf8');
+if (storeUpdatePage === updatePage) throw new Error('Could not replace standalone update module in store update page');
+writeFileSync(updatePagePath, storeUpdatePage, 'utf8');
 
 const channel = args.browser === 'chrome' ? 'chrome-store' : 'edge-store';
 const storeUrl = listingUrl(args.browser, args.extensionId);
@@ -101,7 +102,7 @@ writeFileSync(join(outputDir, 'distribution-channel.js'), [
   '',
 ].join('\n'), 'utf8');
 
-for (const forbiddenRuntime of ['background-update.js', 'options-update.js']) {
+for (const forbiddenRuntime of ['background-update.js', 'options-update.js', 'update-entry.js']) {
   try {
     statSync(join(outputDir, forbiddenRuntime));
     throw new Error(`Store package unexpectedly contains ${forbiddenRuntime}`);

@@ -6,8 +6,9 @@
   <title>GPTWork 设置 / Settings</title>
   <link rel="stylesheet" href="options.css">
   <link rel="stylesheet" href="request-history.css">
+  <link rel="stylesheet" href="module-nav.css">
 </head>
-<body data-settings-revision="v0556-master-tab-isolation">
+<body data-settings-revision="v0561-module-navigation" data-gptwork-module="settings">
   <main class="shell">
     <header>
       <div>
@@ -120,27 +121,6 @@
       </div>
     </section>
 
-    <section id="updates" class="card update-card" aria-labelledby="updateHeading">
-      <div class="update-heading">
-        <div><h2 id="updateHeading">版本更新 <span>Update center</span></h2></div>
-        <span id="updateStatusBadge" class="update-badge idle">待检查</span>
-      </div>
-      <div class="update-meta">
-        <div><span>当前扩展</span><strong id="updateCurrentVersion">—</strong></div>
-        <div><span>最新正式版</span><strong id="updateLatestVersion">—</strong></div>
-        <div><span>本地核心</span><strong id="updateCoreVersion">—</strong></div>
-      </div>
-      <div class="update-track" aria-hidden="true"><div id="updateProgress" class="update-progress"></div></div>
-      <div class="update-progress-row" aria-live="polite"><strong id="updatePercent">0%</strong><span id="updateMessage">尚未检查更新</span></div>
-      <div class="update-actions">
-        <button id="checkUpdateNow" class="secondary" type="button">检查更新</button>
-        <button id="installUpdateNow" class="primary" type="button" hidden>立即更新</button>
-        <button id="openRelease" class="secondary" type="button">打开发布页</button>
-      </div>
-      <pre id="updateLog" class="update-log">等待更新操作…</pre>
-      <p class="permission-note">从扩展弹窗点击“检查更新”会直接打开本区域并自动开始检查；发现新版且 Windows 本地核心满足安全更新基线时，会继续执行一键更新。</p>
-    </section>
-
     <footer>
       <p id="formMessage" role="status" aria-live="polite"></p>
       <p class="permission-note">GPTWork 总开关为全局开关；Work 模式与模型锁定按 ChatGPT 标签页隔离，同一 Chrome 窗口里的不同 ChatGPT 标签页也可以保持不同状态。模型列表及其余配置继续同步。</p>
@@ -148,10 +128,10 @@
   </main>
   <script src="settings-shell.js"></script>
   <script type="module" src="extension-page-error-capture.js"></script>
+  <script type="module" src="module-nav.js"></script>
   <script type="module" src="options.js"></script>
   <script type="module" src="feature-toggle-controller.js"></script>
   <script type="module" src="request-history-options.js"></script>
-  <script type="module" src="options-update.js"></script>
   <script type="module" src="settings-local-logs.js"></script>
   <script src="model-catalog-options.js"></script>
 </body>

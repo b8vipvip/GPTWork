@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GPTWork 运行日志 / Runtime logs</title>
   <link rel="stylesheet" href="diagnostics.css">
+  <link rel="stylesheet" href="module-nav.css">
 </head>
-<body>
+<body data-gptwork-module="diagnostics">
   <main class="shell">
     <header>
       <div>
@@ -49,6 +50,7 @@
     <p id="message" role="status" aria-live="polite"></p>
     <section id="logs" class="logs" aria-live="polite"></section>
   </main>
+  <script type="module" src="module-nav.js"></script>
   <script type="module" src="diagnostics.js"></script>
 </body>
 </html>

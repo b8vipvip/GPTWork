@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPTWork 版本更新 / Update center</title>
+  <link rel="stylesheet" href="options.css">
+  <link rel="stylesheet" href="module-nav.css">
+</head>
+<body data-gptwork-module="update">
+  <main class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">GPTWORK UPDATE</p>
+        <h1>版本更新 <small>Update center</small></h1>
+        <p class="subtitle">检查、下载并跟踪 GPTWork 正式版本更新。</p>
+      </div>
+    </header>
+
+    <section id="updates" class="card update-card" aria-labelledby="updateHeading">
+      <div class="update-heading">
+        <div><h2 id="updateHeading">版本更新 <span>Update center</span></h2></div>
+        <span id="updateStatusBadge" class="update-badge idle">待检查</span>
+      </div>
+      <div class="update-meta">
+        <div><span>当前扩展</span><strong id="updateCurrentVersion">—</strong></div>
+        <div><span>最新正式版</span><strong id="updateLatestVersion">—</strong></div>
+        <div><span>本地核心</span><strong id="updateCoreVersion">—</strong></div>
+      </div>
+      <div class="update-track" aria-hidden="true"><div id="updateProgress" class="update-progress"></div></div>
+      <div class="update-progress-row" aria-live="polite"><strong id="updatePercent">0%</strong><span id="updateMessage">尚未检查更新</span></div>
+      <div class="update-actions">
+        <button id="checkUpdateNow" class="secondary" type="button">检查更新</button>
+        <button id="installUpdateNow" class="primary" type="button" hidden>立即更新</button>
+        <button id="openRelease" class="secondary" type="button">打开发布页</button>
+      </div>
+      <pre id="updateLog" class="update-log">等待更新操作…</pre>
+      <p class="permission-note">从扩展弹窗点击“检查更新”会进入本页面并自动开始检查；发现新版且 Windows 本地核心满足安全更新基线时，会继续执行一键更新。</p>
+    </section>
+  </main>
+  <script type="module" src="extension-page-error-capture.js"></script>
+  <script type="module" src="module-nav.js"></script>
+  <script type="module" src="update-entry.js"></script>
+</body>
+</html>

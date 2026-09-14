@@ -1,0 +1,57 @@
+.gptwork-module-nav {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 20px;
+  padding: 8px;
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 8px 24px rgba(40, 56, 85, .06);
+}
+
+.gptwork-module-nav a {
+  display: grid;
+  gap: 1px;
+  min-width: 96px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: #475569;
+  text-decoration: none;
+  font: 750 12px/1.2 Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
+}
+
+.gptwork-module-nav a small {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.gptwork-module-nav a:hover {
+  color: #1d4ed8;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.gptwork-module-nav a[aria-current="page"] {
+  color: #fff;
+  background: #1d4ed8;
+}
+
+.gptwork-module-nav a[aria-current="page"] small {
+  color: #dbeafe;
+}
+
+@media (max-width: 620px) {
+  .gptwork-module-nav {
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .gptwork-module-nav a {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+}
