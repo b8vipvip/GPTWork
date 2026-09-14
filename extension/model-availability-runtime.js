@@ -53,7 +53,10 @@ function seedTrustedAvailability(stateValue, discovered) {
   let changed = false;
   const now = new Date().toISOString();
   for (const model of discovered.filter(isHigherThanSol)) {
-    if (models[model]) continue;
+    // Trusted formal request/response discovery is stronger and fresher evidence than
+    // any stale account-catalog negative. It also repairs v1 false-unavailable state
+    // immediately during bootstrap, before another chat request is needed.
+    if (models[model]?.status === 'available') continue;
     models[model] = {
       status: 'available',
       checkedAt: now,
