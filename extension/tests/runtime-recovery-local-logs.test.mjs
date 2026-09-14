@@ -49,19 +49,28 @@ test('runtime messaging wrapper is generation-owned and stops on synchronous or 
   assert.match(lifecycle, /globalThis\.chrome\?\.runtime\?\.lastError/);
 });
 
-test('existing ChatGPT tabs use bounded recovery after real install or update events', () => {
+test('content recovery is explicit, bounded, and owned by the update lifecycle', () => {
   assert.ok(manifest.permissions.includes('scripting'));
   assert.equal(manifest.content_scripts[0].js[1], 'content-local-error-capture.js');
+  assert.match(recovery, /export async function contentRuntimeReady/);
+  assert.match(recovery, /export async function recoverOpenTabs/);
+  assert.match(recovery, /export function suspendContentRecovery/);
+  assert.match(recovery, /export function resumeContentRecovery/);
   assert.match(recovery, /GPTLOCK_COLLECT_PAGE_STATE/);
   assert.match(recovery, /contentRuntimeConfirmedMissing/);
   assert.match(recovery, /chrome\.scripting\.executeScript/);
   assert.match(recovery, /content_runtime_recovered/);
-  assert.match(recovery, /chrome\.runtime\.onInstalled/);
-  assert.match(recovery, /\['install', 'update'\]/);
-  assert.match(recovery, /for \(const tab of tabs\)/);
+  assert.match(recovery, /for \(const tab of candidates\)/);
   assert.match(recovery, /UPDATE_RECOVERY_GAP_MS/);
+  assert.doesNotMatch(recovery, /chrome\.runtime\.onInstalled/);
   assert.doesNotMatch(recovery, /service_worker_start/);
   assert.doesNotMatch(recovery, /Promise\.allSettled\(tabs\.map/);
+});
+
+test('content lifecycle supports one proactive terminal quiesce before extension reload', () => {
+  assert.match(lifecycle, /GPTWORK_CONTENT_PREPARE_RELOAD/);
+  assert.match(lifecycle, /shutdown\('extension_reload_prepare'\)/);
+  assert.doesNotMatch(lifecycle, /setInterval\([^)]*GPTWORK_CONTENT_PREPARE_RELOAD/);
 });
 
 test('dynamic recovery only injects classic content-script files declared by the manifest', () => {

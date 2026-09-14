@@ -124,8 +124,6 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       return { ready: true, injected: false, reason: 'already_ready' };
     }
 
-    // The tab can navigate or the master can be switched off while the two-step
-    // receiver probe is running. Re-check both immediately before injection.
     if (recoverySuspended) return { ready: false, injected: false, reason: recoverySuspendReason || 'recovery_suspended' };
     if (!await masterRuntimeEnabled()) {
       return { ready: false, injected: false, reason: 'master_disabled' };
@@ -217,9 +215,6 @@ export async function recoverOpenTabs(reason, { onProgress } = {}) {
   const candidates = tabs.filter((tab) => Number.isInteger(tab.id));
   const summary = { total: candidates.length, ready: 0, injected: 0, skipped: 0, results: [], reason };
 
-  // Deliberately recover one tab at a time. An extension update can leave dozens of
-  // already-open ChatGPT tabs without a current receiver; injecting all of them in a
-  // Promise.all burst can create a CPU/memory/debugger storm across every window.
   for (const tab of candidates) {
     if (recoverySuspended || !await masterRuntimeEnabled()) break;
     const result = await ensureContentRuntime(tab.id, reason);
@@ -235,15 +230,17 @@ export async function recoverOpenTabs(reason, { onProgress } = {}) {
   return summary;
 }
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (changeInfo.status === 'complete' && isChatGptUrl(tab?.url || '')) {
-    void ensureContentRuntime(tabId, 'tab_complete');
-  }
-});
+if (globalThis.chrome?.tabs?.onUpdated && globalThis.chrome?.tabs?.onActivated) {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete' && isChatGptUrl(tab?.url || '')) {
+      void ensureContentRuntime(tabId, 'tab_complete');
+    }
+  });
 
-chrome.tabs.onActivated.addListener(({ tabId }) => {
-  void ensureContentRuntime(tabId, 'tab_activated');
-});
+  chrome.tabs.onActivated.addListener(({ tabId }) => {
+    void ensureContentRuntime(tabId, 'tab_activated');
+  });
+}
 
 // IMPORTANT: do not sweep and re-inject all open tabs merely because an MV3 service
 // worker started. Service workers are routinely suspended and restarted; that event is

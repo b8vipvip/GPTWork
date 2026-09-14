@@ -85,7 +85,7 @@ test('tab feature authority is installed before the sole background lifecycle au
 test('content recovery stays off with the master disabled and lifecycle supervisor loads first', () => {
   assert.match(recovery, /MASTER_KEY = 'gptworkEnabledLocal'/);
   assert.match(recovery, /reason: 'master_disabled'/);
-  assert.match(recovery, /master_enabled/);
+  assert.match(recovery, /masterRuntimeEnabled\(\)/);
   const scripts = manifest.content_scripts[0].js;
   assert.equal(scripts[0], 'content-runtime-lifecycle.js');
   assert.equal(scripts[1], 'content-local-error-capture.js');

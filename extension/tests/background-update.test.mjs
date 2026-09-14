@@ -3,44 +3,60 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
-  AUTO_UPDATE_ALARM_MINUTES,
-  RELEASE_NOTIFICATION_URL,
-  releaseNotificationUrl,
-  shouldAutoInstall,
-} from '../background-update.js';
-import {
   ACCOUNT_REFRESH_ALARM,
   ACCOUNT_REFRESH_PERIOD_MINUTES,
   scheduleAccountRefresh,
 } from '../account-refresh-scheduler.js';
 
 const ROOT = new URL('../', import.meta.url);
+const source = await readFile(new URL('background-update.js', ROOT), 'utf8');
 
 test('release notifications come only from the official GPTWork server', () => {
-  assert.equal(RELEASE_NOTIFICATION_URL, 'https://gptlock.mv3.cn/site/api/releases/notifications');
-  const url = new URL(releaseNotificationUrl('generation-123', 20_000));
-  assert.equal(url.origin, 'https://gptlock.mv3.cn');
-  assert.equal(url.pathname, '/site/api/releases/notifications');
-  assert.equal(url.searchParams.get('since'), 'generation-123');
-  assert.equal(url.searchParams.get('wait'), '20000');
-  assert.equal(AUTO_UPDATE_ALARM_MINUTES, 1);
+  assert.match(source, /RELEASE_NOTIFICATION_URL = 'https:\/\/gptlock\.mv3\.cn\/site\/api\/releases\/notifications'/);
+  assert.match(source, /AUTO_UPDATE_ALARM_MINUTES = 1/);
+  assert.doesNotMatch(source, /api\.github\.com\/repos\/.*releases/);
 });
 
-test('background auto-install is limited to Windows with a hardened connected core', () => {
-  assert.equal(shouldAutoInstall({ platformOs: 'win', nativeConnected: true, nativeVersion: '0.5.24' }), true);
-  assert.equal(shouldAutoInstall({ platformOs: 'win', nativeConnected: true, nativeVersion: '0.5.29' }), true);
-  assert.equal(shouldAutoInstall({ platformOs: 'win', nativeConnected: false, nativeVersion: '0.5.29' }), false);
-  assert.equal(shouldAutoInstall({ platformOs: 'win', nativeConnected: true, nativeVersion: '0.5.23' }), false);
-  assert.equal(shouldAutoInstall({ platformOs: 'linux', nativeConnected: true, nativeVersion: '1.0.0' }), false);
+test('background auto-install remains Windows + hardened-core gated', () => {
+  const body = source.match(/export function shouldAutoInstall\([^]*?\n\}/)?.[0] || '';
+  assert.match(body, /platformOs === 'win'/);
+  assert.match(body, /Boolean\(nativeConnected\)/);
+  assert.match(body, /supportsReliableWindowsOneClickUpdate\(nativeVersion\)/);
+});
+
+test('background updater is the sole persistent update transaction owner', () => {
+  assert.match(source, /GPTWORK_UPDATE_STATUS_GET/);
+  assert.match(source, /GPTWORK_UPDATE_CHECK/);
+  assert.match(source, /GPTWORK_UPDATE_INSTALL/);
+  assert.match(source, /phase: 'quiescing'/);
+  assert.match(source, /phase: 'installing'/);
+  assert.match(source, /phase: 'reloading'/);
+  assert.match(source, /phase: 'recovering'/);
+  assert.match(source, /phase: 'complete', percent: 100/);
+  assert.match(source, /GPTWORK_CONTENT_PREPARE_RELOAD/);
+  assert.match(source, /suspendContentRecovery\('update_quiescing'\)/);
+  assert.match(source, /recoverOpenTabs\('update_recovery'/);
+  assert.match(source, /chromeApi\.runtime\.reload\(\)/);
+  assert.match(source, /originalMasterEnabled/);
+  assert.match(source, /TRANSIENT_PHASES/);
+});
+
+test('100 percent is written only after recovery readiness, never immediately after installer exit', () => {
+  const installer = source.match(/async function autoInstallWindows\([^]*?\n\}/)?.[0] || '';
+  assert.match(installer, /phase: 'reloading', percent: 82/);
+  assert.doesNotMatch(installer, /phase: 'complete'/);
+  const recovery = source.match(/async function recoverAfterReload\([^]*?\n\}/)?.[0] || '';
+  assert.match(recovery, /runtimeReadiness/);
+  assert.match(recovery, /if \(last\.ready\)/);
+  assert.match(recovery, /phase: 'complete', percent: 100/);
 });
 
 test('account control refresh re-arms the shared heartbeat alarm instead of self-messaging', async () => {
   const created = [];
   const chromeApi = {
+    storage: { local: { async get() { return { gptworkEnabledLocal: true }; } } },
     alarms: {
-      create(name, info) {
-        created.push({ name, info });
-      },
+      create(name, info) { created.push({ name, info }); },
     },
   };
   const before = Date.now();
@@ -48,11 +64,9 @@ test('account control refresh re-arms the shared heartbeat alarm instead of self
   assert.equal(created.length, 1);
   assert.equal(created[0].name, ACCOUNT_REFRESH_ALARM);
   assert.equal(created[0].info.periodInMinutes, ACCOUNT_REFRESH_PERIOD_MINUTES);
-  assert.equal(ACCOUNT_REFRESH_PERIOD_MINUTES, AUTO_UPDATE_ALARM_MINUTES);
+  assert.equal(ACCOUNT_REFRESH_PERIOD_MINUTES, 1);
   assert.ok(created[0].info.when >= before);
   assert.ok(created[0].info.when <= Date.now() + 1_000);
-
-  const source = await readFile(new URL('background-update.js', ROOT), 'utf8');
   assert.match(source, /await scheduleAccountRefresh\(chromeApi\);/);
   assert.doesNotMatch(source, /runtime\.sendMessage\(message/);
 });

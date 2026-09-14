@@ -50,7 +50,7 @@ test('extension gates automatic release checks and consumes queued admin command
   assert.match(updater, /CLIENT_CONTROL_URL/);
   assert.match(updater, /ACCOUNT_SESSION_KEY/);
   assert.match(updater, /managed_auto_update_disabled/);
-  assert.match(updater, /checkAndMaybeInstall\('admin_sync', chromeApi, \{ force: true \}\)/);
+  assert.match(updater, /checkAndMaybeInstall\('admin_sync', chromeApi, \{ force: true, install: true \}\)/);
   assert.match(updater, /ACCOUNT_REFRESH_ALARM/);
   assert.match(updater, /scheduleAccountRefresh\(chromeApi\)/);
   assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);

@@ -7,6 +7,13 @@ import {
 } from './update-manager.js';
 import { appendRuntimeLog } from './runtime-log.js';
 import { ACCOUNT_REFRESH_ALARM, scheduleAccountRefresh } from './account-refresh-scheduler.js';
+import {
+  contentRuntimeReady,
+  recoverOpenTabs,
+  resumeContentRecovery,
+  suspendContentRecovery,
+} from './content-runtime-recovery.js';
+import { tabFeatureEnabledSync } from './tab-feature-runtime.js';
 
 export const RELEASE_NOTIFICATION_URL = 'https://gptlock.mv3.cn/site/api/releases/notifications';
 export const CLIENT_UPDATE_POLICY_URL = 'https://gptlock.mv3.cn/site/api/client-update/config';
@@ -23,14 +30,26 @@ export const CLIENT_CONTROL_WAIT_MS = 20_000;
 export const FAILED_RETRY_MS = 15 * 60 * 1000;
 
 const NATIVE_HOST = 'com.gptlock.core';
+const MASTER_KEY = 'gptworkEnabledLocal';
+const NATIVE_STATUS_KEY = 'nativeStatus';
 const DOWNLOAD_TIMEOUT_MS = 3 * 60 * 1000;
-const INSTALL_TIMEOUT_MS = 3 * 60 * 1000;
-const INSTALL_INITIAL_WAIT_MS = 8 * 1000;
-const INSTALL_POLL_MS = 3 * 1000;
-const NATIVE_TIMEOUT_MS = 12 * 1000;
+const INSTALL_TIMEOUT_MS = 2 * 60 * 1000;
+const INSTALL_INITIAL_WAIT_MS = 1_000;
+const INSTALL_POLL_MS = 1_000;
+const RECOVERY_TIMEOUT_MS = 45_000;
+const NATIVE_TIMEOUT_MS = 12_000;
 const LONG_POLL_ROUNDS = 3;
+const TRANSIENT_PHASES = new Set([
+  'downloading',
+  'verifying',
+  'quiescing',
+  'installing',
+  'reloading',
+  'recovering',
+]);
 
 let updateTask = null;
+let resumeTask = null;
 let notificationTask = null;
 let clientControlTask = null;
 
@@ -125,14 +144,23 @@ function findDownload(downloadId, chromeApi = globalThis.chrome) {
   });
 }
 
+async function getUpdateStatus(chromeApi = globalThis.chrome) {
+  const stored = await chromeApi.storage.local.get(UPDATE_STATUS_KEY);
+  return stored?.[UPDATE_STATUS_KEY] && typeof stored[UPDATE_STATUS_KEY] === 'object'
+    ? stored[UPDATE_STATUS_KEY]
+    : null;
+}
+
 async function setUpdateStatus(status, chromeApi = globalThis.chrome) {
-  await chromeApi.storage.local.set({
-    [UPDATE_STATUS_KEY]: {
-      schemaVersion: 2,
-      updatedAt: new Date().toISOString(),
-      ...status,
-    },
-  });
+  const previous = await getUpdateStatus(chromeApi);
+  const next = {
+    ...(previous || {}),
+    schemaVersion: 3,
+    ...status,
+    updatedAt: new Date().toISOString(),
+  };
+  await chromeApi.storage.local.set({ [UPDATE_STATUS_KEY]: next });
+  return next;
 }
 
 async function setActionUpdateState({ available, version, installing = false, error = false }, chromeApi = globalThis.chrome) {
@@ -144,16 +172,17 @@ async function setActionUpdateState({ available, version, installing = false, er
   }
   const badge = error ? 'ERR' : installing ? 'UPD' : 'NEW';
   const title = error
-    ? `GPTWork ${version || ''} 自动更新失败，点击查看`
+    ? `GPTWork ${version || ''} 更新失败，点击查看`
     : installing
-      ? `GPTWork 正在自动更新到 ${version || '新版本'}`
-      : `GPTWork ${version || '新版本'} 已由服务端发布`;
+      ? `GPTWork 正在更新到 ${version || '新版本'}`
+      : `GPTWork ${version || '新版本'} 已发布`;
   await chromeApi.action.setBadgeText({ text: badge }).catch(() => {});
   await chromeApi.action.setTitle({ title }).catch(() => {});
 }
 
-async function waitForDownload(downloadId, chromeApi = globalThis.chrome) {
+async function waitForDownload(downloadId, targetVersion, chromeApi = globalThis.chrome) {
   const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS;
+  let lastPercent = -1;
   while (Date.now() < deadline) {
     const item = await findDownload(downloadId, chromeApi);
     if (item?.state === 'complete') {
@@ -161,10 +190,25 @@ async function waitForDownload(downloadId, chromeApi = globalThis.chrome) {
         throw new Error(`浏览器安全检查阻止安装器：${item.danger}`);
       }
       if (!item.filename) throw new Error('无法取得下载后的安装器路径');
+      await setUpdateStatus({
+        phase: 'downloading', percent: 50, targetVersion, downloadId,
+        message: `安装包下载完成：${targetVersion}`,
+      }, chromeApi);
       return item;
     }
     if (item?.state === 'interrupted') throw new Error(`安装器下载中断：${item.error || 'unknown'}`);
-    await sleep(400);
+    let percent = 18;
+    if (Number(item?.totalBytes) > 0) {
+      percent = 15 + Math.round(Math.max(0, Math.min(1, Number(item.bytesReceived || 0) / Number(item.totalBytes))) * 34);
+    }
+    if (percent !== lastPercent) {
+      lastPercent = percent;
+      await setUpdateStatus({
+        phase: 'downloading', percent, targetVersion, downloadId,
+        message: `正在下载 ${targetVersion} 安装包… ${percent}%`,
+      }, chromeApi);
+    }
+    await sleep(350);
   }
   throw new Error('安装器下载超时');
 }
@@ -173,13 +217,23 @@ async function waitForInstalledCore(targetVersion, chromeApi = globalThis.chrome
   await sleep(INSTALL_INITIAL_WAIT_MS);
   const deadline = Date.now() + INSTALL_TIMEOUT_MS;
   let lastVersion = null;
+  let attempt = 0;
   while (Date.now() < deadline) {
+    attempt += 1;
     try {
-      const status = await nativeRequest('get_status', {}, chromeApi, 7_000);
+      const status = await nativeRequest('get_status', {}, chromeApi, 5_000);
       lastVersion = status?.version || lastVersion;
       if (compareVersions(status?.version, targetVersion) >= 0) return status;
     } catch {
-      // The verified installer may still be replacing the Native Messaging host.
+      // During Setup the Native Messaging manifests are deliberately unavailable.
+    }
+    if (attempt % 3 === 0) {
+      const elapsed = Date.now() - (deadline - INSTALL_TIMEOUT_MS);
+      const percent = 72 + Math.min(8, Math.floor((elapsed / INSTALL_TIMEOUT_MS) * 8));
+      await setUpdateStatus({
+        phase: 'installing', percent, targetVersion,
+        message: `安装器正在替换组件，等待新 Core ${targetVersion} 启动…`,
+      }, chromeApi).catch(() => {});
     }
     await sleep(INSTALL_POLL_MS);
   }
@@ -218,6 +272,239 @@ export async function fetchManagedUpdatePolicy(fetchImpl = fetch) {
   };
 }
 
+function sendTabMessage(tabId, message, chromeApi = globalThis.chrome) {
+  return new Promise((resolve) => {
+    try {
+      chromeApi.tabs.sendMessage(tabId, message, (response) => {
+        void chromeApi.runtime.lastError;
+        resolve(response ?? null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function quiesceForUpdate(targetVersion, chromeApi = globalThis.chrome) {
+  const stored = await chromeApi.storage.local.get(MASTER_KEY);
+  const previousStatus = await getUpdateStatus(chromeApi);
+  const originalMasterEnabled = typeof previousStatus?.originalMasterEnabled === 'boolean'
+    ? previousStatus.originalMasterEnabled
+    : stored?.[MASTER_KEY] === true;
+
+  suspendContentRecovery('update_quiescing');
+  await setUpdateStatus({
+    phase: 'quiescing', percent: 62, targetVersion,
+    originalMasterEnabled,
+    message: '正在安全停止旧版页面运行时、请求锁定器和本地核心…',
+  }, chromeApi);
+
+  let tabs = [];
+  try { tabs = await chromeApi.tabs.query({ url: 'https://chatgpt.com/*' }); } catch {}
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab?.id)) continue;
+    await sendTabMessage(tab.id, { type: 'GPTWORK_CONTENT_PREPARE_RELOAD' }, chromeApi);
+    await sleep(25);
+  }
+
+  // The canonical Master key is the one normal background lifecycle gate. Temporarily
+  // switch it off rather than duplicating debugger/native cleanup inside the updater.
+  // background.js remains the sole owner that actually detaches and disconnects.
+  if (stored?.[MASTER_KEY] === true) await chromeApi.storage.local.set({ [MASTER_KEY]: false });
+  await sleep(500);
+  logUpdate('info', 'update_runtime_quiesced', { targetVersion, originalMasterEnabled, tabCount: tabs.length });
+  return originalMasterEnabled;
+}
+
+async function restoreAfterFailedUpdate(chromeApi = globalThis.chrome) {
+  const status = await getUpdateStatus(chromeApi);
+  resumeContentRecovery();
+  if (status?.originalMasterEnabled === true) {
+    await chromeApi.storage.local.set({ [MASTER_KEY]: true }).catch(() => {});
+  }
+}
+
+async function debuggerAttachedTabIds(chromeApi = globalThis.chrome) {
+  if (!chromeApi.debugger?.getTargets) return new Set();
+  try {
+    const targets = await chromeApi.debugger.getTargets();
+    return new Set(targets.filter((target) => target?.attached === true && Number.isInteger(target.tabId)).map((target) => target.tabId));
+  } catch {
+    return new Set();
+  }
+}
+
+async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
+  const tabs = await chromeApi.tabs.query({ url: 'https://chatgpt.com/*' }).catch(() => []);
+  const readyTabs = [];
+  const pendingContentTabs = [];
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab?.id) || tab.status === 'loading') continue;
+    if (await contentRuntimeReady(tab.id)) readyTabs.push(tab.id);
+    else pendingContentTabs.push(tab.id);
+  }
+
+  const attached = await debuggerAttachedTabIds(chromeApi);
+  const expectedMonitorTabs = tabs
+    .filter((tab) => Number.isInteger(tab?.id) && tabFeatureEnabledSync(tab.id))
+    .map((tab) => tab.id);
+  const pendingMonitorTabs = expectedMonitorTabs.filter((tabId) => !attached.has(tabId));
+  const stored = await chromeApi.storage.local.get(NATIVE_STATUS_KEY);
+  const nativeStatus = stored?.[NATIVE_STATUS_KEY] || null;
+  const coreReady = nativeStatus?.connected === true
+    && compareVersions(nativeStatus?.version, targetVersion) >= 0;
+
+  return {
+    ready: coreReady && pendingContentTabs.length === 0 && pendingMonitorTabs.length === 0,
+    coreReady,
+    nativeVersion: nativeStatus?.version ?? null,
+    tabCount: tabs.length,
+    readyContentCount: readyTabs.length,
+    pendingContentTabs,
+    expectedMonitorTabs,
+    pendingMonitorTabs,
+  };
+}
+
+async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
+  const targetVersion = status?.targetVersion;
+  if (!targetVersion) throw new Error('更新恢复缺少目标版本');
+  const currentVersion = chromeApi.runtime.getManifest().version;
+  if (compareVersions(currentVersion, targetVersion) < 0) {
+    const reloadAttempts = Math.max(0, Number(status?.reloadAttempts || 0));
+    if (reloadAttempts >= 1) {
+      throw new Error(`扩展仍为 ${currentVersion}，未切换到 ${targetVersion}`);
+    }
+    await waitForInstalledCore(targetVersion, chromeApi);
+    await setUpdateStatus({
+      phase: 'reloading', percent: 83, targetVersion,
+      reloadAttempts: reloadAttempts + 1,
+      message: `新组件已安装，正在加载扩展 ${targetVersion}…`,
+    }, chromeApi);
+    await sleep(300);
+    chromeApi.runtime.reload();
+    return { reloadRequested: true };
+  }
+
+  await setUpdateStatus({
+    phase: 'recovering', percent: 86, targetVersion,
+    message: '新版扩展已加载，正在恢复本地核心和页面功能…',
+  }, chromeApi);
+
+  resumeContentRecovery();
+  if (status?.originalMasterEnabled === true) {
+    await chromeApi.storage.local.set({ [MASTER_KEY]: true });
+  }
+
+  if (status?.originalMasterEnabled !== true) {
+    await recordAttempt(targetVersion, 'complete', { nativeVersion: null }, chromeApi);
+    await setUpdateStatus({
+      phase: 'complete', percent: 100, targetVersion,
+      message: `更新完成：${targetVersion}。GPTWork 总开关保持关闭。`,
+      completedAt: new Date().toISOString(),
+    }, chromeApi);
+    await setActionUpdateState({ available: false }, chromeApi);
+    return { complete: true, masterEnabled: false };
+  }
+
+  await recoverOpenTabs('update_recovery', {
+    onProgress: async (progress) => {
+      const ratio = progress.total > 0 ? progress.ready / progress.total : 1;
+      await setUpdateStatus({
+        phase: 'recovering', percent: 88 + Math.round(ratio * 5), targetVersion,
+        message: `正在恢复 ChatGPT 页面运行时 ${progress.ready}/${progress.total}…`,
+      }, chromeApi);
+    },
+  });
+
+  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await runtimeReadiness(targetVersion, chromeApi);
+    if (last.ready) {
+      await recordAttempt(targetVersion, 'complete', { nativeVersion: last.nativeVersion }, chromeApi);
+      await setUpdateStatus({
+        phase: 'complete', percent: 100, targetVersion,
+        nativeVersion: last.nativeVersion,
+        message: `更新完成：${targetVersion}。本地核心、页面运行时和请求锁定器均已恢复。`,
+        completedAt: new Date().toISOString(),
+      }, chromeApi);
+      await setActionUpdateState({ available: false }, chromeApi);
+      logUpdate('info', 'background_auto_update_completed', { targetVersion, ...last });
+      return { complete: true, ...last };
+    }
+    const pending = last.pendingContentTabs.length + last.pendingMonitorTabs.length;
+    const percent = last.coreReady ? (pending > 0 ? 97 : 99) : 95;
+    const detail = !last.coreReady
+      ? '等待本地核心连接'
+      : last.pendingContentTabs.length
+        ? `等待 ${last.pendingContentTabs.length} 个页面运行时`
+        : `等待 ${last.pendingMonitorTabs.length} 个请求锁定器`;
+    await setUpdateStatus({
+      phase: 'recovering', percent, targetVersion,
+      nativeVersion: last.nativeVersion,
+      message: `更新已安装，正在完成恢复：${detail}…`,
+    }, chromeApi);
+    await sleep(750);
+  }
+  throw new Error(`更新已安装但功能恢复超时：${JSON.stringify(last || {})}`);
+}
+
+async function resumeInterruptedUpdate(chromeApi = globalThis.chrome) {
+  if (resumeTask) return resumeTask;
+  resumeTask = (async () => {
+    const status = await getUpdateStatus(chromeApi);
+    if (!TRANSIENT_PHASES.has(status?.phase)) return false;
+
+    // A worker may restart while the silent installer is still running. The persistent
+    // Master=OFF transaction gate prevents normal background initialization from
+    // reconnecting the Core. Wait for the target Core, then perform exactly one reload.
+    if (status.phase === 'installing') {
+      await waitForInstalledCore(status.targetVersion, chromeApi);
+      await setUpdateStatus({
+        phase: 'reloading', percent: 82, targetVersion: status.targetVersion,
+        reloadAttempts: 0,
+        message: `组件 ${status.targetVersion} 已安装，正在重新加载扩展…`,
+      }, chromeApi);
+      await sleep(300);
+      chromeApi.runtime.reload();
+      return true;
+    }
+
+    if (status.phase === 'reloading' || status.phase === 'recovering') {
+      await recoverAfterReload(status, chromeApi);
+      return true;
+    }
+
+    // Download/verify/quiesce cannot safely be resumed after the owning worker vanished:
+    // no installer completion is known. Restore the user's Master state and surface one
+    // explicit failure rather than starting a second overlapping update transaction.
+    await restoreAfterFailedUpdate(chromeApi);
+    await setUpdateStatus({
+      phase: 'error', percent: Math.max(0, Number(status.percent || 0)),
+      targetVersion: status.targetVersion ?? null,
+      message: '更新事务在安装器启动前被中断，请重新执行更新。',
+      error: 'update_transaction_interrupted_before_install',
+      failedAt: new Date().toISOString(),
+    }, chromeApi);
+    return true;
+  })().catch(async (error) => {
+    await restoreAfterFailedUpdate(chromeApi).catch(() => {});
+    const status = await getUpdateStatus(chromeApi).catch(() => null);
+    await setUpdateStatus({
+      phase: 'error', percent: Math.min(99, Math.max(0, Number(status?.percent || 0))),
+      targetVersion: status?.targetVersion ?? null,
+      message: `更新恢复失败：${errorText(error)}`,
+      error: errorText(error),
+      failedAt: new Date().toISOString(),
+    }, chromeApi).catch(() => {});
+    await setActionUpdateState({ available: true, version: status?.targetVersion, error: true }, chromeApi).catch(() => {});
+    logUpdate('error', 'update_resume_failed', { error: errorText(error), targetVersion: status?.targetVersion ?? null });
+    return true;
+  }).finally(() => { resumeTask = null; });
+  return resumeTask;
+}
+
 async function autoInstallWindows(release, nativeStatus, chromeApi = globalThis.chrome) {
   const targetVersion = release.latestVersion;
   await recordAttempt(targetVersion, 'running', {}, chromeApi);
@@ -226,7 +513,12 @@ async function autoInstallWindows(release, nativeStatus, chromeApi = globalThis.
     phase: 'downloading', percent: 15,
     targetVersion,
     nativeVersion: nativeStatus?.version ?? null,
-    message: `服务端已发布 ${targetVersion}，正在自动下载安装包…`,
+    originalMasterEnabled: undefined,
+    reloadAttempts: 0,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    message: `服务端已发布 ${targetVersion}，正在下载安装包…`,
   }, chromeApi);
 
   logUpdate('info', 'background_auto_update_started', {
@@ -241,15 +533,17 @@ async function autoInstallWindows(release, nativeStatus, chromeApi = globalThis.
     conflictAction: 'overwrite',
     saveAs: false,
   }, chromeApi);
-  const download = await waitForDownload(downloadId, chromeApi);
+  const download = await waitForDownload(downloadId, targetVersion, chromeApi);
 
   await setUpdateStatus({
     phase: 'verifying', percent: 55,
     targetVersion,
     nativeVersion: nativeStatus?.version ?? null,
-    message: '安装包已从 GPTWork 服务端下载，正在校验 SHA-256…',
+    message: '安装包下载完成，正在准备安全更新事务…',
     downloadId,
   }, chromeApi);
+
+  const originalMasterEnabled = await quiesceForUpdate(targetVersion, chromeApi);
   const prepared = await nativeRequest('prepare_update', {
     update: {
       installerPath: download.filename,
@@ -262,34 +556,42 @@ async function autoInstallWindows(release, nativeStatus, chromeApi = globalThis.
     phase: 'installing', percent: 70,
     targetVersion,
     nativeVersion: nativeStatus?.version ?? null,
-    message: `正在后台安装 ${targetVersion}，GPTWork Core 会短暂重启…`,
+    originalMasterEnabled,
+    message: `正在后台安装 ${targetVersion}；浏览器保持打开，GPTWork 功能暂时停用…`,
     launcherStrategy: prepared?.launcherStrategy ?? null,
     launcherProcessId: prepared?.launcherProcessId ?? null,
   }, chromeApi);
 
   const installed = await waitForInstalledCore(targetVersion, chromeApi);
-  await recordAttempt(targetVersion, 'complete', { nativeVersion: installed?.version ?? targetVersion }, chromeApi);
   await setUpdateStatus({
-    phase: 'complete', percent: 100,
+    phase: 'reloading', percent: 82,
     targetVersion,
     nativeVersion: installed?.version ?? targetVersion,
-    message: `自动更新完成：${targetVersion}，正在重新加载扩展…`,
-    completedAt: new Date().toISOString(),
+    originalMasterEnabled,
+    reloadAttempts: 0,
+    message: `新组件 ${targetVersion} 已安装，正在重新加载扩展并恢复功能…`,
   }, chromeApi);
-  await setActionUpdateState({ available: false }, chromeApi);
-  logUpdate('info', 'background_auto_update_completed', {
-    targetVersion,
-    nativeVersion: installed?.version ?? null,
-  });
-  await sleep(900);
+  logUpdate('info', 'update_install_complete_reload_requested', { targetVersion, nativeVersion: installed?.version ?? null });
+  await sleep(300);
   chromeApi.runtime.reload();
+  return { reloadRequested: true };
 }
 
-export async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = globalThis.chrome, { force = false } = {}) {
+export async function checkAndMaybeInstall(
+  reason = 'scheduled',
+  chromeApi = globalThis.chrome,
+  { force = false, install = true } = {},
+) {
   if (updateTask) return updateTask;
   updateTask = (async () => {
     const currentVersion = chromeApi.runtime.getManifest().version;
     try {
+      const status = await getUpdateStatus(chromeApi);
+      if (TRANSIENT_PHASES.has(status?.phase)) {
+        await resumeInterruptedUpdate(chromeApi);
+        return { updateInProgress: true, currentVersion, targetVersion: status.targetVersion ?? null };
+      }
+
       if (!force) {
         const policy = await fetchManagedUpdatePolicy();
         if (!policy.enabled) {
@@ -306,6 +608,13 @@ export async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = glo
       const release = await fetchLatestRelease(currentVersion);
       if (!release.updateAvailable) {
         await setActionUpdateState({ available: false }, chromeApi);
+        if (reason === 'ui_check') {
+          await setUpdateStatus({
+            phase: 'up_to_date', percent: 100,
+            targetVersion: release.latestVersion,
+            message: `当前 ${currentVersion} 已是最新正式版。`,
+          }, chromeApi);
+        }
         return release;
       }
 
@@ -313,14 +622,19 @@ export async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = glo
       await setUpdateStatus({
         phase: 'ready', percent: 12,
         targetVersion: release.latestVersion,
-        message: `服务端已发布 GPTWork ${release.latestVersion}，正在准备自动更新…`,
+        message: install
+          ? `服务端已发布 GPTWork ${release.latestVersion}，正在准备自动更新…`
+          : `发现 GPTWork ${release.latestVersion}，可立即更新。`,
       }, chromeApi);
       logUpdate('info', 'server_release_notification_received', {
         reason,
         currentVersion,
         latestVersion: release.latestVersion,
         forcedByAdmin: force,
+        install,
       });
+
+      if (!install) return release;
 
       const platform = await getPlatformInfo(chromeApi);
       let nativeStatus = null;
@@ -331,8 +645,8 @@ export async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = glo
         nativeVersion: nativeStatus?.version,
       })) {
         const message = platform?.os === 'win'
-          ? `发现 ${release.latestVersion}；本地 Core 暂不满足安全自动更新条件，点击 GPTWork 查看`
-          : `发现 ${release.latestVersion}；已通知客户端，当前系统更新包从 GPTWork 官网提供`;
+          ? `发现 ${release.latestVersion}；本地 Core 暂不满足安全自动更新条件，请使用正式安装包`
+          : `发现 ${release.latestVersion}；当前系统请使用 GPTWork 正式发布包`;
         await setUpdateStatus({
           phase: 'ready', percent: 12,
           targetVersion: release.latestVersion,
@@ -346,13 +660,15 @@ export async function checkAndMaybeInstall(reason = 'scheduled', chromeApi = glo
       await autoInstallWindows(release, nativeStatus, chromeApi);
       return release;
     } catch (error) {
-      const targetVersion = (await chromeApi.storage.local.get(UPDATE_STATUS_KEY))[UPDATE_STATUS_KEY]?.targetVersion ?? null;
+      const status = await getUpdateStatus(chromeApi).catch(() => null);
+      const targetVersion = status?.targetVersion ?? null;
       if (targetVersion) await recordAttempt(targetVersion, 'failed', { error: errorText(error) }, chromeApi).catch(() => {});
+      await restoreAfterFailedUpdate(chromeApi).catch(() => {});
       await setActionUpdateState({ available: Boolean(targetVersion), version: targetVersion, error: Boolean(targetVersion) }, chromeApi);
       await setUpdateStatus({
-        phase: 'error', percent: 0,
+        phase: 'error', percent: Math.min(99, Math.max(0, Number(status?.percent || 0))),
         targetVersion,
-        message: `自动更新检查失败：${errorText(error)}`,
+        message: `更新失败：${errorText(error)}`,
         error: errorText(error),
         failedAt: new Date().toISOString(),
       }, chromeApi).catch(() => {});
@@ -426,7 +742,7 @@ async function clientControlRound(chromeApi = globalThis.chrome) {
     const generation = Number(control.updateGeneration);
     await chromeApi.storage.local.set({ [ADMIN_UPDATE_GENERATION_KEY]: generation });
     try {
-      await checkAndMaybeInstall('admin_sync', chromeApi, { force: true });
+      await checkAndMaybeInstall('admin_sync', chromeApi, { force: true, install: true });
       logUpdate('info', 'admin_update_command_applied', { generation });
     } catch (error) {
       await chromeApi.storage.local.set({ [ADMIN_UPDATE_GENERATION_KEY]: sinceUpdate }).catch(() => {});
@@ -453,15 +769,45 @@ async function runClientControlLoop(chromeApi = globalThis.chrome) {
   return clientControlTask;
 }
 
+function handleUpdateMessage(message, sender, sendResponse) {
+  if (sender.id !== chrome.runtime.id || !message || typeof message.type !== 'string') return false;
+  if (!['GPTWORK_UPDATE_STATUS_GET', 'GPTWORK_UPDATE_CHECK', 'GPTWORK_UPDATE_INSTALL'].includes(message.type)) return false;
+
+  const run = async () => {
+    if (message.type === 'GPTWORK_UPDATE_STATUS_GET') {
+      return (await getUpdateStatus()) || {
+        schemaVersion: 3,
+        phase: 'idle',
+        percent: 0,
+        targetVersion: null,
+        message: '尚未开始更新。',
+      };
+    }
+    if (message.type === 'GPTWORK_UPDATE_CHECK') {
+      return checkAndMaybeInstall('ui_check', globalThis.chrome, { force: true, install: false });
+    }
+    return checkAndMaybeInstall('ui_install', globalThis.chrome, { force: true, install: true });
+  };
+
+  run().then(
+    (data) => sendResponse({ ok: true, data }),
+    (error) => sendResponse({ ok: false, error: errorText(error) }),
+  );
+  return true;
+}
+
 export async function initializeBackgroundUpdater(chromeApi = globalThis.chrome) {
   if (!chromeApi?.runtime?.getManifest || !chromeApi?.alarms || !chromeApi?.storage?.local) return;
   await chromeApi.alarms.create(RELEASE_CHECK_ALARM, { periodInMinutes: AUTO_UPDATE_ALARM_MINUTES });
+  const resumed = await resumeInterruptedUpdate(chromeApi);
+  if (resumed) return;
   void runClientControlLoop(chromeApi);
   void checkAndMaybeInstall('startup', chromeApi).catch(() => {});
   void runNotificationLoop(chromeApi);
 }
 
 if (globalThis.chrome?.runtime?.onInstalled && globalThis.chrome?.runtime?.onStartup) {
+  chrome.runtime.onMessage.addListener(handleUpdateMessage);
   chrome.runtime.onInstalled.addListener(() => void initializeBackgroundUpdater());
   chrome.runtime.onStartup.addListener(() => void initializeBackgroundUpdater());
   chrome.alarms.onAlarm.addListener((alarm) => {
