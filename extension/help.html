@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GPTWork 使用帮助</title>
   <link rel="stylesheet" href="help.css">
+  <link rel="stylesheet" href="module-nav.css">
 </head>
-<body>
+<body data-gptwork-module="help">
   <main>
     <header class="hero">
       <p class="eyebrow">GPTWORK LOCAL HELP</p>
@@ -79,7 +80,7 @@
       </details>
       <details>
         <summary>更新或异常后如何提供诊断信息？</summary>
-        <p>打开设置中的更新/诊断相关入口，导出运行日志后再用于排查。不要把账号密码、验证码等敏感信息写入问题描述。</p>
+        <p>通过顶部 GPTWork 模块导航进入“诊断日志”，导出运行日志后再用于排查。不要把账号密码、验证码等敏感信息写入问题描述。</p>
       </details>
     </section>
 
@@ -90,5 +91,6 @@
 
     <footer>GPTWork 本地使用帮助 · Local extension page</footer>
   </main>
+  <script type="module" src="module-nav.js"></script>
 </body>
 </html>
