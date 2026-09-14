@@ -54,7 +54,7 @@ jobs:
               echo "Private implementation source leaked into $package" >&2
               exit 1
             fi
-            if grep -Eq '(^|/)background-update\.js$|(^|/)options-update\.js$' <<<"$listing"; then
+            if grep -Eq '(^|/)background-update\.js$|(^|/)options-update\.js$|(^|/)update-entry\.js$' <<<"$listing"; then
               echo "Standalone self-update runtime leaked into $package" >&2
               exit 1
             fi
@@ -68,7 +68,11 @@ jobs:
               exit 1
             fi
             test "$(unzip -p "$package" manifest.json | jq -r '.background.service_worker')" = 'background-entry-store.js'
-            unzip -p "$package" settings-v0521.html | grep -q 'store-update-page.js'
+            unzip -p "$package" update.html | grep -q 'store-update-page.js'
+            if unzip -p "$package" settings-v0521.html | grep -Eq 'store-update-page\.js|options-update\.js'; then
+              echo "Settings must not embed updater modules in store packages." >&2
+              exit 1
+            fi
           done
 
       - uses: actions/upload-artifact@v4
