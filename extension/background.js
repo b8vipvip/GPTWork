@@ -850,6 +850,15 @@ function initialize() {
   return initializeTask;
 }
 
+async function initializeAfterCurrentTask() {
+  const current = initializeTask;
+  if (current) {
+    try { await current; } catch {}
+  }
+  if (!masterRuntimeEnabled()) return;
+  await initialize();
+}
+
 async function activeTabId() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab?.id ?? null;
@@ -1407,7 +1416,7 @@ function applyConfigurationChange({ policyChanged = false, settingsChanged = fal
     if (masterRuntimeEnabled()) void broadcastTabState(state.tabId);
   }
   if (localEnabledChanged) {
-    if (masterRuntimeEnabled()) void initialize();
+    if (masterRuntimeEnabled()) void initializeAfterCurrentTask();
     else void stopBackgroundRuntime('master_disabled');
     return;
   }
@@ -1446,9 +1455,18 @@ const TAB_FEATURE_MESSAGE_TYPES = new Set([
   'GPTWORK_MASTER_SET',
 ]);
 
+// These messages are owned by background-update.js. The generic router must return
+// false so exactly one listener responds; otherwise Settings can receive the generic
+// "Unsupported extension message" error before the updater listener answers.
+const UPDATE_MESSAGE_TYPES = new Set([
+  'GPTWORK_UPDATE_STATUS_GET',
+  'GPTWORK_UPDATE_CHECK',
+  'GPTWORK_UPDATE_INSTALL',
+]);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || !message || typeof message.type !== 'string') return false;
-  if (TAB_FEATURE_MESSAGE_TYPES.has(message.type)) return false;
+  if (TAB_FEATURE_MESSAGE_TYPES.has(message.type) || UPDATE_MESSAGE_TYPES.has(message.type)) return false;
 
   const run = async () => {
     switch (message.type) {

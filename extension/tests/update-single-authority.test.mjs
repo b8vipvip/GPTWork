@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 const updater = fs.readFileSync(new URL('../background-update.js', import.meta.url), 'utf8');
+const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
 const popup = fs.readFileSync(new URL('../popup.js', import.meta.url), 'utf8');
 const options = fs.readFileSync(new URL('../options-update.js', import.meta.url), 'utf8');
 const installer = fs.readFileSync(new URL('../../packaging/windows/GPTWork.iss', import.meta.url), 'utf8');
@@ -30,6 +31,14 @@ test('popup and settings are update clients, not update lifecycle authorities', 
   }
   assert.match(updater, /function handleUpdateMessage/);
   assert.match(updater, /nativeRequest\('prepare_update'/);
+});
+
+test('generic background router delegates updater-owned runtime messages', () => {
+  assert.match(background, /const UPDATE_MESSAGE_TYPES = new Set/);
+  for (const type of ['GPTWORK_UPDATE_STATUS_GET', 'GPTWORK_UPDATE_CHECK', 'GPTWORK_UPDATE_INSTALL']) {
+    assert.match(background, new RegExp(type));
+  }
+  assert.match(background, /TAB_FEATURE_MESSAGE_TYPES\.has\(message\.type\) \|\| UPDATE_MESSAGE_TYPES\.has\(message\.type\)/);
 });
 
 test('Windows Setup stages the new extension and never recursively deletes the live extension', () => {

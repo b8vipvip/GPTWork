@@ -366,6 +366,33 @@ async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
   };
 }
 
+function installedRecoveryErrorCanSelfHeal(status) {
+  const detail = String(status?.error || status?.message || '');
+  return status?.phase === 'error'
+    && Boolean(status?.targetVersion)
+    && detail.includes('更新已安装但功能恢复超时');
+}
+
+async function reconcileInstalledRecovery(currentVersion, status, chromeApi = globalThis.chrome) {
+  if (!installedRecoveryErrorCanSelfHeal(status)) return false;
+  if (compareVersions(currentVersion, status.targetVersion) < 0) return false;
+  const readiness = await runtimeReadiness(status.targetVersion, chromeApi);
+  if (!readiness.ready) return false;
+
+  await recordAttempt(status.targetVersion, 'complete', { nativeVersion: readiness.nativeVersion }, chromeApi);
+  await setUpdateStatus({
+    phase: 'complete', percent: 100, targetVersion: status.targetVersion,
+    nativeVersion: readiness.nativeVersion,
+    message: `更新完成：${status.targetVersion}。本地核心、页面运行时和请求锁定器已自动恢复。`,
+    error: null,
+    failedAt: null,
+    completedAt: new Date().toISOString(),
+  }, chromeApi);
+  await setActionUpdateState({ available: false }, chromeApi);
+  logUpdate('info', 'update_recovery_reconciled', { targetVersion: status.targetVersion, ...readiness });
+  return true;
+}
+
 async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
   const targetVersion = status?.targetVersion;
   if (!targetVersion) throw new Error('更新恢复缺少目标版本');
@@ -590,6 +617,9 @@ export async function checkAndMaybeInstall(
       if (TRANSIENT_PHASES.has(status?.phase)) {
         await resumeInterruptedUpdate(chromeApi);
         return { updateInProgress: true, currentVersion, targetVersion: status.targetVersion ?? null };
+      }
+      if (await reconcileInstalledRecovery(currentVersion, status, chromeApi)) {
+        return { updateRecovered: true, currentVersion, targetVersion: status.targetVersion ?? null };
       }
 
       if (!force) {
