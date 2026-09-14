@@ -21,6 +21,13 @@ test('feature state is keyed by concrete ChatGPT tab and never shared by windowI
   assert.doesNotMatch(runtime, /chrome\.windows\.onRemoved\.addListener/);
 });
 
+test('new ChatGPT tabs default Work mode and model locking on while explicit tab choices stay authoritative', () => {
+  assert.match(runtime, /const DEFAULT_TAB_FEATURE_STATE = Object\.freeze\(\{[\s\S]*workModeEnabled: true,[\s\S]*modelLockEnabled: true/);
+  assert.match(runtime, /states\.has\(id\) \? states\.get\(id\) : DEFAULT_TAB_FEATURE_STATE/);
+  assert.match(runtime, /normalizeState\(\{ \.\.\.DEFAULT_TAB_FEATURE_STATE, \.\.\.states\.get\(id\), \.\.\.patch \}\)/);
+  assert.match(runtime, /const feature = masterEnabled \? tabFeatureStateSync\(tabId\) : normalizeState\(null\)/);
+});
+
 test('temporary window-scoped state migrates once into independent per-tab copies', () => {
   assert.match(runtime, /LEGACY_TAB_FEATURE_SESSION_KEY = 'gptworkTabFeatureStatesV1'/);
   assert.match(runtime, /WINDOW_FEATURE_SESSION_KEY = 'gptworkWindowFeatureStatesV1'/);
