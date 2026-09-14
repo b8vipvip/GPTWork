@@ -11,8 +11,9 @@ import './tab-feature-runtime.js';
 // background.js is the single lifecycle authority for Native Messaging, alarms,
 // debugger attach/detach, badge cleanup, and Master OFF shutdown.
 import './background.js';
-// Derive optimistic higher-model availability from trusted response metadata and keep
-// unavailable models out of the active lock policy without changing ChatGPT traffic.
+// Derive higher-model availability from positive trusted network evidence. Only a
+// complete account-level model catalog may declare a model unavailable; an unrelated
+// chat response can never gray another model.
 import './model-availability-runtime.js';
 // Recover missing content runtimes only for real install/update lifecycle events. An
 // ordinary MV3 service-worker wake must never fan out reinjection across open tabs.
