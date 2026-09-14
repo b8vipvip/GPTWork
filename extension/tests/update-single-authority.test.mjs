@@ -8,10 +8,21 @@ const options = fs.readFileSync(new URL('../options-update.js', import.meta.url)
 const installer = fs.readFileSync(new URL('../../packaging/windows/GPTWork.iss', import.meta.url), 'utf8');
 
 test('popup and settings are update clients, not update lifecycle authorities', () => {
+  // Settings is the interactive update client: it asks the service worker to check/install
+  // and renders the authoritative status returned/persisted by background-update.js.
+  assert.match(options, /GPTWORK_UPDATE_STATUS_GET/);
+  assert.match(options, /GPTWORK_UPDATE_CHECK/);
+  assert.match(options, /GPTWORK_UPDATE_INSTALL/);
+
+  // Popup is intentionally display/navigation-only. It observes the same persisted status
+  // and sends the user to Settings rather than becoming a second check/install authority.
+  assert.match(popup, /gptlockUiUpdateStatus/);
+  assert.match(popup, /chrome\.storage\.onChanged/);
+  assert.match(popup, /GPTLOCK_OPEN_OPTIONS/);
+  assert.doesNotMatch(popup, /GPTWORK_UPDATE_CHECK/);
+  assert.doesNotMatch(popup, /GPTWORK_UPDATE_INSTALL/);
+
   for (const source of [popup, options]) {
-    assert.match(source, /GPTWORK_UPDATE_STATUS_GET/);
-    assert.match(source, /GPTWORK_UPDATE_CHECK/);
-    assert.match(source, /GPTWORK_UPDATE_INSTALL/);
     assert.doesNotMatch(source, /connectNative\(/);
     assert.doesNotMatch(source, /chrome\.downloads\.download/);
     assert.doesNotMatch(source, /prepare_update/);
