@@ -1,63 +1,111 @@
-# GitHub Actions 策略 v2.0
+# GitHub Actions 策略 v3
 
-本策略同时适用于新项目与已经出现 Actions 堆积、重复运行、长时间卡死的老项目。目标不是只提供一份 YAML 模板，而是建立一套持续生效的资源治理规则。
+GPTWork 的所有 GitHub Actions 都必须遵循本策略。v3 由 **Workflow Guard、Policy Check、Actions Governor、Actions Recovery、历史异常恢复** 五层组成。
 
-## 1. 强制规则
+## 1. Workflow Guard
 
-### 1.1 自动 CI / Test / Smoke 必须取消同一工作流同一分支或 PR 的旧运行
+普通 CI/Test/Smoke 必须使用最小权限、同 PR/ref 自动取消旧运行，并为每个实际运行 Job 设置明确 `timeout-minutes`：
 
 ```yaml
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 ```
 
-Release / Deploy / Publish 可以使用 `cancel-in-progress: false`，但必须有独立串行组，并受仓库级 Actions Governor 的 180 分钟硬上限保护。
+Release / Deploy / Publish / Store Package 使用独立串行 concurrency group 与 `cancel-in-progress: false`，但最长仍受 Governor 180 分钟硬上限约束。
 
-### 1.2 核心验证 Job 必须设置显式超时
+所有可恢复 Workflow 应保留 `workflow_dispatch`，让 v3 能在修复后显式重新提交修复后的 ref。
 
-建议：
+## 2. Actions Policy Check
 
-- 单元测试 / Lint：10～20 分钟
-- 编译 / 安装包验证：20～45 分钟
-- Release / Deploy：可以更长，但不得无限运行
+新增或修改 `.github/workflows/*.yml` 时自动检查：
 
-### 1.3 权限最小化
+- `permissions`；
+- `concurrency`；
+- 普通 Workflow `cancel-in-progress: true`；
+- 发布类 `cancel-in-progress: false`；
+- 每个 `runs-on` Job 的 `timeout-minutes`；
+- `workflow_dispatch` 恢复入口；
+- Debug/diagnostic/one-shot/tmp Workflow 不得长期自动触发。
 
-普通 CI 使用 `contents: read`。只有需要取消 Actions 的治理工作流授予 `actions: write`；只有发布 Release 的工作流才授予 `contents: write`。
+已有老 Workflow 由 Governor 兜底，并在下一次修改时强制迁移到 v3。
 
-### 1.4 Debug / 临时诊断工作流不得长期自动触发
+## 3. Actions Governor
 
-临时诊断完成后必须改为 `workflow_dispatch`，并设置较短超时，避免每次 push / PR 都生成新诊断任务。
+Governor 每 10 分钟扫描仓库当前 `in_progress` / `queued` 任务：
 
-## 2. Actions Governor：仓库级强制治理
+1. 普通同 workflow + branch + event 只保留最新一条。
+2. 普通任务达到 45 分钟仍未结束时自动取消。
+3. Release / Deploy / Publish / Store Package 达到 180 分钟自动取消。
+4. Strategy 内部任务最长 20 分钟。
+5. 真正 stale / historical 的任务取消以后，必须立即启动 Actions Recovery，而不是只做 Cancel。
 
-仓库必须存在 `.github/workflows/actions-governor.yml`。Governor 每 10 分钟扫描仍处于 `in_progress` 或 `queued` 的运行，并执行：
+如果某条运行只是已被更新 Commit 替代的 duplicate，不会恢复旧 Commit，因为最新运行本身就是重新提交。
 
-1. 普通 CI/Test/Smoke 对同一 workflow + branch + event 只保留最新一条，其余自动取消。
-2. 普通工作流达到 45 分钟仍未结束时自动取消。
-3. 名称包含 Release / Deploy / Publish / Store Package 的发布类工作流允许更长时间，但达到 180 分钟仍未结束时自动取消。
-4. Governor 查询仓库当前真实运行状态，因此可以清理由旧版本 workflow 启动的历史异常运行。
-5. Governor 自身使用 concurrency 且 Job 超时 10 分钟，防止治理任务自身形成堆积。
+## 4. Actions Recovery：自动修复 + 重新提交
 
-## 3. 老项目迁移顺序
+Recovery 会：
 
-1. 加入 Actions Governor。
-2. 给主 CI / Test / Smoke 加 `concurrency + cancel-in-progress`。
-3. 给核心 Job 加 `timeout-minutes`。
-4. 将临时 Debug Workflow 改为手动触发。
-5. 合并后由 Governor 清理策略落地之前遗留的长时间运行任务。
-6. 再触发一轮新的 CI 验证策略。
+1. 收集异常 run metadata 与日志。
+2. 从当前 main 加载最新版 v3 修复逻辑，因此能处理策略上线前启动的旧任务。
+3. 自动修复安全、确定性的 Workflow 缺陷：缺少 `workflow_dispatch`、权限声明、concurrency、Job timeout 等。
+4. 如存在 `.github/actions-recovery.sh`，执行项目级幂等修复规则，可根据 `ACTIONS_RECOVERY_LOG` 修复已知代码/测试故障模式。
+5. 有修改时自动建立 `actions-recovery/run-<run_id>` 分支并提交 Recovery PR。
+6. 对普通无副作用 Workflow，自动 dispatch 修复后的 ref，完成“修复后重新提交”。
+7. 没有安全修改可做时，最多 fresh-run rerun 一次，以恢复 Runner/网络/临时环境故障。
+8. 重试预算耗尽后自动创建 `[Actions Recovery]` Issue，留下完整恢复线索。
 
-## 4. 验收标准
+### 安全边界
 
-- 同一 PR 连续 push 两次，旧 CI 自动进入 `cancelled`。
-- 普通 CI 不会无限运行，仓库级硬上限 45 分钟。
-- Release / Deploy 等发布类工作流最长不超过 180 分钟。
-- 历史遗留的长时间 `in_progress` / `queued` 任务能被 Governor 自动取消。
-- 临时诊断不再随每次 push / PR 自动运行。
-- 最新一代正式 CI 最终给出明确 `success` 或 `failure`，而不是长期 `in_progress`。
+v3 不会假装能够凭空推断任意业务代码正确实现。自动代码修复只针对：
 
-## 5. 本仓库策略
+- 策略/Workflow 层可机械确定的问题；
+- 已通过 `.github/actions-recovery.sh` 编码的项目已知故障模式。
 
-GPTWork 主 CI 对同一 PR / ref 自动取消旧运行，并为 Extension、Rust、Windows Setup、Linux package 等核心 Job 设置 20～40 分钟显式超时。其它专用工作流继续保留各自业务语义，但统一受 Actions Governor 的 45 / 180 分钟仓库级资源治理约束。
+Release/Deploy/Publish/Store Package 具有外部副作用，禁止自动盲目重放；v3 可以提交修复，但发布重试需要明确批准，防止重复发布或部署。
+
+## 5. 历史任务标准恢复链路
+
+```text
+历史/当前卡死任务
+      ↓
+Actions Governor 判定 stale
+      ↓
+Cancel 释放 Runner
+      ↓
+Actions Recovery 自动取证
+      ↓
+Workflow/项目规则自动修复
+      ↓
+Recovery branch + PR
+      ↓
+普通任务重新 dispatch
+      ↓
+不可自动修复 → 一次 fresh rerun → Recovery Issue
+```
+
+因此 v3 的“清理”不再等于简单删除或取消，而是资源释放之后必须进入恢复链路。
+
+## 6. GPTWork 默认阈值
+
+- 主 CI Extension：20 分钟。
+- Rust / Native Core / Linux package：30 分钟级。
+- Windows Setup：40 分钟级。
+- 普通仓库级 Governor 兜底：45 分钟。
+- 发布类：180 分钟。
+- Governor：10 分钟。
+- Recovery：20 分钟。
+- 无修改 fresh-run 自动重试：最多 1 次。
+
+## 7. 验收标准
+
+- 同一 PR 多次 push 时只保留最新 CI。
+- 所有新/修改 Workflow 通过 Policy Check。
+- 普通任务不会无限 `in_progress`。
+- 历史异常 run 被取消后能看到 Recovery 接管。
+- 可安全修复的 Workflow 会出现 Recovery 分支/PR。
+- 修复后的普通 Workflow 会被重新提交运行。
+- 无法继续自动恢复时会生成 Recovery Issue，而不是无限重跑。
