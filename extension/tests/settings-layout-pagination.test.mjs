@@ -6,21 +6,21 @@ const settingsHtml = await readFile(new URL('../settings-v0521.html', import.met
 const historyOptionsSource = await readFile(new URL('../request-history-options.js', import.meta.url), 'utf8');
 const historyCss = await readFile(new URL('../request-history.css', import.meta.url), 'utf8');
 
-test('locked models sits directly after feature gates and update center is the last settings card', () => {
+test('locked models sits directly after feature gates and request history is the last settings card', () => {
   const featureIndex = settingsHtml.indexOf('id="globalHeading"');
   const modelIndex = settingsHtml.indexOf('id="modelHeading"');
   const reasoningIndex = settingsHtml.indexOf('id="reasoningHeading"');
   const historyIndex = settingsHtml.indexOf('id="requestHistoryHeading"');
-  const updateIndex = settingsHtml.indexOf('id="updateHeading"');
   const footerIndex = settingsHtml.indexOf('<footer>');
 
   assert(featureIndex >= 0);
   assert(modelIndex > featureIndex);
   assert(reasoningIndex > modelIndex);
   assert(historyIndex > reasoningIndex);
-  assert(updateIndex > historyIndex);
-  assert(footerIndex > updateIndex);
-  assert.equal(settingsHtml.lastIndexOf('<section'), settingsHtml.lastIndexOf('<section id="updates"'));
+  assert(footerIndex > historyIndex);
+  assert.doesNotMatch(settingsHtml, /id="updateHeading"/);
+  assert.doesNotMatch(settingsHtml, /id="updates"/);
+  assert.equal(settingsHtml.lastIndexOf('<section'), settingsHtml.lastIndexOf('<section class="card request-history-card"'));
 });
 
 test('request history pagination renders eight records per page with previous and next controls', () => {
