@@ -15,6 +15,10 @@ const MODEL_SELECTION_KEY = 'gptworkModelLockSelection';
 const DISCOVERED_MODELS_KEY = 'discoveredModels';
 const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';
 const BASE_WORK_MODELS = Object.freeze(['gpt-6-astra', 'gpt-5.6-sol']);
+const DEFAULT_TAB_FEATURE_STATE = Object.freeze({
+  workModeEnabled: true,
+  modelLockEnabled: true,
+});
 const FEATURE_MESSAGE_TYPES = new Set([
   'GPTWORK_TAB_FEATURE_GET',
   'GPTWORK_TAB_FEATURE_SET',
@@ -223,7 +227,7 @@ export async function initializeTabFeatureRuntime() {
 export function tabFeatureStateSync(tabId) {
   const id = Number(tabId);
   if (!Number.isInteger(id)) return normalizeState(null);
-  return normalizeState(states.get(id));
+  return normalizeState(states.has(id) ? states.get(id) : DEFAULT_TAB_FEATURE_STATE);
 }
 
 export async function getTabFeatureState(tabId) {
@@ -263,7 +267,7 @@ async function setTabFeatureState(tabId, patch) {
   await initializeTabFeatureRuntime();
   const id = Number(tabId);
   if (!Number.isInteger(id)) throw Object.assign(new Error('没有打开的 ChatGPT 标签页'), { code: 'NO_CHATGPT_TAB' });
-  const next = normalizeState({ ...states.get(id), ...patch });
+  const next = normalizeState({ ...DEFAULT_TAB_FEATURE_STATE, ...states.get(id), ...patch });
   states.set(id, next);
   await persistStates();
   log('tab_feature_changed', { tabId: id, ...next });

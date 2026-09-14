@@ -40,6 +40,13 @@
     return '历史识别 / Legacy discovered';
   }
 
+  function sourceDetail(model, discoveredSet, evidence) {
+    if (discoveredSet.has(model)) {
+      return `${model} · 自动获取 / Auto discovered · ${evidenceLabel(model, evidence)}`;
+    }
+    return `${model} · 手动添加 / Manual`;
+  }
+
   function modelLabel(value) {
     const model = normalizeConcreteModelId(value);
     if (!model) return 'Unknown';
@@ -59,13 +66,42 @@
     return model;
   }
 
+  function setChoiceSource(input, discoveredSet, evidence) {
+    const concrete = normalizeConcreteModelId(input?.value);
+    const row = input?.closest?.('.check-row');
+    if (!concrete || !row) return;
+    const automatic = discoveredSet.has(concrete);
+    if (automatic) row.dataset.discoveredModel = concrete;
+    else delete row.dataset.discoveredModel;
+
+    const text = row.querySelector('span');
+    if (!text) return;
+    let small = text.querySelector('small');
+    if (!small) {
+      small = document.createElement('small');
+      text.append(small);
+    }
+    small.textContent = sourceDetail(concrete, discoveredSet, evidence);
+  }
+
+  function labelChoiceSources(discovered, evidence) {
+    const container = document.getElementById('modelChoices');
+    if (!container) return;
+    const discoveredSet = new Set(discovered);
+    for (const input of container.querySelectorAll('input[name="model"]')) {
+      setChoiceSource(input, discoveredSet, evidence);
+    }
+  }
+
   function appendChoice(model, lockedModels, evidence) {
     const concrete = normalizeConcreteModelId(model);
     const container = document.getElementById('modelChoices');
     if (!container || !concrete) return;
+    const discoveredSet = new Set([concrete]);
     const existing = container.querySelector(`input[name="model"][value="${CSS.escape(concrete)}"]`);
     if (existing) {
-      if (existing.closest('[data-discovered-model]')) existing.checked = lockedModels.includes(concrete);
+      existing.checked = lockedModels.includes(concrete);
+      setChoiceSource(existing, discoveredSet, evidence);
       return;
     }
 
@@ -83,7 +119,7 @@
     const strong = document.createElement('strong');
     strong.textContent = modelLabel(concrete);
     const small = document.createElement('small');
-    small.textContent = `${concrete} · ${evidenceLabel(concrete, evidence)}`;
+    small.textContent = sourceDetail(concrete, discoveredSet, evidence);
     text.append(strong, small);
     row.append(input, text);
     container.append(row);
@@ -158,12 +194,15 @@
     }
 
     for (const model of discovered) appendChoice(model, lockedModels, evidence);
-    removeDuplicateDiscoveredRows();
-    dedupeCustomField(discovered);
-    window.setTimeout(() => {
+    const syncChoiceUi = () => {
+      labelChoiceSources(discovered, evidence);
       removeDuplicateDiscoveredRows();
       dedupeCustomField(discovered);
-    }, 800);
+    };
+    syncChoiceUi();
+    window.setTimeout(syncChoiceUi, 0);
+    window.setTimeout(syncChoiceUi, 120);
+    window.setTimeout(syncChoiceUi, 800);
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
