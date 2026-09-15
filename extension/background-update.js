@@ -334,6 +334,21 @@ async function debuggerAttachedTabIds(chromeApi = globalThis.chrome) {
   }
 }
 
+function extensionRequest(message, chromeApi = globalThis.chrome) {
+  return new Promise((resolve, reject) => {
+    try {
+      chromeApi.runtime.sendMessage(message, (response) => {
+        const error = chromeApi.runtime.lastError;
+        if (error) reject(new Error(error.message));
+        else if (response?.ok === false) reject(new Error(response.error || 'Extension request failed'));
+        else resolve(response?.data ?? response ?? null);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
   const tabs = await chromeApi.tabs.query({ url: 'https://chatgpt.com/*' }).catch(() => []);
   const readyTabs = [];
@@ -421,6 +436,12 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
   resumeContentRecovery();
   if (status?.originalMasterEnabled === true) {
     await chromeApi.storage.local.set({ [MASTER_KEY]: true });
+    // The new service worker can begin initialization while the updater's temporary
+    // Master=OFF value is still visible. Force one reconnect after that task settles so
+    // recovery cannot inherit the stale master_disabled initialization.
+    await extensionRequest({ type: 'GPTLOCK_RECONNECT' }, chromeApi).catch((error) => {
+      logUpdate('warn', 'update_reconnect_after_reload_failed', { error: errorText(error) });
+    });
   }
 
   if (status?.originalMasterEnabled !== true) {
@@ -801,7 +822,7 @@ async function runClientControlLoop(chromeApi = globalThis.chrome) {
 
 function handleUpdateMessage(message, sender, sendResponse) {
   if (sender.id !== chrome.runtime.id || !message || typeof message.type !== 'string') return false;
-  if (!['GPTWORK_UPDATE_STATUS_GET', 'GPTWORK_UPDATE_CHECK', 'GPTWORK_UPDATE_INSTALL'].includes(message.type)) return false;
+  if (!['GPTWORK_UPDATE_STATUS_GET', 'GPTWORK_UPDATE_CHECK', 'GPTWORK_UPDATE_INSTALL', 'GPTWORK_CORE_REPAIR'].includes(message.type)) return false;
 
   const run = async () => {
     if (message.type === 'GPTWORK_UPDATE_STATUS_GET') {
@@ -815,6 +836,17 @@ function handleUpdateMessage(message, sender, sendResponse) {
     }
     if (message.type === 'GPTWORK_UPDATE_CHECK') {
       return checkAndMaybeInstall('ui_check', globalThis.chrome, { force: true, install: false });
+    }
+    if (message.type === 'GPTWORK_CORE_REPAIR') {
+      try {
+        const status = await nativeRequest('get_status', {}, globalThis.chrome, 5_000);
+        logUpdate('info', 'core_repair_existing_install_detected', { nativeVersion: status?.version ?? null });
+        setTimeout(() => globalThis.chrome.runtime.reload(), 150);
+        return { installed: true, nativeVersion: status?.version ?? null, reloadRequested: true };
+      } catch (error) {
+        logUpdate('info', 'core_repair_install_missing', { error: errorText(error) });
+        return { installed: false, error: errorText(error), reloadRequested: false };
+      }
     }
     return checkAndMaybeInstall('ui_install', globalThis.chrome, { force: true, install: true });
   };
