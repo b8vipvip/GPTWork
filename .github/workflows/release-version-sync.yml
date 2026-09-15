@@ -1,0 +1,28 @@
+name: Release Version Sync
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-version-sync.yml'
+permissions:
+  contents: write
+jobs:
+  sync:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'release/v0.5.62'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Align installer metadata and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/#define MyAppVersion "0\.5\.61"/#define MyAppVersion "0.5.62"/' packaging/windows/GPTWork.iss
+          rm -f .github/workflows/release-version-sync.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packaging/windows/GPTWork.iss .github/workflows/release-version-sync.yml
+          git commit -m 'release: align Windows installer version for v0.5.62'
+          git push origin HEAD:${{ github.head_ref }}
