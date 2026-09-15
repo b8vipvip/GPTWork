@@ -1,0 +1,41 @@
+name: Temporary v0.5.63 release preparation
+on:
+  push:
+    branches: [release/v0.5.63]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/v0.5.63
+      - name: Bump synchronized release metadata
+        shell: python
+        run: |
+          from pathlib import Path
+          files = [
+            Path('extension/manifest.json'),
+            Path('extension/package.json'),
+            Path('native-core/Cargo.toml'),
+            Path('native-core/Cargo.lock'),
+            Path('packaging/windows/GPTWork.iss'),
+          ]
+          for p in files:
+              s = p.read_text()
+              if '0.5.62' not in s:
+                  raise SystemExit(f'expected 0.5.62 in {p}')
+              s = s.replace('0.5.62', '0.5.63')
+              p.write_text(s)
+          note = Path('docs/releases/v0.5.63.md')
+          note.write_text('''# GPTWork v0.5.63\n\n## Fixes\n\n- Fix post-update recovery race where the new extension worker could inherit the temporary Master=OFF state and leave Native Core/request locking offline until a manual extension reload.\n- Reconnect through the background lifecycle authority after restoring Master, waiting for any in-flight initialization to settle first.\n- Make manual reconnect wait for the current initialization instead of reusing stale `master_disabled` state.\n- Improve **下载并安装本地核心 / Download installer**: check the already-installed Native Core first; if it exists, automatically reload GPTWork and recover the connection instead of downloading another installer.\n- Only open the formal installer page when the local Core is actually unavailable.\n- Add regression coverage for updater recovery and Core repair behavior.\n''')
+      - name: Commit release metadata and remove temporary workflow
+        run: |
+          rm .github/workflows/tmp-release-v0563.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add extension/manifest.json extension/package.json native-core/Cargo.toml native-core/Cargo.lock packaging/windows/GPTWork.iss docs/releases/v0.5.63.md .github/workflows/tmp-release-v0563.yml
+          git commit -m "release: prepare v0.5.63"
+          git push origin HEAD:release/v0.5.63
