@@ -257,7 +257,19 @@ elements.checkUpdate.addEventListener('click', () => {
 });
 
 elements.installCore.addEventListener('click', () => {
-  void chrome.tabs.create({ url: RELEASES_URL }).then(() => window.close());
+  elements.installCore.disabled = true;
+  elements.message.textContent = '正在检查本机 Core；若已安装将自动重新加载 GPTWork… / Checking local Core…';
+  void sendMessage({ type: 'GPTWORK_CORE_REPAIR' })
+    .then((result) => {
+      if (result?.installed) {
+        elements.message.textContent = `检测到本地 Core${result.nativeVersion ? ` ${result.nativeVersion}` : ''}，正在重新加载 GPTWork 并自动恢复连接…`;
+        setTimeout(() => window.close(), 120);
+        return;
+      }
+      return chrome.tabs.create({ url: RELEASES_URL }).then(() => window.close());
+    })
+    .catch(() => chrome.tabs.create({ url: RELEASES_URL }).then(() => window.close()))
+    .finally(() => { elements.installCore.disabled = false; });
 });
 
 elements.options.addEventListener('click', () => {

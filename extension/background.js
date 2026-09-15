@@ -850,7 +850,7 @@ function initialize() {
   return initializeTask;
 }
 
-async function initializeAfterCurrentTask() {
+export async function initializeAfterCurrentTask() {
   const current = initializeTask;
   if (current) {
     try { await current; } catch {}
@@ -1462,6 +1462,7 @@ const UPDATE_MESSAGE_TYPES = new Set([
   'GPTWORK_UPDATE_STATUS_GET',
   'GPTWORK_UPDATE_CHECK',
   'GPTWORK_UPDATE_INSTALL',
+  'GPTWORK_CORE_REPAIR',
 ]);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1546,7 +1547,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         nativePort = null;
         rejectPending(new Error('Native host reconnect requested'));
         previousPort?.disconnect();
-        await initialize();
+        await initializeAfterCurrentTask();
         logRuntime('info', 'native', 'manual_reconnect_completed');
         return { ok: true };
       }
