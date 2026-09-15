@@ -10,7 +10,7 @@ test('manual reconnect waits for an in-flight initialization before retrying', (
   assert.match(background, /case 'GPTLOCK_RECONNECT':[\s\S]*await initializeAfterCurrentTask\(\)/);
 });
 
-test('post-update recovery explicitly reconnects after restoring Master', () => {
+test('post-update recovery explicitly reconnects through the background lifecycle authority', () => {
   assert.match(updater, /update_reconnect_after_reload_failed/);
   assert.match(updater, /initializeAfterCurrentTask\(\)/);
   assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);
