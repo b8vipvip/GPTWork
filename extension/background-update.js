@@ -14,6 +14,7 @@ import {
   suspendContentRecovery,
 } from './content-runtime-recovery.js';
 import { tabFeatureEnabledSync } from './tab-feature-runtime.js';
+import { initializeAfterCurrentTask } from './background.js';
 
 export const RELEASE_NOTIFICATION_URL = 'https://gptlock.mv3.cn/site/api/releases/notifications';
 export const CLIENT_UPDATE_POLICY_URL = 'https://gptlock.mv3.cn/site/api/client-update/config';
@@ -334,21 +335,6 @@ async function debuggerAttachedTabIds(chromeApi = globalThis.chrome) {
   }
 }
 
-function extensionRequest(message, chromeApi = globalThis.chrome) {
-  return new Promise((resolve, reject) => {
-    try {
-      chromeApi.runtime.sendMessage(message, (response) => {
-        const error = chromeApi.runtime.lastError;
-        if (error) reject(new Error(error.message));
-        else if (response?.ok === false) reject(new Error(response.error || 'Extension request failed'));
-        else resolve(response?.data ?? response ?? null);
-      });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
 async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
   const tabs = await chromeApi.tabs.query({ url: 'https://chatgpt.com/*' }).catch(() => []);
   const readyTabs = [];
@@ -439,7 +425,7 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
     // The new service worker can begin initialization while the updater's temporary
     // Master=OFF value is still visible. Force one reconnect after that task settles so
     // recovery cannot inherit the stale master_disabled initialization.
-    await extensionRequest({ type: 'GPTLOCK_RECONNECT' }, chromeApi).catch((error) => {
+    await initializeAfterCurrentTask().catch((error) => {
       logUpdate('warn', 'update_reconnect_after_reload_failed', { error: errorText(error) });
     });
   }

@@ -12,7 +12,8 @@ test('manual reconnect waits for an in-flight initialization before retrying', (
 
 test('post-update recovery explicitly reconnects after restoring Master', () => {
   assert.match(updater, /update_reconnect_after_reload_failed/);
-  assert.match(updater, /extensionRequest\(\{ type: 'GPTLOCK_RECONNECT' \}/);
+  assert.match(updater, /initializeAfterCurrentTask\(\)/);
+  assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);
 });
 
 test('core repair checks an existing native install before opening the installer', () => {

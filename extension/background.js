@@ -850,7 +850,7 @@ function initialize() {
   return initializeTask;
 }
 
-async function initializeAfterCurrentTask() {
+export async function initializeAfterCurrentTask() {
   const current = initializeTask;
   if (current) {
     try { await current; } catch {}
