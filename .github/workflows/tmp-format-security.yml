@@ -1,0 +1,29 @@
+name: Temporary format security branch
+on:
+  push:
+    branches: [security/capability-lease-boundary]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: security/capability-lease-boundary
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format and self-remove
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cargo fmt --manifest-path native-core/Cargo.toml --all
+          cargo fmt --manifest-path private-engine/Cargo.toml --all
+          rm .github/workflows/tmp-format-security.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add native-core/src/bridge.rs private-engine/src/main.rs .github/workflows/tmp-format-security.yml
+          git commit -m 'style: format capability lease boundary'
+          git push origin HEAD:security/capability-lease-boundary
