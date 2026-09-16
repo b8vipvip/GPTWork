@@ -50,6 +50,8 @@ A transient server outage may use an already issued lease until its signed expir
 
 This phase intentionally does **not** accept a lease yet. Shipping a client-generated placeholder or trusting an unverified token would create a false security boundary. Protected operations remain fail-closed until Phase B is deployed end-to-end.
 
+Phase A is a review/CI staging change only and must not be released to end users on its own.
+
 ### Phase B — server issuance + cryptographic verification
 
 - Add authenticated `POST /api/v1/account/capability-lease` (or return a lease from heartbeat) after the existing server-side entitlement/device/window calculation.
