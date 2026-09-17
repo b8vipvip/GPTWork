@@ -12,6 +12,7 @@ function keys() {
   return {
     privateKeyPem: pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
     publicKeyPem: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    publicKeyRawBase64Url: pair.publicKey.export({ format: 'jwk' }).x,
   };
 }
 
@@ -72,4 +73,6 @@ test('exported public key corresponds to the deployment-only signing key', () =>
   const issued = issuer.issue(request);
   assert.ok(verifyCapabilityLeaseForTest(issued.leaseToken, issuer.publicKeyPem()));
   assert.doesNotMatch(issuer.publicKeyPem(), /PRIVATE KEY/);
+  assert.equal(issuer.publicKeyRawBase64Url(), key.publicKeyRawBase64Url);
+  assert.match(issuer.publicKeyRawBase64Url(), /^[A-Za-z0-9_-]{43}$/);
 });
