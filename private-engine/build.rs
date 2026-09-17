@@ -31,8 +31,9 @@ fn main() {
         .ok()
         .and_then(|value| normalize_key(&value, KEY_ENV));
 
-    let key_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is required"))
-        .join(KEY_FILE);
+    let key_path =
+        PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is required"))
+            .join(KEY_FILE);
     let file_key = match fs::read_to_string(&key_path) {
         Ok(value) => normalize_key(&value, KEY_FILE),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
