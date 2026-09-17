@@ -1,3 +1,9 @@
+import {
+  clearCapabilityLease,
+  setCapabilityLease,
+  setCapabilityLeaseIdentity,
+} from './capability-lease-client.js';
+
 const API_BASE = 'https://gptlock.mv3.cn';
 const SESSION_KEY = 'gptlockAccountSessionToken';
 const DEVICE_KEY = 'gptlockAccountDeviceId';
@@ -44,7 +50,10 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
   let initialized = false;
 
   async function ensureIds() {
-    if (sessionHydrated && deviceId && browserInstanceId) return { deviceId, browserInstanceId };
+    if (sessionHydrated && deviceId && browserInstanceId) {
+      setCapabilityLeaseIdentity({ deviceId, browserInstanceId, extensionId: chrome.runtime.id });
+      return { deviceId, browserInstanceId };
+    }
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async () => {
       const stored = await chrome.storage.local.get([DEVICE_KEY, BROWSER_KEY, SESSION_KEY, SNAPSHOT_KEY]);
@@ -58,6 +67,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
         sessionHydrated = true;
       }
       await chrome.storage.local.set({ [DEVICE_KEY]: deviceId, [BROWSER_KEY]: browserInstanceId });
+      setCapabilityLeaseIdentity({ deviceId, browserInstanceId, extensionId: chrome.runtime.id });
       return { deviceId, browserInstanceId };
     })().finally(() => {
       hydratePromise = null;
@@ -115,7 +125,10 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     if (initializePromise) return initializePromise;
     initializePromise = (async () => {
       await ensureIds();
-      if (!token) return persist(null);
+      if (!token) {
+        clearCapabilityLease();
+        return persist(null);
+      }
       try {
         return await me();
       } catch (error) {
@@ -142,6 +155,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     state = normalizeAccount(null);
     sessionHydrated = true;
     initialized = true;
+    clearCapabilityLease();
     await chrome.storage.local.remove([SESSION_KEY, SNAPSHOT_KEY]);
     return state;
   }
@@ -175,6 +189,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     const data = await request('/api/v1/auth/login', { method: 'POST', body: identity });
     token = String(data.sessionToken || '');
     if (!token) throw new Error('登录响应缺少会话令牌');
+    clearCapabilityLease();
     sessionHydrated = true;
     initialized = true;
     await chrome.storage.local.set({ [SESSION_KEY]: token });
@@ -202,7 +217,10 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
 
   async function me() {
     await ensureIds();
-    if (!token) return persist(null);
+    if (!token) {
+      clearCapabilityLease();
+      return persist(null);
+    }
     try {
       const data = await request('/api/v1/account/me', { auth: true });
       return persist(data.account);
@@ -214,10 +232,14 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
 
   async function heartbeat(windowKeys = []) {
     await initialize();
-    if (!token) return persist(null);
+    if (!token) {
+      clearCapabilityLease();
+      return persist(null);
+    }
     const identity = await clientIdentity({ windowKeys });
     try {
       const data = await request('/api/v1/account/heartbeat', { method: 'POST', body: identity, auth: true });
+      setCapabilityLease(data.capabilityLease);
       return persist({
         ...data.account,
         allowedWindowKeys: data.allowedWindowKeys || [],
