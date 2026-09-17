@@ -35,13 +35,29 @@
   flex: 0 0 auto;
   align-self: flex-start;
   margin-left: auto;
-  padding: 6px 10px !important;
-  border: 1px solid #dbe3ef !important;
+  min-height: 30px !important;
+  padding: 7px 11px !important;
+  border: 1.5px solid #2563eb !important;
   border-radius: 9px !important;
-  background: #f8fafc !important;
+  background: #eff6ff !important;
   color: #1d4ed8 !important;
-  font-size: 10px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
   line-height: 1.1 !important;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, .14) !important;
+}
+
+.account-settings-button::before {
+  content: '⚙';
+  margin-right: 4px;
+  font-size: 12px;
+}
+
+.account-settings-button:hover,
+.account-settings-button:focus-visible {
+  background: #dbeafe !important;
+  border-color: #1d4ed8 !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, .12) !important;
 }
 
 /* Recovery/error text can contain compact JSON without natural break points. Keep the
@@ -62,4 +78,45 @@ html, body {
 .install-help p {
   overflow-wrap: anywhere !important;
   word-break: break-word !important;
+}
+
+.update-recovery-guide {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #fed7aa;
+}
+
+.update-recovery-guide-title {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.update-recovery-guide button {
+  width: 100%;
+  margin-top: 7px;
+}
+
+.update-recovery-primary {
+  background: #c2410c !important;
+  color: #fff !important;
+  border-color: #c2410c !important;
+}
+
+.update-recovery-secondary {
+  background: #fff !important;
+  color: #9a3412 !important;
+  border-color: #fdba74 !important;
+}
+
+.update-recovery-address {
+  display: block;
+  margin-top: 7px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-size: 9px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  user-select: all;
 }
