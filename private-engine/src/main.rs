@@ -12,9 +12,7 @@ use serde_json::Value;
 mod base {
     include!("main_base.rs");
 
-    pub fn read_frame_public<R: std::io::Read>(
-        reader: &mut R,
-    ) -> std::io::Result<Option<Vec<u8>>> {
+    pub fn read_frame_public<R: std::io::Read>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>> {
         read_frame(reader)
     }
 
