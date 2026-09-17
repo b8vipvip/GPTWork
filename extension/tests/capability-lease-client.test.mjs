@@ -1,29 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  capabilityLeaseEnvelope,
-  capabilityLeaseSnapshot,
-  clearCapabilityLease,
-  resetCapabilityLeaseForTest,
-  setCapabilityLease,
-  setCapabilityLeaseIdentity,
-} from '../capability-lease-client.js';
+import { createCapabilityLeaseStore } from '../capability-lease-client.js';
 
 test('opaque lease is forwarded byte-for-byte with local request identity', () => {
-  resetCapabilityLeaseForTest();
+  const store = createCapabilityLeaseStore();
   const token = 'opaque.header.payload.signature';
   const now = Date.now();
-  setCapabilityLeaseIdentity({
+  store.setIdentity({
     deviceId: 'device:12345678',
     browserInstanceId: 'browser:12345678',
     extensionId: 'bhchcpeodphgjfjoookncemnamdbfcof',
   });
-  setCapabilityLease({
+  store.setLease({
     leaseToken: token,
     expiresAt: new Date(now + 60_000).toISOString(),
     windowKeys: ['chrome:100'],
   });
-  const envelope = capabilityLeaseEnvelope('chrome:100', now);
+  const envelope = store.envelope('chrome:100', now);
   assert.equal(envelope.capabilityLease, token);
   assert.deepEqual(envelope.leaseBinding, {
     deviceId: 'device:12345678',
@@ -31,30 +24,30 @@ test('opaque lease is forwarded byte-for-byte with local request identity', () =
     extensionId: 'bhchcpeodphgjfjoookncemnamdbfcof',
     windowKey: 'chrome:100',
   });
-  assert.equal(capabilityLeaseSnapshot(now).leaseReady, true);
+  assert.equal(store.snapshot(now).leaseReady, true);
 });
 
 test('missing, expired and wrong-window leases fail before private transport', () => {
-  resetCapabilityLeaseForTest();
+  const store = createCapabilityLeaseStore();
   const now = Date.now();
-  setCapabilityLeaseIdentity({
+  store.setIdentity({
     deviceId: 'device:12345678',
     browserInstanceId: 'browser:12345678',
     extensionId: 'bhchcpeodphgjfjoookncemnamdbfcof',
   });
-  assert.throws(() => capabilityLeaseEnvelope('chrome:100', now), /missing or expired/);
-  setCapabilityLease({
+  assert.throws(() => store.envelope('chrome:100', now), /missing or expired/);
+  store.setLease({
     leaseToken: 'opaque-token',
     expiresAt: new Date(now + 4_000).toISOString(),
     windowKeys: ['chrome:100'],
   });
-  assert.throws(() => capabilityLeaseEnvelope('chrome:100', now), /missing or expired/);
-  setCapabilityLease({
+  assert.throws(() => store.envelope('chrome:100', now), /missing or expired/);
+  store.setLease({
     leaseToken: 'opaque-token',
     expiresAt: new Date(now + 60_000).toISOString(),
     windowKeys: ['chrome:100'],
   });
-  assert.throws(() => capabilityLeaseEnvelope('chrome:101', now), /does not admit this window/);
-  clearCapabilityLease();
-  assert.equal(capabilityLeaseSnapshot(now).leaseReady, false);
+  assert.throws(() => store.envelope('chrome:101', now), /does not admit this window/);
+  store.clearLease();
+  assert.equal(store.snapshot(now).leaseReady, false);
 });
