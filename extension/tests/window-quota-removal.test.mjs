@@ -6,7 +6,7 @@ test('legacy License stays removed while user-level window quota gates GPTWork',
   const [background, auth, accountSystem, manifestText] = await Promise.all([
     readFile(new URL('../background.js', import.meta.url), 'utf8'),
     readFile(new URL('../auth-gate.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../license-server/account-system.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../../license-server/account-system-base.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../manifest.json', import.meta.url), 'utf8'),
   ]);
   const manifest = JSON.parse(manifestText);

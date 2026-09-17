@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::context_budget::{base_safe_limit_for_model, hard_limit_sanity_floor_for_model};
+use super::context_budget::{base_safe_limit_for_model, hard_limit_sanity_floor_for_model};
 
 const LEARNING_HEADROOM_RATIO: f64 = 0.06;
 const LEARNING_HEADROOM_MIN_TOKENS: u64 = 8_192;

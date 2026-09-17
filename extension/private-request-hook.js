@@ -54,7 +54,8 @@ export function installPrivateRequestRoutingHook() {
     try {
       postData = await this.pausedPostData(tabId, params);
       const payload = buildPrivateRequestPayload(request, postData, this.configuration());
-      const rawDecision = await privateCoreChannel.request('evaluate_request', payload, 'request');
+      const windowKey = await privateCoreChannel.windowKeyForTab(tabId);
+      const rawDecision = await privateCoreChannel.request('evaluate_request', payload, 'request', { windowKey });
       decision = normalizePrivateRequestDecision(rawDecision);
     } catch {
       privateCoreChannel.invalidate();
