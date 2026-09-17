@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
 use serde::Deserialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -107,10 +108,6 @@ fn production_verifying_key() -> Result<VerifyingKey, LeaseError> {
     VerifyingKey::from_bytes(&raw).map_err(|_| LeaseError::unconfigured())
 }
 
-pub fn verifier_configured() -> bool {
-    production_verifying_key().is_ok()
-}
-
 pub fn verify_capability_lease(
     token: &str,
     binding: &LeaseBinding,
@@ -131,13 +128,20 @@ fn verify_with_key(
     let header_part = parts.next().unwrap_or_default();
     let claims_part = parts.next().unwrap_or_default();
     let signature_part = parts.next().unwrap_or_default();
-    if parts.next().is_some() || header_part.is_empty() || claims_part.is_empty() || signature_part.is_empty() {
+    if parts.next().is_some()
+        || header_part.is_empty()
+        || claims_part.is_empty()
+        || signature_part.is_empty()
+    {
         return Err(LeaseError::invalid("Capability lease token shape is invalid"));
     }
 
     let header: LeaseHeader = serde_json::from_slice(&decode_part(header_part)?)
         .map_err(|_| LeaseError::invalid("Capability lease header is invalid"))?;
-    if header.alg != LEASE_HEADER_ALG || header.typ != LEASE_HEADER_TYPE || header.kid != LEASE_KEY_ID {
+    if header.alg != LEASE_HEADER_ALG
+        || header.typ != LEASE_HEADER_TYPE
+        || header.kid != LEASE_KEY_ID
+    {
         return Err(LeaseError::invalid("Capability lease header is not supported"));
     }
 
@@ -151,13 +155,18 @@ fn verify_with_key(
 
     let claims: LeaseClaims = serde_json::from_slice(&claims_bytes)
         .map_err(|_| LeaseError::invalid("Capability lease claims are invalid"))?;
-    if claims.version != LEASE_VERSION || claims.issuer != LEASE_ISSUER || claims.audience != LEASE_AUDIENCE {
+    if claims.version != LEASE_VERSION
+        || claims.issuer != LEASE_ISSUER
+        || claims.audience != LEASE_AUDIENCE
+    {
         return Err(LeaseError::invalid("Capability lease issuer or audience is invalid"));
     }
     if claims.subject.is_empty() || claims.session_id.is_empty() || claims.jti.is_empty() {
         return Err(LeaseError::invalid("Capability lease identity is incomplete"));
     }
-    if claims.issued_at > now + CLOCK_SKEW_SECONDS || claims.not_before > now + CLOCK_SKEW_SECONDS {
+    if claims.issued_at > now + CLOCK_SKEW_SECONDS
+        || claims.not_before > now + CLOCK_SKEW_SECONDS
+    {
         return Err(LeaseError::invalid("Capability lease is not valid yet"));
     }
     if claims.expires_at <= now - CLOCK_SKEW_SECONDS {
@@ -175,7 +184,11 @@ fn verify_with_key(
     {
         return Err(LeaseError::invalid("Capability lease client binding does not match"));
     }
-    if !claims.window_keys.iter().any(|value| value == &binding.window_key) {
+    if !claims
+        .window_keys
+        .iter()
+        .any(|value| value == &binding.window_key)
+    {
         return Err(LeaseError::invalid("Capability lease window is not admitted"));
     }
     if !claims.features.iter().any(|value| value == operation) {
@@ -225,17 +238,31 @@ mod tests {
     }
 
     fn token(value: Value, key: &SigningKey) -> String {
-        let header = json!({ "alg": LEASE_HEADER_ALG, "typ": LEASE_HEADER_TYPE, "kid": LEASE_KEY_ID });
+        let header =
+            json!({ "alg": LEASE_HEADER_ALG, "typ": LEASE_HEADER_TYPE, "kid": LEASE_KEY_ID });
         let header_part = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header).unwrap());
         let claims_part = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&value).unwrap());
         let signing_input = format!("{header_part}.{claims_part}");
         let signature = key.sign(signing_input.as_bytes());
-        format!("{signing_input}.{}", URL_SAFE_NO_PAD.encode(signature.to_bytes()))
+        format!(
+            "{signing_input}.{}",
+            URL_SAFE_NO_PAD.encode(signature.to_bytes())
+        )
     }
 
-    fn verify(value: Value, binding: &LeaseBinding, operation: &str) -> Result<(), LeaseError> {
+    fn verify(
+        value: Value,
+        binding: &LeaseBinding,
+        operation: &str,
+    ) -> Result<(), LeaseError> {
         let key = signing_key(7);
-        verify_with_key(&token(value, &key), binding, operation, NOW, &key.verifying_key())
+        verify_with_key(
+            &token(value, &key),
+            binding,
+            operation,
+            NOW,
+            &key.verifying_key(),
+        )
     }
 
     #[test]
@@ -248,7 +275,14 @@ mod tests {
         let signer = signing_key(7);
         let attacker = signing_key(8);
         let forged = token(claims(), &attacker);
-        assert!(verify_with_key(&forged, &binding(), "evaluate_request", NOW, &signer.verifying_key()).is_err());
+        assert!(verify_with_key(
+            &forged,
+            &binding(),
+            "evaluate_request",
+            NOW,
+            &signer.verifying_key()
+        )
+        .is_err());
 
         let mut expired = claims();
         expired["expiresAt"] = json!(NOW - 30);
