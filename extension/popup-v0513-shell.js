@@ -1,5 +1,7 @@
+import './popup-update-recovery.js';
+
 const POPUP_RUNTIME_KEY = 'gptlockPopupRuntimeInfo';
-const SHELL_REVISION = 'v0513-single-authority-1';
+const SHELL_REVISION = 'v0513-single-authority-2';
 
 function openUpdateCenter(event) {
   event.preventDefault();
