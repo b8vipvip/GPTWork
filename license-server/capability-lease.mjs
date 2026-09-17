@@ -78,7 +78,15 @@ export function createCapabilityLeaseIssuer({
     return publicKey.export({ type: 'spki', format: 'pem' }).toString();
   }
 
-  return { issue, publicKeyPem };
+  function publicKeyRawBase64Url() {
+    const jwk = publicKey.export({ format: 'jwk' });
+    if (jwk.kty !== 'OKP' || jwk.crv !== 'Ed25519' || !jwk.x) {
+      throw new Error('Capability lease public key is not Ed25519');
+    }
+    return jwk.x;
+  }
+
+  return { issue, publicKeyPem, publicKeyRawBase64Url };
 }
 
 // Test/deployment validation helper. The production private engine performs its own
