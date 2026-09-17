@@ -62,6 +62,8 @@ Generate the Ed25519 key pair outside Git. Store the PKCS#8 private PEM only in 
 
 The matching raw 32-byte public key is not secret. `createCapabilityLeaseIssuer(...).publicKeyRawBase64Url()` returns the exact base64url value that must be supplied as `GPTWORK_CAPABILITY_LEASE_PUBLIC_KEY_B64` when compiling the production private engine. A production artifact built without that value compiles for CI/migration compatibility but rejects every protected lease at runtime with `capability_lease_verifier_unconfigured`; it never falls back to a development key.
 
+`private-engine/build.rs` adds a production release gate. Ordinary CI may still compile without the deployment key so migration/adversarial tests can run, but a GitHub Actions workflow named `Release` (or any build with `GPTWORK_REQUIRE_CAPABILITY_LEASE_KEY=1`) fails before compiling the private engine unless a valid 43-character base64url public key is supplied. The build script accepts the key from `GPTWORK_CAPABILITY_LEASE_PUBLIC_KEY_B64` or from `private-engine/capability-lease-public-key.txt`, and if both are present they must match. This prevents publishing an artifact that is guaranteed to reject every protected lease.
+
 ## Migration phases
 
 ### Phase A — boundary hardening (merged)
@@ -73,7 +75,7 @@ The matching raw 32-byte public key is not secret. `createCapabilityLeaseIssuer(
 
 Phase A is a migration boundary, not a standalone release target. It must not be published to end users until Phase B restores protected operations through a real server-issued, cryptographically verified lease.
 
-### Phase B — server issuance + cryptographic verification
+### Phase B — server issuance + cryptographic verification (merged)
 
 Implemented acceptance criteria:
 
@@ -85,19 +87,25 @@ Implemented acceptance criteria:
 - [x] tests cover valid lease, bad signature, expired/future lease, wrong issuer/audience, wrong device/browser/extension/window, missing operation feature, opaque extension transport, and server issuance after admission;
 - [x] rollout remains server-first and backward compatible because lease issuance is feature-flagged and old clients ignore the additional heartbeat field.
 
-### Phase C — remove client authority
+### Phase C — remove client authority (completed)
 
-- Treat `accountState.entitlement.active`, `authorized`, `allowedWindowKeys`, and cached snapshots as display/UX hints only.
-- Remove any execution decision that depends solely on those values.
-- Add adversarial tests that mutate extension storage/JavaScript account state and prove private operations remain denied without a valid server lease.
+Implemented acceptance criteria:
+
+- [x] `accountState.entitlement.active`, `authorized`, `allowedWindowKeys`, `deniedWindowKeys`, and cached account snapshots are presentation/preflight hints only; none can mint, replace, verify, or bypass a capability lease;
+- [x] protected request routing never falls back to the legacy JavaScript request rewriter when private authority is unavailable or denies the request;
+- [x] protected HTTP/SSE/WebSocket response evaluation never falls back to client-derived legacy evidence after private-authority failure;
+- [x] capability leases remain service-worker-memory-only and are not persisted in cached account snapshots;
+- [x] adversarial regression coverage forges authenticated/authorized/active extension storage and JavaScript account state and proves a protected operation is still rejected with `capability_lease_unavailable` when no server lease exists.
+
+Client account hints may still suppress or shape UI/preflight work (for example, avoiding an unnecessary monitor/auto-verify attempt for a visibly inactive account), but they are never sufficient to enter a protected private evaluator. The cryptographically verified lease remains the only execution grant.
 
 ## Deployment order
 
 1. Generate and install the deployment Ed25519 private key on the account service while leaving `GPTLOCK_CAPABILITY_LEASE_ENABLED=0`.
 2. Deploy the server code and verify ordinary login/heartbeat behavior for existing clients.
 3. Set `GPTLOCK_CAPABILITY_LEASE_ENABLED=1`, restart the service, and verify heartbeat returns a signed lease for an admitted account/window. Existing clients remain compatible because the field is additive.
-4. Derive the matching raw public key and build the private engine with `GPTWORK_CAPABILITY_LEASE_PUBLIC_KEY_B64=<public-key-base64url>`.
-5. Ship the compatible extension/native-core/private-engine together. Do not publish a Phase B client whose private engine was built without the pinned production public key.
+4. Derive the matching raw public key and build the private engine with `GPTWORK_CAPABILITY_LEASE_PUBLIC_KEY_B64=<public-key-base64url>` (or place that public value in `private-engine/capability-lease-public-key.txt`). The production release gate must pass.
+5. Ship the compatible extension/native-core/private-engine together. Do not publish a Phase B/C client whose private engine was built without the pinned production public key.
 
 ## Repository boundary
 
