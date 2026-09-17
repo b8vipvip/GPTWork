@@ -2,16 +2,24 @@ name: Store Package
 
 on:
   pull_request:
+    paths:
+      - 'extension/**'
+      - 'packaging/store/**'
+      - '.github/workflows/store-package.yml'
   push:
     branches: [main]
+    paths:
+      - 'extension/**'
+      - 'packaging/store/**'
+      - '.github/workflows/store-package.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: store-package-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  group: store-package-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   store-package:
@@ -19,8 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -55,32 +63,17 @@ jobs:
           set -Eeuo pipefail
           for package in dist/store/GPTWork-chrome-store.zip dist/store/GPTWork-edge-store.zip; do
             listing="$(unzip -Z1 "$package")"
-            if grep -Eq '(^|/)(private-engine|private-source|private-core)/|\.rs$|Cargo\.(toml|lock)$' <<<"$listing"; then
-              echo "Private implementation source leaked into $package" >&2
-              exit 1
-            fi
-            if grep -Eq '(^|/)background-update\.js$|(^|/)options-update\.js$|(^|/)update-entry\.js$' <<<"$listing"; then
-              echo "Standalone self-update runtime leaked into $package" >&2
-              exit 1
-            fi
+            if grep -Eq '(^|/)(private-engine|private-source|private-core)/|\.rs$|Cargo\.(toml|lock)$' <<<"$listing"; then echo "Private implementation source leaked into $package" >&2; exit 1; fi
+            if grep -Eq '(^|/)background-update\.js$|(^|/)options-update\.js$|(^|/)update-entry\.js$' <<<"$listing"; then echo "Standalone self-update runtime leaked into $package" >&2; exit 1; fi
             unzip -p "$package" manifest.json | python -m json.tool >/dev/null
-            if unzip -p "$package" manifest.json | jq -e '.permissions | index("downloads")' >/dev/null; then
-              echo "Store package must not request downloads permission." >&2
-              exit 1
-            fi
-            if unzip -p "$package" manifest.json | jq -e 'has("key")' >/dev/null; then
-              echo "Store package must not pin the standalone extension key." >&2
-              exit 1
-            fi
+            if unzip -p "$package" manifest.json | jq -e '.permissions | index("downloads")' >/dev/null; then echo "Store package must not request downloads permission." >&2; exit 1; fi
+            if unzip -p "$package" manifest.json | jq -e 'has("key")' >/dev/null; then echo "Store package must not pin the standalone extension key." >&2; exit 1; fi
             test "$(unzip -p "$package" manifest.json | jq -r '.background.service_worker')" = 'background-entry-store.js'
             unzip -p "$package" update.html | grep -q 'store-update-page.js'
-            if unzip -p "$package" settings-v0521.html | grep -Eq 'store-update-page\.js|options-update\.js'; then
-              echo "Settings must not embed updater modules in store packages." >&2
-              exit 1
-            fi
+            if unzip -p "$package" settings-v0521.html | grep -Eq 'store-update-page\.js|options-update\.js'; then echo "Settings must not embed updater modules in store packages." >&2; exit 1; fi
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gptwork-store-packages
           path: |

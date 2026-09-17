@@ -10,17 +10,23 @@ on:
     paths:
       - 'license-server/**'
       - '.github/workflows/license-server.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: license-server-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   license-server:
     name: License server
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22.23.2
       - name: Check JavaScript

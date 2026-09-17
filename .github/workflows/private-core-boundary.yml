@@ -3,70 +3,66 @@ name: Private Core Boundary
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Optional base SHA for manual validation
+        required: false
+        type: string
 
 permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: private-core-boundary-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   boundary:
     name: Enforce private-engine distribution boundary
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Enforce frozen legacy browser-core paths
         shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           PR_BODY: ${{ github.event.pull_request.body || '' }}
         run: |
           set -Eeuo pipefail
-
+          if [[ -z "${BASE_SHA:-}" || "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
           override=false
-          if jq -e '.[] | select(. == "public-core-maintenance" or . == "legacy-core-maintenance")' <<<"$LABELS_JSON" >/dev/null; then
+          if jq -e '.[] | select(. == "public-core-maintenance" or . == "legacy-core-maintenance")' <<<"${LABELS_JSON:-[]}" >/dev/null; then
             override=true
-          elif grep -Eq '\[(public|legacy)-core-maintenance\]' <<<"$PR_BODY"; then
+          elif grep -Eq '\[(public|legacy)-core-maintenance\]' <<<"${PR_BODY:-}"; then
             override=true
           fi
-
           frozen_regex='^(extension/(background|content|context-budget|context-remaining-indicator|guard|model-auto-lock|model-catalog|network-evidence|network-monitor|page-model-evidence|policy)\.js|native-core/src/(bridge|config|lib|verifier)\.rs)$'
           violations=0
-
           while IFS=$'\t' read -r status path rest; do
             [[ -n "${path:-}" ]] || continue
             if [[ "$path" =~ $frozen_regex ]]; then
-              # Deletion is how a compiled-engine migration removes a legacy implementation.
-              if [[ "$status" == D* ]]; then
-                echo "allowed deletion of frozen legacy source: $path"
-                continue
-              fi
-              if [[ "$override" == true ]]; then
-                echo "explicit legacy-core maintenance override: $status $path"
-                continue
-              fi
-              echo "::error file=$path::This is a frozen legacy runtime path. New implementation-sensitive behavior belongs in private-engine/. Delete the legacy file after replacement, or use an explicit maintenance override for a narrowly scoped compatibility/security fix."
-              violations=$((violations + 1))
+              if [[ "$status" == D* ]]; then echo "allowed deletion of frozen legacy source: $path"; continue; fi
+              if [[ "$override" == true ]]; then echo "explicit legacy-core maintenance override: $status $path"; continue; fi
+              echo "::error file=$path::Frozen legacy runtime path. New implementation-sensitive behavior belongs in private-engine/."; violations=$((violations + 1))
             fi
           done < <(git diff --name-status "$BASE_SHA"...HEAD)
-
-          if (( violations > 0 )); then
-            echo "$violations frozen legacy path(s) were modified." >&2
-            exit 1
-          fi
+          if (( violations > 0 )); then echo "$violations frozen legacy path(s) were modified." >&2; exit 1; fi
 
       - name: Reject obsolete or ambiguous private-source locations
         shell: bash
         run: |
           set -Eeuo pipefail
           forbidden='(^|/)(private-core|private-source|private-overlays|private-artifacts)(/|$)|\.private\.'
-          if git ls-files | grep -E "$forbidden"; then
-            echo "Implementation-sensitive source must use the designated private-engine/ tree; obsolete private source locations are not allowed." >&2
-            exit 1
-          fi
+          if git ls-files | grep -E "$forbidden"; then echo "Implementation-sensitive source must use private-engine/." >&2; exit 1; fi
 
       - name: Confirm private engine is outside browser runtime tree
         shell: bash
@@ -75,7 +71,4 @@ jobs:
           test -f private-engine/Cargo.toml
           test -f private-engine/src/main.rs
           test -f private-engine/src/lib.rs
-          if find extension -type f \( -name '*.rs' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) -print -quit | grep -q .; then
-            echo "Rust/private-engine source must not live inside extension/." >&2
-            exit 1
-          fi
+          if find extension -type f \( -name '*.rs' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) -print -quit | grep -q .; then echo "Rust/private-engine source must not live inside extension/." >&2; exit 1; fi
