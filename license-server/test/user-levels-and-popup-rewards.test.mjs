@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-const account = readFileSync(join(ROOT, 'license-server/account-system.mjs'), 'utf8');
+const account = readFileSync(join(ROOT, 'license-server/account-system-base.mjs'), 'utf8');
 const manifest = JSON.parse(readFileSync(join(ROOT, 'extension/manifest.json'), 'utf8'));
 const popup = readFileSync(join(ROOT, 'extension/popup.html'), 'utf8');
 const shippedPopup = readFileSync(join(ROOT, 'extension', manifest.action.default_popup), 'utf8');
