@@ -87,7 +87,9 @@ fn unix_seconds() -> Result<i64, LeaseError> {
 
 fn decode_part(value: &str) -> Result<Vec<u8>, LeaseError> {
     if value.is_empty() || value.len() > MAX_TOKEN_PART_BYTES {
-        return Err(LeaseError::invalid("Capability lease token part is invalid"));
+        return Err(LeaseError::invalid(
+            "Capability lease token part is invalid",
+        ));
     }
     URL_SAFE_NO_PAD
         .decode(value)
@@ -133,7 +135,9 @@ fn verify_with_key(
         || claims_part.is_empty()
         || signature_part.is_empty()
     {
-        return Err(LeaseError::invalid("Capability lease token shape is invalid"));
+        return Err(LeaseError::invalid(
+            "Capability lease token shape is invalid",
+        ));
     }
 
     let header: LeaseHeader = serde_json::from_slice(&decode_part(header_part)?)
@@ -142,7 +146,9 @@ fn verify_with_key(
         || header.typ != LEASE_HEADER_TYPE
         || header.kid != LEASE_KEY_ID
     {
-        return Err(LeaseError::invalid("Capability lease header is not supported"));
+        return Err(LeaseError::invalid(
+            "Capability lease header is not supported",
+        ));
     }
 
     let claims_bytes = decode_part(claims_part)?;
@@ -159,14 +165,16 @@ fn verify_with_key(
         || claims.issuer != LEASE_ISSUER
         || claims.audience != LEASE_AUDIENCE
     {
-        return Err(LeaseError::invalid("Capability lease issuer or audience is invalid"));
+        return Err(LeaseError::invalid(
+            "Capability lease issuer or audience is invalid",
+        ));
     }
     if claims.subject.is_empty() || claims.session_id.is_empty() || claims.jti.is_empty() {
-        return Err(LeaseError::invalid("Capability lease identity is incomplete"));
+        return Err(LeaseError::invalid(
+            "Capability lease identity is incomplete",
+        ));
     }
-    if claims.issued_at > now + CLOCK_SKEW_SECONDS
-        || claims.not_before > now + CLOCK_SKEW_SECONDS
-    {
+    if claims.issued_at > now + CLOCK_SKEW_SECONDS || claims.not_before > now + CLOCK_SKEW_SECONDS {
         return Err(LeaseError::invalid("Capability lease is not valid yet"));
     }
     if claims.expires_at <= now - CLOCK_SKEW_SECONDS {
@@ -182,17 +190,23 @@ fn verify_with_key(
         || claims.browser_instance_id != binding.browser_instance_id
         || claims.extension_id != binding.extension_id
     {
-        return Err(LeaseError::invalid("Capability lease client binding does not match"));
+        return Err(LeaseError::invalid(
+            "Capability lease client binding does not match",
+        ));
     }
     if !claims
         .window_keys
         .iter()
         .any(|value| value == &binding.window_key)
     {
-        return Err(LeaseError::invalid("Capability lease window is not admitted"));
+        return Err(LeaseError::invalid(
+            "Capability lease window is not admitted",
+        ));
     }
     if !claims.features.iter().any(|value| value == operation) {
-        return Err(LeaseError::invalid("Capability lease does not grant this operation"));
+        return Err(LeaseError::invalid(
+            "Capability lease does not grant this operation",
+        ));
     }
     Ok(())
 }
@@ -275,14 +289,7 @@ mod tests {
         let signer = signing_key(7);
         let attacker = signing_key(8);
         let forged = token(claims(), &attacker);
-        assert!(verify_with_key(
-            &forged,
-            &binding(),
-            "evaluate_request",
-            NOW,
-            &signer.verifying_key()
-        )
-        .is_err());
+        assert!(verify_with_key(&forged, &binding(), "evaluate_request", NOW, &signer.verifying_key()).is_err());
 
         let mut expired = claims();
         expired["expiresAt"] = json!(NOW - 30);
