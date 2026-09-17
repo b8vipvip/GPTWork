@@ -4,6 +4,7 @@
 /.gptlock/
 /license-server/data/
 /license-server/.env
+/license-server/.capability-lease-key/
 /private-core/
 /private-overlays/
 /private-artifacts/
