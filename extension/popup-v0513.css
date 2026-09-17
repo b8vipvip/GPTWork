@@ -63,3 +63,44 @@ html, body {
   overflow-wrap: anywhere !important;
   word-break: break-word !important;
 }
+
+.update-recovery-guide {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #fed7aa;
+}
+
+.update-recovery-guide-title {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.update-recovery-guide button {
+  width: 100%;
+  margin-top: 7px;
+}
+
+.update-recovery-primary {
+  background: #c2410c !important;
+  color: #fff !important;
+  border-color: #c2410c !important;
+}
+
+.update-recovery-secondary {
+  background: #fff !important;
+  color: #9a3412 !important;
+  border-color: #fdba74 !important;
+}
+
+.update-recovery-address {
+  display: block;
+  margin-top: 7px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-size: 9px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
