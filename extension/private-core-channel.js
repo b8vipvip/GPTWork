@@ -1,8 +1,10 @@
+import { capabilityLeaseEnvelope } from './capability-lease-client.js';
 import { createCoreBridgeRequest, parseCoreBridgeResponse } from './core-bridge.js';
 
 const NATIVE_HOST = 'com.gptlock.core';
 const REQUEST_TIMEOUT_MS = 4500;
 const CAPABILITY_TTL_MS = 30_000;
+const PROTECTED_TYPES = new Set(['evaluate_request', 'evaluate_response', 'evaluate_context']);
 const PRIVATE_ENGINE_FEATURES = Object.freeze([
   'requestEvaluation',
   'responseEvaluation',
@@ -19,6 +21,7 @@ export function normalizePrivateEngineCapabilities(response) {
     available: engine.available === true && Number(engine.protocolVersion) === 2,
     protocolVersion: Number(engine.protocolVersion) === 2 ? 2 : null,
     capabilityProbe: engine.capabilityProbe === true,
+    capabilityLeaseRequired: engine.capabilityLeaseRequired === true,
   };
   for (const feature of PRIVATE_ENGINE_FEATURES) capability[feature] = engine[feature] === true;
   return capability;
@@ -110,9 +113,22 @@ export class PrivateCoreChannel {
     return capability.available && capability.capabilityProbe && capability[feature] === true;
   }
 
-  async request(type, payload, prefix = 'private') {
+  async windowKeyForTab(tabId) {
+    const tab = await chrome.tabs.get(tabId);
+    if (!Number.isInteger(tab?.windowId)) {
+      const error = new Error('Private core request has no Chrome window binding');
+      error.code = 'capability_lease_window_unavailable';
+      throw error;
+    }
+    return `chrome:${tab.windowId}`;
+  }
+
+  async request(type, payload, prefix = 'private', context = {}) {
     const id = this.nextId(prefix);
-    const message = createCoreBridgeRequest(id, type, payload);
+    let message = createCoreBridgeRequest(id, type, payload);
+    if (PROTECTED_TYPES.has(type)) {
+      message = { ...message, ...capabilityLeaseEnvelope(context.windowKey) };
+    }
     const raw = await this.requestRaw(message);
     const parsed = parseCoreBridgeResponse(raw, id);
     if (!parsed.ok) {
