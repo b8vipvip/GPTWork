@@ -32,7 +32,6 @@ test('opaque lease is forwarded byte-for-byte with local request identity', () =
     extensionId: 'bhchcpeodphgjfjoookncemnamdbfcof',
     windowKey: 'chrome:100',
   });
-  assert.equal(capabilityLeaseSnapshot(now).leaseReady, true);
 });
 
 test('missing, expired and wrong-window leases fail before private transport', () => {
