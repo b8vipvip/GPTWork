@@ -153,11 +153,16 @@ function safeErrorCode(error) {
   return /^[a-z0-9_:-]{1,80}$/i.test(code) ? code : 'private_context_unavailable';
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+function senderWindowKey(sender) {
+  return Number.isInteger(sender?.tab?.windowId) ? `chrome:${sender.tab.windowId}` : null;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (![BUDGET_MESSAGE_TYPE, PROFILE_MESSAGE_TYPE].includes(message?.type)) return false;
 
   void (async () => {
     try {
+      const windowKey = senderWindowKey(sender);
       if (message.type === PROFILE_MESSAGE_TYPE) {
         if (!(await privateCoreChannel.supports('contextProfileEvaluation'))) {
           sendResponse({ ok: false, error: 'private_context_profile_unsupported' });
@@ -168,6 +173,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           'evaluate_context',
           { mode: 'profile', profileEvaluation },
           'context-profile',
+          { windowKey },
         );
         sendResponse({ ok: true, data: normalizePrivateContextProfileResult(raw) });
         return;
@@ -182,6 +188,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           'evaluate_context',
           { mode: 'budget', budget },
           'context-budget',
+          { windowKey },
         );
         sendResponse({ ok: true, data: normalizePrivateContextBudgetResult(raw) });
         return;
