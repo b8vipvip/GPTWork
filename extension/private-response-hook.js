@@ -29,11 +29,13 @@ async function responseBody(monitor, tabId, requestId) {
   return decodePrivateResponseBody(result?.body ?? '', Boolean(result?.base64Encoded));
 }
 
-async function evaluateResponse(body, headers, mimeType, prefix) {
+async function evaluateResponse(tabId, body, headers, mimeType, prefix) {
+  const windowKey = await privateCoreChannel.windowKeyForTab(tabId);
   const rawEvidence = await privateCoreChannel.request(
     'evaluate_response',
     buildPrivateResponsePayload({ body, headers, mimeType }),
     prefix,
+    { windowKey },
   );
   return normalizePrivateResponseEvidence(rawEvidence);
 }
@@ -107,6 +109,7 @@ export function installPrivateResponseRoutingHook() {
     try {
       body = await responseBody(this, tabId, record.requestId);
       evidence = await evaluateResponse(
+        tabId,
         body,
         record.responseHeaders,
         record.mimeType,
@@ -162,7 +165,7 @@ export function installPrivateResponseRoutingHook() {
 
     let evidence;
     try {
-      evidence = await evaluateResponse(payload, {}, 'application/json', 'websocket');
+      evidence = await evaluateResponse(tabId, payload, {}, 'application/json', 'websocket');
     } catch {
       privateCoreChannel.invalidate();
       return legacyHandleWebSocketFrame.call(this, tabId, params, direction);
