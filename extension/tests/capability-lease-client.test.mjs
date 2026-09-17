@@ -9,9 +9,8 @@ import {
   setCapabilityLeaseIdentity,
 } from '../capability-lease-client.js';
 
-test.beforeEach(() => resetCapabilityLeaseForTest());
-
 test('opaque lease is forwarded byte-for-byte with local request identity', () => {
+  resetCapabilityLeaseForTest();
   const token = 'opaque.header.payload.signature';
   const now = Date.now();
   setCapabilityLeaseIdentity({
@@ -32,9 +31,11 @@ test('opaque lease is forwarded byte-for-byte with local request identity', () =
     extensionId: 'bhchcpeodphgjfjoookncemnamdbfcof',
     windowKey: 'chrome:100',
   });
+  assert.equal(capabilityLeaseSnapshot(now).leaseReady, true);
 });
 
 test('missing, expired and wrong-window leases fail before private transport', () => {
+  resetCapabilityLeaseForTest();
   const now = Date.now();
   setCapabilityLeaseIdentity({
     deviceId: 'device:12345678',
