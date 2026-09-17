@@ -264,11 +264,7 @@ mod tests {
         )
     }
 
-    fn verify(
-        value: Value,
-        binding: &LeaseBinding,
-        operation: &str,
-    ) -> Result<(), LeaseError> {
+    fn verify(value: Value, binding: &LeaseBinding, operation: &str) -> Result<(), LeaseError> {
         let key = signing_key(7);
         verify_with_key(
             &token(value, &key),
@@ -289,7 +285,14 @@ mod tests {
         let signer = signing_key(7);
         let attacker = signing_key(8);
         let forged = token(claims(), &attacker);
-        assert!(verify_with_key(&forged, &binding(), "evaluate_request", NOW, &signer.verifying_key()).is_err());
+        assert!(verify_with_key(
+            &forged,
+            &binding(),
+            "evaluate_request",
+            NOW,
+            &signer.verifying_key()
+        )
+        .is_err());
 
         let mut expired = claims();
         expired["expiresAt"] = json!(NOW - 30);
