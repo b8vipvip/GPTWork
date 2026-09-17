@@ -3,11 +3,10 @@ import { ChatGptNetworkMonitor } from './network-monitor.js';
 import {
   buildPrivateResponsePayload,
   decodePrivateResponseBody,
-  hasCompletePrivateResponseEvidence,
   normalizePrivateResponseEvidence,
 } from './private-response-routing.js';
 
-const PATCH_MARKER = Symbol.for('gptlock.privateResponseRouting.v2');
+const PATCH_MARKER = Symbol.for('gptlock.privateResponseRouting.v3');
 
 function debuggerCall(method, ...args) {
   return new Promise((resolve, reject) => {
@@ -17,6 +16,11 @@ function debuggerCall(method, ...args) {
       else resolve(result);
     });
   });
+}
+
+function safeErrorCode(error, fallback = 'private_response_authority_unavailable') {
+  const code = String(error?.code || '').trim();
+  return /^[a-z0-9_:-]{1,80}$/i.test(code) ? code : fallback;
 }
 
 async function responseBody(monitor, tabId, requestId) {
@@ -82,26 +86,96 @@ function emitHttpEvidence(monitor, tabId, params, record, evidence, body, handof
   });
 }
 
+function emitHttpAuthorityFailure(monitor, tabId, params, record, handoff, error) {
+  const streamContext = handoff
+    ? monitor.streamContext(handoff, {
+      isDownstream: true,
+      transport: 'sse',
+      direction: 'received',
+      stage: 'downstream_http',
+      matchBasis: record.matchBasis ?? 'handoff_marker',
+    })
+    : null;
+  monitor.onEvidence(tabId, {
+    requestId: record.requestId,
+    capturedAt: new Date().toISOString(),
+    status: record.status,
+    model: null,
+    reasoning: null,
+    conflicts: { model: false, reasoning: false },
+    fields: { model: null, reasoning: null },
+    bodyError: safeErrorCode(error),
+    rawResponseBody: null,
+    streamContext,
+    diagnostics: {
+      endpoint: record.endpoint,
+      httpStatus: record.status,
+      encodedDataLength: Number.isFinite(params.encodedDataLength) ? params.encodedDataLength : null,
+      transport: handoff ? 'sse' : 'http',
+      direction: 'received',
+      stage: record.downstream ? 'downstream_http' : 'initial_conversation',
+      privateEngine: true,
+      privateAuthorityAvailable: false,
+    },
+  });
+}
+
+function emitWebSocketAuthorityFailure(monitor, tabId, requestId, handoff, direction, socket, error) {
+  const frameId = `ws-${requestId}-${++monitor.webSocketSequence}`;
+  const streamContext = monitor.streamContext(handoff, {
+    transport: 'websocket',
+    direction,
+    stage: 'downstream_websocket',
+    matchBasis: socket.matchBasis,
+  });
+  monitor.onEvidence(tabId, {
+    requestId: frameId,
+    capturedAt: new Date().toISOString(),
+    status: 101,
+    model: null,
+    reasoning: null,
+    conflicts: { model: false, reasoning: false },
+    fields: { model: null, reasoning: null },
+    bodyError: safeErrorCode(error),
+    rawResponseBody: null,
+    streamContext,
+    diagnostics: {
+      endpoint: socket.endpoint,
+      httpStatus: 101,
+      transport: 'websocket',
+      direction,
+      stage: 'downstream_websocket',
+      privateEngine: true,
+      privateAuthorityAvailable: false,
+    },
+  });
+}
+
 export function installPrivateResponseRoutingHook() {
   const prototype = ChatGptNetworkMonitor.prototype;
   if (prototype[PATCH_MARKER]) return false;
-  const legacyHandleFinished = prototype.handleFinished;
   const legacyHandleWebSocketFrame = prototype.handleWebSocketFrame;
-  if (typeof legacyHandleFinished !== 'function' || typeof legacyHandleWebSocketFrame !== 'function') return false;
+  if (typeof prototype.handleFinished !== 'function' || typeof legacyHandleWebSocketFrame !== 'function') return false;
 
   Object.defineProperty(prototype, PATCH_MARKER, { value: true, configurable: false });
   prototype.handleFinished = async function privateHandleFinished(tabId, params = {}) {
     const key = this.key(tabId, String(params.requestId));
     const record = this.requests.get(key);
-    if (!record || !record.responseVerificationEnabled) {
-      return legacyHandleFinished.call(this, tabId, params);
+    if (!record) return;
+    if (!record.responseVerificationEnabled) {
+      this.requests.delete(key);
+      return;
     }
     const handoff = matchingHandoff(this, record);
     if (record.downstream && !handoff) {
-      return legacyHandleFinished.call(this, tabId, params);
+      this.requests.delete(key);
+      emitHttpAuthorityFailure(this, tabId, params, record, null, { code: 'private_response_handoff_unavailable' });
+      return;
     }
     if (!(await privateCoreChannel.isAvailable())) {
-      return legacyHandleFinished.call(this, tabId, params);
+      this.requests.delete(key);
+      emitHttpAuthorityFailure(this, tabId, params, record, handoff, { code: 'private_response_authority_unavailable' });
+      return;
     }
 
     let body = '';
@@ -115,15 +189,12 @@ export function installPrivateResponseRoutingHook() {
         record.mimeType,
         record.downstream ? 'downstream-http' : 'response',
       );
-    } catch {
+    } catch (error) {
       privateCoreChannel.invalidate();
+      this.requests.delete(key);
       body = '';
-      return legacyHandleFinished.call(this, tabId, params);
-    }
-
-    if (!hasCompletePrivateResponseEvidence(evidence)) {
-      body = '';
-      return legacyHandleFinished.call(this, tabId, params);
+      emitHttpAuthorityFailure(this, tabId, params, record, handoff, error);
+      return;
     }
 
     this.requests.delete(key);
@@ -160,18 +231,17 @@ export function installPrivateResponseRoutingHook() {
     if (direction === 'sent') return;
 
     if (!(await privateCoreChannel.isAvailable())) {
-      return legacyHandleWebSocketFrame.call(this, tabId, params, direction);
+      emitWebSocketAuthorityFailure(this, tabId, requestId, handoff, direction, socket, { code: 'private_response_authority_unavailable' });
+      return;
     }
 
     let evidence;
     try {
       evidence = await evaluateResponse(tabId, payload, {}, 'application/json', 'websocket');
-    } catch {
+    } catch (error) {
       privateCoreChannel.invalidate();
-      return legacyHandleWebSocketFrame.call(this, tabId, params, direction);
-    }
-    if (!hasCompletePrivateResponseEvidence(evidence)) {
-      return legacyHandleWebSocketFrame.call(this, tabId, params, direction);
+      emitWebSocketAuthorityFailure(this, tabId, requestId, handoff, direction, socket, error);
+      return;
     }
 
     const frameId = `ws-${requestId}-${++this.webSocketSequence}`;
