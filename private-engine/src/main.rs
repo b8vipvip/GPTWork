@@ -1,6 +1,4 @@
 mod capability_lease;
-#[allow(dead_code)]
-mod context_budget;
 
 use std::io;
 
@@ -10,8 +8,6 @@ use serde_json::Value;
 
 #[allow(dead_code)]
 mod base {
-    include!("main_base.rs");
-
     pub fn read_frame_public<R: std::io::Read>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>> {
         read_frame(reader)
     }
@@ -30,6 +26,8 @@ mod base {
     pub fn error_public(id: Value, code: &str, message: impl Into<String>) -> Value {
         error(id, code, message)
     }
+
+    include!("main_base.rs");
 }
 
 fn protected_operation(value: &str) -> bool {
