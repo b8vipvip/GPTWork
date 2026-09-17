@@ -7,13 +7,37 @@ import {
   safeRequestEndpoint,
 } from './private-request-routing.js';
 
-const PATCH_MARKER = Symbol.for('gptlock.privateRequestRouting.v2');
+const PATCH_MARKER = Symbol.for('gptlock.privateRequestRouting.v3');
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function continueFailOpen(monitor, tabId, requestId, endpoint, decision, initialError) {
+function errorCode(error, fallback = 'private_request_authority_unavailable') {
+  const code = String(error?.code || '').trim();
+  return /^[a-z0-9_:-]{1,80}$/i.test(code) ? code : fallback;
+}
+
+async function continueUnmodified(monitor, tabId, requestId, endpoint, reason, error = null) {
+  monitor.onRewrite?.(tabId, {
+    endpoint,
+    changed: false,
+    reason,
+    error: error ? errorCode(error) : null,
+  });
+  try {
+    await monitor.continuePaused(tabId, requestId);
+  } catch (continueError) {
+    monitor.onRewrite?.(tabId, {
+      endpoint,
+      changed: false,
+      reason: 'private_request_continue_failed',
+      error: errorText(continueError),
+    });
+  }
+}
+
+async function continueAfterDecisionFailure(monitor, tabId, requestId, endpoint, decision, initialError) {
   monitor.onRewrite?.(tabId, {
     endpoint,
     changed: false,
@@ -37,18 +61,19 @@ async function continueFailOpen(monitor, tabId, requestId, endpoint, decision, i
 export function installPrivateRequestRoutingHook() {
   const prototype = ChatGptNetworkMonitor.prototype;
   if (prototype[PATCH_MARKER]) return false;
-  const legacyHandlePausedRequest = prototype.handlePausedRequest;
-  if (typeof legacyHandlePausedRequest !== 'function') return false;
+  if (typeof prototype.handlePausedRequest !== 'function') return false;
 
   Object.defineProperty(prototype, PATCH_MARKER, { value: true, configurable: false });
   prototype.handlePausedRequest = async function privateHandlePausedRequest(tabId, params = {}) {
-    if (!(await privateCoreChannel.isAvailable())) {
-      return legacyHandlePausedRequest.call(this, tabId, params);
-    }
-
     const requestId = String(params.requestId ?? '');
     const request = params.request ?? {};
     const endpoint = safeRequestEndpoint(request.url);
+
+    if (!(await privateCoreChannel.isAvailable())) {
+      await continueUnmodified(this, tabId, requestId, endpoint, 'private_request_authority_unavailable');
+      return;
+    }
+
     let decision;
     let postData;
     try {
@@ -57,22 +82,16 @@ export function installPrivateRequestRoutingHook() {
       const windowKey = await privateCoreChannel.windowKeyForTab(tabId);
       const rawDecision = await privateCoreChannel.request('evaluate_request', payload, 'request', { windowKey });
       decision = normalizePrivateRequestDecision(rawDecision);
-    } catch {
+    } catch (error) {
       privateCoreChannel.invalidate();
-      return legacyHandlePausedRequest.call(this, tabId, params);
+      postData = null;
+      await continueUnmodified(this, tabId, requestId, endpoint, 'private_request_authority_denied', error);
+      return;
     }
 
     if (!decision.officialConversation) {
-      try {
-        await this.continuePaused(tabId, requestId);
-      } catch (error) {
-        this.onRewrite?.(tabId, {
-          endpoint,
-          changed: false,
-          reason: 'continue_failed',
-          error: errorText(error),
-        });
-      }
+      await continueUnmodified(this, tabId, requestId, endpoint, 'private_request_not_official');
+      postData = null;
       return;
     }
 
@@ -80,9 +99,11 @@ export function installPrivateRequestRoutingHook() {
     if (decision.changed) {
       try {
         rewrittenPostData = applyPrivateRequestPatches(postData, decision.patches);
-      } catch {
+      } catch (error) {
         privateCoreChannel.invalidate();
-        return legacyHandlePausedRequest.call(this, tabId, params);
+        postData = null;
+        await continueUnmodified(this, tabId, requestId, endpoint, 'private_request_decision_invalid', error);
+        return;
       }
     }
 
@@ -101,7 +122,7 @@ export function installPrivateRequestRoutingHook() {
         reasoningFields: decision.reasoningFields,
       });
     } catch (error) {
-      await continueFailOpen(this, tabId, requestId, endpoint, decision, error);
+      await continueAfterDecisionFailure(this, tabId, requestId, endpoint, decision, error);
     } finally {
       rewrittenPostData = null;
       postData = null;
