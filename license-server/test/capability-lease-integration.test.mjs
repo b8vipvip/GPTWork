@@ -150,9 +150,8 @@ test('heartbeat mints a lease only for the admitted session and windows', async 
       method: 'POST', headers: { origin: ORIGIN, authorization },
       body: extensionBody({ windowKeys: ['chrome:10000001'] }),
     });
-    assert.equal(denied.response.status, 200);
-    assert.equal(denied.data.authorized, false);
-    assert.equal(denied.data.capabilityLease, null);
+    assert.equal(denied.response.status, 401);
+    assert.equal(denied.data.capabilityLease, undefined);
   } finally {
     if (child.exitCode === null) child.kill('SIGTERM');
     await rm(dir, { recursive: true, force: true });
