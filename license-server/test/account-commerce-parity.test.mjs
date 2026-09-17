@@ -6,7 +6,7 @@ import { normalizePlanPricing } from '../plan-pricing.mjs';
 const websiteCommerce = await readFile(new URL('../public/account-commerce.js', import.meta.url), 'utf8');
 const extensionCommerce = await readFile(new URL('../../extension/account-commerce.js', import.meta.url), 'utf8');
 const paymentSystem = await readFile(new URL('../payment-system.mjs', import.meta.url), 'utf8');
-const accountSystem = await readFile(new URL('../account-system.mjs', import.meta.url), 'utf8');
+const accountSystem = await readFile(new URL('../account-system-base.mjs', import.meta.url), 'utf8');
 const zpayClient = await readFile(new URL('../zpay-client.mjs', import.meta.url), 'utf8');
 const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
 
