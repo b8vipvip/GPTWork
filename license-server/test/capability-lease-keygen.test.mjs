@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const script = new URL('../generate-capability-lease-key.mjs', import.meta.url);
+const script = fileURLToPath(new URL('../generate-capability-lease-key.mjs', import.meta.url));
 
 test('deployment key generator writes a matching Ed25519 pair without printing the private key', async () => {
   const root = await mkdtemp(join(tmpdir(), 'gptwork-capability-keygen-'));
