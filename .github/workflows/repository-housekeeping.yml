@@ -3,6 +3,8 @@ name: Repository housekeeping
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '39 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -11,115 +13,64 @@ permissions:
 
 concurrency:
   group: gptwork-repository-housekeeping
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   main-policy-audit:
     name: Audit PR-only main changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Verify the main commit is associated with a merged PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
-          # GitHub's commit -> PR association can lag a few seconds after a merge.
-          # Prefer that API because it also works for squash/rebase merges.
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            echo "Non-push housekeeping run; PR-only audit not applicable."
+            exit 0
+          fi
           for attempt in $(seq 1 6); do
-            count="$(gh api \
-              -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-              --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
-            if [[ "$count" -ge 1 ]]; then
-              echo "Main commit $GITHUB_SHA is associated with a merged pull request."
-              exit 0
-            fi
+            count="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
+            if [[ "$count" -ge 1 ]]; then exit 0; fi
             sleep 5
           done
-
-          # Merge commits are independently verifiable from the canonical merge message.
-          # This avoids a false alarm when GitHub's association index is still stale.
           message="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.commit.message // ""')"
           if [[ "$message" =~ ^Merge\ pull\ request\ \#([0-9]+)\ from\  ]]; then
-            pr_number="${BASH_REMATCH[1]}"
-            pr_json="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
-            merged_at="$(jq -r '.merged_at // ""' <<<"$pr_json")"
-            base_ref="$(jq -r '.base.ref // ""' <<<"$pr_json")"
-            merge_sha="$(jq -r '.merge_commit_sha // ""' <<<"$pr_json")"
-            if [[ -n "$merged_at" && "$base_ref" == "main" && "$merge_sha" == "$GITHUB_SHA" ]]; then
-              echo "Main commit $GITHUB_SHA is verified as merge commit for PR #$pr_number."
-              exit 0
-            fi
+            pr_number="${BASH_REMATCH[1]}"; pr_json="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
+            merged_at="$(jq -r '.merged_at // ""' <<<"$pr_json")"; base_ref="$(jq -r '.base.ref // ""' <<<"$pr_json")"; merge_sha="$(jq -r '.merge_commit_sha // ""' <<<"$pr_json")"
+            [[ -n "$merged_at" && "$base_ref" == main && "$merge_sha" == "$GITHUB_SHA" ]] && exit 0
           fi
-
           echo "::error::Direct push to main detected at $GITHUB_SHA. Repository policy requires changes to enter main through a merged pull request."
           exit 1
 
-  prune-merged-branches:
-    name: Prune merged development branches
+  prune-stale-branches:
+    name: Prune every branch older than 7 days
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Delete fully merged short-lived branches
+      - name: Delete every non-default branch older than 7 days
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+          default="${{ github.event.repository.default_branch }}"
+          cutoff="$(date -u -d '7 days ago' +%s)"
           git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
-          owner="${GITHUB_REPOSITORY%%/*}"
-
-          deleted=0
-          kept=0
+          deleted=0; kept=0
           while IFS= read -r ref; do
             branch="${ref#refs/remotes/origin/}"
-            [[ "$branch" == "HEAD" || "$branch" == "main" ]] && continue
-
-            case "$branch" in
-              feat/*|fix/*|codex/*|chore/*|refactor/*|test/*|ui/*|hardening/*|ci-inspection-placeholder)
-                ;;
-              *)
-                continue
-                ;;
-            esac
-
-            delete_reason=""
-            if git merge-base --is-ancestor "$ref" "$GITHUB_SHA"; then
-              delete_reason="git-ancestor"
+            [[ "$branch" == HEAD || "$branch" == "$default" ]] && continue
+            tip_epoch="$(git log -1 --format=%ct "$ref")"
+            tip_date="$(git log -1 --format=%cI "$ref")"
+            if (( tip_epoch < cutoff )); then
+              echo "DELETE stale branch: $branch (tip=$tip_date)"
+              if git push origin --delete "$branch"; then deleted=$((deleted+1)); else echo "::warning::Unable to delete $branch"; kept=$((kept+1)); fi
             else
-              # Squash/rebase merges do not make the branch tip an ancestor of main.
-              # Delete only when a merged PR targets main AND its recorded head SHA is
-              # exactly the branch's current tip, so a branch reused after merge is safe.
-              branch_sha="$(git rev-parse "$ref")"
-              pr_json="$(gh api --method GET \
-                "/repos/$GITHUB_REPOSITORY/pulls" \
-                -f state=closed \
-                -f base=main \
-                -f "head=$owner:$branch" \
-                -f per_page=100)"
-              merged_tip_count="$(jq --arg sha "$branch_sha" '[.[] | select(.merged_at != null and .head.sha == $sha)] | length' <<<"$pr_json")"
-              if [[ "$merged_tip_count" -ge 1 ]]; then
-                delete_reason="merged-pr-head"
-              fi
-            fi
-
-            if [[ -n "$delete_reason" ]]; then
-              echo "Deleting merged branch: $branch ($delete_reason)"
-              if git push origin --delete "$branch"; then
-                deleted=$((deleted + 1))
-              else
-                echo "::warning::Unable to delete $branch; leaving it in place."
-                kept=$((kept + 1))
-              fi
-            else
-              echo "Keeping branch without conclusive merge evidence: $branch"
-              kept=$((kept + 1))
+              echo "KEEP recent branch: $branch (tip=$tip_date)"
+              kept=$((kept+1))
             fi
           done < <(git for-each-ref --format='%(refname)' refs/remotes/origin)
-
-          echo "Deleted merged branches: $deleted"
-          echo "Kept development branches without conclusive merge evidence: $kept"
+          echo "deleted=$deleted kept=$kept"
