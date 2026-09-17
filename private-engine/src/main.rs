@@ -5,17 +5,23 @@ mod context_budget;
 use std::io;
 
 use capability_lease::{verify_capability_lease, LeaseBinding};
+
 use serde_json::Value;
 
 #[allow(dead_code)]
 mod base {
     include!("main_base.rs");
 
-    pub fn read_frame_public<R: std::io::Read>(reader: &mut R) -> std::io::Result<Option<Vec<u8>>> {
+    pub fn read_frame_public<R: std::io::Read>(
+        reader: &mut R,
+    ) -> std::io::Result<Option<Vec<u8>>> {
         read_frame(reader)
     }
 
-    pub fn write_frame_public<W: std::io::Write>(writer: &mut W, value: &Value) -> std::io::Result<()> {
+    pub fn write_frame_public<W: std::io::Write>(
+        writer: &mut W,
+        value: &Value,
+    ) -> std::io::Result<()> {
         write_frame(writer, value)
     }
 
@@ -29,12 +35,18 @@ mod base {
 }
 
 fn protected_operation(value: &str) -> bool {
-    matches!(value, "evaluate_request" | "evaluate_response" | "evaluate_context")
+    matches!(
+        value,
+        "evaluate_request" | "evaluate_response" | "evaluate_context"
+    )
 }
 
 fn verified_handle(message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
-    let operation = message.get("type").and_then(Value::as_str).unwrap_or_default();
+    let operation = message
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if protected_operation(operation) {
         let lease = match message.get("capabilityLease").and_then(Value::as_str) {
             Some(value) if !value.trim().is_empty() => value,
@@ -108,7 +120,10 @@ mod tests {
             "payload": {}
         }));
         assert_eq!(response["ok"], false);
-        assert_eq!(response["error"]["code"], "capability_lease_binding_required");
+        assert_eq!(
+            response["error"]["code"],
+            "capability_lease_binding_required"
+        );
     }
 
     #[test]
