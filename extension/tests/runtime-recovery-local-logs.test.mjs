@@ -11,7 +11,8 @@ const contentErrorCapture = fs.readFileSync(new URL('../content-local-error-capt
 const popup = fs.readFileSync(new URL('../popup-v0513.html', import.meta.url), 'utf8');
 const popupShell = fs.readFileSync(new URL('../popup-v0513-shell.js', import.meta.url), 'utf8');
 const settings = fs.readFileSync(new URL('../settings-v0521.html', import.meta.url), 'utf8');
-const settingsLogs = fs.readFileSync(new URL('../settings-local-logs.js', import.meta.url), 'utf8');
+const diagnostics = fs.readFileSync(new URL('../diagnostics.html', import.meta.url), 'utf8');
+const diagnosticsSource = fs.readFileSync(new URL('../diagnostics.js', import.meta.url), 'utf8');
 
 test('network monitor is loaded directly without the removed legacy safety monkeypatch', () => {
   assert.doesNotMatch(entry, /network-monitor-safety\.js/);
@@ -94,15 +95,13 @@ test('content errors are persisted to the same bounded local runtime log buffer'
   assert.match(contentErrorCapture, /slice\(-LIMIT\)/);
 });
 
-test('settings exposes local log export, clear, and detailed diagnostics controls', () => {
-  assert.match(settings, /id="exportLocalLogs"/);
-  assert.match(settings, /id="clearLocalLogs"/);
-  assert.match(settings, /id="openLocalDiagnostics"/);
-  assert.match(settings, /src="settings-local-logs\.js"/);
-  assert.match(settingsLogs, /GPTLOCK_GET_RUNTIME_LOGS/);
-  assert.match(settingsLogs, /GPTLOCK_CLEAR_RUNTIME_LOGS/);
-  assert.match(settingsLogs, /application\/x-ndjson/);
-  assert.match(settingsLogs, /runtimeLogs:\s*\[\]/);
+test('runtime logs have one diagnostics UI and are removed from settings', () => {
+  assert.doesNotMatch(settings, /Local runtime logs|exportLocalLogs|clearLocalLogs|settings-local-logs\.js/);
+  assert.match(diagnostics, /id="export"/);
+  assert.match(diagnostics, /id="clear"/);
+  assert.match(diagnosticsSource, /GPTLOCK_GET_RUNTIME_LOGS/);
+  assert.match(diagnosticsSource, /GPTLOCK_CLEAR_RUNTIME_LOGS/);
+  assert.match(diagnosticsSource, /runtimeLogs/);
 });
 
 test('auto verification copy is account-based and legacy authorization-code copy stays absent', () => {
