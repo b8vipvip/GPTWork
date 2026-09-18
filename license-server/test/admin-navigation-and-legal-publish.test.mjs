@@ -14,6 +14,7 @@ const ADMIN_PAGES = [
   'admin-issues.html',
   'admin-website.html',
   'admin-settings.html',
+  'admin-client-settings.html',
   'admin-client-logs.html',
   'admin-server-logs.html',
   'admin-update.html',
@@ -32,7 +33,7 @@ test('every admin page exposes the canonical user-configuration navigation and l
 
 test('shared admin navigation is the final authority for the complete canonical menu', () => {
   const source = readFileSync(join(PUBLIC, 'page-cms.js'), 'utf8');
-  for (const route of ['/admin/overview', '/admin/users', '/admin/plans', '/admin/orders', '/admin/issues', '/admin/website', '/admin/settings', '/admin/client-logs', '/admin/server-logs', '/admin/update']) {
+  for (const route of ['/admin/overview', '/admin/users', '/admin/plans', '/admin/orders', '/admin/issues', '/admin/website', '/admin/settings', '/admin/client-settings', '/admin/client-logs', '/admin/server-logs', '/admin/update']) {
     assert.ok(source.includes(route), `shared navigation should contain ${route}`);
   }
   const userConfigTuple = /\['plans', '\/admin\/plans', '用户配置'\]/g;
