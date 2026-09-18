@@ -788,6 +788,38 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
   return accountState;
 }
 
+async function applyServerFeatureSettings() {
+  if (!accountClient.hasSession()) return null;
+  try {
+    const data = await accountClient.clientControl();
+    const remote = data?.control?.featureSettings;
+    if (!remote) return null;
+    const nextSettings = normalizeSettings({
+      ...currentSettings,
+      networkVerificationEnabled: remote.responseVerificationEnabled !== false,
+      autoAlignSelection: remote.autoAlignSelection !== false,
+    });
+    const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
+    const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
+    const policyChanged = JSON.stringify(nextPolicy) !== JSON.stringify(currentPolicy);
+    if (settingsChanged || policyChanged) {
+      await chrome.storage.sync.set({ settings: nextSettings, policy: nextPolicy });
+      currentSettings = nextSettings;
+      currentPolicy = nextPolicy;
+      logRuntime('info', 'settings', 'server_client_settings_applied', {
+        generation: remote.generation ?? null,
+        responseVerificationEnabled: nextSettings.networkVerificationEnabled,
+        autoAlignSelection: nextSettings.autoAlignSelection,
+        strictMode: nextPolicy.strictMode,
+      });
+    }
+    return remote;
+  } catch (error) {
+    logRuntime('warn', 'settings', 'server_client_settings_fetch_failed', { error: errorText(error) });
+    return null;
+  }
+}
+
 async function refreshNativeCore({ tolerateFailure = false } = {}) {
   if (!masterRuntimeEnabled()) {
     await markNativeStopped();
