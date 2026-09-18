@@ -1,4 +1,4 @@
-import { KNOWN_MODELS, normalizePolicy } from './policy.js';
+import { KNOWN_MODELS, REASONING_LEVELS, normalizeConcreteModelId, normalizePolicy, normalizeSettings } from './policy.js';
 import { classifyNativeError, nativeHelp, RELEASES_URL } from './native-status.js';
 
 const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
@@ -30,6 +30,10 @@ const elements = {
   updateRuntimeProgressBar: document.getElementById('updateRuntimeProgressBar'),
   popupLockedModels: document.getElementById('popupLockedModels'),
   editModelLock: document.getElementById('editModelLock'),
+  popupLockEditor: document.getElementById('popupLockEditor'),
+  popupModelChoices: document.getElementById('popupModelChoices'),
+  popupPreferredReasoning: document.getElementById('popupPreferredReasoning'),
+  popupLockMessage: document.getElementById('popupLockMessage'),
 };
 
 let lastState = null;
@@ -39,12 +43,50 @@ function lockModelLabel(id) {
   return KNOWN_MODELS.find((model) => model.id === id)?.label || id;
 }
 
-async function renderPopupLockSummary() {
-  const stored = await chrome.storage.sync.get('policy');
-  const policy = normalizePolicy(stored.policy);
-  if (elements.popupLockedModels) {
-    elements.popupLockedModels.textContent = policy.lockedModels.map(lockModelLabel).join(' / ') || '—';
+function popupModelIds(stored, policy) {
+  return [...new Set([
+    ...KNOWN_MODELS.map((model) => model.id),
+    ...(Array.isArray(stored?.discoveredModels) ? stored.discoveredModels : []),
+    ...policy.lockedModels,
+  ].map(normalizeConcreteModelId).filter(Boolean))];
+}
+
+function renderPopupLockEditor(stored, policy, settings) {
+  if (!elements.popupModelChoices || !elements.popupPreferredReasoning) return;
+  elements.popupModelChoices.replaceChildren();
+  for (const model of popupModelIds(stored, policy)) {
+    const row = document.createElement('label');
+    row.className = 'popup-lock-choice';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'popup-lock-model';
+    input.value = model;
+    input.checked = policy.lockedModels.includes(model);
+    const label = document.createElement('span');
+    label.textContent = lockModelLabel(model);
+    row.append(input, label);
+    elements.popupModelChoices.append(row);
   }
+  elements.popupPreferredReasoning.replaceChildren();
+  for (const level of REASONING_LEVELS) {
+    const option = document.createElement('option');
+    option.value = level.id;
+    option.textContent = `${level.labelZh} / ${level.labelEn}`;
+    elements.popupPreferredReasoning.append(option);
+  }
+  elements.popupPreferredReasoning.value = settings.preferredReasoning;
+}
+
+async function renderPopupLockSummary() {
+  const stored = await chrome.storage.sync.get(['policy', 'settings', 'discoveredModels']);
+  const policy = normalizePolicy(stored.policy);
+  const settings = normalizeSettings(stored.settings);
+  if (elements.popupLockedModels) {
+    elements.popupLockedModels.textContent = policy.lockedModels
+      .map((model) => `${lockModelLabel(model)} · ${settings.preferredReasoning}`)
+      .join(' / ') || '—';
+  }
+  renderPopupLockEditor(stored, policy, settings);
 }
 
 function sendMessage(message) {
@@ -240,7 +282,40 @@ async function load() {
 }
 
 elements.editModelLock?.addEventListener('click', () => {
-  void chrome.runtime.openOptionsPage();
+  const open = elements.popupLockEditor?.hidden !== false;
+  if (elements.popupLockEditor) elements.popupLockEditor.hidden = !open;
+  elements.editModelLock.setAttribute('aria-expanded', String(open));
+});
+
+elements.popupModelChoices?.addEventListener('change', async () => {
+  const selected = [...elements.popupModelChoices.querySelectorAll('input[name="popup-lock-model"]:checked')]
+    .map((input) => normalizeConcreteModelId(input.value)).filter(Boolean);
+  if (!selected.length) {
+    if (elements.popupLockMessage) elements.popupLockMessage.textContent = '至少保留一个锁定模型。';
+    await renderPopupLockSummary();
+    return;
+  }
+  const stored = await chrome.storage.sync.get('policy');
+  const policy = normalizePolicy(stored.policy);
+  await chrome.storage.sync.set({ policy: normalizePolicy({ ...policy, lockedModels: selected }) });
+  if (elements.popupLockMessage) elements.popupLockMessage.textContent = '锁定模型已保存。';
+  await renderPopupLockSummary();
+});
+
+elements.popupPreferredReasoning?.addEventListener('change', async () => {
+  const preferredReasoning = elements.popupPreferredReasoning.value;
+  const stored = await chrome.storage.sync.get(['policy', 'settings']);
+  const policy = normalizePolicy(stored.policy);
+  const settings = normalizeSettings(stored.settings);
+  const allowedReasoningLevels = policy.allowedReasoningLevels.includes(preferredReasoning)
+    ? policy.allowedReasoningLevels
+    : [...new Set([...policy.allowedReasoningLevels, preferredReasoning])];
+  await chrome.storage.sync.set({
+    policy: normalizePolicy({ ...policy, allowedReasoningLevels }),
+    settings: normalizeSettings({ ...settings, preferredReasoning }),
+  });
+  if (elements.popupLockMessage) elements.popupLockMessage.textContent = '推理强度已保存。';
+  await renderPopupLockSummary();
 });
 
 elements.autoVerify.addEventListener('click', () => {
@@ -307,7 +382,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 void renderPopupLockSummary().catch(() => {});
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'sync' && changes.policy) void renderPopupLockSummary().catch(() => {});
+  if (areaName === 'sync' && (changes.policy || changes.settings || changes.discoveredModels)) {
+    void renderPopupLockSummary().catch(() => {});
+  }
 });
 
 void load().catch((error) => {
