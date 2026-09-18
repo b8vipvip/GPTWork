@@ -79,6 +79,22 @@ test('rewrites a disallowed concrete model to Astra as the preferred policy targ
   assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
 });
 
+test('per-model verification preserves unknown raw model transport instead of guessing a rewrite', () => {
+  const source = JSON.stringify({ model: 'gpt-5-6-thinking', thinking_effort: 'medium' });
+  const result = rewriteConversationPostData(source, {
+    lockedModels: ['gpt-5.6-thinking'],
+    allowedReasoningLevels: ['high'],
+    preferredReasoning: null,
+    preserveModel: true,
+    preserveReasoning: true,
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.transportModelBefore, 'gpt-5-6-thinking');
+  assert.equal(result.transportModelAfter, 'gpt-5-6-thinking');
+  assert.equal(JSON.parse(result.postData).model, 'gpt-5-6-thinking');
+  assert.equal(result.reason, 'verification_model_passthrough');
+});
+
 test('per-model verification can preserve the model default reasoning while locking the selected model', () => {
   const source = JSON.stringify({ model: 'gpt-5.5', thinking_effort: 'medium' });
   const result = rewriteConversationPostData(source, {
