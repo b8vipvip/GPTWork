@@ -253,6 +253,12 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     }
   }
 
+  async function clientControl() {
+    await initialize();
+    if (!token) return null;
+    return request('/api/v1/client/control', { auth: true });
+  }
+
   async function security() {
     await initialize();
     return request('/api/v1/account/security', { auth: true });
@@ -308,6 +314,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     resetPassword,
     me,
     heartbeat,
+    clientControl,
     security,
     releaseDevice,
     revokeSession,
