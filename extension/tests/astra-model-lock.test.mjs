@@ -72,7 +72,7 @@ test('rewrites a disallowed concrete model to Astra as the preferred policy targ
   });
   assert.equal(result.changed, true);
   assert.equal(result.modelAfter, 'gpt-6-astra');
-  assert.equal(result.transportModelAfter, 'gpt-6-astra');
+  assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
 });
 
 test('Astra page adapter recognizes visible Astra labels and likely transport labels', () => {
