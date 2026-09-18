@@ -5,7 +5,11 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/scripts/**'
-      - '.github/ACTIONS_STRATEGY.md'\n      - '.github/GITHUB_AGENT.md'\n      - '.github/GPTAUTO.md'\n      - '.github/gptauto/**'\n      - '.github/tests/test_gptauto.py'
+      - '.github/ACTIONS_STRATEGY.md'
+      - '.github/GITHUB_AGENT.md'
+      - '.github/GPTAUTO.md'
+      - '.github/gptauto/**'
+      - '.github/tests/test_gptauto.py'
   push:
     branches: [main]
     paths:
@@ -69,4 +73,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           mapfile -t workflows < /tmp/actions-workflows.txt
-          python .github/scripts/validate_actions_strategy.py "${workflows[@]}"\n\n      - name: Test embedded GPTAuto runtime\n        shell: bash\n        run: PYTHONPATH=.github python -m unittest discover -s .github/tests -p 'test_gptauto.py' -v
+          python .github/scripts/validate_actions_strategy.py "${workflows[@]}"
+
+      - name: Test embedded GPTAuto runtime
+        shell: bash
+        run: PYTHONPATH=.github python -m unittest discover -s .github/tests -p 'test_gptauto.py' -v
