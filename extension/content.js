@@ -652,6 +652,23 @@
     return { ...result, responseText: response || '' };
   }
 
+  async function verifyAccountModel(message) {
+    const model = normalizeDisplayedModel(message?.model) || String(message?.model || '').trim().toLowerCase();
+    if (!model) throw new Error('Invalid account model / 无效账户模型');
+    await waitForIdle();
+    const selected = await chooseExact(MODEL_SELECTORS, model, normalizeDisplayedModel);
+    const observation = collectObservation();
+    const confirmed = observation.model === model;
+    return {
+      model,
+      label: message?.label || model,
+      selected: selected || confirmed,
+      confirmed,
+      observation,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+
   async function discoverAccountModelMetadata() {
     const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
     const modelButton = [...document.querySelectorAll(MODEL_SELECTORS.join(','))].find((element) => {
@@ -708,6 +725,13 @@
     if (message?.type === 'GPTLOCK_AUTO_RESOLVE_MODEL_NAMES') {
       void resolveModelNamesWithChatGpt(message).then(
         (result) => sendResponse({ ok: true, ...result }),
+        (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+      return true;
+    }
+    if (message?.type === 'GPTLOCK_VERIFY_ACCOUNT_MODEL') {
+      void verifyAccountModel(message).then(
+        (result) => sendResponse({ ok: true, result }),
         (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
       );
       return true;
