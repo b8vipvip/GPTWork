@@ -406,8 +406,12 @@ elements.logs.addEventListener('click', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes[UPDATE_STATUS_KEY]?.newValue) {
+  if (areaName !== 'local') return;
+  if (changes[UPDATE_STATUS_KEY]?.newValue) {
     renderUpdateStatus(changes[UPDATE_STATUS_KEY].newValue);
+  }
+  if (changes.nativeStatus?.newValue && lastState) {
+    render({ ...lastState, nativeStatus: changes.nativeStatus.newValue });
   }
 });
 
