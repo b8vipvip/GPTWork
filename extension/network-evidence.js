@@ -445,15 +445,21 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   result.modelBefore = normalizeModelId(parsed.model);
   // Multiple checked models are a priority/fallback set, not an unordered allowlist.
   // Always request the strongest selected model first; lower models remain explicit fallbacks.
+  // Auto verification is the exception: after the page explicitly selects one account model,
+  // preserve the raw transport ID ChatGPT itself emits so future/unknown models are observed
+  // rather than rewritten from a guessed canonical transport mapping.
   const targetModel = lockedModels[0];
-  const targetTransport = result.modelBefore === targetModel
+  const preserveModel = configuration.preserveModel === true;
+  const targetTransport = preserveModel
     ? parsed.model
-    : modelTransportId(targetModel);
+    : result.modelBefore === targetModel
+      ? parsed.model
+      : modelTransportId(targetModel);
   if (!targetTransport) {
     result.reason = 'locked_model_invalid';
     return result;
   }
-  if (parsed.model !== targetTransport) {
+  if (!preserveModel && parsed.model !== targetTransport) {
     parsed.model = targetTransport;
     result.changed = true;
   }
@@ -489,7 +495,7 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
     : null;
 
   if (result.changed) result.postData = JSON.stringify(parsed);
-  result.reason = result.changed ? 'rewritten' : 'already_locked';
+  result.reason = preserveModel ? 'verification_model_passthrough' : result.changed ? 'rewritten' : 'already_locked';
   return result;
 }
 

@@ -75,6 +75,7 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /probeMarker: 'GPTWork 模型验证'/);
   assert.match(backgroundSource, /skipAlignment: true/);
   assert.match(backgroundSource, /runtimePolicyForTabSync/);
+  assert.match(backgroundSource, /preserveModel: verifyingAccountModel/);
   assert.match(backgroundSource, /preserveReasoning: verifyingAccountModel/);
   assert.match(backgroundSource, /Account-menu DOM is discovery input, not authoritative persistence/);
   assert.doesNotMatch(backgroundSource, /sources: \[\.\.\.new Set\(\[\.\.\.\(Array\.isArray\(prior\.sources\).*account_model_catalog/s);

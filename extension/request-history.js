@@ -74,8 +74,11 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
       const rewrite = (key ? pendingRewriteByRequest.get(key) : null) ?? pendingRewriteByTab.get(tabId) ?? null;
       if (key) pendingRewriteByRequest.delete(key);
       if (pendingRewriteByTab.get(tabId) === rewrite) pendingRewriteByTab.delete(tabId);
-      const requestModel = details.model ?? null;
-      const discoveredModel = rewrite?.modelBefore ?? requestModel;
+      // Network.requestWillBeSent can expose the pre-Fetch body even when the
+      // interceptor continued the request with rewritten postData. The correlated
+      // rewrite event is authoritative for the actual model GPTWork sent.
+      const requestModel = rewrite?.modelAfter ?? details.model ?? null;
+      const discoveredModel = rewrite?.modelBefore ?? details.model ?? requestModel;
       const record = {
         id: typeof entry.id === 'string' && entry.id ? entry.id : `request:${tabId}:${entry.timestamp ?? records.length}`,
         tabId,
