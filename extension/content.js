@@ -633,6 +633,25 @@
     }
   }
 
+  function assistantMessages() {
+    return [...document.querySelectorAll('[data-message-author-role="assistant"]')];
+  }
+
+  async function resolveModelNamesWithChatGpt(message) {
+    const before = assistantMessages().length;
+    const result = await autoSendProbe({
+      probeText: String(message?.prompt || '').slice(0, 1800),
+      probeMarker: 'GPTWork 模型名称解析',
+    });
+    const response = await waitUntil(() => {
+      const messages = assistantMessages();
+      if (messages.length <= before) return null;
+      const text = String(messages[messages.length - 1]?.innerText || messages[messages.length - 1]?.textContent || '').trim();
+      return text || null;
+    }, 45000, 250);
+    return { ...result, responseText: response || '' };
+  }
+
   async function discoverAccountModelMetadata() {
     const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
     const modelButton = [...document.querySelectorAll(MODEL_SELECTORS.join(','))].find((element) => {
@@ -686,6 +705,13 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'GPTLOCK_AUTO_RESOLVE_MODEL_NAMES') {
+      void resolveModelNamesWithChatGpt(message).then(
+        (result) => sendResponse({ ok: true, ...result }),
+        (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+      return true;
+    }
     if (message?.type === 'GPTLOCK_DISCOVER_ACCOUNT_MODELS') {
       void discoverAccountModelMetadata().then(
         (catalog) => sendResponse({ ok: true, catalog }),
