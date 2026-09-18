@@ -121,5 +121,14 @@ html, body {
   user-select: all;
 }
 
-.lock-summary-popup small{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lock-edit-button{flex:0 0 auto;width:34px;height:34px;padding:0!important;border:1px solid #bfdbfe!important;border-radius:9px!important;background:#eff6ff!important;color:#1d4ed8!important;font-size:20px!important;line-height:1!important}
+.lock-summary-popup{position:relative}
+.lock-summary-popup>span{min-width:0;flex:1}
+.lock-summary-popup small{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lock-edit-button{display:inline-grid;place-items:center;vertical-align:middle;width:25px;height:25px;margin-left:5px;padding:0!important;border:1px solid #bfdbfe!important;border-radius:7px!important;background:#eff6ff!important;color:#1d4ed8!important;font-size:16px!important;line-height:1!important;transform:scaleX(-1)}
+.popup-lock-editor{position:absolute;z-index:20;top:58px;left:10px;right:10px;padding:12px;border:1px solid #bfdbfe;border-radius:12px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.18)}
+.popup-lock-editor>strong{display:block;margin-bottom:7px}
+.popup-lock-choices{display:grid;gap:6px;max-height:150px;overflow:auto}
+.popup-lock-choice{display:flex;align-items:center;gap:8px;font-size:12px}
+.popup-lock-field{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:8px;margin-top:10px;font-size:12px;font-weight:700}
+.popup-lock-field select{min-width:0;padding:7px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+.popup-lock-message{min-height:14px;margin:7px 0 0!important;font-size:10px;color:#b45309}
