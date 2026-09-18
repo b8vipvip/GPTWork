@@ -1519,23 +1519,35 @@ function diagnosticTabState(state) {
   };
 }
 
-async function createDiagnosticBundle() {
-  const [stored, runtimeLogs, platform] = await Promise.all([
+function diagnosticExportLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 300;
+  return Math.min(300, Math.max(1, Math.trunc(parsed)));
+}
+
+async function createDiagnosticBundle({ entryLimit = 300 } = {}) {
+  const limit = diagnosticExportLimit(entryLimit);
+  const [stored, allRuntimeLogs, platform] = await Promise.all([
     chrome.storage.local.get(['nativeStatus', DIAGNOSTIC_SSE_STORAGE_KEY]),
     getRuntimeLogs(),
     getPlatformInfo(),
   ]);
+  const runtimeLogs = allRuntimeLogs.slice(-limit);
   let nativeDiagnostics = null;
   let nativeDiagnosticsError = null;
   try {
-    nativeDiagnostics = await sendNative('get_diagnostics', { auditLimit: 1000 });
+    nativeDiagnostics = await sendNative('get_diagnostics', { auditLimit: limit });
   } catch (error) {
     nativeDiagnosticsError = errorText(error);
   }
   const rawStreamCapture = stored[DIAGNOSTIC_SSE_STORAGE_KEY] ?? null;
   const safeBundle = sanitizeLogValue({
-    schemaVersion: 4,
+    schemaVersion: 5,
     generatedAt: new Date().toISOString(),
+    exportSelection: {
+      recentEntries: limit,
+      runtimeLogCount: runtimeLogs.length,
+    },
     extension: {
       id: chrome.runtime.id,
       version: chrome.runtime.getManifest().version,
@@ -1916,7 +1928,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         logRuntime('info', 'diagnostics', 'runtime_logs_cleared');
         return { cleared: true };
       case 'GPTLOCK_EXPORT_DIAGNOSTICS': {
-        const bundle = await createDiagnosticBundle();
+        const bundle = await createDiagnosticBundle({ entryLimit: message.entryLimit });
         logRuntime('info', 'diagnostics', 'bundle_created', {
           runtimeLogCount: bundle.runtimeLogs?.length ?? 0,
           nativeAuditCount: bundle.nativeDiagnostics?.auditRecords?.length ?? 0,
