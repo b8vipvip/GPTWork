@@ -297,7 +297,10 @@ elements.popupModelChoices?.addEventListener('change', async () => {
   }
   const stored = await chrome.storage.sync.get('policy');
   const policy = normalizePolicy(stored.policy);
-  await chrome.storage.sync.set({ policy: normalizePolicy({ ...policy, lockedModels: selected }) });
+  await chrome.storage.sync.set({
+    policy: normalizePolicy({ ...policy, lockedModels: selected }),
+    gptworkModelLockSelection: selected,
+  });
   if (elements.popupLockMessage) elements.popupLockMessage.textContent = '锁定模型已保存。';
   await renderPopupLockSummary();
 });
