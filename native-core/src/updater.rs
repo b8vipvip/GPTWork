@@ -267,8 +267,11 @@ try {
   $installer = Start-Process -FilePath ([string]$job.installerPath) -ArgumentList ([string]$job.installerArguments) -WorkingDirectory ([string]$job.installRoot) -WindowStyle Hidden -PassThru
   Write-HelperLog ("installer_started pid=" + $installer.Id)
 
+  # Setup pauses the Native Messaging manifests before replacing binaries and performs
+  # its own bounded process shutdown. Do not keep killing gptwork-core while Setup is
+  # running: the installer's post-install Repair-GPTWork.ps1 intentionally starts the
+  # freshly installed core to verify a real Native Messaging round trip.
   while (-not $installer.HasExited) {
-    Stop-InstalledCoreProcesses
     Start-Sleep -Milliseconds 250
     $installer.Refresh()
   }
@@ -547,6 +550,8 @@ mod tests {
         assert!(!script.contains("Timed out waiting for preparing Native Messaging host to exit"));
         assert!(script.contains("Stop-InstalledCoreProcesses"));
         assert!(script.contains("while (-not $installer.HasExited)"));
+        assert!(!script.contains("while (-not $installer.HasExited) {\n    Stop-InstalledCoreProcesses"));
+        assert!(script.contains("post-install Repair-GPTWork.ps1"));
         assert!(script.contains("Get-Process -Name 'gptwork-core'"));
         assert!(script.contains("installed_core_version_output"));
     }
