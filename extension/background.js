@@ -788,6 +788,38 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
   return accountState;
 }
 
+async function applyServerFeatureSettings() {
+  if (!accountClient.hasSession()) return null;
+  try {
+    const data = await accountClient.clientControl();
+    const remote = data?.control?.featureSettings;
+    if (!remote) return null;
+    const nextSettings = normalizeSettings({
+      ...currentSettings,
+      networkVerificationEnabled: remote.responseVerificationEnabled !== false,
+      autoAlignSelection: remote.autoAlignSelection !== false,
+    });
+    const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
+    const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
+    const policyChanged = JSON.stringify(nextPolicy) !== JSON.stringify(currentPolicy);
+    if (settingsChanged || policyChanged) {
+      await chrome.storage.sync.set({ settings: nextSettings, policy: nextPolicy });
+      currentSettings = nextSettings;
+      currentPolicy = nextPolicy;
+      logRuntime('info', 'settings', 'server_client_settings_applied', {
+        generation: remote.generation ?? null,
+        responseVerificationEnabled: nextSettings.networkVerificationEnabled,
+        autoAlignSelection: nextSettings.autoAlignSelection,
+        strictMode: nextPolicy.strictMode,
+      });
+    }
+    return remote;
+  } catch (error) {
+    logRuntime('warn', 'settings', 'server_client_settings_fetch_failed', { error: errorText(error) });
+    return null;
+  }
+}
+
 async function refreshNativeCore({ tolerateFailure = false } = {}) {
   if (!masterRuntimeEnabled()) {
     await markNativeStopped();
@@ -1140,6 +1172,68 @@ async function discoverAccountCatalog(tabId) {
   }
 }
 
+async function verifyAccountCatalogModels(tabId, state, accountCatalog) {
+  const rows = Array.isArray(accountCatalog?.rows) ? accountCatalog.rows : [];
+  const unique = [];
+  for (const row of rows) {
+    const model = normalizeConcreteModelId(row?.model || row?.rawId);
+    if (!model || unique.some((item) => item.model === model)) continue;
+    unique.push({ model, label: String(row?.label || model).slice(0, 160) });
+  }
+  state.autoVerification.catalogVerification = {
+    total: unique.length,
+    completed: 0,
+    verified: 0,
+    failed: 0,
+    currentModel: null,
+    currentLabel: null,
+    results: [],
+  };
+  await broadcastTabState(tabId);
+  logRuntime('info', 'verification', 'account_model_verification_started', {
+    tabId,
+    total: unique.length,
+    models: unique.map((item) => item.model),
+  });
+  for (let index = 0; index < unique.length; index += 1) {
+    const item = unique[index];
+    const progress = state.autoVerification.catalogVerification;
+    progress.currentModel = item.model;
+    progress.currentLabel = item.label;
+    await broadcastTabState(tabId);
+    logRuntime('info', 'verification', 'account_model_verification_model_started', {
+      tabId, index: index + 1, total: unique.length, model: item.model, label: item.label,
+    });
+    try {
+      const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, label: item.label });
+      const result = response?.result || {};
+      const verified = result.confirmed === true;
+      progress.results.push({ model: item.model, label: item.label, verified, observation: result.observation || null });
+      if (verified) progress.verified += 1; else progress.failed += 1;
+      logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
+        tabId, index: index + 1, total: unique.length, model: item.model, label: item.label,
+        verified, observedModel: result.observation?.model || null,
+      });
+    } catch (error) {
+      progress.failed += 1;
+      progress.results.push({ model: item.model, label: item.label, verified: false, error: errorText(error) });
+      logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
+        tabId, index: index + 1, total: unique.length, model: item.model, label: item.label, error: errorText(error),
+      });
+    }
+    progress.completed = index + 1;
+    await broadcastTabState(tabId);
+  }
+  const progress = state.autoVerification.catalogVerification;
+  progress.currentModel = null;
+  progress.currentLabel = null;
+  logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
+    tabId, total: progress.total, verified: progress.verified, failed: progress.failed, results: progress.results,
+  });
+  await broadcastTabState(tabId);
+  return progress;
+}
+
 async function autoVerify(tabId) {
   if (!masterRuntimeEnabled()) throw new Error('GPTWork is disabled / GPTWork 已关闭');
   const tab = await chrome.tabs.get(tabId);
@@ -1171,6 +1265,7 @@ async function autoVerify(tabId) {
     responseReasoning: null,
     evidenceSource: null,
     attempts: [],
+    catalogVerification: null,
   };
   try {
     await startAutoVerificationStreamCapture(tabId, startedAt);
@@ -1180,6 +1275,8 @@ async function autoVerify(tabId) {
   resetVerificationAttempt(state);
   state.lastError = page.error;
   await broadcastTabState(tabId);
+
+  const catalogVerification = await verifyAccountCatalogModels(tabId, state, accountCatalog);
 
   if (!monitorAttached) {
     logRuntime('warn', 'verification', 'auto_verify_request_lock_unavailable', {
@@ -1361,6 +1458,9 @@ async function autoVerify(tabId) {
     responseModel: state.autoVerification.responseModel,
     responseReasoning: state.autoVerification.responseReasoning,
     evidenceSource: state.autoVerification.evidenceSource,
+    catalogTotal: catalogVerification.total,
+    catalogVerified: catalogVerification.verified,
+    catalogFailed: catalogVerification.failed,
     checks: {
       coreConnected: coreCheck.connected,
       coreError: coreCheck.error,

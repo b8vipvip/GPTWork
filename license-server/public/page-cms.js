@@ -12,6 +12,7 @@ const cmsRichTextPromise = import('/rich-text-style.js').catch(() => null);
     ['issues', '/admin/issues', 'Issues 讨论区'],
     ['website', '/admin/website', '官网管理'],
     ['settings', '/admin/settings', '系统配置'],
+    ['client-settings', '/admin/client-settings', '客户端设置'],
     ['client-logs', '/admin/client-logs', '客户端运行日志'],
     ['server-logs', '/admin/server-logs', '服务端日志'],
     ['update', '/admin/update', '更新'],

@@ -55,6 +55,10 @@ test('popup edits lock models and reasoning inline without opening Settings', ()
   assert.match(popupJs, /preferredReasoning/);
   assert.doesNotMatch(popupJs, /editModelLock[\s\S]{0,180}openOptionsPage/);
   assert.match(popupCss, /transform:scaleX\(-1\)/);
+  assert.doesNotMatch(popupHtml, /自动锁定 GPT-5\.6 Sol 及以上模型/);
+  assert.match(popupHtml, /id="autoVerifyProgress"/);
+  assert.match(popupJs, /catalogVerification/);
+  assert.match(popupJs, /5000/);
 });
 
 test('model discovery schema v3 removes routing aliases before persistence', () => {

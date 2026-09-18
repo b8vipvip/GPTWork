@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GPTWork 设置 / Settings</title>
+  <title>GPTWork 功能配置 / Features</title>
   <link rel="stylesheet" href="options.css">
   <link rel="stylesheet" href="request-history.css">
   <link rel="stylesheet" href="module-nav.css">
@@ -52,21 +52,6 @@
           <select id="preferredReasoning"></select>
         </div>
       </div>
-    </section>
-
-    <section class="card" aria-labelledby="verificationHeading">
-      <h2 id="verificationHeading">响应确认（可选） <span>Response verification</span></h2>
-      <label class="check-row wide"><input id="networkVerification" type="checkbox"><span><strong>启用响应元数据确认</strong><small>Read response metadata after a formal chat request. Missing metadata warns but does not block normal chat.</small></span></label>
-      <p class="permission-note">请求锁定本身也需要 Chrome/Edge 的“调试程序”权限。新版会等 ChatGPT 顶层页面加载完成后才连接调试器；页面加载期间保持分离，避免导航被调试会话影响。</p>
-      <p class="permission-note en">The request interceptor uses the browser debugger permission, but GPTWork now defers debugger attachment until the ChatGPT document has finished loading.</p>
-      <label class="check-row wide"><input id="autoAlignSelection" type="checkbox"><span><strong>自动对齐页面选择（尽力而为）</strong><small>Prefer GPT-6 Astra when the account exposes it; the network request lock remains authoritative.</small></span></label>
-    </section>
-
-    <section class="card" aria-labelledby="modeHeading">
-      <h2 id="modeHeading">处理模式 <span>Enforcement mode</span></h2>
-      <p class="help">请求锁定优先保证正常聊天。核心离线、页面识别缺失、响应字段缺失或推理强度确认异常只告警；只有与当前最新正式请求关联、且响应明确确认实际模型不在锁定列表时，强制模式才阻断后续发送。</p>
-      <label class="radio-row"><input type="radio" name="mode" value="false"><span><strong>提醒</strong><small>Warn — 永不因响应确认结果阻断</small></span></label>
-      <label class="radio-row"><input type="radio" name="mode" value="true"><span><strong>强制</strong><small>Strict — only a current confirmed response-model mismatch blocks subsequent sends</small></span></label>
     </section>
 
     <section class="card status-card" aria-labelledby="statusHeading">

@@ -224,7 +224,7 @@ const SITE_PAGES = {
 };
 const ADMIN_PAGES = {
   '/admin':'admin.html','/admin/':'admin.html','/admin/overview':'admin.html','/admin/users':'admin-users.html','/admin/plans':'admin-plans.html','/admin/orders':'admin-orders.html',
-  '/admin/issues':'admin-issues.html','/admin/website':'admin-website.html','/admin/settings':'admin-settings.html','/admin/client-logs':'admin-client-logs.html','/admin/server-logs':'admin-server-logs.html','/admin/update':'admin-update.html',
+  '/admin/issues':'admin-issues.html','/admin/website':'admin-website.html','/admin/settings':'admin-settings.html','/admin/client-settings':'admin-client-settings.html','/admin/client-logs':'admin-client-logs.html','/admin/server-logs':'admin-server-logs.html','/admin/update':'admin-update.html',
 };
 
 const server = createServer(async (req, res) => {
@@ -246,6 +246,7 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/issues-new.js') return staticFile(res, join(PUBLIC,'issues-new.js'));
     if (url.pathname === '/admin.js') return staticFile(res, join(PUBLIC,'admin.js'));
     if (url.pathname === '/admin-users.js') return staticFile(res, join(PUBLIC,'admin-users.js'));
+    if (url.pathname === '/admin-client-settings.js') return staticFile(res, join(PUBLIC,'admin-client-settings.js'));
     if (url.pathname === '/admin-client-control.js') return staticFile(res, join(PUBLIC,'admin-client-control.js'));
     if (url.pathname === '/admin-issues.js') return staticFile(res, join(PUBLIC,'admin-issues.js'));
     if (url.pathname === '/admin-website.js') return staticFile(res, join(PUBLIC,'admin-website.js'));

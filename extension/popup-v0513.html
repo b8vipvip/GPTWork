@@ -94,7 +94,7 @@
             <button id="accountUpgrade" class="account-upgrade" type="button" hidden>升级</button>
           </div>
         </div>
-        <button id="options" class="account-settings-button" type="button" title="设置 / Settings">设置</button>
+        <button id="options" class="account-settings-button" type="button" title="功能配置 / Features">功能配置</button>
       </div>
       <div class="account-meta"><div class="account-expiry-row"><span id="accountExpiry">权益有效期 —</span><div class="reward-actions"><button id="accountCheckin" class="reward-button" type="button">签到<sup>+1</sup></button><button id="accountShare" class="reward-button" type="button">分享<sup>+7</sup></button></div></div><span id="accountUsage">设备/窗口 —</span></div>
       <div class="account-actions">
@@ -104,7 +104,7 @@
     </section>
 
     <section class="enable-row">
-      <span><strong>Work 模式</strong><small>自动锁定 GPT-5.6 Sol 及以上模型</small></span>
+      <span><strong>Work 模式</strong></span>
       <label class="switch" title="启用 Work 模式 / Enable Work mode"><input id="workModeEnabled" type="checkbox"><span aria-hidden="true"></span></label>
     </section>
 
@@ -117,6 +117,8 @@
         <p id="popupLockMessage" class="popup-lock-message" role="status"></p>
       </div>
     </section>
+
+    <section id="autoVerifyProgress" class="auto-verify-progress" aria-live="polite" hidden><div><strong id="autoVerifyProgressTitle">正在验证账户模型</strong><span id="autoVerifyProgressText">0 / 0</span></div><progress id="autoVerifyProgressBar" max="100" value="0"></progress></section>
 
     <section id="updateRuntimeProgress" class="install-help" aria-live="polite" hidden>
       <strong id="updateRuntimeProgressTitle">GPTWork 更新进行中 / Updating</strong>

@@ -43,6 +43,14 @@ export function createClientControlSystem({
       sync_generation INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL
     ) STRICT;
+    CREATE TABLE IF NOT EXISTS client_feature_settings (
+      id INTEGER PRIMARY KEY CHECK(id=1),
+      response_verification_enabled INTEGER NOT NULL DEFAULT 1 CHECK(response_verification_enabled IN (0,1)),
+      auto_align_selection INTEGER NOT NULL DEFAULT 1 CHECK(auto_align_selection IN (0,1)),
+      strict_mode INTEGER NOT NULL DEFAULT 1 CHECK(strict_mode IN (0,1)),
+      generation INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    ) STRICT;
     CREATE TABLE IF NOT EXISTS user_client_control (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       update_generation INTEGER NOT NULL DEFAULT 0,
@@ -52,6 +60,8 @@ export function createClientControlSystem({
   `);
   db.prepare(`INSERT OR IGNORE INTO client_update_control(id,auto_update_enabled,sync_generation,updated_at)
     VALUES(1,1,0,?)`).run(nowIso());
+  db.prepare(`INSERT OR IGNORE INTO client_feature_settings(id,response_verification_enabled,auto_align_selection,strict_mode,generation,updated_at)
+    VALUES(1,1,1,1,0,?)`).run(nowIso());
 
   const waiters = new Map();
   const onlineTtlSeconds = Math.max(90, Number(windowTtlSeconds || DEFAULT_ONLINE_TTL_SECONDS));
@@ -110,6 +120,16 @@ export function createClientControlSystem({
       timer = setTimeout(done, timeoutMs);
     });
   }
+  function featureSettings() {
+    const row = db.prepare('SELECT * FROM client_feature_settings WHERE id=1').get();
+    return {
+      responseVerificationEnabled: Boolean(row.response_verification_enabled),
+      autoAlignSelection: Boolean(row.auto_align_selection),
+      strictMode: Boolean(row.strict_mode),
+      generation: Number(row.generation || 0),
+      updatedAt: row.updated_at,
+    };
+  }
   function publicConfig() {
     const row = controlRow();
     return {
@@ -127,6 +147,7 @@ export function createClientControlSystem({
       accountSyncGeneration: Number(user.account_sync_generation || 0),
       forceUpdate: sameOrNewerGeneration(user.update_generation, sinceUpdate),
       accountSync: sameOrNewerGeneration(user.account_sync_generation, sinceAccount),
+      featureSettings: featureSettings(),
     };
   }
   function userClientStatus(userId) {
@@ -282,7 +303,21 @@ export function createClientControlSystem({
 
   async function handleAdmin(req, res, url) {
     const path = url.pathname;
-    if (path === '/admin/api/client-control' && req.method === 'GET') {
+    if (path === '/admin/api/client-feature-settings' && req.method === 'GET') {
+      json(res, 200, { ok: true, settings: featureSettings() });
+      return true;
+    }
+    if (path === '/admin/api/client-feature-settings' && req.method === 'PUT') {
+      const input = await bodyJson(req);
+      const stamp = nowIso();
+      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,generation=generation+1,updated_at=? WHERE id=1`)
+        .run(input.responseVerificationEnabled !== false ? 1 : 0, input.autoAlignSelection !== false ? 1 : 0, input.strictMode === true ? 1 : 0, stamp);
+      audit('admin_client_feature_settings_changed', null, featureSettings());
+      notifyAll();
+      json(res, 200, { ok: true, settings: featureSettings() });
+      return true;
+    }
+        if (path === '/admin/api/client-control' && req.method === 'GET') {
       json(res, 200, { ok: true, config: publicConfig() });
       return true;
     }
@@ -325,6 +360,7 @@ export function createClientControlSystem({
     handleApi,
     handleAdmin,
     publicConfig,
+    featureSettings,
     userClientStatus,
     queueUserUpdate,
     queueAllUpdates,
