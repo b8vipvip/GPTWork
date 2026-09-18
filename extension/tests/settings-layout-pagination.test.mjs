@@ -18,6 +18,7 @@ test('compact lock editor sits directly after feature gates and request history 
   assert(footerIndex > historyIndex);
   assert.doesNotMatch(settingsHtml, /id="updateHeading"/);
   assert.doesNotMatch(settingsHtml, /id="updates"/);
+  assert.doesNotMatch(settingsHtml, /Response verification|Enforcement mode|id="networkVerification"|name="mode"/);
   assert.equal(settingsHtml.lastIndexOf('<section'), settingsHtml.lastIndexOf('<section class="card request-history-card"'));
 });
 
