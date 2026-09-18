@@ -107,8 +107,18 @@ export function buildRequestModelHistory(entries, { limit = REQUEST_HISTORY_LIMI
       if (!record) continue;
       record.finalModel = details.model ?? record.finalModel;
       record.finalReasoning = details.reasoning ?? record.finalReasoning;
-      record.status = details.verdict ?? 'unverified';
-      record.statusReason = details.reason ?? details.evidenceIssue ?? null;
+      const preferredModelMissed = Boolean(
+        record.requestModel
+        && record.finalModel
+        && record.requestModel !== record.finalModel
+      );
+      // A response from a lower selected model is not proof that request priority failed:
+      // the formal POST still carried requestModel. Surface the backend/model-router
+      // fallback explicitly instead of collapsing it into a generic verification badge.
+      record.status = preferredModelMissed ? 'fallback' : details.verdict ?? 'unverified';
+      record.statusReason = preferredModelMissed
+        ? 'response_model_differs_from_requested_model'
+        : details.reason ?? details.evidenceIssue ?? null;
       record.evidenceSource = details.evidenceSource ?? 'network_response_metadata';
       record.completedAt = isoTimestamp(entry.timestamp);
       continue;
