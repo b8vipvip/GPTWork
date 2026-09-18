@@ -23,6 +23,21 @@ jobs:
       - name: Test embedded GPTAuto goal-bound runtime
         shell: bash
         run: PYTHONPATH=.github python -m unittest discover -s .github/tests -p 'test_gptauto.py' -v
+      - name: Smoke-test GPTAuto diagnostic bundle
+        shell: bash
+        run: |
+          PYTHONPATH=.github python -m gptauto.cli init --goal "CI diagnostic smoke test" --repo "${{ github.repository }}" --out .gptauto/task.json > /tmp/gptauto-init.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          data=json.loads(Path("/tmp/gptauto-init.json").read_text())
+          with open(os.environ["GITHUB_ENV"],"a") as f: f.write("GPTAUTO_TASK_ID="+Path(data["directory"]).name+"\n")
+          PY
+      - name: Upload GPTAuto diagnostic artifact
+        uses: ./.github/actions/upload-gptauto-log
+        with:
+          task-id: ${{ env.GPTAUTO_TASK_ID }}
+          retention-days: '1'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
