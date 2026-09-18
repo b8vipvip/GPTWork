@@ -7,6 +7,7 @@ import {
   DEFAULT_POLICY,
   KNOWN_MODELS,
   normalizeModelId,
+  prioritizeModels,
 } from '../policy.js';
 import {
   extractRequestEvidence,
@@ -52,16 +53,18 @@ test('preserves the real Astra transport slug when ChatGPT already selected Astr
   assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
 });
 
-test('keeps Sol untouched when Astra is not selected or not yet exposed', () => {
+test('multi-model selection always requests Astra before Sol', () => {
   const source = JSON.stringify({ model: 'gpt-5.6-sol-wm', reasoning_effort: 'high' });
   const result = rewriteConversationPostData(source, {
-    lockedModels: ['gpt-6-astra', 'gpt-5.6-sol'],
+    lockedModels: ['gpt-5.6-sol', 'gpt-6-astra'],
     allowedReasoningLevels: ['high'],
     preferredReasoning: 'high',
   });
-  assert.equal(result.changed, false);
-  assert.equal(result.modelAfter, 'gpt-5.6-sol');
-  assert.equal(result.transportModelAfter, 'gpt-5.6-sol-wm');
+  assert.equal(result.changed, true);
+  assert.equal(result.modelBefore, 'gpt-5.6-sol');
+  assert.equal(result.modelAfter, 'gpt-6-astra');
+  assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
+  assert.deepEqual(prioritizeModels(['gpt-5.6-sol', 'gpt-6-astra']), ['gpt-6-astra', 'gpt-5.6-sol']);
 });
 
 test('rewrites a disallowed concrete model to Astra as the preferred policy target', () => {
