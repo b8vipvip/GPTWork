@@ -35,16 +35,12 @@ test('auto remains observable as request metadata but is never a concrete lock t
   assert.deepEqual(fallback.lockedModels, ['gpt-5.6-sol']);
 });
 
-test('settings expose an immediate custom model Add action without verbose routing copy', () => {
-  assert.match(optionsHtml, /id="saveCustomModels"/);
-  assert.match(optionsHtml, />添加 \/ Add<\/button>/);
-  assert.doesNotMatch(optionsHtml, /添加并保存/);
-  assert.doesNotMatch(optionsHtml, /auto<\/code> 是 ChatGPT 自动路由标识/);
-  assert.doesNotMatch(optionsHtml, /正式聊天 POST 发出前会再次检查/);
-  assert.match(optionsJs, /async function addCustomModels\(\)/);
-  assert.match(optionsJs, /renderCustomChoice\(model, true\)/);
-  assert.match(optionsJs, /normalizeConcreteModelId/);
-  assert.match(optionsJs, /自动路由标识，不是具体模型/);
+test('settings no longer expose manual custom-model entry', () => {
+  assert.doesNotMatch(optionsHtml, /id="saveCustomModels"|id="customModels"/);
+  assert.doesNotMatch(optionsJs, /addCustomModels|parseCustomModels|validateCustomModels/);
+  assert.match(optionsHtml, /id="lockEditorToggle"/);
+  assert.match(optionsHtml, /id="lockedModelSummary"/);
+  assert.match(optionsHtml, /id="reasoningSummary"/);
 });
 
 test('model discovery schema v3 removes routing aliases before persistence', () => {
