@@ -166,9 +166,7 @@ pub fn normalize_model_id(value: &str) -> Option<String> {
     Some(match model.as_str() {
         "gpt-5.6-sol-wm" | "gpt-5-6" => "gpt-5.6-sol".to_string(),
         "gpt-6-astra-wm" => "gpt-6-astra".to_string(),
-        _ if model.starts_with("gpt-6-astra.")
-            || model.starts_with("gpt-6-astra:") =>
-        {
+        _ if model.starts_with("gpt-6-astra.") || model.starts_with("gpt-6-astra:") => {
             "gpt-6-astra".to_string()
         }
         _ => model,
@@ -732,8 +730,14 @@ mod tests {
         assert!(!decision.changed);
         assert_eq!(decision.model_before.as_deref(), Some("gpt-6-astra"));
         assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
-        assert_eq!(decision.transport_model_before.as_deref(), Some("gpt-6-astra-wm"));
-        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-astra-wm"));
+        assert_eq!(
+            decision.transport_model_before.as_deref(),
+            Some("gpt-6-astra-wm")
+        );
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-6-astra-wm")
+        );
     }
 
     #[test]
