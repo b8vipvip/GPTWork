@@ -1,41 +1,65 @@
-# GPTAuto for GPTWork
+# GPTAuto for GPTWork / GPTWork 的 GPTAuto 协议
 
-GPTAuto is GPTWork's goal-bound GitHub work protocol. It supersedes turn-bound execution while retaining GitHub Agent as the deterministic Actions-governance subsystem.
+## 中文（默认）
 
-## Completion contract
+GPTWork 内嵌 GPTAuto v0.2。GitHub 工作任务默认采用**最终目标驱动**语义，而不是按一次对话、一条 Commit、一个 PR 或一次 Actions run 判断完成。
 
-A GPTWork GitHub task is complete only when its requested final outcome satisfies its Definition of Done. A chat turn, tool call, commit, PR, queued/running Actions run, merge, tag, or started release is not completion.
+### GPTWork 如何使用
 
-Canonical lifecycle:
+当用户要求 GPTWork 执行 GitHub 工程任务时，宿主应自动执行：
 
-    GOAL -> INSPECT -> IMPLEMENT -> PR -> WAIT_CI -> MERGE -> MAIN_CI -> RELEASE -> VERIFY -> DONE
-                                      |                    |          |          |
-                                      +-> ANALYZE -> FIX <-+----------+----------+
+    用户目标
+      ↓
+    GOAL
+      ↓
+    PLAN：生成任务专属 Definition of Done + Dynamic Gates
+      ↓
+    EXECUTE：只执行当前目标真正需要的 Gate
+      ↓
+    VERIFY：逐项记录 DoD 证据
+      ↓
+    DONE
 
-Queued, requested, pending, waiting and in-progress Actions are WAITING. They never imply DONE.
+可选 Gate：INSPECT、IMPLEMENT、COMMIT、PR、PR_CI、MERGE、MAIN_CI、RELEASE、DEPLOY、RUNTIME_VERIFY。
 
-## Responsibility split
+因此：
+- “修改代码并提交”可以在 Commit + 验证后结束。
+- “修复 Actions 直到 CI 全绿”不强制 Merge/Release。
+- “合并到 main”需要 Merge 证据，但不自动发布版本。
+- “发布正式版”才选择发布所需的 PR/CI/Merge/main CI/Release Gate。
 
-GPTAuto owns durable goal state, completion semantics, retry budget and final acceptance. GPT/Work owns reasoning: repository inspection, code changes, root-cause analysis, fixes and product-aware verification. GitHub Agent owns deterministic Actions governance: Policy Check, Governor, Recovery and Housekeeping.
+### 用户是否需要额外告诉 ChatGPT
 
-## Stop policy
+**不需要每次额外说明。** 在 GPTWork 仓库/工作模式识别到本协议后，GitHub 工程任务应默认按 GPTAuto 执行。
 
-The worker may return control before DONE only when state is BLOCKED because credentials/permissions are unavailable, a material product decision is ambiguous, a destructive/high-risk action lacks authorization, bounded repair attempts are exhausted, or an external platform condition cannot be repaired.
+用户只需要描述最终目标，例如：
 
-## Durable handoff
+    @GitHub 修复当前 Actions 失败，直到 CI 全绿。
+    @GitHub 完成这个功能并合并到 main。
+    @GitHub 修复问题并发布 v0.6.0 正式版。
 
-The embedded runtime lives in `.github/gptauto/`. Persist active task JSON outside the repository worktree when possible, or as an Actions artifact/state store in a host integration. The JSON is the handoff between invocations; WAITING state must be resumed rather than reported as task completion.
+只有用户明确要求改变终态时才需要补充，例如“只提交不要合并”“先开 PR 不要发布”“不要等待 CI”。
 
-Example:
+### 宿主集成约定
 
-    python -m .github.gptauto.cli
+GPTAuto 的内置 GoalPlanner 是安全的参考/CLI 启发式规划器。GPTWork 的 ChatGPT/Work 推理层应优先根据完整自然语言意图、仓库规则、风险和上下文生成更准确的 gates 与 DoD，并可显式覆盖启发式结果。
 
-For local execution set `PYTHONPATH=.github` and run:
+异步 Actions 的 queued/requested/pending/in_progress 仅在相应 CI Gate 被当前计划选中时表示 WAITING，绝不能当作 DONE。
 
-    PYTHONPATH=.github python -m gptauto.cli init --goal "Ship fix" --repo b8vipvip/GPTWork --out /tmp/gptauto-task.json
-    PYTHONPATH=.github python -m gptauto.cli step /tmp/gptauto-task.json accepted
-    PYTHONPATH=.github python -m gptauto.cli status /tmp/gptauto-task.json
+进入 DONE 必须同时满足：所有 required Gate 已通过/跳过；所有 DoD 条目均 passed；DoD 条目保留验收 evidence。
 
-## Release Definition of Done
+### BLOCKED
 
-Release-required work reaches DONE only after PR CI succeeds, the PR is merged, CI for the exact merge SHA succeeds, the requested non-draft GitHub Release exists, and product-specific final verification is recorded as passed.
+只有权限/凭据缺失、重大产品决策歧义、未经授权的高风险破坏操作、修复预算耗尽或不可修复的平台条件，才应把控制权交还用户。
+
+---
+
+## English
+
+GPTWork embeds GPTAuto v0.2. GitHub engineering tasks are goal-bound by default: completion is determined by the requested final outcome, not by a chat turn, commit, PR, or Actions run.
+
+The host derives a task-specific Definition of Done and selects only the required dynamic gates, then verifies evidence before DONE.
+
+Users do **not** need to mention GPTAuto on every request. A normal final-goal instruction is enough. Extra wording is only needed when the user wants to override the terminal outcome, such as “commit only”, “open a PR but do not merge”, or “do not wait for CI”.
+
+GPTWork's reasoning layer should use the built-in GoalPlanner as a conservative fallback and may explicitly provide a more accurate gate/DoD plan based on full natural-language intent, repository policy, risk, and context.

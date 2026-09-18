@@ -1,44 +1,27 @@
-import sys, tempfile, unittest
+import sys,tempfile,unittest
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT))
-from gptauto.engine import Signal, advance
-from gptauto.github import RunSummary
-from gptauto.model import State, Task
-from gptauto.orchestrator import Orchestrator
-
-class FakeGitHub:
-    def __init__(self,run=None,pr=None,release=None):
-        self.run=run or RunSummary("completed","success",42);self.pr=pr or {"merged":True};self.release=release
-    def latest_run(self,**kwargs):return self.run
-    def classify_run(self,r):
-        if r.status!="completed":return "waiting"
-        return "passed" if r.conclusion=="success" else "failed"
-    def pull(self,n):return self.pr
-    def release_by_tag(self,t):return self.release
-
-class GPTAutoTests(unittest.TestCase):
-    def task(self,state):
-        return Task("t","goal","b8vipvip/GPTWork",["verified"],state=state,metadata={"work_branch":"fix/x","work_head_sha":"abc","pr_number":7,"default_branch":"main","merge_sha":"def","release_tag":"v1.0.0"})
-    def test_waiting_actions_are_not_done(self):
-        t=self.task(State.WAIT_CI);d=Orchestrator(FakeGitHub(RunSummary("queued",None,9))).reconcile_once(t)
-        self.assertEqual(d.action,"wait");self.assertEqual(t.state,State.WAIT_CI)
-    def test_ci_failure_enters_analysis(self):
-        t=self.task(State.WAIT_CI);Orchestrator(FakeGitHub(RunSummary("completed","failure",9))).reconcile_once(t);self.assertEqual(t.state,State.ANALYZE)
-    def test_ci_success_advances_to_merge(self):
-        t=self.task(State.WAIT_CI);Orchestrator(FakeGitHub()).reconcile_once(t);self.assertEqual(t.state,State.MERGE)
-    def test_release_is_not_done_without_release(self):
-        t=self.task(State.RELEASE);t.release_required=True
-        self.assertEqual(Orchestrator(FakeGitHub()).reconcile_once(t).action,"wait")
-        Orchestrator(FakeGitHub(release={"draft":False})).reconcile_once(t);self.assertEqual(t.state,State.VERIFY)
-    def test_repair_budget_blocks(self):
-        t=self.task(State.ANALYZE);t.max_repair_attempts=1
-        advance(t,Signal("fixable"));self.assertEqual(t.state,State.FIX)
-        t.state=State.ANALYZE;advance(t,Signal("fixable"));self.assertEqual(t.state,State.BLOCKED)
-    def test_state_persists(self):
-        t=self.task(State.WAIT_CI)
+ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
+from gptauto.engine import begin_verify,criterion,finish,gate,is_complete,plan_ready,start
+from gptauto.model import CriterionStatus,Gate,GateStatus,State,Task
+from gptauto.planner import GoalPlanner
+class GPTAutoV02Tests(unittest.TestCase):
+    def task(self,goal):
+        t=Task("t",goal,"b8vipvip/GPTWork",[]);start(t);GoalPlanner().apply(t);plan_ready(t);return t
+    def test_ci_goal_does_not_force_release(self):
+        t=self.task("修复 Actions 直到 CI 全绿");gs=[x.gate for x in t.plan];self.assertIn(Gate.PR_CI,gs);self.assertNotIn(Gate.RELEASE,gs)
+    def test_merge_goal_does_not_force_release(self):
+        t=self.task("完成修复并合并到 main");gs=[x.gate for x in t.plan];self.assertIn(Gate.MERGE,gs);self.assertNotIn(Gate.RELEASE,gs)
+    def test_release_goal_selects_release_chain(self):
+        t=self.task("修复并发布 v0.6.0 正式版");gs=[x.gate for x in t.plan]
+        for g in [Gate.PR,Gate.PR_CI,Gate.MERGE,Gate.MAIN_CI,Gate.RELEASE]:self.assertIn(g,gs)
+    def test_done_requires_dod_evidence(self):
+        t=self.task("修改 README 文档")
+        for s in t.plan:gate(t,s.gate,GateStatus.PASSED,"ok")
+        begin_verify(t);self.assertFalse(is_complete(t))
+        for i in range(len(t.definition_of_done)):criterion(t,i,CriterionStatus.PASSED,"verified")
+        finish(t);self.assertTrue(is_complete(t));self.assertEqual(t.state,State.DONE)
+    def test_state_persists_dynamic_plan(self):
+        t=self.task("合并到 main")
         with tempfile.TemporaryDirectory() as d:
-            p=Path(d)/"task.json";t.save(p);loaded=Task.load(p)
-            self.assertEqual(loaded.state,State.WAIT_CI);self.assertEqual(loaded.metadata["pr_number"],7)
-
+            p=Path(d)/"task.json";t.save(p);loaded=Task.load(p);self.assertEqual([x.gate for x in loaded.plan],[x.gate for x in t.plan])
 if __name__=="__main__":unittest.main()
