@@ -79,6 +79,20 @@ test('rewrites a disallowed concrete model to Astra as the preferred policy targ
   assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
 });
 
+test('per-model verification can preserve the model default reasoning while locking the selected model', () => {
+  const source = JSON.stringify({ model: 'gpt-5.5', thinking_effort: 'medium' });
+  const result = rewriteConversationPostData(source, {
+    lockedModels: ['gpt-6-astra'],
+    allowedReasoningLevels: ['high'],
+    preferredReasoning: null,
+    preserveReasoning: true,
+  });
+  assert.equal(result.modelAfter, 'gpt-6-astra');
+  assert.equal(result.reasoningBefore, 'medium');
+  assert.equal(result.reasoningAfter, 'medium');
+  assert.equal(JSON.parse(result.postData).thinking_effort, 'medium');
+});
+
 test('Astra page adapter recognizes visible Astra labels and likely transport labels', () => {
   const adapter = loadPageEvidenceAdapter();
   assert.equal(adapter.modelFromText('GPT-6 Astra 高'), 'gpt-6-astra');
