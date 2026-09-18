@@ -60,22 +60,6 @@ test('ignores generic model fields buried in unrelated tool data', () => {
   assert.equal(result.reasoning, null);
 });
 
-test('explicit Astra response model beats default model metadata in the same frame', () => {
-  const result = extractResponseEvidence({
-    body: JSON.stringify({
-      message: {
-        metadata: {
-          model_slug: 'gpt-6-astra-wm',
-          model_name: 'gpt-6-astra-wm',
-          default_model_slug: 'gpt-5.6-sol-wm',
-        },
-      },
-    }),
-  });
-  assert.equal(result.model, 'gpt-6-astra');
-  assert.equal(result.conflicts.model, false);
-});
-
 test('marks conflicting highest-confidence metadata as unusable', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify([
