@@ -273,6 +273,26 @@ export class ChatGptNetworkMonitor {
     return handoff;
   }
 
+  resolveFinishedHandoff(tabId, record, body = '') {
+    let handoff = record?.handoffId ? this.handoffs.get(record.handoffId) ?? null : null;
+    if (!record?.downstream) {
+      const parsedHandoff = extractStreamHandoff(body);
+      if (parsedHandoff) handoff = this.registerHandoff(tabId, record.requestId, parsedHandoff);
+    } else if (!handoff) {
+      handoff = this.matchHandoff(tabId, `${record.url}\n${body}`) || this.newestHandoff(tabId);
+    }
+    return handoff;
+  }
+
+  downstreamResponseMatchesHandoff(record, body, handoff) {
+    if (!record?.downstream) return true;
+    if (!handoff) return false;
+    if (!record.downstreamCandidate) return true;
+    if (streamPayloadMatches(`${record.url}\n${body}`, handoff)) return true;
+    const age = Date.now() - handoff.startedAt;
+    return age <= PROVISIONAL_STREAM_WINDOW_MS && /event-stream/i.test(record.mimeType || '');
+  }
+
   streamContext(handoff, extra = {}) {
     return {
       isDownstream: extra.isDownstream !== false,
@@ -517,19 +537,8 @@ export class ChatGptNetworkMonitor {
       bodyError = safeError(error);
     }
 
-    let handoff = record.handoffId ? this.handoffs.get(record.handoffId) : null;
-    if (!record.downstream) {
-      const parsedHandoff = extractStreamHandoff(body);
-      if (parsedHandoff) handoff = this.registerHandoff(tabId, record.requestId, parsedHandoff);
-    } else if (!handoff) {
-      handoff = this.matchHandoff(tabId, `${record.url}\n${body}`) || this.newestHandoff(tabId);
-    }
-
-    if (record.downstream && !handoff) return;
-    if (record.downstreamCandidate && handoff && !streamPayloadMatches(`${record.url}\n${body}`, handoff)) {
-      const age = Date.now() - handoff.startedAt;
-      if (age > PROVISIONAL_STREAM_WINDOW_MS || !/event-stream/i.test(record.mimeType)) return;
-    }
+    const handoff = this.resolveFinishedHandoff(tabId, record, body);
+    if (!this.downstreamResponseMatchesHandoff(record, body, handoff)) return;
 
     const evidence = extractResponseEvidence({
       body,
