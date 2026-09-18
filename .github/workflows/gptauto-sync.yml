@@ -8,10 +8,11 @@ permissions:
   pull-requests: write
 concurrency:
   group: gptauto-consumer-sync
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Sync canonical GPTAuto runtime
