@@ -220,6 +220,43 @@ fn unique_models(values: &[String]) -> Vec<String> {
     output
 }
 
+fn model_priority_score(value: &str) -> i64 {
+    let Some(model) = normalize_model_id(value) else {
+        return i64::MIN;
+    };
+    let version = model.strip_prefix("gpt-").unwrap_or("");
+    let numeric = version.split('-').next().unwrap_or("");
+    let mut parts = numeric.split('.');
+    let major = parts
+        .next()
+        .and_then(|part| part.parse::<i64>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<i64>().ok())
+        .unwrap_or(0);
+    let tier = if model.contains("astra") {
+        500
+    } else if model.contains("pro") {
+        450
+    } else if model.contains("sol") {
+        300
+    } else if model.contains("terra") {
+        200
+    } else if model.contains("luna") {
+        100
+    } else {
+        0
+    };
+    (major * 1_000_000) + (minor * 10_000) + tier
+}
+
+fn prioritize_models(values: &[String]) -> Vec<String> {
+    let mut models = unique_models(values);
+    models.sort_by_key(|model| std::cmp::Reverse(model_priority_score(model)));
+    models
+}
+
 fn unique_reasoning(values: &[String]) -> Vec<String> {
     let mut seen = BTreeSet::new();
     let mut output = Vec::new();
@@ -272,7 +309,7 @@ pub fn evaluate_request(input: &RequestEnvelope) -> RequestDecision {
         return decision;
     };
 
-    let locked_models = unique_models(&input.locked_models);
+    let locked_models = prioritize_models(&input.locked_models);
     if locked_models.is_empty() {
         decision.reason = "no_locked_model".to_string();
         return decision;
@@ -289,12 +326,9 @@ pub fn evaluate_request(input: &RequestEnvelope) -> RequestDecision {
 
     decision.transport_model_before = Some(raw_model.clone());
     decision.model_before = normalize_model_id(&raw_model);
-    let target_model = decision
-        .model_before
-        .as_ref()
-        .filter(|model| locked_models.contains(model))
-        .cloned()
-        .unwrap_or_else(|| locked_models[0].clone());
+    // A multi-model policy is ordered by capability. Always request the strongest
+    // selected model first; the remaining models are fallbacks, not equal peers.
+    let target_model = locked_models[0].clone();
     let target_transport = if decision.model_before.as_deref() == Some(target_model.as_str()) {
         raw_model.clone()
     } else {
@@ -753,6 +787,28 @@ mod tests {
             decision.transport_model_before.as_deref(),
             Some("gpt-6-astra-wm")
         );
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-6-astra-wm")
+        );
+    }
+
+    #[test]
+    fn rewrites_allowed_sol_request_to_stronger_selected_astra() {
+        let request = RequestEnvelope {
+            host: "chatgpt.com".into(),
+            path: "/backend-api/f/conversation".into(),
+            method: "POST".into(),
+            post_data: json!({"model":"gpt-5.6-sol-wm","thinking_effort":"high"}).to_string(),
+            locked_models: vec!["gpt-5.6-sol".into(), "gpt-6-astra".into()],
+            allowed_reasoning_levels: vec!["high".into()],
+            preferred_reasoning: Some("high".into()),
+        };
+        let decision = evaluate_request(&request);
+        assert!(decision.official_conversation);
+        assert!(decision.changed);
+        assert_eq!(decision.model_before.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
         assert_eq!(
             decision.transport_model_after.as_deref(),
             Some("gpt-6-astra-wm")

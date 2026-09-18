@@ -73,6 +73,30 @@ export function modelTransportId(value) {
   return model ? MODEL_TRANSPORT_IDS[model] ?? model : null;
 }
 
+function modelPriorityScore(value) {
+  const model = normalizeConcreteModelId(value);
+  if (!model) return Number.NEGATIVE_INFINITY;
+  const version = model.match(/^gpt-(\d+)(?:[.-](\d+))?/i);
+  const major = Number(version?.[1] || 0);
+  const minor = Number(version?.[2] || 0);
+  const tier = model.includes('astra') ? 500
+    : model.includes('pro') ? 450
+      : model.includes('sol') ? 300
+        : model.includes('terra') ? 200
+          : model.includes('luna') ? 100
+            : 0;
+  return (major * 1_000_000) + (minor * 10_000) + tier;
+}
+
+export function prioritizeModels(values) {
+  return unique((Array.isArray(values) ? values : [])
+    .map(normalizeConcreteModelId)
+    .filter(Boolean))
+    .map((model, index) => ({ model, index, score: modelPriorityScore(model) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((entry) => entry.model);
+}
+
 export function normalizeReasoningLevel(value) {
   const level = String(value ?? '').trim().toLowerCase();
   if (['extra high', 'extra_high', 'extra-high', 'xhigh'].includes(level)) return 'extra-high';

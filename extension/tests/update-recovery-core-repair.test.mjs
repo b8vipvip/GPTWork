@@ -12,7 +12,9 @@ test('manual reconnect waits for an in-flight initialization before retrying', (
 
 test('post-update recovery explicitly reconnects through the background lifecycle authority', () => {
   assert.match(updater, /update_reconnect_after_reload_failed/);
-  assert.match(updater, /initializeAfterCurrentTask\(\)/);
+  assert.match(updater, /initializeAfterCurrentTask\(\{ refreshMasterFromStorage: true \}\)/);
+  assert.match(updater, /reloadOpenExtensionPages\(chromeApi\)/);
+  assert.match(background, /refreshMasterRuntimeStateFromStorage/);
   assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);
 });
 
@@ -21,4 +23,10 @@ test('core repair checks an existing native install before opening the installer
   assert.match(updater, /core_repair_existing_install_detected/);
   assert.match(popup, /sendMessage\(\{ type: 'GPTWORK_CORE_REPAIR' \}\)/);
   assert.match(popup, /if \(result\?\.installed\)/);
+});
+
+
+test('popup follows live nativeStatus changes after update recovery', () => {
+  assert.match(popup, /changes\.nativeStatus\?\.newValue/);
+  assert.match(popup, /render\(\{ \.\.\.lastState, nativeStatus: changes\.nativeStatus\.newValue \}\)/);
 });
