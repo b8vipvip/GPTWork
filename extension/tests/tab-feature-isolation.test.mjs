@@ -82,9 +82,10 @@ test('master storage transition is the single fan-out and OFF pushes an immediat
 });
 
 test('background derives debugger configuration from the target tab policy directly', () => {
-  assert.match(background, /lockConfigurationForTabSync/);
   assert.match(background, /getLockConfiguration\(tabId\)/);
-  assert.match(background, /effectivePolicyForTabSync\(tabId\)/);
+  assert.match(background, /runtimePolicyForTabSync\(tabId\)/);
+  assert.match(background, /const policy = effectivePolicyForTabSync\(tabId\)/);
+  assert.match(background, /autoVerificationModelForTab\(tabId\)/);
   assert.match(background, /tab\.status === 'loading'/);
   assert.match(monitor, /getLockConfiguration\?\.\(tabId\)/);
   assert.doesNotMatch(background, /network-monitor-safety\.js|tab-feature-network-policy\.js/);
@@ -92,7 +93,7 @@ test('background derives debugger configuration from the target tab policy direc
 
 test('Native verification receives the effective tab policy without persisting it', () => {
   assert.match(background, /verifyObservation\(message\.observation \?\? \{\}, policy\)/);
-  assert.match(background, /effectivePolicyForTabSync\(sender\.tab\.id\)/);
+  assert.match(background, /runtimePolicyForTabSync\(sender\.tab\.id\)/);
   assert.match(nativeBridge, /state\.verify_with_policy\(request, policy_override\)/);
   assert.match(nativeLib, /pub fn verify_with_policy/);
 });

@@ -417,33 +417,61 @@
     return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
   }
 
+  function modelTrigger(triggerSelectors = MODEL_SELECTORS) {
+    const direct = triggerSelectors
+      .map((selector) => document.querySelector(selector))
+      .find((element) => element && visible(element));
+    if (direct) return direct;
+    if (triggerSelectors !== MODEL_SELECTORS) return null;
+    return composerNearbyControls().find((element) =>
+      elementTexts(element).some((text) => Boolean(normalizeDisplayedModel(text))),
+    ) || null;
+  }
+
   function menuCandidates() {
-    return [...document.querySelectorAll([
+    const selectors = [
       '[role="menu"] [role="menuitem"]',
+      '[role="menu"] [role="menuitemradio"]',
+      '[role="menu"] [role="radio"]',
+      '[role="menu"] button',
       '[role="listbox"] [role="option"]',
+      '[role="listbox"] [role="radio"]',
+      '[role="listbox"] button',
       '[data-radix-menu-content] [role="menuitem"]',
-    ].join(','))].filter(visible);
+      '[data-radix-menu-content] [role="menuitemradio"]',
+      '[data-radix-menu-content] [role="radio"]',
+      '[data-radix-menu-content] button',
+      '[data-model]',
+      '[data-model-id]',
+    ];
+    return [...new Set([...document.querySelectorAll(selectors.join(','))])].filter(visible);
   }
 
   async function chooseExact(triggerSelectors, desired, normalize) {
-    const trigger = triggerSelectors.map((selector) => document.querySelector(selector)).find((element) => element && visible(element));
+    const trigger = modelTrigger(triggerSelectors);
     if (!trigger) return false;
-    const triggerValue = elementTexts(trigger).map(normalize).find(Boolean);
-    if (!triggerValue) return false;
+    const current = elementTexts(trigger).map(normalize).find(Boolean);
+    if (current === desired) return true;
     trigger.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
-    const candidate = menuCandidates().find((element) => {
-      for (const text of elementTexts(element)) {
-        if (normalize(text) === desired) return true;
-      }
-      return false;
+    const candidates = await waitUntil(() => {
+      const rows = menuCandidates();
+      return rows.length ? rows : null;
+    }, 2500, 80);
+    const candidate = (candidates || []).find((element) => {
+      const values = [
+        element.getAttribute?.('data-model'),
+        element.getAttribute?.('data-model-id'),
+        element.getAttribute?.('data-value'),
+        ...elementTexts(element),
+      ].filter(Boolean);
+      return values.some((text) => normalize(text) === desired);
     });
     if (!candidate) {
-      document.body.click();
+      trigger.click();
       return false;
     }
     candidate.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
+    await new Promise((resolve) => window.setTimeout(resolve, 450));
     return true;
   }
 
@@ -578,8 +606,10 @@
     autoProbeRunning = true;
     try {
       await waitForIdle();
-      await alignSelection({ force: true });
-      await new Promise((resolve) => window.setTimeout(resolve, 450));
+      if (options.skipAlignment !== true) {
+        await alignSelection({ force: true });
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+      }
 
       const composer = await waitUntil(findComposer, 5000, 100);
       if (!composer) throw new Error('ChatGPT composer not found / 未找到 ChatGPT 输入框');
@@ -657,7 +687,13 @@
     if (!model) throw new Error('Invalid account model / 无效账户模型');
     await waitForIdle();
     const selected = await chooseExact(MODEL_SELECTORS, model, normalizeDisplayedModel);
-    const observation = collectObservation();
+    const confirmedObservation = selected
+      ? await waitUntil(() => {
+        const observation = collectObservation();
+        return observation.model === model ? observation : null;
+      }, 3000, 100)
+      : null;
+    const observation = confirmedObservation || collectObservation();
     const confirmed = observation.model === model;
     return {
       model,
@@ -671,54 +707,68 @@
 
   async function discoverAccountModelMetadata() {
     const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
-    const modelButton = [...document.querySelectorAll(MODEL_SELECTORS.join(','))].find((element) => {
-      const rect = element?.getBoundingClientRect?.();
-      return rect && rect.width > 0 && rect.height > 0;
-    });
-    const wasExpanded = modelButton?.getAttribute?.('aria-expanded') === 'true';
-    if (modelButton && !wasExpanded) {
-      modelButton.click();
-      await new Promise((resolve) => window.setTimeout(resolve, 280));
+    const currentBeforeOpen = collectObservation();
+    const trigger = modelTrigger(MODEL_SELECTORS);
+    const wasExpanded = trigger?.getAttribute?.('aria-expanded') === 'true';
+    let openedByUs = false;
+    if (trigger && !wasExpanded) {
+      trigger.click();
+      openedByUs = true;
     }
 
-    const rows = [...document.querySelectorAll(
-      '[role="menuitem"],[role="option"],[data-model],[data-model-id],[data-value]',
-    )].filter((element) => {
-      const rect = element?.getBoundingClientRect?.();
-      return rect && rect.width > 0 && rect.height > 0;
-    });
+    const rows = trigger
+      ? (await waitUntil(() => {
+        const candidates = menuCandidates();
+        return candidates.length ? candidates : null;
+      }, 3000, 80)) || []
+      : [];
+
     const models = [];
     const reasoning = new Set();
     for (const row of rows) {
-      const values = [
+      const attributes = [
         row.getAttribute?.('data-model'),
         row.getAttribute?.('data-model-id'),
         row.getAttribute?.('data-value'),
+      ].map((value) => String(value || '').trim()).filter(Boolean);
+      const values = [
+        ...attributes,
         row.getAttribute?.('aria-label'),
         row.getAttribute?.('title'),
         row.innerText,
         row.textContent,
       ].map((value) => String(value || '').trim()).filter(Boolean);
-      const rawId = values.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt|model/i.test(value)) || null;
-      const canonical = values.map((value) => evidence?.modelFromText?.(value)).find(Boolean) || rawId;
+      const rawId = attributes.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt|model/i.test(value))
+        || values.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt|model/i.test(value))
+        || null;
+      const canonical = values.map((value) => normalizeDisplayedModel(value)).find(Boolean)
+        || values.map((value) => evidence?.modelFromText?.(value)).find(Boolean)
+        || rawId;
       const level = values.map((value) => evidence?.reasoningFromText?.(value)).find(Boolean);
       if (level) reasoning.add(level);
       if (!canonical) continue;
-      const label = values.find((value) => /gpt|astra|sol/i.test(value)) || canonical;
+      const label = values.find((value) => /gpt|astra|sol|thinking|pro|terra|luna/i.test(value)) || canonical;
       if (!models.some((item) => item.rawId === rawId && item.model === canonical)) {
         models.push({ rawId, model: canonical, label });
       }
     }
 
-    if (modelButton && !wasExpanded && modelButton.getAttribute?.('aria-expanded') === 'true') {
-      modelButton.click();
+    if (openedByUs && trigger) {
+      trigger.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
     }
-    const current = collectObservation();
+    const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
     if (current?.model && !models.some((item) => item.model === current.model)) {
       models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
     }
     if (current?.reasoning) reasoning.add(current.reasoning);
-    return { models, reasoningLevels: [...reasoning], capturedAt: new Date().toISOString() };
+    return {
+      models,
+      reasoningLevels: [...reasoning],
+      capturedAt: new Date().toISOString(),
+      candidateCount: rows.length,
+      triggerFound: Boolean(trigger),
+    };
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

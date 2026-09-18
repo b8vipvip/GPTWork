@@ -5,6 +5,7 @@ import {
   appendDiagnosticSseCapture,
   boundRuntimeLogs,
   createDiagnosticSseCapture,
+  filterRuntimeLogs,
   prepareRuntimeLogUploadEntry,
   sanitizeLogValue,
   shouldPersistRuntimeLog,
@@ -62,6 +63,26 @@ test('drops high-frequency non-diagnostic bookkeeping while preserving chain evi
     requestId: 'cdp-1',
     model: 'gpt-5.6-sol',
   }), true);
+});
+
+test('compacts historical private-request polling noise on read', () => {
+  const logs = [
+    {
+      level: 'info',
+      component: 'lock',
+      event: 'request_lock_checked',
+      details: { changed: false, error: null, requestId: null, reason: 'private_request_not_official' },
+    },
+    {
+      level: 'info',
+      component: 'network',
+      event: 'formal_conversation_request_detected',
+      details: { requestId: 'req-1', model: 'gpt-6-astra' },
+    },
+  ];
+  const filtered = filterRuntimeLogs(logs);
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].event, 'formal_conversation_request_detected');
 });
 
 test('diagnostic array sanitization can retain a selected recent 300-entry export', () => {

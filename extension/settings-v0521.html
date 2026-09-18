@@ -59,6 +59,13 @@
         <h2 id="statusHeading">运行状态 <span>Runtime status</span></h2>
         <div class="status-actions"><button id="autoVerify" class="primary" type="button" title="使用当前 GPTWork 账号权益进行自动验证">自动验证 / Auto verify</button></div>
       </div>
+      <div id="autoVerifyProgress" class="auto-verify-progress" hidden>
+        <div class="auto-verify-progress-head">
+          <strong id="autoVerifyProgressLabel">准备自动验证…</strong>
+          <span id="autoVerifyProgressCount">0 / 0</span>
+        </div>
+        <progress id="autoVerifyProgressBar" value="0" max="1"></progress>
+      </div>
       <span id="reconnect" hidden aria-hidden="true"></span>
       <span id="logs" hidden aria-hidden="true"></span>
       <dl>

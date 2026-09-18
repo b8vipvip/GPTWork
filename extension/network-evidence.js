@@ -465,9 +465,12 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
     normalizeReasoningLevel,
   );
   const preferredReasoning = normalizeReasoningLevel(configuration.preferredReasoning);
-  const targetReasoning = preferredReasoning && allowedReasoning.includes(preferredReasoning)
-    ? preferredReasoning
-    : allowedReasoning[0] ?? null;
+  const preserveReasoning = configuration.preserveReasoning === true;
+  const targetReasoning = preserveReasoning
+    ? null
+    : preferredReasoning && allowedReasoning.includes(preferredReasoning)
+      ? preferredReasoning
+      : allowedReasoning[0] ?? null;
 
   const reasoningValues = [];
   for (const [rawKey, rawValue] of Object.entries(parsed)) {

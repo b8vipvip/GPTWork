@@ -26,6 +26,10 @@ const elements = {
   evidenceStatus: document.getElementById('evidenceStatus'),
   reconnect: document.getElementById('reconnect'),
   autoVerify: document.getElementById('autoVerify'),
+  autoVerifyProgress: document.getElementById('autoVerifyProgress'),
+  autoVerifyProgressLabel: document.getElementById('autoVerifyProgressLabel'),
+  autoVerifyProgressCount: document.getElementById('autoVerifyProgressCount'),
+  autoVerifyProgressBar: document.getElementById('autoVerifyProgressBar'),
   logs: document.getElementById('logs'),
   formMessage: document.getElementById('formMessage'),
   installHelp: document.getElementById('installHelp'),
@@ -43,6 +47,7 @@ let applyingRemoteState = false;
 let messageTimer = null;
 let updateRecoveryActive = false;
 let lastNativeStatus = null;
+let autoVerifyPollTimer = null;
 
 function checkbox(container, name, id, label, detail = '', dataset = {}) {
   const existing = [...container.querySelectorAll(`input[name="${name}"]`)]
@@ -194,6 +199,49 @@ function renderLockSummary(policy, settings) {
   }
 }
 
+function renderAutoVerifyProgress(autoVerification = null) {
+  if (!elements.autoVerifyProgress) return;
+  const progress = autoVerification?.catalogVerification;
+  const running = autoVerification?.running === true;
+  const total = Math.max(0, Number(progress?.total || autoVerification?.maxAttempts || 0));
+  const completed = Math.min(total, Math.max(0, Number(progress?.completed || 0)));
+  const verified = Math.max(0, Number(progress?.verified || 0));
+  const failed = Math.max(0, Number(progress?.failed || 0));
+  const current = progress?.currentLabel || progress?.currentModel || null;
+
+  elements.autoVerifyProgress.hidden = !running && !progress;
+  if (elements.autoVerifyProgressBar) {
+    elements.autoVerifyProgressBar.max = Math.max(1, total);
+    elements.autoVerifyProgressBar.value = completed;
+  }
+  if (elements.autoVerifyProgressCount) {
+    elements.autoVerifyProgressCount.textContent = total ? `${completed} / ${total}` : '发现中…';
+  }
+  if (elements.autoVerifyProgressLabel) {
+    elements.autoVerifyProgressLabel.textContent = running
+      ? current
+        ? `正在验证：${modelLabel(current)}`
+        : '正在发现当前账户可用模型…'
+      : total
+        ? `自动验证完成：${verified} 成功 / ${failed} 失败`
+        : '未发现可验证模型';
+  }
+}
+
+function stopAutoVerifyPolling() {
+  if (autoVerifyPollTimer !== null) window.clearInterval(autoVerifyPollTimer);
+  autoVerifyPollTimer = null;
+}
+
+function startAutoVerifyPolling() {
+  stopAutoVerifyPolling();
+  autoVerifyPollTimer = window.setInterval(() => {
+    void sendMessage({ type: 'GPTLOCK_GET_STATE' })
+      .then((state) => renderAutoVerifyProgress(state?.tabState?.autoVerification))
+      .catch(() => {});
+  }, 500);
+}
+
 function renderStatus(nativeStatus = {}) {
   lastNativeStatus = nativeStatus || {};
   const connected = Boolean(nativeStatus.connected);
@@ -259,6 +307,7 @@ async function applyState(state) {
       elements.autoAlignSelection.checked = settings.autoAlignSelection;
     }
     renderStatus(state.nativeStatus);
+    renderAutoVerifyProgress(state.tabState?.autoVerification);
   } finally {
     applyingRemoteState = false;
   }
@@ -359,19 +408,23 @@ elements.reconnect?.addEventListener('click', () => {
     });
 });
 
-elements.autoVerify.addEventListener('click', () => {
-  showMessage('正在自动对齐并发送可见测试消息 / Sending visible verification message…');
+elements.autoVerify?.addEventListener('click', () => {
+  showMessage('正在发现账户模型并逐一验证 / Discovering and verifying account models…');
   elements.autoVerify.disabled = true;
+  renderAutoVerifyProgress({ running: true, maxAttempts: 0, catalogVerification: null });
+  startAutoVerifyPolling();
   void sendMessage({ type: 'GPTLOCK_AUTO_VERIFY' })
     .then(async (result) => {
       await load();
-      showMessage(result.sent
-        ? '已自动发送可见测试消息；响应完成后自动确认 / Visible test sent automatically.'
-        : `自动验证未发送 / Not sent · ${result.tabState?.guard?.reason || result.tabState?.guard?.status || 'unknown'}`,
+      showMessage(result.catalogTotal
+        ? `自动验证完成：${result.catalogVerified}/${result.catalogTotal} 个模型已取得可信请求证据`
+        : `自动验证未发现模型 / No account models discovered · ${result.reason || 'unknown'}`,
+        result.catalogFailed || !result.catalogTotal ? 'bad' : 'good',
       );
     })
     .catch((error) => showMessage(`自动验证失败 / Auto verification failed: ${error.message}`, 'bad'))
     .finally(() => {
+      stopAutoVerifyPolling();
       elements.autoVerify.disabled = false;
     });
 });
