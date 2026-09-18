@@ -107,7 +107,7 @@ test('only an explicit complete account model catalog may mark a higher model un
   const result = evaluateModelAvailability(null, details);
   assert.equal(result.state.models['gpt-6-astra'].status, 'unavailable');
   assert.equal(result.state.models['gpt-6-astra'].source, ACCOUNT_MODEL_CATALOG_SOURCE);
-  assert.deepEqual(result.becameUnavailable, ['gpt-6-astra']);
+  assert.deepEqual(result.becameUnavailable.sort(), ['gpt-6-astra', 'gpt-6-sol'].sort());
 });
 
 test('live trusted metadata restores a model after an older complete catalog excluded it', () => {
