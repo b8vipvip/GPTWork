@@ -1,7 +1,9 @@
 import {
   DEFAULT_POLICY,
   DEFAULT_SETTINGS,
+  normalizeConcreteModelId,
   normalizePolicy,
+  normalizeReasoningLevel,
   normalizeSettings,
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
