@@ -387,7 +387,10 @@ fn path_score(path: &[String], key: &str, kind: &str) -> i32 {
         if key.contains("default") || key.contains("fallback") {
             return 60;
         }
-        if matches!(key, "model_slug" | "model_id" | "modelid" | "model_name" | "modelname") {
+        if matches!(
+            key,
+            "model_slug" | "model_id" | "modelid" | "model_name" | "modelname"
+        ) {
             return if metadata { 130 } else { 120 };
         }
         if key.contains("slug") && metadata {
@@ -802,7 +805,8 @@ mod tests {
                     "default_model_slug":"gpt-5.6-sol-wm",
                     "model_name":"gpt-6-astra-wm"
                 }
-            }).to_string(),
+            })
+            .to_string(),
             headers: BTreeMap::new(),
             mime_type: "application/json".into(),
         };
