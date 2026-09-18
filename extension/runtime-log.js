@@ -5,7 +5,7 @@ export const RUNTIME_LOG_UPLOAD_ALARM = 'gptlock-runtime-log-upload';
 export const RUNTIME_LOG_UPLOAD_BATCH_SIZE = 50;
 
 const MAX_STRING_LENGTH = 2000;
-const MAX_ARRAY_ITEMS = 250;
+const MAX_ARRAY_ITEMS = 300;
 const MAX_OBJECT_KEYS = 100;
 const MAX_DEPTH = 8;
 const MAX_UPLOAD_DETAILS_CHARS = 12000;
@@ -166,6 +166,44 @@ export function boundRuntimeLogs(entries, limit = MAX_RUNTIME_LOG_ENTRIES) {
   return entries.slice(-Math.max(1, limit));
 }
 
+export function shouldPersistRuntimeLog(level, component, event, details = {}) {
+  const normalizedLevel = ['debug', 'info', 'warn', 'error'].includes(level) ? level : 'info';
+  const normalizedComponent = String(component || 'extension');
+  const normalizedEvent = String(event || 'unknown');
+
+  // Warnings/errors are always diagnostic evidence. The filters below only remove
+  // high-frequency successful bookkeeping that was drowning the request/core chain.
+  if (normalizedLevel === 'warn' || normalizedLevel === 'error') {
+    if (
+      normalizedComponent === 'content-runtime'
+      && normalizedEvent === 'uncaught_error'
+      && /ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/i.test(String(details?.message || ''))
+    ) return false;
+    return true;
+  }
+
+  // A non-official/private request can be observed several times per second on every
+  // ChatGPT tab. It is not a lock failure and carries no formal request correlation id.
+  if (
+    normalizedComponent === 'lock'
+    && normalizedEvent === 'request_lock_checked'
+    && details?.changed !== true
+    && !details?.error
+    && !details?.requestId
+    && details?.reason === 'private_request_not_official'
+  ) return false;
+
+  // Context-budget snapshots are operational telemetry, not request/core diagnostics.
+  // Retain only snapshots close to exhaustion or carrying a hard-limit observation.
+  if (normalizedComponent === 'context-budget' && normalizedEvent === 'remaining_snapshot') {
+    const remaining = Number(details?.remainingPercent);
+    const hardLimitObserved = Number(details?.hardLimitObservedCount || 0) > 0;
+    return hardLimitObserved || (Number.isFinite(remaining) && remaining <= 10);
+  }
+
+  return true;
+}
+
 function createEntry(level, component, event, details) {
   return {
     id: randomLogId(),
@@ -198,6 +236,7 @@ export function prepareRuntimeLogUploadEntry(entry) {
 }
 
 export function appendRuntimeLog(level, component, event, details = {}) {
+  if (!shouldPersistRuntimeLog(level, component, event, details)) return Promise.resolve(null);
   const entry = createEntry(level, component, event, details);
   writeQueue = writeQueue
     .catch(() => {})
