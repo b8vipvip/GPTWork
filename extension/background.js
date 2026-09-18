@@ -884,11 +884,24 @@ function initialize() {
   return initializeTask;
 }
 
-export async function initializeAfterCurrentTask() {
+async function refreshMasterRuntimeStateFromStorage() {
+  const stored = await chrome.storage.local.get(LOCAL_ENABLED_KEY);
+  const nextEnabled = stored?.[LOCAL_ENABLED_KEY];
+  if (typeof nextEnabled === 'boolean') {
+    localEnabledOverride = nextEnabled;
+    currentSettings = normalizeSettings({ ...currentSettings, enabled: nextEnabled });
+  }
+  return masterRuntimeEnabled();
+}
+
+export async function initializeAfterCurrentTask({ refreshMasterFromStorage = false } = {}) {
   const current = initializeTask;
   if (current) {
     try { await current; } catch {}
   }
+  // Update recovery writes Master=ON to storage before asking this lifecycle authority
+  // to reconnect. Do not depend on storage.onChanged winning that race.
+  if (refreshMasterFromStorage) await refreshMasterRuntimeStateFromStorage();
   if (!masterRuntimeEnabled()) return;
   await initialize();
 }
