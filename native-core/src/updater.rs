@@ -550,7 +550,8 @@ mod tests {
         assert!(!script.contains("Timed out waiting for preparing Native Messaging host to exit"));
         assert!(script.contains("Stop-InstalledCoreProcesses"));
         assert!(script.contains("while (-not $installer.HasExited)"));
-        assert!(!script.contains("while (-not $installer.HasExited) {\n    Stop-InstalledCoreProcesses"));
+        assert!(!script
+            .contains("while (-not $installer.HasExited) {\n    Stop-InstalledCoreProcesses"));
         assert!(script.contains("post-install Repair-GPTWork.ps1"));
         assert!(script.contains("Get-Process -Name 'gptwork-core'"));
         assert!(script.contains("installed_core_version_output"));
