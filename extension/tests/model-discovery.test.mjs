@@ -42,8 +42,8 @@ test('legacy polluted Sol fragments are migrated out of discoveries and locked p
   assert.match(optionsSource, /removeDuplicateDiscoveredRows/);
 });
 
-test('locked model cards distinguish manually added models from automatically discovered models', () => {
-  assert.match(optionsSource, /手动添加 \/ Manual/);
+test('locked model cards distinguish built-in models from automatically discovered models', () => {
+  assert.match(optionsSource, /内置模型 \/ Built-in/);
   assert.match(optionsSource, /自动获取 \/ Auto discovered/);
   assert.match(optionsSource, /function sourceDetail/);
   assert.match(optionsSource, /function labelChoiceSources/);
