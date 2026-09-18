@@ -7,6 +7,7 @@ import {
   createDiagnosticSseCapture,
   prepareRuntimeLogUploadEntry,
   sanitizeLogValue,
+  shouldPersistRuntimeLog,
 } from '../runtime-log.js';
 
 test('redacts secrets and chat payload fields while preserving safe technical diagnostics', () => {
@@ -39,18 +40,50 @@ test('redacts secrets and chat payload fields while preserving safe technical di
   assert.equal(result.diagnostics.nested.fields.model, 'message.metadata.model_slug');
 });
 
+test('drops high-frequency non-diagnostic bookkeeping while preserving chain evidence', () => {
+  assert.equal(shouldPersistRuntimeLog('info', 'lock', 'request_lock_checked', {
+    changed: false,
+    error: null,
+    requestId: null,
+    reason: 'private_request_not_official',
+  }), false);
+  assert.equal(shouldPersistRuntimeLog('info', 'context-budget', 'remaining_snapshot', {
+    remainingPercent: 98.7,
+    hardLimitObservedCount: 0,
+  }), false);
+  assert.equal(shouldPersistRuntimeLog('error', 'content-runtime', 'uncaught_error', {
+    message: 'ResizeObserver loop completed with undelivered notifications.',
+  }), false);
+  assert.equal(shouldPersistRuntimeLog('info', 'network', 'formal_conversation_request_detected', {
+    requestId: 'cdp-1',
+    model: 'gpt-6-astra',
+  }), true);
+  assert.equal(shouldPersistRuntimeLog('warn', 'verification', 'response_evaluated', {
+    requestId: 'cdp-1',
+    model: 'gpt-5.6-sol',
+  }), true);
+});
+
+test('diagnostic array sanitization can retain a selected recent 300-entry export', () => {
+  const entries = Array.from({ length: 300 }, (_, index) => ({ index }));
+  const result = sanitizeLogValue(entries);
+  assert.equal(result.length, 300);
+  assert.equal(result[0].index, 0);
+  assert.equal(result.at(-1).index, 299);
+});
+
 test('bounds the persisted runtime log ring buffer', () => {
   const entries = Array.from({ length: 8 }, (_, index) => ({ index }));
   assert.deepEqual(boundRuntimeLogs(entries, 3), [{ index: 5 }, { index: 6 }, { index: 7 }]);
   assert.deepEqual(boundRuntimeLogs(null), []);
 });
 
-test('diagnostic array sanitization keeps the newest entries', () => {
-  const entries = Array.from({ length: 300 }, (_, index) => ({ index }));
+test('diagnostic array sanitization keeps the newest entries beyond the 300-entry export ceiling', () => {
+  const entries = Array.from({ length: 360 }, (_, index) => ({ index }));
   const result = sanitizeLogValue(entries);
-  assert.equal(result[0], '[truncated:300;omitted:50;kept:last]');
-  assert.equal(result[1].index, 50);
-  assert.equal(result.at(-1).index, 299);
+  assert.equal(result[0], '[truncated:360;omitted:60;kept:last]');
+  assert.equal(result[1].index, 60);
+  assert.equal(result.at(-1).index, 359);
 });
 
 test('clips overly long strings without dropping diagnostic context', () => {
