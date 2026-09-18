@@ -171,19 +171,10 @@ export function shouldPersistRuntimeLog(level, component, event, details = {}) {
   const normalizedComponent = String(component || 'extension');
   const normalizedEvent = String(event || 'unknown');
 
-  // Warnings/errors are always diagnostic evidence. The filters below only remove
-  // high-frequency successful bookkeeping that was drowning the request/core chain.
-  if (normalizedLevel === 'warn' || normalizedLevel === 'error') {
-    if (
-      normalizedComponent === 'content-runtime'
-      && normalizedEvent === 'uncaught_error'
-      && /ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/i.test(String(details?.message || ''))
-    ) return false;
-    return true;
-  }
-
   // A non-official/private request can be observed several times per second on every
   // ChatGPT tab. It is not a lock failure and carries no formal request correlation id.
+  // Apply this before the level gate so historical copies that were accidentally
+  // persisted as info/warn are compacted out when the log is read or appended.
   if (
     normalizedComponent === 'lock'
     && normalizedEvent === 'request_lock_checked'
@@ -192,6 +183,17 @@ export function shouldPersistRuntimeLog(level, component, event, details = {}) {
     && !details?.requestId
     && details?.reason === 'private_request_not_official'
   ) return false;
+
+  // Warnings/errors are diagnostic evidence unless they are a known browser-only
+  // rendering warning with no bearing on the request/Core chain.
+  if (normalizedLevel === 'warn' || normalizedLevel === 'error') {
+    if (
+      normalizedComponent === 'content-runtime'
+      && normalizedEvent === 'uncaught_error'
+      && /ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/i.test(String(details?.message || ''))
+    ) return false;
+    return true;
+  }
 
   // Context-budget snapshots are operational telemetry, not request/core diagnostics.
   // Retain only snapshots close to exhaustion or carrying a hard-limit observation.
@@ -202,6 +204,15 @@ export function shouldPersistRuntimeLog(level, component, event, details = {}) {
   }
 
   return true;
+}
+
+export function filterRuntimeLogs(entries) {
+  return boundRuntimeLogs(entries).filter((entry) => shouldPersistRuntimeLog(
+    entry?.level,
+    entry?.component,
+    entry?.event,
+    entry?.details,
+  ));
 }
 
 function createEntry(level, component, event, details) {
@@ -243,7 +254,7 @@ export function appendRuntimeLog(level, component, event, details = {}) {
     .then(async () => {
       const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
       const logs = boundRuntimeLogs([
-        ...(Array.isArray(stored[RUNTIME_LOG_STORAGE_KEY]) ? stored[RUNTIME_LOG_STORAGE_KEY] : []),
+        ...filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]),
         entry,
       ]);
       await chrome.storage.local.set({ [RUNTIME_LOG_STORAGE_KEY]: logs });
@@ -254,13 +265,18 @@ export function appendRuntimeLog(level, component, event, details = {}) {
 export async function getRuntimeLogs() {
   await writeQueue.catch(() => {});
   const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
-  return boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
+  const raw = boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
+  const logs = filterRuntimeLogs(raw);
+  if (logs.length !== raw.length) {
+    await chrome.storage.local.set({ [RUNTIME_LOG_STORAGE_KEY]: logs });
+  }
+  return logs;
 }
 
 async function runtimeLogUploadBatch(limit = RUNTIME_LOG_UPLOAD_BATCH_SIZE) {
   await writeQueue.catch(() => {});
   const stored = await chrome.storage.local.get([RUNTIME_LOG_STORAGE_KEY, RUNTIME_LOG_UPLOADED_IDS_KEY]);
-  let logs = boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
+  let logs = filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
   let changed = false;
   logs = logs.map((entry) => {
     if (typeof entry?.id === 'string' && entry.id) return entry;
