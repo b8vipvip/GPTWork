@@ -326,6 +326,22 @@ async function restoreAfterFailedUpdate(chromeApi = globalThis.chrome) {
   }
 }
 
+async function reloadOpenExtensionPages(chromeApi = globalThis.chrome) {
+  const extensionRoot = chromeApi.runtime.getURL('');
+  let tabs = [];
+  try { tabs = await chromeApi.tabs.query({}); } catch { return []; }
+  const reloaded = [];
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab?.id) || typeof tab.url !== 'string' || !tab.url.startsWith(extensionRoot)) continue;
+    try {
+      await chromeApi.tabs.reload(tab.id);
+      reloaded.push(tab.id);
+    } catch {}
+  }
+  if (reloaded.length) logUpdate('info', 'extension_pages_reloaded_after_update', { tabIds: reloaded });
+  return reloaded;
+}
+
 async function debuggerAttachedTabIds(chromeApi = globalThis.chrome) {
   if (!chromeApi.debugger?.getTargets) return new Set();
   try {
@@ -426,7 +442,7 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
     // The new service worker can begin initialization while the updater's temporary
     // Master=OFF value is still visible. Force one reconnect after that task settles so
     // recovery cannot inherit the stale master_disabled initialization.
-    await initializeAfterCurrentTask().catch((error) => {
+    await initializeAfterCurrentTask({ refreshMasterFromStorage: true }).catch((error) => {
       logUpdate('warn', 'update_reconnect_after_reload_failed', { error: errorText(error) });
     });
   }
@@ -441,6 +457,10 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
     await setActionUpdateState({ available: false }, chromeApi);
     return { complete: true, masterEnabled: false };
   }
+
+  // Options/diagnostics tabs survive an unpacked-extension runtime reload and can keep
+  // rendering the old Core failure forever. Reload them once under the new generation.
+  await reloadOpenExtensionPages(chromeApi);
 
   await recoverOpenTabs('update_recovery', {
     onProgress: async (progress) => {
