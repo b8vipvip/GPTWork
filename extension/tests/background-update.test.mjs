@@ -50,7 +50,7 @@ test('100 percent is written only after recovery readiness, never immediately af
   assert.doesNotMatch(installer, /phase: 'complete'/);
   const recovery = source.match(/async function recoverAfterReload\([^]*?\n\}/)?.[0] || '';
   assert.match(recovery, /runtimeReadiness/);
-  assert.match(recovery, /if \(last\.ready\)/);
+  assert.match(recovery, /last\.ready \|\| \(contentAndCoreReady && monitorGraceElapsed\)/);
   assert.match(recovery, /phase: 'complete', percent: 100/);
 });
 
