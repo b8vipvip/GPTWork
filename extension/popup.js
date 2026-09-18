@@ -34,6 +34,10 @@ const elements = {
   popupModelChoices: document.getElementById('popupModelChoices'),
   popupPreferredReasoning: document.getElementById('popupPreferredReasoning'),
   popupLockMessage: document.getElementById('popupLockMessage'),
+  autoVerifyProgress: document.getElementById('autoVerifyProgress'),
+  autoVerifyProgressTitle: document.getElementById('autoVerifyProgressTitle'),
+  autoVerifyProgressText: document.getElementById('autoVerifyProgressText'),
+  autoVerifyProgressBar: document.getElementById('autoVerifyProgressBar'),
 };
 
 let lastState = null;
@@ -179,6 +183,29 @@ async function renderStoredUpdateStatus() {
   renderUpdateStatus(stored[UPDATE_STATUS_KEY] || null);
 }
 
+function renderAutoVerifyProgress(auto) {
+  const catalog = auto?.catalogVerification;
+  const running = Boolean(auto?.running && catalog && Number(catalog.total || 0) > 0);
+  if (!elements.autoVerifyProgress) return;
+  elements.autoVerifyProgress.hidden = !running;
+  if (!running) return;
+  const total = Math.max(1, Number(catalog.total || 0));
+  const completed = Math.max(0, Math.min(total, Number(catalog.completed || 0)));
+  const percent = Math.round((completed / total) * 100);
+  elements.autoVerifyProgressBar.value = percent;
+  elements.autoVerifyProgressText.textContent = `${completed} / ${total}`;
+  elements.autoVerifyProgressTitle.textContent = catalog.currentLabel
+    ? `正在验证：${catalog.currentLabel}`
+    : '正在验证账户全部可用模型';
+}
+
+function showAutoVerifyToast(text) {
+  elements.message.textContent = text;
+  window.setTimeout(() => {
+    if (elements.message.textContent === text) elements.message.textContent = '';
+  }, 5000);
+}
+
 function render(state) {
   lastState = state;
   renderUpdateStatus(updateStatus);
@@ -189,6 +216,7 @@ function render(state) {
   const tab = state.tabState;
   const guard = tab?.guard;
   const auto = tab?.autoVerification;
+  renderAutoVerifyProgress(auto);
   const autoApplies = autoVerificationAppliesToLatestRequest(auto, tab);
   const autoEvidenceConfirmed = hasConfirmedAutoEvidence(auto, state.policy, tab);
   elements.native.textContent = native.connected
@@ -328,14 +356,14 @@ elements.autoVerify.addEventListener('click', () => {
     .then(async (result) => {
       await load();
       if (result.outcome === 'verified') {
-        elements.message.textContent = `自动验证通过；共尝试 ${result.attempts} 次 / Verified.`;
+        showAutoVerifyToast(`自动验证完成：已验证 ${result.catalogVerified || 0}/${result.catalogTotal || 0} 个账户模型 / Verification completed.`);
       } else if (result.outcome === 'model_verified_reasoning_unconfirmed') {
-        elements.message.textContent = `模型已确认 ${result.responseModel || result.requestModel || ''}；已自动重试 ${result.retries} 次，但服务端未暴露推理强度。`;
+        showAutoVerifyToast(`自动验证完成：模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；响应推理元数据未完全暴露。`);
       } else {
-        elements.message.textContent = `自动验证未完全确认：${result.reason || 'metadata_incomplete'}；已自动尝试 ${result.attempts} 次，请求锁定=${result.requestLockConfirmed ? '成功' : '未确认'}。`;
+        showAutoVerifyToast(`自动验证完成但存在失败：${result.reason || 'metadata_incomplete'}；模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}。`);
       }
     })
-    .catch((error) => { elements.message.textContent = `自动验证失败 / Auto verification failed: ${error.message}`; })
+    .catch((error) => { showAutoVerifyToast(`自动验证失败 / Auto verification failed: ${error.message}`); })
     .finally(() => { elements.autoVerify.disabled = false; });
 });
 
