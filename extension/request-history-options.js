@@ -23,7 +23,7 @@ function modelLabel(model) {
   return knownLabels.get(model) || model;
 }
 
-function appendModelCell(row, model, pendingText = null) {
+function appendModelCell(row, model, pendingText = null, transportModel = null) {
   const cell = document.createElement('td');
   if (!model) {
     cell.className = 'request-model-muted';
@@ -34,6 +34,11 @@ function appendModelCell(row, model, pendingText = null) {
   const strong = document.createElement('strong');
   strong.textContent = modelLabel(model);
   cell.append(strong);
+  if (transportModel) {
+    const code = document.createElement('code');
+    code.textContent = transportModel;
+    cell.append(code);
+  }
   row.append(cell);
 }
 
@@ -43,6 +48,8 @@ function statusPresentation(record) {
       return ['已确认 / Verified', 'good'];
     case 'mismatch':
       return ['不匹配 / Mismatch', 'bad'];
+    case 'fallback':
+      return ['服务端回退 / Server fallback', 'warn'];
     case 'unverified':
       return ['未完全确认 / Unverified', 'warn'];
     case 'error':
@@ -76,8 +83,8 @@ function appendHistoryRow(record) {
   time.textContent = formatTime(record.capturedAt);
   row.append(time);
 
-  appendModelCell(row, record.discoveredModel);
-  appendModelCell(row, record.requestModel);
+  appendModelCell(row, record.discoveredModel, null, record.discoveredTransportModel);
+  appendModelCell(row, record.requestModel, null, record.requestTransportModel);
   appendModelCell(
     row,
     record.finalModel,
