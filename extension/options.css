@@ -129,8 +129,9 @@ button:disabled { opacity: .5; cursor: default; }
   .badge { white-space: normal; }
 }
 
-.lock-summary-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
-.icon-button{width:40px;height:40px;padding:0;border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;font-size:24px;line-height:1;transform:rotate(0deg)}
+.lock-summary-heading{display:flex;align-items:flex-start;justify-content:flex-start;gap:14px}
+.lock-summary-heading h2{display:flex;align-items:center;gap:7px}
+.icon-button{display:inline-grid;place-items:center;width:30px;height:30px;padding:0;border:1px solid #cbd5e1;background:#fff;color:#1d4ed8;font-size:18px;line-height:1;transform:scaleX(-1);vertical-align:middle}
 .lock-summary-line{margin:8px 0;color:#334155;line-height:1.55}
 .lock-summary-line strong{color:#172033}
 .lock-editor{margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0}
