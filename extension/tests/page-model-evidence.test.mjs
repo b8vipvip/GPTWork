@@ -54,3 +54,12 @@ test('selection attribute changes refresh page evidence', () => {
     assert.ok(catalogSource.includes(`'${name}'`), `catalog observer should watch ${name}`);
   }
 });
+
+
+test('policy canonicalizes GPT-6 Astra and Sol transport aliases', async () => {
+  const policy = await import('../policy.js');
+  assert.equal(policy.normalizeModelId('gpt-6-astra-wm'), 'gpt-6-astra');
+  assert.equal(policy.normalizeModelId('gpt-6-sol-wm'), 'gpt-6-sol');
+  assert.equal(policy.modelTransportId('gpt-6-astra'), 'gpt-6-astra-wm');
+  assert.equal(policy.modelTransportId('gpt-6-sol'), 'gpt-6-sol-wm');
+});

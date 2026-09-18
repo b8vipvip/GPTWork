@@ -11,14 +11,13 @@ test('settings page no longer depends on a bottom Save & sync action', () => {
   assert.doesNotMatch(settingsHtml, /id="save"/);
   assert.doesNotMatch(settingsHtml, /保存并同步\s*\/\s*Save &amp; sync/);
   assert.match(settingsHtml, /Work 模式和模型锁定按 ChatGPT 标签页隔离/);
-  assert.match(settingsHtml, /同一 Chrome 窗口里的不同 ChatGPT 标签页也可以保持不同状态/);
-  assert.match(settingsHtml, /模型列表及其余配置继续同步/);
+  assert.match(settingsHtml, /模型\/推理配置来自自动识别目录并同步/);
 });
 
-test('custom model button is Add-only and custom models are rendered in the choice list', () => {
-  assert.match(settingsHtml, /id="saveCustomModels"[^>]*>添加 \/ Add<\/button>/);
-  assert.match(optionsSource, /function renderCustomChoice\(/);
-  assert.match(optionsSource, /renderCustomChoice\(model, true\)/);
+test('model editor is discovery-only and expands from the pencil summary', () => {
+  assert.doesNotMatch(settingsHtml, /id="saveCustomModels"|id="customModels"/);
+  assert.match(settingsHtml, /id="lockEditorToggle"/);
+  assert.match(optionsSource, /function renderDiscoveredChoice\(/);
   assert.match(optionsSource, /persistModelSelection/);
 });
 

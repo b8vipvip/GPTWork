@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 export const KNOWN_MODELS = Object.freeze([
   { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
+  { id: 'gpt-6-sol', label: 'GPT-6 Sol' },
   { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
   { id: 'gpt-5.5', label: 'GPT-5.5' },
 ]);
@@ -31,6 +32,8 @@ export const REASONING_LEVELS = Object.freeze([
 const MODEL_ALIASES = Object.freeze({
   'gpt-5.6-sol-wm': 'gpt-5.6-sol',
   'gpt-5-6': 'gpt-5.6-sol',
+  'gpt-6-astra-wm': 'gpt-6-astra',
+  'gpt-6-sol-wm': 'gpt-6-sol',
 });
 
 const NON_CONCRETE_MODEL_IDS = new Set(['auto']);
@@ -38,21 +41,26 @@ const INVALID_EXPLICIT_POLICY_FALLBACK = Object.freeze(['gpt-5.6-sol']);
 
 const MODEL_TRANSPORT_IDS = Object.freeze({
   'gpt-5.6-sol': 'gpt-5.6-sol-wm',
+  'gpt-6-astra': 'gpt-6-astra-wm',
+  'gpt-6-sol': 'gpt-6-sol-wm',
 });
 
 function unique(values) {
   return [...new Set(values)];
 }
 
-function normalizeAstraFamily(model) {
-  if (model === 'gpt-6-astra') return 'gpt-6-astra';
-  return /^(?:gpt-6-astra)(?:[-_.:][a-z0-9._:-]+)$/.test(model) ? 'gpt-6-astra' : null;
+function normalizeKnownFamily(model) {
+  if (model === 'gpt-6-astra' || model.startsWith('gpt-6-astra.') || model.startsWith('gpt-6-astra:')
+    || model.startsWith('gpt-6-astra_') || model.startsWith('gpt-6-astra-')) return 'gpt-6-astra';
+  if (model === 'gpt-6-sol' || model.startsWith('gpt-6-sol.') || model.startsWith('gpt-6-sol:')
+    || model.startsWith('gpt-6-sol_') || model.startsWith('gpt-6-sol-')) return 'gpt-6-sol';
+  return null;
 }
 
 export function normalizeModelId(value) {
   const model = String(value ?? '').trim().toLowerCase();
   if (!/^[a-z0-9._:-]{1,128}$/.test(model)) return null;
-  return normalizeAstraFamily(model) ?? MODEL_ALIASES[model] ?? model;
+  return normalizeKnownFamily(model) ?? MODEL_ALIASES[model] ?? model;
 }
 
 export function normalizeConcreteModelId(value) {

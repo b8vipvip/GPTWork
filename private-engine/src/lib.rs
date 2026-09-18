@@ -166,8 +166,12 @@ pub fn normalize_model_id(value: &str) -> Option<String> {
     Some(match model.as_str() {
         "gpt-5.6-sol-wm" | "gpt-5-6" => "gpt-5.6-sol".to_string(),
         "gpt-6-astra-wm" => "gpt-6-astra".to_string(),
+        "gpt-6-sol-wm" => "gpt-6-sol".to_string(),
         _ if model.starts_with("gpt-6-astra.") || model.starts_with("gpt-6-astra:") => {
             "gpt-6-astra".to_string()
+        }
+        _ if model.starts_with("gpt-6-sol.") || model.starts_with("gpt-6-sol:") => {
+            "gpt-6-sol".to_string()
         }
         _ => model,
     })
@@ -177,6 +181,8 @@ pub fn model_transport_id(value: &str) -> Option<String> {
     let model = normalize_model_id(value)?;
     Some(match model.as_str() {
         "gpt-5.6-sol" => "gpt-5.6-sol-wm".to_string(),
+        "gpt-6-astra" => "gpt-6-astra-wm".to_string(),
+        "gpt-6-sol" => "gpt-6-sol-wm".to_string(),
         _ => model,
     })
 }

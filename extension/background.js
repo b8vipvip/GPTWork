@@ -1,7 +1,9 @@
 import {
   DEFAULT_POLICY,
   DEFAULT_SETTINGS,
+  normalizeConcreteModelId,
   normalizePolicy,
+  normalizeReasoningLevel,
   normalizeSettings,
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
@@ -1031,6 +1033,113 @@ function probeText(attempt) {
   return 'GPTWork 自动验证 2/2：请计算 137×29，并只回复结果。';
 }
 
+function parseModelNameMappings(text, rawIds) {
+  const source = String(text || '');
+  const start = source.indexOf('{');
+  const end = source.lastIndexOf('}');
+  if (start < 0 || end <= start) return [];
+  try {
+    const parsed = JSON.parse(source.slice(start, end + 1));
+    const allowedRaw = new Set(rawIds);
+    return (Array.isArray(parsed?.mappings) ? parsed.mappings : [])
+      .map((item) => ({
+        raw: String(item?.raw || '').trim().toLowerCase(),
+        canonical: normalizeConcreteModelId(item?.canonical),
+        displayName: String(item?.displayName || '').trim().slice(0, 120),
+      }))
+      .filter((item) => allowedRaw.has(item.raw) && item.canonical);
+  } catch {
+    return [];
+  }
+}
+
+async function resolveUnknownCatalogNames(tabId, rows) {
+  const unresolved = rows.filter((item) => {
+    const raw = String(item?.rawId || '').trim().toLowerCase();
+    const canonical = normalizeConcreteModelId(item?.model || raw);
+    return raw && raw === canonical && /(?:-wm|preview|experimental|beta)$/i.test(raw);
+  });
+  if (!unresolved.length) return [];
+  const rawIds = [...new Set(unresolved.map((item) => String(item.rawId).trim().toLowerCase()))];
+  const prompt = [
+    'GPTWork 模型名称解析：下面是从当前 ChatGPT 账户模型元数据自动发现、但 GPTWork 尚未定义显示名称的原始 model ID：',
+    rawIds.join(', '),
+    '请仅返回 JSON，不要解释。格式：{"mappings":[{"raw":"原始ID","canonical":"稳定的规范model ID","displayName":"ChatGPT界面正式模型名称"}]}。',
+    '如果无法确定，canonical 请保持与 raw 完全相同，不要猜测。',
+  ].join('\n');
+  try {
+    const result = await sendTabMessage(tabId, { type: 'GPTLOCK_AUTO_RESOLVE_MODEL_NAMES', prompt });
+    const mappings = parseModelNameMappings(result?.responseText, rawIds);
+    if (mappings.length) {
+      const stored = await chrome.storage.sync.get('gptworkModelNameMappingsV1');
+      const previous = stored.gptworkModelNameMappingsV1 && typeof stored.gptworkModelNameMappingsV1 === 'object'
+        ? stored.gptworkModelNameMappingsV1
+        : {};
+      const next = { ...previous };
+      for (const item of mappings) next[item.raw] = { canonical: item.canonical, displayName: item.displayName, learnedAt: new Date().toISOString() };
+      await chrome.storage.sync.set({ gptworkModelNameMappingsV1: next });
+    }
+    logRuntime('info', 'verification', 'model_name_fallback_completed', { tabId, rawIds, mappings });
+    return mappings;
+  } catch (error) {
+    logRuntime('warn', 'verification', 'model_name_fallback_failed', { tabId, rawIds, error: errorText(error) });
+    return [];
+  }
+}
+
+async function discoverAccountCatalog(tabId) {
+  try {
+    const result = await sendTabMessage(tabId, { type: 'GPTLOCK_DISCOVER_ACCOUNT_MODELS' });
+    const rows = Array.isArray(result?.catalog?.models) ? result.catalog.models : [];
+    const models = [...new Set(rows
+      .map((item) => normalizeConcreteModelId(item?.model || item?.rawId))
+      .filter(Boolean))];
+    const reasoningLevels = [...new Set((Array.isArray(result?.catalog?.reasoningLevels)
+      ? result.catalog.reasoningLevels
+      : []).map(normalizeReasoningLevel).filter(Boolean))];
+    const stored = await chrome.storage.sync.get(['discoveredModels', 'discoveredModelEvidence', 'policy']);
+    const previous = Array.isArray(stored.discoveredModels) ? stored.discoveredModels : [];
+    const discoveredModels = [...new Set([...previous, ...models].map(normalizeConcreteModelId).filter(Boolean))];
+    const evidence = stored.discoveredModelEvidence && typeof stored.discoveredModelEvidence === 'object'
+      ? { ...stored.discoveredModelEvidence }
+      : {};
+    const now = new Date().toISOString();
+    for (const model of models) {
+      const prior = evidence[model] && typeof evidence[model] === 'object' ? evidence[model] : {};
+      evidence[model] = {
+        confirmed: true,
+        sources: [...new Set([...(Array.isArray(prior.sources) ? prior.sources : []), 'account_model_catalog'])],
+        firstSeenAt: prior.firstSeenAt || now,
+        lastSeenAt: now,
+      };
+    }
+    const policy = normalizePolicy(stored.policy);
+    const patch = { discoveredModels, discoveredModelEvidence: evidence };
+    if (reasoningLevels.length) {
+      patch.policy = normalizePolicy({
+        ...policy,
+        allowedReasoningLevels: [...new Set([...policy.allowedReasoningLevels, ...reasoningLevels])],
+      });
+    }
+    await chrome.storage.sync.set(patch);
+    const nameMappings = await resolveUnknownCatalogNames(tabId, rows);
+    logRuntime('info', 'verification', 'account_model_catalog_discovered', {
+      tabId,
+      models,
+      reasoningLevels,
+      rowCount: rows.length,
+      nameMappings,
+    });
+    return { models, reasoningLevels, rows, nameMappings };
+  } catch (error) {
+    logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
+      tabId,
+      error: errorText(error),
+    });
+    return { models: [], reasoningLevels: [], rows: [], error: errorText(error) };
+  }
+}
+
 async function autoVerify(tabId) {
   if (!masterRuntimeEnabled()) throw new Error('GPTWork is disabled / GPTWork 已关闭');
   const tab = await chrome.tabs.get(tabId);
@@ -1045,6 +1154,7 @@ async function autoVerify(tabId) {
   const coreCheck = await refreshNativeCore({ tolerateFailure: true });
   const monitorAttached = await networkMonitor.attach(tabId);
   const page = await collectPageObservation(tabId, state);
+  const accountCatalog = await discoverAccountCatalog(tabId);
 
   state.autoVerification = {
     running: true,
@@ -1259,6 +1369,8 @@ async function autoVerify(tabId) {
       pageCollectionError: page.error,
       pageModel: state.pageObservation?.model ?? null,
       pageReasoning: state.pageObservation?.reasoning ?? null,
+      discoveredModels: accountCatalog.models,
+      discoveredReasoningLevels: accountCatalog.reasoningLevels,
     },
     autoVerification: state.autoVerification,
     tabState: publicTabState(state),

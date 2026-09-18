@@ -6,17 +6,15 @@ const settingsHtml = await readFile(new URL('../settings-v0521.html', import.met
 const historyOptionsSource = await readFile(new URL('../request-history-options.js', import.meta.url), 'utf8');
 const historyCss = await readFile(new URL('../request-history.css', import.meta.url), 'utf8');
 
-test('locked models sits directly after feature gates and request history is the last settings card', () => {
+test('compact lock editor sits directly after feature gates and request history is the last settings card', () => {
   const featureIndex = settingsHtml.indexOf('id="globalHeading"');
-  const modelIndex = settingsHtml.indexOf('id="modelHeading"');
-  const reasoningIndex = settingsHtml.indexOf('id="reasoningHeading"');
+  const lockIndex = settingsHtml.indexOf('id="lockSummaryHeading"');
   const historyIndex = settingsHtml.indexOf('id="requestHistoryHeading"');
   const footerIndex = settingsHtml.indexOf('<footer>');
 
   assert(featureIndex >= 0);
-  assert(modelIndex > featureIndex);
-  assert(reasoningIndex > modelIndex);
-  assert(historyIndex > reasoningIndex);
+  assert(lockIndex > featureIndex);
+  assert(historyIndex > lockIndex);
   assert(footerIndex > historyIndex);
   assert.doesNotMatch(settingsHtml, /id="updateHeading"/);
   assert.doesNotMatch(settingsHtml, /id="updates"/);

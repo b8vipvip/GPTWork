@@ -12,10 +12,11 @@ const elements = {
   extensionVersion: document.getElementById('extensionVersion'),
   modelChoices: document.getElementById('modelChoices'),
   reasoningChoices: document.getElementById('reasoningChoices'),
-  customModels: document.getElementById('customModels'),
-  saveCustomModels: document.getElementById('saveCustomModels'),
-  customModelsMessage: document.getElementById('customModelsMessage'),
   preferredReasoning: document.getElementById('preferredReasoning'),
+  lockedModelSummary: document.getElementById('lockedModelSummary'),
+  reasoningSummary: document.getElementById('reasoningSummary'),
+  lockEditorToggle: document.getElementById('lockEditorToggle'),
+  lockEditor: document.getElementById('lockEditor'),
   enabled: document.getElementById('enabled'),
   networkVerification: document.getElementById('networkVerification'),
   autoAlignSelection: document.getElementById('autoAlignSelection'),
@@ -164,7 +165,7 @@ async function patchSettings(patch) {
   return next;
 }
 
-function renderCustomChoice(model, checked = true) {
+function renderDiscoveredChoice(model, checked = true) {
   const concrete = normalizeConcreteModelId(model);
   if (!concrete) return null;
   const input = checkbox(
@@ -172,36 +173,25 @@ function renderCustomChoice(model, checked = true) {
     'model',
     concrete,
     modelLabel(concrete),
-    `${concrete} · 自定义 / Custom`,
-    { customModel: concrete },
+    `${concrete} · 自动识别 / Auto discovered`,
+    { discoveredModel: concrete },
   );
   input.checked = checked;
   return input;
 }
 
-function parseCustomModels() {
-  const raw = elements.customModels.value
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const invalid = raw.filter((value) => !normalizeModelId(value));
-  const routingAliases = raw.filter((value) => normalizeModelId(value) && !normalizeConcreteModelId(value));
-  const models = [...new Set(raw.map(normalizeConcreteModelId).filter(Boolean))];
-  return { raw, invalid, routingAliases, models };
-}
-
-function validateCustomModels(parsed) {
-  if (parsed.invalid.length) {
-    throw new Error(`模型标识格式无效：${parsed.invalid.join(', ')}。请填写实际传输 model ID（不能包含空格）。`);
-  }
-  if (parsed.routingAliases.length) {
-    throw new Error(`${parsed.routingAliases.join(', ')} 是自动路由标识，不是具体模型，不能加入锁定列表。`);
-  }
-  if (!parsed.models.length) throw new Error('请输入至少一个具体模型 ID。');
-}
-
 function concreteSelectedModels() {
   return selected('model').map(normalizeConcreteModelId).filter(Boolean);
+}
+
+function renderLockSummary(policy, settings) {
+  if (elements.lockedModelSummary) {
+    elements.lockedModelSummary.textContent = policy.lockedModels.map(modelLabel).join(' / ') || '—';
+  }
+  if (elements.reasoningSummary) {
+    const allowed = policy.allowedReasoningLevels.join(' / ');
+    elements.reasoningSummary.textContent = `${settings.preferredReasoning}${allowed ? `（允许：${allowed}）` : ''}`;
+  }
 }
 
 function renderStatus(nativeStatus = {}) {
@@ -249,13 +239,14 @@ async function applyState(state) {
     const settings = normalizeSettings(state.settings);
 
     for (const model of policy.lockedModels) {
-      if (!knownModelIds.has(model)) renderCustomChoice(model, true);
+      if (!knownModelIds.has(model)) renderDiscoveredChoice(model, true);
     }
     setSelected('model', policy.lockedModels);
     setSelected('reasoning', policy.allowedReasoningLevels);
     const mode = document.querySelector(`input[name="mode"][value="${policy.strictMode}"]`);
     if (mode) mode.checked = true;
     elements.preferredReasoning.value = settings.preferredReasoning;
+    renderLockSummary(policy, settings);
     // #enabled is local-only Master authority and is rendered exclusively by
     // master-ui-controller.js. Never repaint it from legacy/synced settings.enabled.
     elements.networkVerification.checked = settings.networkVerificationEnabled;
@@ -303,19 +294,6 @@ async function persistReasoningSelection(changedInput) {
   elements.preferredReasoning.value = preferredReasoning;
 }
 
-async function addCustomModels() {
-  const parsed = parseCustomModels();
-  validateCustomModels(parsed);
-  for (const model of parsed.models) renderCustomChoice(model, true);
-  const lockedModels = [...new Set(concreteSelectedModels())];
-  await patchPolicy({ lockedModels });
-  elements.customModels.value = '';
-  if (elements.customModelsMessage) {
-    elements.customModelsMessage.textContent = `已添加：${parsed.models.join(', ')} / Added.`;
-    elements.customModelsMessage.className = 'inline-message good';
-  }
-}
-
 function persistFromChange(event) {
   if (applyingRemoteState) return;
   const target = event.target;
@@ -359,27 +337,11 @@ function persistFromChange(event) {
 
 document.addEventListener('change', persistFromChange);
 
-if (elements.saveCustomModels) {
-  elements.saveCustomModels.addEventListener('click', () => {
-    if (elements.customModelsMessage) elements.customModelsMessage.className = 'inline-message';
-    elements.saveCustomModels.disabled = true;
-    void queueWrite(addCustomModels)
-      .catch((error) => {
-        if (elements.customModelsMessage) {
-          elements.customModelsMessage.textContent = `添加失败 / Add failed: ${error.message}`;
-          elements.customModelsMessage.className = 'inline-message bad';
-        }
-      })
-      .finally(() => {
-        elements.saveCustomModels.disabled = false;
-      });
-  });
-  elements.customModels.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    elements.saveCustomModels.click();
-  });
-}
+elements.lockEditorToggle?.addEventListener('click', () => {
+  const open = elements.lockEditor?.hidden !== false;
+  if (elements.lockEditor) elements.lockEditor.hidden = !open;
+  elements.lockEditorToggle.setAttribute('aria-expanded', String(open));
+});
 
 elements.reconnect.addEventListener('click', () => {
   elements.nativeStatus.textContent = '重新连接中 / Reconnecting…';

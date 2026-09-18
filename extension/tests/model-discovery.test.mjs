@@ -42,8 +42,8 @@ test('legacy polluted Sol fragments are migrated out of discoveries and locked p
   assert.match(optionsSource, /removeDuplicateDiscoveredRows/);
 });
 
-test('locked model cards distinguish manually added models from automatically discovered models', () => {
-  assert.match(optionsSource, /手动添加 \/ Manual/);
+test('locked model cards distinguish built-in models from automatically discovered models', () => {
+  assert.match(optionsSource, /内置模型 \/ Built-in/);
   assert.match(optionsSource, /自动获取 \/ Auto discovered/);
   assert.match(optionsSource, /function sourceDetail/);
   assert.match(optionsSource, /function labelChoiceSources/);
@@ -55,4 +55,15 @@ test('trusted network evidence can restore a future model that resembles a legac
   assert.match(catalogSource, /!legacySuspiciousModel\(model\) \|\| hasTrustedNetworkEvidence\(item\)/);
   assert.match(optionsSource, /const trusted = \(model\) => hasTrustedNetworkEvidence/);
   assert.match(optionsSource, /!legacySuspiciousModel\(model\) \|\| trusted\(model\)/);
+});
+
+
+test('auto verification can discover account catalog and use a visible naming fallback for unresolved IDs', async () => {
+  const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
+  const backgroundSource = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+  assert.match(contentSource, /GPTLOCK_DISCOVER_ACCOUNT_MODELS/);
+  assert.match(contentSource, /GPTLOCK_AUTO_RESOLVE_MODEL_NAMES/);
+  assert.match(backgroundSource, /account_model_catalog_discovered/);
+  assert.match(backgroundSource, /model_name_fallback_completed/);
+  assert.match(backgroundSource, /gptworkModelNameMappingsV1/);
 });

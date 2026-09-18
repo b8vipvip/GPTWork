@@ -6,6 +6,8 @@
   const MODEL_ALIASES = Object.freeze({
     'gpt-5.6-sol-wm': 'gpt-5.6-sol',
     'gpt-5-6': 'gpt-5.6-sol',
+    'gpt-6-astra-wm': 'gpt-6-astra',
+    'gpt-6-sol-wm': 'gpt-6-sol',
   });
   const NON_CONCRETE_MODEL_IDS = new Set(['auto']);
 
@@ -44,7 +46,7 @@
     if (discoveredSet.has(model)) {
       return `${model} · 自动获取 / Auto discovered · ${evidenceLabel(model, evidence)}`;
     }
-    return `${model} · 手动添加 / Manual`;
+    return `${model} · 内置模型 / Built-in`;
   }
 
   function modelLabel(value) {
@@ -125,17 +127,6 @@
     container.append(row);
   }
 
-  function dedupeCustomField(discovered) {
-    const field = document.getElementById('customModels');
-    if (!field || !field.value.trim()) return;
-    const discoveredSet = new Set(discovered);
-    const remaining = field.value
-      .split(',')
-      .map((value) => normalizeConcreteModelId(value))
-      .filter((value) => value && !discoveredSet.has(value));
-    field.value = [...new Set(remaining)].join(', ');
-  }
-
   function removeDuplicateDiscoveredRows() {
     const container = document.getElementById('modelChoices');
     if (!container) return;
@@ -197,7 +188,6 @@
     const syncChoiceUi = () => {
       labelChoiceSources(discovered, evidence);
       removeDuplicateDiscoveredRows();
-      dedupeCustomField(discovered);
     };
     syncChoiceUi();
     window.setTimeout(syncChoiceUi, 0);
