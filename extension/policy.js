@@ -50,61 +50,10 @@ function unique(values) {
 }
 
 function normalizeKnownFamily(model) {
-  for (const family of ['gpt-6-astra', 'gpt-6-sol']) {
-    if (model === family) return family;
-    if (new RegExp(`^${family}(?:[-_.:][a-z0-9._:-]+)export const DEFAULT_POLICY = Object.freeze({
-  lockedModels: ['gpt-6-astra', 'gpt-5.6-sol'],
-  allowedReasoningLevels: ['medium', 'high', 'extra-high'],
-  strictMode: true,
-});
-
-export const DEFAULT_SETTINGS = Object.freeze({
-  // A fresh install must be inert until the user signs in and explicitly enables
-  // Work mode and/or Model lock. This prevents the debugger request interceptor
-  // from attaching to ChatGPT during first-run account setup.
-  enabled: false,
-  networkVerificationEnabled: true,
-  firstRequestMode: 'allow_once',
-  autoAlignSelection: true,
-  preferredReasoning: 'high',
-});
-
-export const KNOWN_MODELS = Object.freeze([
-  { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
-  { id: 'gpt-6-sol', label: 'GPT-6 Sol' },
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.5', label: 'GPT-5.5' },
-]);
-
-export const REASONING_LEVELS = Object.freeze([
-  { id: 'low', labelZh: '低', labelEn: 'Low' },
-  { id: 'medium', labelZh: '中', labelEn: 'Medium' },
-  { id: 'high', labelZh: '高', labelEn: 'High' },
-  { id: 'extra-high', labelZh: '超高', labelEn: 'Extra High' },
-]);
-
-const MODEL_ALIASES = Object.freeze({
-  'gpt-5.6-sol-wm': 'gpt-5.6-sol',
-  'gpt-5-6': 'gpt-5.6-sol',
-  'gpt-6-astra-wm': 'gpt-6-astra',
-  'gpt-6-sol-wm': 'gpt-6-sol',
-});
-
-const NON_CONCRETE_MODEL_IDS = new Set(['auto']);
-const INVALID_EXPLICIT_POLICY_FALLBACK = Object.freeze(['gpt-5.6-sol']);
-
-const MODEL_TRANSPORT_IDS = Object.freeze({
-  'gpt-5.6-sol': 'gpt-5.6-sol-wm',
-  'gpt-6-astra': 'gpt-6-astra-wm',
-  'gpt-6-sol': 'gpt-6-sol-wm',
-});
-
-function unique(values) {
-  return [...new Set(values)];
-}
-
-).test(model)) return family;
-  }
+  if (model === 'gpt-6-astra' || model.startsWith('gpt-6-astra.') || model.startsWith('gpt-6-astra:')
+    || model.startsWith('gpt-6-astra_') || model.startsWith('gpt-6-astra-')) return 'gpt-6-astra';
+  if (model === 'gpt-6-sol' || model.startsWith('gpt-6-sol.') || model.startsWith('gpt-6-sol:')
+    || model.startsWith('gpt-6-sol_') || model.startsWith('gpt-6-sol-')) return 'gpt-6-sol';
   return null;
 }
 
