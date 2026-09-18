@@ -22,7 +22,7 @@ test('popup keeps settings inside the account card and gives three primary actio
   }
   const accountCard = html.match(/<section class="account-card">([\s\S]*?)<\/section>/)?.[1] || '';
   const actions = html.match(/<div class="actions"[^>]*>([\s\S]*?)<\/div>/)?.[1] || '';
-  assert.match(accountCard, /id="options"[^>]*>功能配置<\/button>/);
+  assert.match(accountCard, /id="options"[^>]*>设置<\/button>/);
   for (const id of ['autoVerify', 'checkUpdate', 'help']) assert.match(actions, new RegExp(`id="${id}"`));
   assert.doesNotMatch(actions, /id="options"/);
   assert.doesNotMatch(html, /<button id="reconnect"/);

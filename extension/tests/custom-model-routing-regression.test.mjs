@@ -59,6 +59,10 @@ test('popup edits lock models and reasoning inline without opening Settings', ()
   assert.match(popupHtml, /id="autoVerifyProgress"/);
   assert.match(popupJs, /catalogVerification/);
   assert.match(popupJs, /5000/);
+  assert.match(popupCss, /#popupLockedModels\{color:#15803d/);
+  assert.match(popupCss, /expiry-good/);
+  assert.match(popupCss, /expiry-soon/);
+  assert.match(popupCss, /expiry-expired/);
 });
 
 test('model discovery schema v3 removes routing aliases before persistence', () => {

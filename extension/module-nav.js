@@ -1,6 +1,6 @@
 const MODULES = [
   { id: 'account', href: 'account.html', label: '账户中心', english: 'Account' },
-  { id: 'settings', href: 'settings-v0521.html', label: '功能配置', english: 'Features' },
+  { id: 'settings', href: 'settings-v0521.html', label: '设置', english: 'Settings' },
   { id: 'help', href: 'help.html', label: '使用帮助', english: 'Help' },
   { id: 'update', href: 'update.html', label: '版本更新', english: 'Update' },
   { id: 'diagnostics', href: 'diagnostics.html', label: '诊断日志', english: 'Diagnostics' },

@@ -39,6 +39,9 @@ test('background updater is the sole persistent update transaction owner', () =>
   assert.match(source, /chromeApi\.runtime\.reload\(\)/);
   assert.match(source, /originalMasterEnabled/);
   assert.match(source, /TRANSIENT_PHASES/);
+  assert.match(source, /RECOVERY_MONITOR_GRACE_MS = 12_000/);
+  assert.match(source, /contentAndCoreReady && monitorGraceElapsed/);
+  assert.match(source, /monitorRecoveryPending/);
 });
 
 test('100 percent is written only after recovery readiness, never immediately after installer exit', () => {
@@ -47,7 +50,7 @@ test('100 percent is written only after recovery readiness, never immediately af
   assert.doesNotMatch(installer, /phase: 'complete'/);
   const recovery = source.match(/async function recoverAfterReload\([^]*?\n\}/)?.[0] || '';
   assert.match(recovery, /runtimeReadiness/);
-  assert.match(recovery, /if \(last\.ready\)/);
+  assert.match(recovery, /last\.ready \|\| \(contentAndCoreReady && monitorGraceElapsed\)/);
   assert.match(recovery, /phase: 'complete', percent: 100/);
 });
 

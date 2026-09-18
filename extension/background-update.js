@@ -37,7 +37,8 @@ const DOWNLOAD_TIMEOUT_MS = 3 * 60 * 1000;
 const INSTALL_TIMEOUT_MS = 2 * 60 * 1000;
 const INSTALL_INITIAL_WAIT_MS = 1_000;
 const INSTALL_POLL_MS = 1_000;
-const RECOVERY_TIMEOUT_MS = 45_000;
+const RECOVERY_TIMEOUT_MS = 90_000;
+const RECOVERY_MONITOR_GRACE_MS = 12_000;
 const NATIVE_TIMEOUT_MS = 12_000;
 const LONG_POLL_ROUNDS = 3;
 const TRANSIENT_PHASES = new Set([
@@ -347,7 +348,7 @@ async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
 
   const attached = await debuggerAttachedTabIds(chromeApi);
   const expectedMonitorTabs = tabs
-    .filter((tab) => Number.isInteger(tab?.id) && tabFeatureEnabledSync(tab.id))
+    .filter((tab) => Number.isInteger(tab?.id) && tab.status !== 'loading' && tabFeatureEnabledSync(tab.id))
     .map((tab) => tab.id);
   const pendingMonitorTabs = expectedMonitorTabs.filter((tabId) => !attached.has(tabId));
   const stored = await chromeApi.storage.local.get(NATIVE_STATUS_KEY);
@@ -451,16 +452,22 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
     },
   });
 
-  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+  const recoveryStartedAt = Date.now();
+  const deadline = recoveryStartedAt + RECOVERY_TIMEOUT_MS;
   let last = null;
   while (Date.now() < deadline) {
     last = await runtimeReadiness(targetVersion, chromeApi);
-    if (last.ready) {
+    const contentAndCoreReady = last.coreReady && last.pendingContentTabs.length === 0;
+    const monitorGraceElapsed = Date.now() - recoveryStartedAt >= RECOVERY_MONITOR_GRACE_MS;
+    if (last.ready || (contentAndCoreReady && monitorGraceElapsed)) {
       await recordAttempt(targetVersion, 'complete', { nativeVersion: last.nativeVersion }, chromeApi);
       await setUpdateStatus({
         phase: 'complete', percent: 100, targetVersion,
         nativeVersion: last.nativeVersion,
-        message: `更新完成：${targetVersion}。本地核心、页面运行时和请求锁定器均已恢复。`,
+        monitorRecoveryPending: last.pendingMonitorTabs.length > 0,
+        message: last.pendingMonitorTabs.length
+          ? `更新完成：${targetVersion}。本地核心和页面运行时已恢复，请求锁定器将在页面发送请求时继续自动连接。`
+          : `更新完成：${targetVersion}。本地核心、页面运行时和请求锁定器均已恢复。`,
         completedAt: new Date().toISOString(),
       }, chromeApi);
       await setActionUpdateState({ available: false }, chromeApi);
