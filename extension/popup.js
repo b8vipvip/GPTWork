@@ -1,3 +1,4 @@
+import { KNOWN_MODELS, normalizePolicy } from './policy.js';
 import { classifyNativeError, nativeHelp, RELEASES_URL } from './native-status.js';
 
 const UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus';
@@ -27,10 +28,24 @@ const elements = {
   updateRuntimeProgressTitle: document.getElementById('updateRuntimeProgressTitle'),
   updateRuntimeProgressDetail: document.getElementById('updateRuntimeProgressDetail'),
   updateRuntimeProgressBar: document.getElementById('updateRuntimeProgressBar'),
+  popupLockedModels: document.getElementById('popupLockedModels'),
+  editModelLock: document.getElementById('editModelLock'),
 };
 
 let lastState = null;
 let updateStatus = null;
+
+function lockModelLabel(id) {
+  return KNOWN_MODELS.find((model) => model.id === id)?.label || id;
+}
+
+async function renderPopupLockSummary() {
+  const stored = await chrome.storage.sync.get('policy');
+  const policy = normalizePolicy(stored.policy);
+  if (elements.popupLockedModels) {
+    elements.popupLockedModels.textContent = policy.lockedModels.map(lockModelLabel).join(' / ') || '—';
+  }
+}
 
 function sendMessage(message) {
   return new Promise((resolve, reject) => {
@@ -224,6 +239,10 @@ async function load() {
   await renderStoredUpdateStatus();
 }
 
+elements.editModelLock?.addEventListener('click', () => {
+  void chrome.runtime.openOptionsPage();
+});
+
 elements.autoVerify.addEventListener('click', () => {
   elements.message.textContent = '正在自动验证；证据不足会自动跟踪后续流并重试一次 / Auto verification is running…';
   elements.autoVerify.disabled = true;
@@ -284,6 +303,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes[UPDATE_STATUS_KEY]?.newValue) {
     renderUpdateStatus(changes[UPDATE_STATUS_KEY].newValue);
   }
+});
+
+void renderPopupLockSummary().catch(() => {});
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'sync' && changes.policy) void renderPopupLockSummary().catch(() => {});
 });
 
 void load().catch((error) => {
