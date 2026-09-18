@@ -152,7 +152,15 @@ function renderAccount(account) {
   const sourceName = account.level?.name || entitlement.level?.name || '普通用户';
   if (el.accountEmail) el.accountEmail.textContent = user.email || '—';
   if (el.accountTier) el.accountTier.textContent = sourceName;
-  if (el.accountExpiry) el.accountExpiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
+  if (el.accountExpiry) {
+    el.accountExpiry.textContent = `权益有效期 ${localDate(entitlement.expiresAt)}`;
+    const expiresAt = Date.parse(entitlement.expiresAt || '');
+    const remainingMs = Number.isFinite(expiresAt) ? expiresAt - Date.now() : Number.POSITIVE_INFINITY;
+    el.accountExpiry.classList.remove('expiry-good', 'expiry-soon', 'expiry-expired');
+    el.accountExpiry.classList.add(
+      remainingMs <= 0 ? 'expiry-expired' : remainingMs <= 3 * 24 * 60 * 60 * 1000 ? 'expiry-soon' : 'expiry-good',
+    );
+  }
   const usage = entitlement.usage || {};
   const limits = entitlement.limits || {};
   if (el.accountUsage) {
