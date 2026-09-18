@@ -65,6 +65,7 @@ test('multi-model selection always requests Astra before Sol', () => {
   assert.equal(result.modelAfter, 'gpt-6-astra');
   assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
   assert.deepEqual(prioritizeModels(['gpt-5.6-sol', 'gpt-6-astra']), ['gpt-6-astra', 'gpt-5.6-sol']);
+  assert.deepEqual(prioritizeModels(['gpt-5.6-sol', 'gpt-6-astra', 'gpt-6.1']), ['gpt-6.1', 'gpt-6-astra', 'gpt-5.6-sol']);
 });
 
 test('rewrites a disallowed concrete model to Astra as the preferred policy target', () => {
