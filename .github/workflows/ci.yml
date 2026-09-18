@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Test embedded GPTAuto goal-bound runtime
+        shell: bash
+        run: PYTHONPATH=.github python -m unittest discover -s .github/tests -p 'test_gptauto.py' -v
       - uses: actions/setup-node@v4
         with:
           node-version: 22

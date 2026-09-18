@@ -6,12 +6,20 @@ on:
       - '.github/workflows/**'
       - '.github/scripts/**'
       - '.github/ACTIONS_STRATEGY.md'
+      - '.github/GITHUB_AGENT.md'
+      - '.github/GPTAUTO.md'
+      - '.github/gptauto/**'
+      - '.github/tests/test_gptauto.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - '.github/scripts/**'
       - '.github/ACTIONS_STRATEGY.md'
+      - '.github/GITHUB_AGENT.md'
+      - '.github/GPTAUTO.md'
+      - '.github/gptauto/**'
+      - '.github/tests/test_gptauto.py'
   workflow_dispatch:
     inputs:
       ref:
@@ -28,7 +36,7 @@ concurrency:
 
 jobs:
   policy:
-    name: Enforce GitHub Actions Strategy v3
+    name: Enforce GPTAuto / GitHub Agent policy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -66,3 +74,7 @@ jobs:
           set -Eeuo pipefail
           mapfile -t workflows < /tmp/actions-workflows.txt
           python .github/scripts/validate_actions_strategy.py "${workflows[@]}"
+
+      - name: Test embedded GPTAuto runtime
+        shell: bash
+        run: PYTHONPATH=.github python -m unittest discover -s .github/tests -p 'test_gptauto.py' -v

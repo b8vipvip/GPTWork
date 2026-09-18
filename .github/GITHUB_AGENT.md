@@ -1,6 +1,6 @@
-# GitHub Agent v3
+# GitHub Agent v3 — GPTAuto deterministic subsystem
 
-> 原“GitHub Actions 策略 v3”已正式更名为 **GitHub Agent v3**。GitHub Agent **不内置、不调用 coding-agent provider**。它负责发现问题、释放资源、做确定性修复，并把不能安全自动修复的问题整理成 **AI Repair Brief**，由用户指定的 AI 再读取仓库、Issue、Run 日志并完成代码修复。
+> GitHub Agent v3 现在是 [GPTAuto](./GPTAUTO.md) 的确定性 GitHub Actions 治理子系统。GPTAuto 负责按最终目标持续推进与完成判定；GitHub Agent 负责 Actions 的预防、治理、确定性恢复与证据交接。\n>\n> 原“GitHub Actions 策略 v3”已正式更名为 **GitHub Agent v3**。GitHub Agent **不内置、不调用 coding-agent provider**。它负责发现问题、释放资源、做确定性修复，并把不能安全自动修复的问题整理成 **AI Repair Brief**，由用户指定的 AI 再读取仓库、Issue、Run 日志并完成代码修复。
 
 ## 1. 职责边界
 
