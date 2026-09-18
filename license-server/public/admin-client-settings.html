@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GPTWork 管理 · 客户端设置</title><link rel="stylesheet" href="/admin.css"></head>
+<body data-admin-page="client-settings"><div class="shell"><aside class="sidebar"><div class="brand"><span>G</span><div><strong>GPTWork</strong><small>Control Center</small></div></div><nav><a href="/admin/overview">总览</a><a href="/admin/users">用户</a><a href="/admin/plans">用户配置</a><a href="/admin/orders">订单</a><a href="/admin/issues">Issues 讨论区</a><a href="/admin/website">官网管理</a><a href="/admin/settings">系统配置</a><a href="/admin/client-settings" class="active" aria-current="page">客户端设置</a><a href="/admin/client-logs">客户端运行日志</a><a href="/admin/server-logs">服务端日志</a><a href="/admin/update">更新</a></nav><button id="logout" class="ghost" hidden>退出管理员</button></aside>
+<main class="workspace"><header class="topbar"><div><p>GPTWORK ADMIN · CLIENT SETTINGS</p><h1>客户端设置</h1></div><span class="security-pill">Server Controlled</span></header>
+<section id="login" class="card login-card"><h2>管理员登录</h2><div class="inline"><input id="password" type="password" autocomplete="current-password" placeholder="管理员密码"><button id="loginButton" class="primary">登录</button></div><p id="loginMessage" class="message"></p></section>
+<div id="app" hidden><section class="card"><div class="section-title"><div><h2>响应确认（可选） <small>Response verification</small></h2><p class="muted">由服务端统一下发到登录客户端。</p></div></div>
+<label class="check"><input id="clientResponseVerification" type="checkbox"><span>启用响应元数据确认</span></label>
+<label class="check"><input id="clientAutoAlignSelection" type="checkbox"><span>自动对齐页面选择（尽力而为）</span></label></section>
+<section class="card"><div class="section-title"><div><h2>处理模式 <small>Enforcement mode</small></h2><p class="muted">提醒模式永不因响应确认结果阻断；强制模式只在当前正式请求的响应模型明确不符合锁定策略时阻断后续发送。</p></div></div>
+<label class="check"><input type="radio" name="clientStrictMode" value="false"><span>提醒 / Warn</span></label>
+<label class="check"><input type="radio" name="clientStrictMode" value="true"><span>强制 / Strict</span></label>
+<div class="inline"><button id="saveClientSettings" class="primary">保存客户端设置</button><span id="clientSettingsMessage" class="message"></span></div></section></div></main></div>
+<script type="module" src="/admin-client-settings.js"></script></body></html>
