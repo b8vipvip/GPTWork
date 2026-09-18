@@ -13,6 +13,17 @@ function recoverySnapshot(status) {
   try { return JSON.parse(detail.slice(jsonStart)); } catch { return {}; }
 }
 
+function sendMessage(payload) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(payload, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else if (!response?.ok) reject(new Error(response?.error || 'Extension request failed'));
+      else resolve(response.data);
+    });
+  });
+}
+
 function managerAddress() {
   return `chrome://extensions/?id=${chrome.runtime.id}`;
 }
@@ -22,8 +33,14 @@ async function liveRecoveryReadiness(status, snapshot) {
   const targetVersion = String(status?.targetVersion || '');
   if (!targetVersion || compareVersions(currentVersion, targetVersion) < 0) return { ready: false };
 
-  const stored = await chrome.storage.local.get(['nativeStatus', 'gptworkEnabledLocal']);
-  const nativeStatus = stored?.nativeStatus || {};
+  const [stored, liveState] = await Promise.all([
+    chrome.storage.local.get(['nativeStatus', 'gptworkEnabledLocal']),
+    sendMessage({ type: 'GPTLOCK_GET_STATE' }).catch(() => null),
+  ]);
+  // Recovery must use the live Core state. The persisted nativeStatus can survive an
+  // extension reload with the pre-update version and was keeping a stale error card
+  // visible even after GET_STATE already reported the new Core online.
+  const nativeStatus = liveState?.nativeStatus || stored?.nativeStatus || {};
   const coreReady = nativeStatus.connected === true && compareVersions(nativeStatus.version, targetVersion) >= 0;
   if (!coreReady) return { ready: false, coreReady, nativeVersion: nativeStatus.version ?? null };
 
@@ -109,10 +126,16 @@ function ensureGuide(card) {
   automatic.type = 'button';
   automatic.className = 'update-recovery-primary';
   automatic.textContent = '再次自动重新加载 GPTWork / Reload GPTWork';
-  automatic.addEventListener('click', () => {
+  automatic.addEventListener('click', async () => {
     automatic.disabled = true;
-    detail.textContent = '正在重新加载 GPTWork。弹窗会自动关闭；稍后重新打开即可检查恢复状态。';
-    setTimeout(() => chrome.runtime.reload(), 80);
+    detail.textContent = '正在重新检查扩展、本地 Core、页面运行时和请求锁定器状态…';
+    await loadRecoveryStatus();
+    if (guide.hidden) {
+      detail.textContent = '恢复状态已确认完成。';
+      return;
+    }
+    detail.textContent = '状态仍未完全恢复，正在重新加载 GPTWork。重新打开弹窗后会自动再次检查。';
+    setTimeout(() => chrome.runtime.reload(), 120);
   });
   const manual = document.createElement('button');
   manual.type = 'button';
