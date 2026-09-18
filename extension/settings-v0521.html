@@ -26,35 +26,33 @@
         <input id="enabled" data-gptwork-master-toggle="true" type="checkbox" aria-label="GPTWork 总开关">
         <span><strong>GPTWork 总开关</strong><small>关闭后立即停止 GPTWork；重新开启时会保留各 ChatGPT 标签页各自的 Work/模型锁定状态。</small></span>
       </label>
-      <p id="featureScope" class="permission-note">正在定位当前 ChatGPT 标签页…</p>
+      
       <label class="check-row wide">
         <input id="workModeEnabled" type="checkbox">
         <span><strong>Work 模式</strong><small>仅当前 ChatGPT 标签页生效，不与同一窗口中的其他标签页共享。启用后自动锁定 GPT-5.6 Sol 及以上模型。</small></span>
       </label>
-      <label class="check-row wide">
-        <input id="modelLockEnabled" type="checkbox">
-        <span><strong>模型锁定</strong><small>仅当前 ChatGPT 标签页生效，不与同一窗口中的其他标签页共享。启用后锁定下方“锁定模型”列表，可与当前标签页的 Work 模式叠加。</small></span>
-      </label>
     </section>
 
-    <section class="card" aria-labelledby="modelHeading">
-      <h2 id="modelHeading">锁定模型 <span>Locked models</span></h2>
-      <p class="help">这里保存“模型锁定”功能使用的模型列表。Work 模式有独立的 GPT-5.6 Sol 及以上模型规则；两个功能同时开启时会合并两边允许的模型。</p>
-      <div id="modelChoices" class="choices"></div>
-      <label class="field" for="customModels"><span>自定义模型标识（逗号分隔）</span><small>填写实际传输 model ID；添加后会立即显示在上方模型列表。Custom concrete model IDs, comma-separated.</small></label>
-      <div class="custom-model-editor">
-        <input id="customModels" type="text" spellcheck="false" placeholder="例如 / e.g. gpt-6-astra-preview">
-        <button id="saveCustomModels" class="primary" type="button">添加 / Add</button>
+    <section class="card lock-summary-card" aria-labelledby="lockSummaryHeading">
+      <div class="lock-summary-heading">
+        <div>
+          <h2 id="lockSummaryHeading">模型锁定 <span>Model lock</span></h2>
+          <p id="featureScope" class="permission-note">正在定位当前 ChatGPT 标签页…</p>
+        </div>
+        <button id="lockEditorToggle" class="icon-button" type="button" aria-expanded="false" aria-controls="lockEditor" title="编辑模型锁定 / Edit model lock">✎</button>
       </div>
-      <p id="customModelsMessage" class="inline-message" role="status" aria-live="polite"></p>
-    </section>
-
-    <section class="card" aria-labelledby="reasoningHeading">
-      <h2 id="reasoningHeading">允许的推理强度 <span>Allowed reasoning levels</span></h2>
-      <p class="help">若正式请求顶层已经存在可识别的推理强度字段，GPTWork 会把不允许的值改为优先推理强度；不会凭空添加网页当前没有发送的字段。选择后立即同步。</p>
-      <div id="reasoningChoices" class="choices"></div>
-      <label class="field" for="preferredReasoning"><span>优先推理强度</span><small>Preferred reasoning level for request locking and best-effort UI alignment</small></label>
-      <select id="preferredReasoning"></select>
+      <p class="lock-summary-line"><strong>锁定模型：</strong><span id="lockedModelSummary">—</span></p>
+      <p class="lock-summary-line"><strong>推理强度：</strong><span id="reasoningSummary">—</span></p>
+      <div id="lockEditor" class="lock-editor" hidden>
+        <p class="help">列表只来自 GPTWork 自动识别的历史模型和内置模型；不再支持手动输入自定义模型。勾选模型即可启用锁定，并用下方选项设置允许及优先推理强度。</p>
+        <div id="modelChoices" class="choices"></div>
+        <div class="reasoning-editor">
+          <strong>允许的推理强度</strong>
+          <div id="reasoningChoices" class="choices"></div>
+          <label class="field" for="preferredReasoning"><span>优先推理强度</span><small>Preferred reasoning level</small></label>
+          <select id="preferredReasoning"></select>
+        </div>
+      </div>
     </section>
 
     <section class="card" aria-labelledby="verificationHeading">
@@ -123,7 +121,7 @@
 
     <footer>
       <p id="formMessage" role="status" aria-live="polite"></p>
-      <p class="permission-note">GPTWork 总开关为全局开关；Work 模式与模型锁定按 ChatGPT 标签页隔离，同一 Chrome 窗口里的不同 ChatGPT 标签页也可以保持不同状态。模型列表及其余配置继续同步。</p>
+      <p class="permission-note">GPTWork 总开关为全局开关；Work 模式与请求锁定执行状态按 ChatGPT 标签页隔离。模型/推理配置来自自动识别目录并同步。</p>
     </footer>
   </main>
   <script src="settings-shell.js"></script>
