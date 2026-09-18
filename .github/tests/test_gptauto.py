@@ -1,10 +1,11 @@
 import sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
+from gptauto.audit import write_audit
 from gptauto.engine import begin_verify,criterion,finish,gate,is_complete,plan_ready,start
 from gptauto.model import CriterionStatus,Gate,GateStatus,State,Task
 from gptauto.planner import GoalPlanner
-class GPTAutoV02Tests(unittest.TestCase):
+class GPTAutoV031Tests(unittest.TestCase):
     def task(self,goal):
         t=Task("t",goal,"b8vipvip/GPTWork",[]);start(t);GoalPlanner().apply(t);plan_ready(t);return t
     def test_ci_goal_does_not_force_release(self):
@@ -24,4 +25,12 @@ class GPTAutoV02Tests(unittest.TestCase):
         t=self.task("合并到 main")
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"task.json";t.save(p);loaded=Task.load(p);self.assertEqual([x.gate for x in loaded.plan],[x.gate for x in t.plan])
+    def test_audit_bundle_is_generated(self):
+        t=self.task("修改 README 文档") if hasattr(self,"task") else self.make("修改文档")
+        with tempfile.TemporaryDirectory() as d:
+            paths=write_audit(t,d)
+            self.assertTrue(Path(paths["task_log"]).exists())
+            self.assertTrue(Path(paths["state"]).exists())
+            self.assertTrue(Path(paths["events"]).exists())
+            self.assertTrue(Path(paths["summary"]).exists())
 if __name__=="__main__":unittest.main()
