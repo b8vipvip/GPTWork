@@ -2,6 +2,7 @@ import {
   modelTransportId,
   normalizeModelId,
   normalizeReasoningLevel,
+  prioritizeModels,
 } from './policy.js';
 
 const MODEL_KEYS = new Set([
@@ -430,7 +431,7 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
     return result;
   }
 
-  const lockedModels = normalizedUnique(configuration.lockedModels, normalizeModelId);
+  const lockedModels = prioritizeModels(normalizedUnique(configuration.lockedModels, normalizeModelId));
   if (!lockedModels.length) {
     result.reason = 'no_locked_model';
     return result;
@@ -442,9 +443,9 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
 
   result.transportModelBefore = parsed.model;
   result.modelBefore = normalizeModelId(parsed.model);
-  const targetModel = result.modelBefore && lockedModels.includes(result.modelBefore)
-    ? result.modelBefore
-    : lockedModels[0];
+  // Multiple checked models are a priority/fallback set, not an unordered allowlist.
+  // Always request the strongest selected model first; lower models remain explicit fallbacks.
+  const targetModel = lockedModels[0];
   const targetTransport = result.modelBefore === targetModel
     ? parsed.model
     : modelTransportId(targetModel);
