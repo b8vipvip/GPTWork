@@ -1,5 +1,6 @@
 import { privateCoreChannel } from './private-core-channel.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
+import { extractStreamHandoff, streamPayloadMatches } from './network-evidence.js';
 import {
   buildPrivateResponsePayload,
   decodePrivateResponseBody,
@@ -44,9 +45,18 @@ async function evaluateResponse(tabId, body, headers, mimeType, prefix) {
   return normalizePrivateResponseEvidence(rawEvidence);
 }
 
-function matchingHandoff(monitor, record) {
-  if (!record?.downstream || !record.handoffId) return null;
-  return monitor.handoffs.get(record.handoffId) ?? null;
+function matchingHandoff(monitor, record, body = '') {
+  if (!record?.downstream) return null;
+  const direct = record.handoffId ? monitor.handoffs.get(record.handoffId) ?? null : null;
+  if (direct) return direct;
+  const payload = `${record.url || ''}\n${body}`;
+  return monitor.matchHandoff(record.tabId, payload) || monitor.newestHandoff(record.tabId);
+}
+
+function usableDownstreamResponse(record) {
+  const status = Number(record?.status);
+  if (Number.isFinite(status) && status >= 400) return false;
+  return true;
 }
 
 function emitHttpEvidence(monitor, tabId, params, record, evidence, body, handoff) {
@@ -166,12 +176,11 @@ export function installPrivateResponseRoutingHook() {
       this.requests.delete(key);
       return;
     }
-    const handoff = matchingHandoff(this, record);
-    if (record.downstream && !handoff) {
+    if (record.downstream && !usableDownstreamResponse(record)) {
       this.requests.delete(key);
-      emitHttpAuthorityFailure(this, tabId, params, record, null, { code: 'private_response_handoff_unavailable' });
       return;
     }
+    let handoff = matchingHandoff(this, record);
     if (!(await privateCoreChannel.isAvailable())) {
       this.requests.delete(key);
       emitHttpAuthorityFailure(this, tabId, params, record, handoff, { code: 'private_response_authority_unavailable' });
@@ -182,6 +191,23 @@ export function installPrivateResponseRoutingHook() {
     let evidence;
     try {
       body = await responseBody(this, tabId, record.requestId);
+      if (!record.downstream) {
+        const parsedHandoff = extractStreamHandoff(body);
+        if (parsedHandoff) handoff = this.registerHandoff(tabId, record.requestId, parsedHandoff);
+      } else {
+        handoff = matchingHandoff(this, record, body);
+        if (!handoff) {
+          this.requests.delete(key);
+          return;
+        }
+        if (record.downstreamCandidate && !streamPayloadMatches(`${record.url || ''}\n${body}`, handoff)) {
+          const age = Date.now() - handoff.startedAt;
+          if (age > 12000 || !/event-stream/i.test(record.mimeType || '')) {
+            this.requests.delete(key);
+            return;
+          }
+        }
+      }
       evidence = await evaluateResponse(
         tabId,
         body,
