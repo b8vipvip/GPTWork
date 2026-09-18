@@ -66,4 +66,8 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /account_model_catalog_discovered/);
   assert.match(backgroundSource, /model_name_fallback_completed/);
   assert.match(backgroundSource, /gptworkModelNameMappingsV1/);
+  assert.match(contentSource, /GPTLOCK_VERIFY_ACCOUNT_MODEL/);
+  assert.match(backgroundSource, /account_model_verification_started/);
+  assert.match(backgroundSource, /account_model_verification_model_completed/);
+  assert.match(backgroundSource, /account_model_verification_completed/);
 });
