@@ -633,7 +633,66 @@
     }
   }
 
+  async function discoverAccountModelMetadata() {
+    const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
+    const modelButton = [...document.querySelectorAll(MODEL_SELECTORS.join(','))].find((element) => {
+      const rect = element?.getBoundingClientRect?.();
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    const wasExpanded = modelButton?.getAttribute?.('aria-expanded') === 'true';
+    if (modelButton && !wasExpanded) {
+      modelButton.click();
+      await new Promise((resolve) => window.setTimeout(resolve, 280));
+    }
+
+    const rows = [...document.querySelectorAll(
+      '[role="menuitem"],[role="option"],[data-model],[data-model-id],[data-value]',
+    )].filter((element) => {
+      const rect = element?.getBoundingClientRect?.();
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    const models = [];
+    const reasoning = new Set();
+    for (const row of rows) {
+      const values = [
+        row.getAttribute?.('data-model'),
+        row.getAttribute?.('data-model-id'),
+        row.getAttribute?.('data-value'),
+        row.getAttribute?.('aria-label'),
+        row.getAttribute?.('title'),
+        row.innerText,
+        row.textContent,
+      ].map((value) => String(value || '').trim()).filter(Boolean);
+      const rawId = values.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt|model/i.test(value)) || null;
+      const canonical = values.map((value) => evidence?.modelFromText?.(value)).find(Boolean) || rawId;
+      const level = values.map((value) => evidence?.reasoningFromText?.(value)).find(Boolean);
+      if (level) reasoning.add(level);
+      if (!canonical) continue;
+      const label = values.find((value) => /gpt|astra|sol/i.test(value)) || canonical;
+      if (!models.some((item) => item.rawId === rawId && item.model === canonical)) {
+        models.push({ rawId, model: canonical, label });
+      }
+    }
+
+    if (modelButton && !wasExpanded && modelButton.getAttribute?.('aria-expanded') === 'true') {
+      modelButton.click();
+    }
+    const current = collectObservation();
+    if (current?.model && !models.some((item) => item.model === current.model)) {
+      models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
+    }
+    if (current?.reasoning) reasoning.add(current.reasoning);
+    return { models, reasoningLevels: [...reasoning], capturedAt: new Date().toISOString() };
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'GPTLOCK_DISCOVER_ACCOUNT_MODELS') {
+      void discoverAccountModelMetadata().then(
+        (catalog) => sendResponse({ ok: true, catalog }),
+        (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+      return true;
+    }
     if (message?.type === 'GPTLOCK_COLLECT_PAGE_STATE') {
       sendResponse({ ok: true, observation: collectObservation() });
       return false;
