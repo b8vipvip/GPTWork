@@ -1,6 +1,5 @@
 import { privateCoreChannel } from './private-core-channel.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
-import { extractStreamHandoff, streamPayloadMatches } from './network-evidence.js';
 import {
   buildPrivateResponsePayload,
   decodePrivateResponseBody,
@@ -45,12 +44,10 @@ async function evaluateResponse(tabId, body, headers, mimeType, prefix) {
   return normalizePrivateResponseEvidence(rawEvidence);
 }
 
-function matchingHandoff(monitor, record, body = '') {
+function matchingHandoff(monitor, record) {
   if (!record?.downstream) return null;
   const direct = record.handoffId ? monitor.handoffs.get(record.handoffId) ?? null : null;
-  if (direct) return direct;
-  const payload = `${record.url || ''}\n${body}`;
-  return monitor.matchHandoff(record.tabId, payload) || monitor.newestHandoff(record.tabId);
+  return direct || monitor.newestHandoff(record.tabId);
 }
 
 function usableDownstreamResponse(record) {
@@ -191,21 +188,11 @@ export function installPrivateResponseRoutingHook() {
     let evidence;
     try {
       body = await responseBody(this, tabId, record.requestId);
-      if (!record.downstream) {
-        const parsedHandoff = extractStreamHandoff(body);
-        if (parsedHandoff) handoff = this.registerHandoff(tabId, record.requestId, parsedHandoff);
-      } else {
-        handoff = matchingHandoff(this, record, body);
+      if (record.downstream) {
+        handoff = matchingHandoff(this, record);
         if (!handoff) {
           this.requests.delete(key);
           return;
-        }
-        if (record.downstreamCandidate && !streamPayloadMatches(`${record.url || ''}\n${body}`, handoff)) {
-          const age = Date.now() - handoff.startedAt;
-          if (age > 12000 || !/event-stream/i.test(record.mimeType || '')) {
-            this.requests.delete(key);
-            return;
-          }
         }
       }
       evidence = await evaluateResponse(
