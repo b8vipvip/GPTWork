@@ -1220,6 +1220,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     });
 
     try {
+      const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
+      if (!attached) throw new Error(state.monitor?.error || 'Request lock monitor is not attached');
       const selectionResponse = await sendTabMessage(tabId, {
         type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
         model: item.model,
@@ -1316,14 +1318,12 @@ async function autoVerify(tabId) {
   if (!isChatGptUrl(tab.url ?? '')) throw new Error('Open chatgpt.com first / 请先打开 chatgpt.com');
   const state = ensureTabState(tabId, tab.url);
   const startedAt = new Date().toISOString();
-  logRuntime('info', 'verification', 'auto_verify_started', {
-    tabId,
-    maxAttempts: AUTO_VERIFY_MAX_ATTEMPTS,
-  });
+  logRuntime('info', 'verification', 'auto_verify_started', { tabId });
 
   const coreCheck = await refreshNativeCore({ tolerateFailure: true });
   const monitorAttached = await networkMonitor.attach(tabId);
   const page = await collectPageObservation(tabId, state);
+  const restoreModel = normalizeConcreteModelId(state.pageObservation?.model);
   const accountCatalog = await discoverAccountCatalog(tabId);
 
   state.autoVerification = {
@@ -1331,7 +1331,7 @@ async function autoVerify(tabId) {
     startedAt,
     completedAt: null,
     attempt: 0,
-    maxAttempts: AUTO_VERIFY_MAX_ATTEMPTS,
+    maxAttempts: accountCatalog.models.length,
     retries: 0,
     outcome: 'running',
     reason: null,
@@ -1352,8 +1352,6 @@ async function autoVerify(tabId) {
   state.lastError = page.error;
   await broadcastTabState(tabId);
 
-  const catalogVerification = await verifyAccountCatalogModels(tabId, state, accountCatalog);
-
   if (!monitorAttached) {
     logRuntime('warn', 'verification', 'auto_verify_request_lock_unavailable', {
       tabId,
@@ -1361,147 +1359,50 @@ async function autoVerify(tabId) {
     });
   }
 
-  for (let attempt = 1; attempt <= AUTO_VERIFY_MAX_ATTEMPTS; attempt += 1) {
-    resetVerificationAttempt(state);
-    state.autoVerification.running = true;
-    state.autoVerification.attempt = attempt;
-    state.autoVerification.retries = attempt - 1;
-    state.autoVerification.reason = attempt > 1 ? 'retrying_after_incomplete_evidence' : null;
-    await broadcastTabState(tabId);
+  const catalogVerification = await verifyAccountCatalogModels(
+    tabId,
+    state,
+    accountCatalog,
+    { restoreModel },
+  );
+  state.autoVerification.attempts = catalogVerification.results.map((item, index) => ({
+    attempt: index + 1,
+    sent: Boolean(item.requestId),
+    requestLockConfirmed: item.requestConfirmed === true,
+    requestModel: item.requestModel ?? null,
+    responseModel: item.responseModel ?? null,
+    responseReasoning: item.responseReasoning ?? null,
+    evidenceSource: item.evidenceSource ?? null,
+    verdict: item.responseVerdict ?? null,
+    outcome: item.verified ? 'verified' : 'unverified',
+    reason: item.verified ? null : item.error || 'model_verification_incomplete',
+  }));
 
-    const attemptStartedMs = Date.now();
-    let sendResult = null;
-    let sendError = null;
-    try {
-      sendResult = await sendTabMessage(tabId, {
-        type: 'GPTLOCK_AUTO_SEND_PROBE',
-        preferredReasoning: currentSettings.preferredReasoning,
-        probeText: probeText(attempt),
-        probeMarker: `GPTWork 自动验证 ${attempt}/2`,
-      });
-    } catch (error) {
-      sendError = errorText(error);
-      state.lastError = sendError;
-      logRuntime('error', 'verification', 'auto_probe_send_failed', {
-        tabId,
-        attempt,
-        error: sendError,
-        monitorAttached,
-      });
-    }
+  const successful = catalogVerification.results.filter((item) => item.verified);
+  const lastVerified = successful.at(-1) ?? null;
+  const finalOutcome = catalogVerification.total === 0
+    ? 'unverified'
+    : catalogVerification.failed === 0 && catalogVerification.verified === catalogVerification.total
+      ? 'verified'
+      : catalogVerification.verified > 0
+        ? 'partial'
+        : 'unverified';
+  const finalReason = catalogVerification.total === 0
+    ? 'account_model_catalog_empty'
+    : catalogVerification.failed
+      ? 'account_model_verification_incomplete'
+      : null;
 
-    if (sendError || !sendResult?.sent) {
-      state.autoVerification.attempts.push({
-        attempt,
-        sent: false,
-        sendError: sendError || 'visible_probe_not_sent',
-        requestLockConfirmed: false,
-        outcome: 'send_failed',
-        reason: sendError || 'visible_probe_not_sent',
-      });
-      if (attempt < AUTO_VERIFY_MAX_ATTEMPTS) {
-        logRuntime('warn', 'verification', 'auto_verify_retry_scheduled', {
-          tabId,
-          attempt,
-          reason: sendError || 'visible_probe_not_sent',
-        });
-        await sleep(1000);
-        continue;
-      }
-      break;
-    }
-
-    logRuntime('info', 'verification', 'auto_probe_send_completed', {
-      tabId,
-      attempt,
-      sent: true,
-      method: sendResult.method ?? null,
-      draftPreserved: Boolean(sendResult.draftPreserved),
-      draftRestored: Boolean(sendResult.draftRestored),
-      coreConnected: coreCheck.connected,
-      coreError: coreCheck.error,
-      monitorAttached,
-      pageCollected: page.collected,
-      pageCollectionError: page.error,
-    });
-
-    const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
-    if (waited.timedOut) {
-      state.phase = 'unverified';
-      state.evidenceIssue = 'auto_verify_response_timeout';
-      state.lastError = 'response_verification_timeout';
-      logRuntime('warn', 'verification', 'auto_verify_response_timeout', {
-        tabId,
-        attempt,
-        requestId: waited.requestId,
-        timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
-      });
-      await broadcastTabState(tabId);
-    } else if (state.lastVerification?.verdict !== 'verified') {
-      logRuntime('info', 'verification', 'conversation_fallback_skipped', {
-        tabId,
-        attempt,
-        reason: 'deprecated_after_stream_handoff_tracking',
-        handoffSettled: Boolean(waited.handoffSettled),
-        downstreamEvidenceCount: state.streamTracking?.downstreamEvidenceCount || 0,
-      });
-    }
-
-    const requestLocked = requestLockConfirmed(state);
-    const outcome = verificationOutcome(state, { timedOut: waited.timedOut });
-    const attemptSummary = {
-      attempt,
-      sent: true,
-      requestLockConfirmed: requestLocked,
-      requestModel: state.lastRequest?.model ?? null,
-      rewriteReason: state.lastRewrite?.reason ?? null,
-      responseModel: state.lastVerification?.model ?? null,
-      responseReasoning: state.lastVerification?.reasoning ?? null,
-      evidenceSource: state.lastVerification?.evidenceSource ?? null,
-      verdict: state.lastVerification?.verdict ?? null,
-      evidenceIssue: state.evidenceIssue ?? null,
-      streamTracking: state.streamTracking ? { ...state.streamTracking } : null,
-      timedOut: waited.timedOut,
-      outcome: outcome.outcome,
-      reason: outcome.reason,
-    };
-    state.autoVerification.attempts.push(attemptSummary);
-    state.autoVerification.requestLockConfirmed = requestLocked;
-    state.autoVerification.requestModel = attemptSummary.requestModel;
-    state.autoVerification.responseModel = attemptSummary.responseModel;
-    state.autoVerification.responseReasoning = attemptSummary.responseReasoning;
-    state.autoVerification.evidenceSource = attemptSummary.evidenceSource;
-    state.autoVerification.outcome = outcome.outcome;
-    state.autoVerification.reason = outcome.reason;
-    await broadcastTabState(tabId);
-
-    if (outcome.outcome === 'verified') break;
-    if (attempt < AUTO_VERIFY_MAX_ATTEMPTS) {
-      logRuntime('warn', 'verification', 'auto_verify_retry_scheduled', {
-        tabId,
-        attempt,
-        nextAttempt: attempt + 1,
-        reason: outcome.reason,
-        requestLockConfirmed: requestLocked,
-      });
-      await sleep(1000);
-    }
-  }
-
-  const attempts = state.autoVerification.attempts;
-  const lastAttempt = attempts[attempts.length - 1] ?? null;
-  const finalOutcome = lastAttempt?.outcome ?? 'error';
-  const finalReason = lastAttempt?.reason ?? state.lastError ?? 'auto_verify_failed';
   state.autoVerification.running = false;
   state.autoVerification.completedAt = new Date().toISOString();
   state.autoVerification.outcome = finalOutcome;
   state.autoVerification.reason = finalReason;
-  state.autoVerification.retries = Math.max(0, attempts.length - 1);
-  state.autoVerification.requestLockConfirmed = Boolean(lastAttempt?.requestLockConfirmed);
-  state.autoVerification.requestModel = lastAttempt?.requestModel ?? null;
-  state.autoVerification.responseModel = lastAttempt?.responseModel ?? null;
-  state.autoVerification.responseReasoning = lastAttempt?.responseReasoning ?? null;
-  state.autoVerification.evidenceSource = lastAttempt?.evidenceSource ?? null;
+  state.autoVerification.retries = 0;
+  state.autoVerification.requestLockConfirmed = Boolean(lastVerified?.requestConfirmed);
+  state.autoVerification.requestModel = lastVerified?.requestModel ?? null;
+  state.autoVerification.responseModel = lastVerified?.responseModel ?? null;
+  state.autoVerification.responseReasoning = lastVerified?.responseReasoning ?? null;
+  state.autoVerification.evidenceSource = lastVerified?.evidenceSource ?? null;
   try {
     await finalizeAutoVerificationStreamCapture(tabId, state.autoVerification.completedAt);
   } catch (error) {
@@ -1513,22 +1414,25 @@ async function autoVerify(tabId) {
     tabId,
     outcome: finalOutcome,
     reason: finalReason,
-    attempts: attempts.length,
-    retries: state.autoVerification.retries,
-    requestLockConfirmed: state.autoVerification.requestLockConfirmed,
-    requestModel: state.autoVerification.requestModel,
-    responseModel: state.autoVerification.responseModel,
-    responseReasoning: state.autoVerification.responseReasoning,
-    evidenceSource: state.autoVerification.evidenceSource,
+    catalogTotal: catalogVerification.total,
+    catalogVerified: catalogVerification.verified,
+    catalogFailed: catalogVerification.failed,
+    models: catalogVerification.results.map((item) => ({
+      model: item.model,
+      verified: item.verified,
+      requestModel: item.requestModel ?? null,
+      responseModel: item.responseModel ?? null,
+      evidenceSource: item.evidenceSource ?? null,
+    })),
   });
 
   return {
-    ready: Boolean(lastAttempt?.sent),
-    sent: Boolean(lastAttempt?.sent),
+    ready: catalogVerification.total > 0,
+    sent: catalogVerification.results.some((item) => Boolean(item.requestId)),
     outcome: finalOutcome,
     reason: finalReason,
-    attempts: attempts.length,
-    retries: state.autoVerification.retries,
+    attempts: catalogVerification.total,
+    retries: 0,
     requestLockConfirmed: state.autoVerification.requestLockConfirmed,
     requestModel: state.autoVerification.requestModel,
     responseModel: state.autoVerification.responseModel,
@@ -1543,7 +1447,7 @@ async function autoVerify(tabId) {
       monitorAttached,
       pageCollected: page.collected,
       pageCollectionError: page.error,
-      pageModel: state.pageObservation?.model ?? null,
+      pageModel: restoreModel,
       pageReasoning: state.pageObservation?.reasoning ?? null,
       discoveredModels: accountCatalog.models,
       discoveredReasoningLevels: accountCatalog.reasoningLevels,
