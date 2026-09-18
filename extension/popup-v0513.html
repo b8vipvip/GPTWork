@@ -109,8 +109,13 @@
     </section>
 
     <section class="enable-row lock-summary-popup">
-      <span><strong>锁定模型</strong><small id="popupLockedModels">读取中…</small></span>
-      <button id="editModelLock" class="lock-edit-button" type="button" title="编辑模型与推理强度 / Edit models and reasoning">✎</button>
+      <span><strong>锁定模型 <button id="editModelLock" class="lock-edit-button" type="button" aria-expanded="false" aria-controls="popupLockEditor" title="编辑模型与推理强度 / Edit models and reasoning">✎</button></strong><small id="popupLockedModels">读取中…</small></span>
+      <div id="popupLockEditor" class="popup-lock-editor" hidden>
+        <strong>锁定模型</strong>
+        <div id="popupModelChoices" class="popup-lock-choices"></div>
+        <label class="popup-lock-field"><span>推理强度</span><select id="popupPreferredReasoning"></select></label>
+        <p id="popupLockMessage" class="popup-lock-message" role="status"></p>
+      </div>
     </section>
 
     <section id="updateRuntimeProgress" class="install-help" aria-live="polite" hidden>

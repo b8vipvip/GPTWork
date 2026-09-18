@@ -7,7 +7,7 @@ const MAX_WALK_DEPTH: usize = 14;
 const MAX_BODY_CHARS: usize = 16 * 1024 * 1024;
 const OFFICIAL_CONVERSATION_PATHS: [&str; 2] =
     ["/backend-api/conversation", "/backend-api/f/conversation"];
-const MODEL_KEYS: [&str; 12] = [
+const MODEL_KEYS: [&str; 16] = [
     "model_slug",
     "modelslug",
     "model_id",
@@ -19,6 +19,10 @@ const MODEL_KEYS: [&str; 12] = [
     "served_model_slug",
     "used_model_slug",
     "default_model_slug",
+    "model_name",
+    "modelname",
+    "backend_model",
+    "backend_model_slug",
     "model",
 ];
 const REASONING_KEYS: [&str; 7] = [
@@ -378,10 +382,19 @@ fn path_score(path: &[String], key: &str, kind: &str) -> i32 {
     });
     if kind == "model" {
         if key.contains("served") || key.contains("resolved") || key.contains("used") {
-            return 130;
+            return 140;
+        }
+        if key.contains("default") || key.contains("fallback") {
+            return 60;
+        }
+        if matches!(
+            key,
+            "model_slug" | "model_id" | "modelid" | "model_name" | "modelname"
+        ) {
+            return if metadata { 130 } else { 120 };
         }
         if key.contains("slug") && metadata {
-            return 120;
+            return 115;
         }
         if key.contains("slug") {
             return 105;
@@ -781,6 +794,25 @@ mod tests {
         let evidence = evaluate_response(&response);
         assert_eq!(evidence.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(evidence.reasoning.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn explicit_astra_model_slug_beats_default_model_metadata() {
+        let response = ResponseEnvelope {
+            body: json!({
+                "metadata": {
+                    "model_slug":"gpt-6-astra-wm",
+                    "default_model_slug":"gpt-5.6-sol-wm",
+                    "model_name":"gpt-6-astra-wm"
+                }
+            })
+            .to_string(),
+            headers: BTreeMap::new(),
+            mime_type: "application/json".into(),
+        };
+        let evidence = evaluate_response(&response);
+        assert!(!evidence.conflicts.model);
+        assert_eq!(evidence.model.as_deref(), Some("gpt-6-astra"));
     }
 
     #[test]

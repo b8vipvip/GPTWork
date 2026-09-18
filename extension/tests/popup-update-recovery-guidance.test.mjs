@@ -19,6 +19,8 @@ test('popup loads recovery guidance for installed-update recovery timeouts', () 
 test('stale 95 percent recovery errors self-heal from live extension, core, content and monitor state', () => {
   assert.match(recovery, /liveRecoveryReadiness/);
   assert.match(recovery, /compareVersions\(currentVersion, targetVersion\)/);
+  assert.match(recovery, /GPTLOCK_GET_STATE/);
+  assert.match(recovery, /liveState\?\.nativeStatus/);
   assert.match(recovery, /nativeStatus\.connected === true/);
   assert.match(recovery, /contentRuntimeReady/);
   assert.match(recovery, /chrome\.debugger\.getTargets/);

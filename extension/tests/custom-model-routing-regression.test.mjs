@@ -10,6 +10,9 @@ import {
 
 const optionsHtml = fs.readFileSync(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const optionsJs = fs.readFileSync(new URL('../options.js', import.meta.url), 'utf8');
+const popupHtml = fs.readFileSync(new URL('../popup-v0513.html', import.meta.url), 'utf8');
+const popupJs = fs.readFileSync(new URL('../popup.js', import.meta.url), 'utf8');
+const popupCss = fs.readFileSync(new URL('../popup-v0513.css', import.meta.url), 'utf8');
 const catalog = fs.readFileSync(new URL('../model-catalog.js', import.meta.url), 'utf8');
 const catalogOptions = fs.readFileSync(new URL('../model-catalog-options.js', import.meta.url), 'utf8');
 const autoLock = fs.readFileSync(new URL('../model-auto-lock.js', import.meta.url), 'utf8');
@@ -41,6 +44,17 @@ test('settings no longer expose manual custom-model entry', () => {
   assert.match(optionsHtml, /id="lockEditorToggle"/);
   assert.match(optionsHtml, /id="lockedModelSummary"/);
   assert.match(optionsHtml, /id="reasoningSummary"/);
+});
+
+test('popup edits lock models and reasoning inline without opening Settings', () => {
+  assert.match(popupHtml, /id="popupLockEditor"/);
+  assert.match(popupHtml, /id="popupModelChoices"/);
+  assert.match(popupHtml, /id="popupPreferredReasoning"/);
+  assert.match(popupJs, /discoveredModels/);
+  assert.match(popupJs, /popup-lock-model/);
+  assert.match(popupJs, /preferredReasoning/);
+  assert.doesNotMatch(popupJs, /editModelLock[\s\S]{0,180}openOptionsPage/);
+  assert.match(popupCss, /transform:scaleX\(-1\)/);
 });
 
 test('model discovery schema v3 removes routing aliases before persistence', () => {
