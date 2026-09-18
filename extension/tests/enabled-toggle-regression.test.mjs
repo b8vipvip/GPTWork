@@ -13,13 +13,15 @@ test('fresh installs default to an inert request interceptor', () => {
   assert.match(policy, /enabled:\s*false/);
 });
 
-test('popup and settings expose independent Work and model-lock feature gates', () => {
+test('popup and settings keep Work tab gate while model lock uses the compact editor', () => {
   for (const html of [popup, settings]) {
     assert.match(html, /id="workModeEnabled"/);
-    assert.match(html, /id="modelLockEnabled"/);
+    assert.doesNotMatch(html, /id="modelLockEnabled"/);
     assert.match(html, /src="feature-toggle-controller\.js"/);
     assert.doesNotMatch(html, /src="enabled-toggle-controller\.js"/);
   }
+  assert.match(popup, /id="popupLockedModels"/);
+  assert.match(settings, /id="lockEditorToggle"/);
 });
 
 test('feature controller delegates activation to the exact ChatGPT tab runtime authority', () => {
