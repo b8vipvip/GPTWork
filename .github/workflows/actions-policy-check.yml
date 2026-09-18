@@ -12,6 +12,10 @@ on:
       - '.github/workflows/**'
       - '.github/scripts/**'
       - '.github/ACTIONS_STRATEGY.md'
+      - '.github/GITHUB_AGENT.md'
+      - '.github/GPTAUTO.md'
+      - '.github/gptauto/**'
+      - '.github/tests/test_gptauto.py'
   workflow_dispatch:
     inputs:
       ref:
