@@ -108,9 +108,9 @@
       <label class="switch" title="启用 Work 模式 / Enable Work mode"><input id="workModeEnabled" type="checkbox"><span aria-hidden="true"></span></label>
     </section>
 
-    <section class="enable-row">
-      <span><strong>模型锁定</strong><small>锁定设置中勾选的全部模型</small></span>
-      <label class="switch" title="启用模型锁定 / Enable configured model lock"><input id="modelLockEnabled" type="checkbox"><span aria-hidden="true"></span></label>
+    <section class="enable-row lock-summary-popup">
+      <span><strong>锁定模型</strong><small id="popupLockedModels">读取中…</small></span>
+      <button id="editModelLock" class="lock-edit-button" type="button" title="编辑模型与推理强度 / Edit models and reasoning">✎</button>
     </section>
 
     <section id="updateRuntimeProgress" class="install-help" aria-live="polite" hidden>
