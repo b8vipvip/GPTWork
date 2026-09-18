@@ -44,12 +44,6 @@ async function evaluateResponse(tabId, body, headers, mimeType, prefix) {
   return normalizePrivateResponseEvidence(rawEvidence);
 }
 
-function matchingHandoff(monitor, record) {
-  if (!record?.downstream) return null;
-  const direct = record.handoffId ? monitor.handoffs.get(record.handoffId) ?? null : null;
-  return direct || monitor.newestHandoff(record.tabId);
-}
-
 function usableDownstreamResponse(record) {
   const status = Number(record?.status);
   if (Number.isFinite(status) && status >= 400) return false;
@@ -61,11 +55,11 @@ function emitHttpEvidence(monitor, tabId, params, record, evidence, body, handof
   const keepRawForExplicitDiagnostics = /event-stream/i.test(record.mimeType || '') || bodyFormat.includes('sse');
   const streamContext = handoff
     ? monitor.streamContext(handoff, {
-      isDownstream: true,
+      isDownstream: Boolean(record.downstream),
       transport: 'sse',
       direction: 'received',
-      stage: 'downstream_http',
-      matchBasis: record.matchBasis ?? 'handoff_marker',
+      stage: record.downstream ? 'downstream_http' : 'initial_conversation',
+      matchBasis: record.matchBasis ?? (record.downstream ? 'handoff_marker' : 'formal_request'),
     })
     : null;
   monitor.onEvidence(tabId, {
@@ -177,7 +171,7 @@ export function installPrivateResponseRoutingHook() {
       this.requests.delete(key);
       return;
     }
-    let handoff = matchingHandoff(this, record);
+    let handoff = record.handoffId ? this.handoffs.get(record.handoffId) ?? null : null;
     if (!(await privateCoreChannel.isAvailable())) {
       this.requests.delete(key);
       emitHttpAuthorityFailure(this, tabId, params, record, handoff, { code: 'private_response_authority_unavailable' });
@@ -188,12 +182,10 @@ export function installPrivateResponseRoutingHook() {
     let evidence;
     try {
       body = await responseBody(this, tabId, record.requestId);
-      if (record.downstream) {
-        handoff = matchingHandoff(this, record);
-        if (!handoff) {
-          this.requests.delete(key);
-          return;
-        }
+      handoff = this.resolveFinishedHandoff(tabId, record, body);
+      if (!this.downstreamResponseMatchesHandoff(record, body, handoff)) {
+        this.requests.delete(key);
+        return;
       }
       evidence = await evaluateResponse(
         tabId,

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { extractResponseEvidence } from '../network-evidence.js';
 import {
+  ChatGptNetworkMonitor,
   hasCompleteResponseEvidence,
   webSocketFrameMatchesHandoff,
 } from '../network-monitor.js';
@@ -102,5 +103,53 @@ test('websocket verification requires a marker from the exact handoff', () => {
       handoff,
     ),
     false,
+  );
+});
+
+
+test('private response routing can reuse initial SSE handoff correlation', () => {
+  const monitor = Object.create(ChatGptNetworkMonitor.prototype);
+  monitor.handoffs = new Map();
+  monitor.onStreamData = () => {};
+  const body = [
+    `data: ${JSON.stringify({ type: 'resume_conversation_token', token: 'resume-token-12345678', conversation_id: 'conversation-12345678' })}`,
+    `data: ${JSON.stringify({ type: 'stream_handoff', conversation_id: 'conversation-12345678', turn_exchange_id: 'turn-12345678', options: [{ type: 'websocket', topic_id: 'conversation-turn-turn-12345678' }] })}`,
+    '',
+  ].join('\n\n');
+  const record = {
+    tabId: 7,
+    requestId: 'initial-request',
+    url: 'https://chatgpt.com/backend-api/f/conversation',
+    mimeType: 'text/event-stream',
+    downstream: false,
+  };
+
+  const handoff = monitor.resolveFinishedHandoff(7, record, body);
+  assert.ok(handoff);
+  assert.equal(handoff.conversationId, 'conversation-12345678');
+  assert.equal(handoff.turnExchangeId, 'turn-12345678');
+  assert.equal(monitor.newestHandoff(7)?.id, handoff.id);
+
+  const downstream = {
+    ...record,
+    requestId: 'downstream-request',
+    downstream: true,
+    downstreamCandidate: true,
+    handoffId: null,
+    url: 'https://chatgpt.com/backend-api/conversation/stream',
+  };
+  const matched = monitor.resolveFinishedHandoff(
+    7,
+    downstream,
+    JSON.stringify({ topic_id: 'conversation-turn-turn-12345678' }),
+  );
+  assert.equal(matched?.id, handoff.id);
+  assert.equal(
+    monitor.downstreamResponseMatchesHandoff(
+      downstream,
+      JSON.stringify({ topic_id: 'conversation-turn-turn-12345678' }),
+      matched,
+    ),
+    true,
   );
 });

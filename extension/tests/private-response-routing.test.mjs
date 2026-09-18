@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   buildPrivateResponsePayload,
@@ -38,4 +39,11 @@ test('private response evidence normalizer requires complete conflict-free model
 test('base64 response decoding uses UTF-8', () => {
   const encoded = btoa(unescape(encodeURIComponent('你好 GPTWork')));
   assert.equal(decodePrivateResponseBody(encoded, true), '你好 GPTWork');
+});
+
+
+test('private response hook delegates stream correlation to the network monitor transport layer', async () => {
+  const source = await readFile(new URL('../private-response-hook.js', import.meta.url), 'utf8');
+  assert.match(source, /resolveFinishedHandoff\(tabId, record, body\)/);
+  assert.match(source, /downstreamResponseMatchesHandoff\(record, body, handoff\)/);
 });
