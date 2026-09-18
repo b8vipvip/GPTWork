@@ -16,10 +16,6 @@ const MODEL_KEYS = new Set([
   'served_model_slug',
   'used_model_slug',
   'default_model_slug',
-  'model_name',
-  'modelname',
-  'backend_model',
-  'backend_model_slug',
   'model',
 ]);
 const REASONING_KEYS = new Set([
@@ -77,16 +73,8 @@ function pathScore(path, key, kind) {
   const normalizedPath = path.map(canonicalKey);
   const metadata = normalizedPath.some((part) => /metadata|details|response/.test(part));
   if (kind === 'model') {
-    // A response can carry both the actually selected model and account/default/fallback
-    // model metadata in the same frame. Default metadata is context, not served-model
-    // evidence, and must not tie with the explicit model_slug (Astra was becoming a
-    // false conflict here).
-    if (/served|resolved|used/.test(key)) return 140;
-    if (/default|fallback/.test(key)) return 60;
-    if (key === 'model_slug' || key === 'model_id' || key === 'modelid' || key === 'model_name' || key === 'modelname') {
-      return metadata ? 130 : 120;
-    }
-    if (key.includes('slug') && metadata) return 115;
+    if (/served|resolved|used/.test(key)) return 130;
+    if (key.includes('slug') && metadata) return 120;
     if (key.includes('slug')) return 105;
     if (metadata) return 100;
     return path.length <= 2 ? 90 : 0;
