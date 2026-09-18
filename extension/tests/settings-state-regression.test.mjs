@@ -9,7 +9,7 @@ const settingsShellUrl = new URL('../settings-shell.js', import.meta.url);
 const migrationUrl = new URL('../settings-migration.js', import.meta.url);
 const masterUiUrl = new URL('../master-ui-controller.js', import.meta.url);
 
-test('current settings expose master plus independent tab-scoped Work/model-lock gates', async () => {
+test('current settings expose master, tab-scoped Work, and compact model lock editor', async () => {
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   const settingsPageUrl = new URL(`../${manifest.options_ui.page}`, import.meta.url);
   const [settingsHtml, options, featureController, shell, migration, masterUi] = await Promise.all([
@@ -27,9 +27,10 @@ test('current settings expose master plus independent tab-scoped Work/model-lock
   assert.doesNotMatch(settingsHtml, /id="enabled"[^>]*hidden/);
   assert.match(settingsHtml, /data-gptwork-settings-master="true"/);
   assert.match(settingsHtml, /<input\b(?=[^>]*\bid="workModeEnabled")(?=[^>]*\btype="checkbox")[^>]*>/);
-  assert.match(settingsHtml, /<input\b(?=[^>]*\bid="modelLockEnabled")(?=[^>]*\btype="checkbox")[^>]*>/);
+  assert.doesNotMatch(settingsHtml, /id="modelLockEnabled"/);
+  assert.match(settingsHtml, /id="lockEditorToggle"/);
   assert.match(settingsHtml, /按 ChatGPT 标签页隔离/);
-  assert.match(settingsHtml, /同一 Chrome 窗口里的不同 ChatGPT 标签页也可以保持不同状态/);
+  assert.match(settingsHtml, /按 ChatGPT 标签页隔离/);
   assert.match(settingsHtml, /<script type="module" src="feature-toggle-controller\.js"><\/script>/);
   assert.doesNotMatch(settingsHtml, /settings-enabled-guard\.js/);
   assert.doesNotMatch(settingsHtml, /enabled-toggle-controller\.js/);
