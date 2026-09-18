@@ -21,7 +21,6 @@ import {
 import { createAccountClient } from './account-client.js';
 import {
   effectivePolicyForTabSync,
-  lockConfigurationForTabSync,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
@@ -243,10 +242,24 @@ function effectiveSettingsForState(state) {
   };
 }
 
+function autoVerificationModelForTab(tabId) {
+  return normalizeConcreteModelId(
+    tabStates.get(Number(tabId))?.autoVerification?.catalogVerification?.currentModel,
+  );
+}
+
+function runtimePolicyForTabSync(tabId) {
+  const policy = effectivePolicyForTabSync(tabId);
+  const verificationModel = autoVerificationModelForTab(tabId);
+  return verificationModel
+    ? normalizePolicy({ ...policy, lockedModels: [verificationModel] })
+    : policy;
+}
+
 function guardFor(state) {
   return evaluateGuard({
     state,
-    policy: effectivePolicyForTabSync(state?.tabId),
+    policy: runtimePolicyForTabSync(state?.tabId),
     settings: effectiveSettingsForState(state),
     inScope: isChatGptUrl(state.url),
   });
@@ -316,7 +329,7 @@ async function broadcastTabState(tabId) {
     await chrome.tabs.sendMessage(tabId, {
       type: 'GPTLOCK_GUARD_STATE',
       state: publicTabState(state),
-      policy: effectivePolicyForTabSync(tabId),
+      policy: runtimePolicyForTabSync(tabId),
       settings: effectiveSettingsForState(state),
     });
   } catch {
@@ -588,7 +601,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       evidenceSource: 'network_response_metadata',
       capturedAt: evidence.capturedAt,
       requestId: `cdp-${tabId}-${evidence.requestId}`,
-    }, effectivePolicyForTabSync(tabId));
+    }, runtimePolicyForTabSync(tabId));
     state.lastVerification = result;
     state.evidenceIssue = diagnoseEvidenceIssue(evidence, result);
     state.lastError = evidence.bodyError || (evidence.conflicts?.model || evidence.conflicts?.reasoning
@@ -624,10 +637,15 @@ async function applyNetworkEvidence(tabId, evidence) {
 
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
-    return lockConfigurationForTabSync(tabId, {
-      preferredReasoning: currentSettings.preferredReasoning,
+    const policy = runtimePolicyForTabSync(tabId);
+    const verifyingAccountModel = Boolean(autoVerificationModelForTab(tabId));
+    return {
+      lockedModels: policy.lockedModels,
+      allowedReasoningLevels: policy.allowedReasoningLevels,
+      preferredReasoning: verifyingAccountModel ? null : currentSettings.preferredReasoning,
+      preserveReasoning: verifyingAccountModel,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
-    });
+    };
   },
   onStatus(tabId, monitor) {
     const state = ensureTabState(tabId);
@@ -983,7 +1001,7 @@ function resetVerificationAttempt(state) {
 }
 
 function requestLockConfirmed(state) {
-  const policy = effectivePolicyForTabSync(state?.tabId);
+  const policy = runtimePolicyForTabSync(state?.tabId);
   return Boolean(
     state.lastRequest?.model
       && policy.lockedModels.includes(state.lastRequest.model),
@@ -993,7 +1011,7 @@ function requestLockConfirmed(state) {
 function verificationOutcome(state, { timedOut = false } = {}) {
   const verification = state.lastVerification;
   const reasons = Array.isArray(verification?.reasons) ? verification.reasons : [];
-  const policy = effectivePolicyForTabSync(state?.tabId);
+  const policy = runtimePolicyForTabSync(state?.tabId);
   const modelAllowed = Boolean(
     verification?.model && policy.lockedModels.includes(verification.model),
   );
@@ -1142,37 +1160,17 @@ async function discoverAccountCatalog(tabId) {
     const reasoningLevels = [...new Set((Array.isArray(result?.catalog?.reasoningLevels)
       ? result.catalog.reasoningLevels
       : []).map(normalizeReasoningLevel).filter(Boolean))];
-    const stored = await chrome.storage.sync.get(['discoveredModels', 'discoveredModelEvidence', 'policy']);
-    const previous = Array.isArray(stored.discoveredModels) ? stored.discoveredModels : [];
-    const discoveredModels = [...new Set([...previous, ...models].map(normalizeConcreteModelId).filter(Boolean))];
-    const evidence = stored.discoveredModelEvidence && typeof stored.discoveredModelEvidence === 'object'
-      ? { ...stored.discoveredModelEvidence }
-      : {};
-    const now = new Date().toISOString();
-    for (const model of models) {
-      const prior = evidence[model] && typeof evidence[model] === 'object' ? evidence[model] : {};
-      evidence[model] = {
-        confirmed: true,
-        sources: [...new Set([...(Array.isArray(prior.sources) ? prior.sources : []), 'account_model_catalog'])],
-        firstSeenAt: prior.firstSeenAt || now,
-        lastSeenAt: now,
-      };
-    }
-    const policy = normalizePolicy(stored.policy);
-    const patch = { discoveredModels, discoveredModelEvidence: evidence };
-    if (reasoningLevels.length) {
-      patch.policy = normalizePolicy({
-        ...policy,
-        allowedReasoningLevels: [...new Set([...policy.allowedReasoningLevels, ...reasoningLevels])],
-      });
-    }
-    await chrome.storage.sync.set(patch);
+    // Account-menu DOM is discovery input, not authoritative persistence. A model is
+    // promoted to discoveredModels by model-catalog.js only after the per-model probe
+    // produces trusted network request/response metadata.
     const nameMappings = await resolveUnknownCatalogNames(tabId, rows);
-    logRuntime('info', 'verification', 'account_model_catalog_discovered', {
+    logRuntime(models.length ? 'info' : 'warn', 'verification', 'account_model_catalog_discovered', {
       tabId,
       models,
       reasoningLevels,
       rowCount: rows.length,
+      candidateCount: Number(result?.catalog?.candidateCount || 0),
+      triggerFound: result?.catalog?.triggerFound === true,
       nameMappings,
     });
     return { models, reasoningLevels, rows, nameMappings };
@@ -1185,7 +1183,7 @@ async function discoverAccountCatalog(tabId) {
   }
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog) {
+async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
   const rows = Array.isArray(accountCatalog?.rows) ? accountCatalog.rows : [];
   const unique = [];
   for (const row of rows) {
@@ -1203,29 +1201,83 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog) {
     results: [],
   };
   await broadcastTabState(tabId);
-  logRuntime('info', 'verification', 'account_model_verification_started', {
+  logRuntime(unique.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
     tabId,
     total: unique.length,
     models: unique.map((item) => item.model),
   });
+
   for (let index = 0; index < unique.length; index += 1) {
     const item = unique[index];
     const progress = state.autoVerification.catalogVerification;
     progress.currentModel = item.model;
     progress.currentLabel = item.label;
+    state.autoVerification.attempt = index + 1;
+    resetVerificationAttempt(state);
     await broadcastTabState(tabId);
     logRuntime('info', 'verification', 'account_model_verification_model_started', {
       tabId, index: index + 1, total: unique.length, model: item.model, label: item.label,
     });
+
     try {
-      const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, label: item.label });
-      const result = response?.result || {};
-      const verified = result.confirmed === true;
-      progress.results.push({ model: item.model, label: item.label, verified, observation: result.observation || null });
+      const selectionResponse = await sendTabMessage(tabId, {
+        type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+        model: item.model,
+        label: item.label,
+      });
+      const selection = selectionResponse?.result || {};
+      if (selection.confirmed !== true) {
+        throw new Error(`Model selection was not confirmed: ${selection.observation?.model || 'unknown'}`);
+      }
+
+      const attemptStartedMs = Date.now();
+      const probe = await sendTabMessage(tabId, {
+        type: 'GPTLOCK_AUTO_SEND_PROBE',
+        skipAlignment: true,
+        probeText: `GPTWork 模型验证 ${index + 1}/${unique.length}：请只回复“验证完成”。`,
+        probeMarker: 'GPTWork 模型验证',
+      });
+      if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
+
+      const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
+      const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
+      const responseModel = normalizeConcreteModelId(state.lastVerification?.model);
+      const requestConfirmed = requestModel === item.model;
+      const responseEvidence = state.lastVerification?.evidenceSource === 'network_response_metadata'
+        ? state.lastVerification
+        : null;
+      const verified = requestConfirmed && Boolean(state.lastRequest?.requestId);
+      const result = {
+        model: item.model,
+        label: item.label,
+        verified,
+        selected: true,
+        requestConfirmed,
+        requestId: state.lastRequest?.requestId ?? null,
+        requestModel,
+        responseModel,
+        responseReasoning: responseEvidence?.reasoning ?? null,
+        responseVerdict: responseEvidence?.verdict ?? null,
+        evidenceSource: responseEvidence?.evidenceSource ?? 'network_request_metadata',
+        timedOut: waited.timedOut,
+        observation: selection.observation || null,
+      };
+      progress.results.push(result);
       if (verified) progress.verified += 1; else progress.failed += 1;
       logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
-        tabId, index: index + 1, total: unique.length, model: item.model, label: item.label,
-        verified, observedModel: result.observation?.model || null,
+        tabId,
+        index: index + 1,
+        total: unique.length,
+        model: item.model,
+        label: item.label,
+        verified,
+        requestConfirmed,
+        requestId: result.requestId,
+        requestModel,
+        responseModel,
+        responseVerdict: result.responseVerdict,
+        evidenceSource: result.evidenceSource,
+        timedOut: waited.timedOut,
       });
     } catch (error) {
       progress.failed += 1;
@@ -1234,12 +1286,23 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog) {
         tabId, index: index + 1, total: unique.length, model: item.model, label: item.label, error: errorText(error),
       });
     }
+
     progress.completed = index + 1;
     await broadcastTabState(tabId);
   }
+
   const progress = state.autoVerification.catalogVerification;
   progress.currentModel = null;
   progress.currentLabel = null;
+  if (restoreModel && unique.some((item) => item.model === restoreModel)) {
+    try {
+      await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: restoreModel, label: restoreModel });
+    } catch (error) {
+      logRuntime('warn', 'verification', 'account_model_verification_restore_failed', {
+        tabId, model: restoreModel, error: errorText(error),
+      });
+    }
+  }
   logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
     tabId, total: progress.total, verified: progress.verified, failed: progress.failed, results: progress.results,
   });
@@ -1718,7 +1781,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await collectPageObservation(tabId, state);
         }
         return {
-          policy: state ? effectivePolicyForTabSync(state.tabId) : currentPolicy,
+          policy: state ? runtimePolicyForTabSync(state.tabId) : currentPolicy,
           settings: state ? effectiveSettingsForState(state) : currentSettings,
           nativeStatus: nativeStatus ?? { connected: false },
           tabState: state ? publicTabState(state) : null,
@@ -1917,7 +1980,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GPTLOCK_VERIFY': {
         const policy = sender.tab?.id
-          ? effectivePolicyForTabSync(sender.tab.id)
+          ? runtimePolicyForTabSync(sender.tab.id)
           : currentPolicy;
         return verifyObservation(message.observation ?? {}, policy);
       }
