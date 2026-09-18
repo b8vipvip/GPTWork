@@ -779,6 +779,25 @@ mod tests {
     }
 
     #[test]
+    fn rewrites_allowed_sol_request_to_stronger_selected_astra() {
+        let request = RequestEnvelope {
+            host: "chatgpt.com".into(),
+            path: "/backend-api/f/conversation".into(),
+            method: "POST".into(),
+            post_data: json!({"model":"gpt-5.6-sol-wm","thinking_effort":"high"}).to_string(),
+            locked_models: vec!["gpt-5.6-sol".into(), "gpt-6-astra".into()],
+            allowed_reasoning_levels: vec!["high".into()],
+            preferred_reasoning: Some("high".into()),
+        };
+        let decision = evaluate_request(&request);
+        assert!(decision.official_conversation);
+        assert!(decision.changed);
+        assert_eq!(decision.model_before.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-astra-wm"));
+    }
+
+    #[test]
     fn rewrites_only_official_chat_request_and_existing_reasoning_fields() {
         let request = RequestEnvelope {
             host: "chatgpt.com".into(),
