@@ -39,3 +39,13 @@ test('base64 response decoding uses UTF-8', () => {
   const encoded = btoa(unescape(encodeURIComponent('你好 GPTWork')));
   assert.equal(decodePrivateResponseBody(encoded, true), '你好 GPTWork');
 });
+
+
+test('private response hook preserves stream handoff tracking and ignores failed downstream responses', async () => {
+  const source = await import('node:fs/promises').then((fs) => fs.readFile(new URL('../private-response-hook.js', import.meta.url), 'utf8'));
+  assert.match(source, /extractStreamHandoff\(body\)/);
+  assert.match(source, /registerHandoff\(tabId, record\.requestId, parsedHandoff\)/);
+  assert.match(source, /matchingHandoff\(this, record, body\)/);
+  assert.match(source, /status >= 400/);
+  assert.match(source, /streamPayloadMatches/);
+});
