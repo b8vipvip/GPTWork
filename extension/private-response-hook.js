@@ -45,8 +45,15 @@ async function evaluateResponse(tabId, body, headers, mimeType, prefix) {
 }
 
 function matchingHandoff(monitor, record) {
-  if (!record?.downstream || !record.handoffId) return null;
-  return monitor.handoffs.get(record.handoffId) ?? null;
+  if (!record?.downstream) return null;
+  const direct = record.handoffId ? monitor.handoffs.get(record.handoffId) ?? null : null;
+  return direct || monitor.newestHandoff(record.tabId);
+}
+
+function usableDownstreamResponse(record) {
+  const status = Number(record?.status);
+  if (Number.isFinite(status) && status >= 400) return false;
+  return true;
 }
 
 function emitHttpEvidence(monitor, tabId, params, record, evidence, body, handoff) {
@@ -166,12 +173,11 @@ export function installPrivateResponseRoutingHook() {
       this.requests.delete(key);
       return;
     }
-    const handoff = matchingHandoff(this, record);
-    if (record.downstream && !handoff) {
+    if (record.downstream && !usableDownstreamResponse(record)) {
       this.requests.delete(key);
-      emitHttpAuthorityFailure(this, tabId, params, record, null, { code: 'private_response_handoff_unavailable' });
       return;
     }
+    let handoff = matchingHandoff(this, record);
     if (!(await privateCoreChannel.isAvailable())) {
       this.requests.delete(key);
       emitHttpAuthorityFailure(this, tabId, params, record, handoff, { code: 'private_response_authority_unavailable' });
@@ -182,6 +188,13 @@ export function installPrivateResponseRoutingHook() {
     let evidence;
     try {
       body = await responseBody(this, tabId, record.requestId);
+      if (record.downstream) {
+        handoff = matchingHandoff(this, record);
+        if (!handoff) {
+          this.requests.delete(key);
+          return;
+        }
+      }
       evidence = await evaluateResponse(
         tabId,
         body,
