@@ -2,7 +2,7 @@
 
 ## 中文（默认）
 
-GPTWork 内嵌 GPTAuto v0.2。GitHub 工作任务默认采用**最终目标驱动**语义，而不是按一次对话、一条 Commit、一个 PR 或一次 Actions run 判断完成。
+GPTWork 内嵌 GPTAuto v0.3.1。GitHub 工作任务默认采用**最终目标驱动**语义，而不是按一次对话、一条 Commit、一个 PR 或一次 Actions run 判断完成。
 
 ### GPTWork 如何使用
 
@@ -54,9 +54,13 @@ GPTAuto 的内置 GoalPlanner 是安全的参考/CLI 启发式规划器。GPTWor
 
 ---
 
+### 审计日志与 Artifact
+
+每个 GPTAuto 任务应生成 `.gptauto/logs/<TASK_ID>/task.log|state.json|events.jsonl|summary.md`。宿主 Actions 在任务执行环境存在该目录时，应使用 `.github/actions/upload-gptauto-log` 并以 `if: always()` 归档为 `gptauto-<TASK_ID>`，以便 DONE、BLOCKED 和失败任务都可追踪。以后诊断优先使用“仓库名 + Task ID +（可选）Actions Run ID”。
+
 ## English
 
-GPTWork embeds GPTAuto v0.2. GitHub engineering tasks are goal-bound by default: completion is determined by the requested final outcome, not by a chat turn, commit, PR, or Actions run.
+GPTWork embeds GPTAuto v0.3.1. GitHub engineering tasks are goal-bound by default: completion is determined by the requested final outcome, not by a chat turn, commit, PR, or Actions run.
 
 The host derives a task-specific Definition of Done and selects only the required dynamic gates, then verifies evidence before DONE.
 
