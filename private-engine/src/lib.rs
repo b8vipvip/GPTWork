@@ -221,18 +221,33 @@ fn unique_models(values: &[String]) -> Vec<String> {
 }
 
 fn model_priority_score(value: &str) -> i64 {
-    let Some(model) = normalize_model_id(value) else { return i64::MIN; };
+    let Some(model) = normalize_model_id(value) else {
+        return i64::MIN;
+    };
     let version = model.strip_prefix("gpt-").unwrap_or("");
     let numeric = version.split('-').next().unwrap_or("");
     let mut parts = numeric.split('.');
-    let major = parts.next().and_then(|part| part.parse::<i64>().ok()).unwrap_or(0);
-    let minor = parts.next().and_then(|part| part.parse::<i64>().ok()).unwrap_or(0);
-    let tier = if model.contains("astra") { 500 }
-        else if model.contains("pro") { 450 }
-        else if model.contains("sol") { 300 }
-        else if model.contains("terra") { 200 }
-        else if model.contains("luna") { 100 }
-        else { 0 };
+    let major = parts
+        .next()
+        .and_then(|part| part.parse::<i64>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<i64>().ok())
+        .unwrap_or(0);
+    let tier = if model.contains("astra") {
+        500
+    } else if model.contains("pro") {
+        450
+    } else if model.contains("sol") {
+        300
+    } else if model.contains("terra") {
+        200
+    } else if model.contains("luna") {
+        100
+    } else {
+        0
+    };
     (major * 1_000_000) + (minor * 10_000) + tier
 }
 
@@ -794,7 +809,10 @@ mod tests {
         assert!(decision.changed);
         assert_eq!(decision.model_before.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
-        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-astra-wm"));
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-6-astra-wm")
+        );
     }
 
     #[test]
