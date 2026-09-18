@@ -36,10 +36,9 @@
     <section class="card lock-summary-card" aria-labelledby="lockSummaryHeading">
       <div class="lock-summary-heading">
         <div>
-          <h2 id="lockSummaryHeading">模型锁定 <span>Model lock</span></h2>
+          <h2 id="lockSummaryHeading">锁定模型 <span>Model lock</span><button id="lockEditorToggle" class="icon-button" type="button" aria-expanded="false" aria-controls="lockEditor" title="编辑模型锁定 / Edit model lock">✎</button></h2>
           <p id="featureScope" class="permission-note">正在定位当前 ChatGPT 标签页…</p>
         </div>
-        <button id="lockEditorToggle" class="icon-button" type="button" aria-expanded="false" aria-controls="lockEditor" title="编辑模型锁定 / Edit model lock">✎</button>
       </div>
       <p class="lock-summary-line"><strong>锁定模型：</strong><span id="lockedModelSummary">—</span></p>
       <p class="lock-summary-line"><strong>推理强度：</strong><span id="reasoningSummary">—</span></p>
@@ -88,23 +87,6 @@
       </div>
     </section>
 
-    <section class="card" aria-labelledby="localLogHeading">
-      <div class="status-title">
-        <div>
-          <h2 id="localLogHeading">本地诊断日志 <span>Local runtime logs</span></h2>
-          <p class="help">日志保存在浏览器本机，最多保留 2000 条。记录后台、内容脚本、调试连接、自动验证及未捕获 JavaScript 错误；敏感字段继续按现有规则脱敏。</p>
-        </div>
-        <span id="localLogCount" class="request-history-count">0 / 2000</span>
-      </div>
-      <div class="update-actions">
-        <button id="exportLocalLogs" class="primary" type="button">导出本地日志</button>
-        <button id="clearLocalLogs" class="secondary" type="button">清空本地日志</button>
-        <button id="openLocalDiagnostics" class="secondary" type="button">查看详细日志</button>
-      </div>
-      <p id="localLogMessage" class="inline-message" role="status" aria-live="polite"></p>
-      <p class="permission-note">导出格式为 JSONL，可直接发给我继续定位“页面无法加载 / Receiving end does not exist / 悬浮提示缺失”等本地问题。</p>
-    </section>
-
     <section class="card request-history-card" aria-labelledby="requestHistoryHeading">
       <div class="request-history-heading">
         <div><h2 id="requestHistoryHeading">请求记录 <span>Request model history</span></h2><p class="help">列出最近正式聊天请求中发现的模型、实际发送模型和响应最终确认模型。这里是现有锁定/请求/响应证据的只读投影，不参与模型选择、锁定、验证或阻断决策。</p></div>
@@ -130,7 +112,6 @@
   <script type="module" src="options.js"></script>
   <script type="module" src="feature-toggle-controller.js"></script>
   <script type="module" src="request-history-options.js"></script>
-  <script type="module" src="settings-local-logs.js"></script>
   <script src="model-catalog-options.js"></script>
 </body>
 </html>
