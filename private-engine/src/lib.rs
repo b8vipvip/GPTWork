@@ -165,6 +165,12 @@ pub fn normalize_model_id(value: &str) -> Option<String> {
     }
     Some(match model.as_str() {
         "gpt-5.6-sol-wm" | "gpt-5-6" => "gpt-5.6-sol".to_string(),
+        "gpt-6-astra-wm" => "gpt-6-astra".to_string(),
+        _ if model.starts_with("gpt-6-astra.")
+            || model.starts_with("gpt-6-astra:") =>
+        {
+            "gpt-6-astra".to_string()
+        }
         _ => model,
     })
 }
@@ -709,6 +715,26 @@ pub fn evaluate_response(input: &ResponseEnvelope) -> EvidenceResult {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn preserves_astra_transport_alias_when_it_is_already_locked() {
+        let request = RequestEnvelope {
+            host: "chatgpt.com".into(),
+            path: "/backend-api/f/conversation".into(),
+            method: "POST".into(),
+            post_data: json!({"model":"gpt-6-astra-wm","thinking_effort":"high"}).to_string(),
+            locked_models: vec!["gpt-6-astra".into(), "gpt-5.6-sol".into()],
+            allowed_reasoning_levels: vec!["high".into()],
+            preferred_reasoning: Some("high".into()),
+        };
+        let decision = evaluate_request(&request);
+        assert!(decision.official_conversation);
+        assert!(!decision.changed);
+        assert_eq!(decision.model_before.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(decision.transport_model_before.as_deref(), Some("gpt-6-astra-wm"));
+        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-astra-wm"));
+    }
 
     #[test]
     fn rewrites_only_official_chat_request_and_existing_reasoning_fields() {
