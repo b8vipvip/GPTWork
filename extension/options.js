@@ -249,8 +249,15 @@ async function applyState(state) {
     renderLockSummary(policy, settings);
     // #enabled is local-only Master authority and is rendered exclusively by
     // master-ui-controller.js. Never repaint it from legacy/synced settings.enabled.
-    elements.networkVerification.checked = settings.networkVerificationEnabled;
-    elements.autoAlignSelection.checked = settings.autoAlignSelection;
+    // These controls were removed from settings-v0521.html when the settings UI was
+    // simplified. Keep options.js compatible with pages that no longer render them:
+    // a missing legacy checkbox must never abort applyState() before renderStatus().
+    if (elements.networkVerification) {
+      elements.networkVerification.checked = settings.networkVerificationEnabled;
+    }
+    if (elements.autoAlignSelection) {
+      elements.autoAlignSelection.checked = settings.autoAlignSelection;
+    }
     renderStatus(state.nativeStatus);
   } finally {
     applyingRemoteState = false;
@@ -343,7 +350,7 @@ elements.lockEditorToggle?.addEventListener('click', () => {
   elements.lockEditorToggle.setAttribute('aria-expanded', String(open));
 });
 
-elements.reconnect.addEventListener('click', () => {
+elements.reconnect?.addEventListener('click', () => {
   elements.nativeStatus.textContent = '重新连接中 / Reconnecting…';
   void sendMessage({ type: 'GPTLOCK_RECONNECT' })
     .then(load)
@@ -369,11 +376,11 @@ elements.autoVerify.addEventListener('click', () => {
     });
 });
 
-elements.logs.addEventListener('click', () => {
+elements.logs?.addEventListener('click', () => {
   void sendMessage({ type: 'GPTLOCK_OPEN_DIAGNOSTICS' });
 });
 
-elements.installCore.addEventListener('click', () => {
+elements.installCore?.addEventListener('click', () => {
   void chrome.tabs.create({ url: RELEASES_URL });
 });
 

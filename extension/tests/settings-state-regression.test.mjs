@@ -50,6 +50,8 @@ test('current settings expose master, tab-scoped Work, and compact model lock ed
   assert.match(masterUi, /event\.stopImmediatePropagation\(\)/);
   assert.doesNotMatch(options, /patchSettings\(\{ enabled: target\.checked \}\)/);
   assert.doesNotMatch(options, /elements\.save\.addEventListener/);
+  assert.match(options, /if \(elements\.networkVerification\)/);
+  assert.match(options, /if \(elements\.autoAlignSelection\)/);
 
   assert.match(shell, /UPDATE_STATUS_KEY = 'gptlockUiUpdateStatus'/);
   assert.match(shell, /SAFE_CORE_RECONCILE_PHASES = new Set\(\['idle', 'checking', 'ready', 'up_to_date', 'error'\]\)/);

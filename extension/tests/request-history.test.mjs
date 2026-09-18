@@ -51,6 +51,43 @@ test('request history shows discovered, sent and final response models from one 
   assert.equal(rows[0].evidenceSource, 'network_response_metadata');
 });
 
+test('marks a lower response model as server fallback while preserving the Astra request', () => {
+  const rows = buildRequestModelHistory([
+    log('2026-09-18T11:43:50.000Z', 'lock', 'request_lock_rewritten', {
+      tabId: 7,
+      requestId: 'astra-request',
+      changed: true,
+      reason: 'rewritten',
+      modelBefore: 'gpt-5.6-sol',
+      modelAfter: 'gpt-6-astra',
+      transportModelBefore: 'gpt-5.6-sol-wm',
+      transportModelAfter: 'gpt-6-astra-wm',
+    }),
+    log('2026-09-18T11:43:50.100Z', 'network', 'formal_conversation_request_detected', {
+      tabId: 7,
+      requestId: 'astra-request',
+      model: 'gpt-6-astra',
+      reasoning: 'high',
+      responseVerificationEnabled: true,
+    }, 'astra-row'),
+    log('2026-09-18T11:43:52.000Z', 'verification', 'response_evaluated', {
+      tabId: 7,
+      requestId: 'astra-request',
+      verdict: 'unverified',
+      model: 'gpt-5.6-sol',
+      reasoning: null,
+      evidenceSource: 'network_response_metadata',
+    }),
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].requestModel, 'gpt-6-astra');
+  assert.equal(rows[0].requestTransportModel, 'gpt-6-astra-wm');
+  assert.equal(rows[0].finalModel, 'gpt-5.6-sol');
+  assert.equal(rows[0].status, 'fallback');
+  assert.equal(rows[0].statusReason, 'response_model_differs_from_requested_model');
+});
+
 test('latest request stays waiting while an older unresolved request becomes unconfirmed', () => {
   const rows = buildRequestModelHistory([
     log('2026-09-06T10:00:00.000Z', 'network', 'formal_conversation_request_detected', {

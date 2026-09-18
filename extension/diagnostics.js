@@ -6,6 +6,7 @@ const elements = {
   level: document.getElementById('level'),
   component: document.getElementById('component'),
   search: document.getElementById('search'),
+  exportLimit: document.getElementById('exportLimit'),
   count: document.getElementById('count'),
   message: document.getElementById('message'),
   logs: document.getElementById('logs'),
@@ -108,7 +109,8 @@ async function exportDiagnostics() {
   elements.export.disabled = true;
   elements.message.textContent = '正在收集扩展日志与本地核心审计记录 / Collecting extension and core diagnostics…';
   try {
-    const bundle = await sendMessage({ type: 'GPTLOCK_EXPORT_DIAGNOSTICS' });
+    const entryLimit = Math.min(300, Math.max(1, Number(elements.exportLimit?.value || 300)));
+    const bundle = await sendMessage({ type: 'GPTLOCK_EXPORT_DIAGNOSTICS', entryLimit });
     const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -123,7 +125,7 @@ async function exportDiagnostics() {
     const wsCount = entries.filter((entry) => entry.transport === 'websocket').length;
     elements.message.textContent = entries.length
       ? `诊断包已导出；自动验证流共 ${entries.length} 条（SSE ${sseCount} / WebSocket ${wsCount}），${stream.includedBytes || 0} 字节${stream.overflowed ? '，另有超限数据未完整打包' : ''}。`
-      : '诊断包已导出；本次没有可打包的自动验证流数据 / Diagnostic bundle exported.';
+      : `诊断包已导出；最近 ${bundle.exportSelection?.recentEntries || entryLimit} 条范围内没有可打包的自动验证流数据 / Diagnostic bundle exported.`;
   } finally {
     elements.export.disabled = false;
   }
