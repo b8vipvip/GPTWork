@@ -1031,6 +1031,57 @@ function probeText(attempt) {
   return 'GPTWork 自动验证 2/2：请计算 137×29，并只回复结果。';
 }
 
+async function discoverAccountCatalog(tabId) {
+  try {
+    const result = await sendTabMessage(tabId, { type: 'GPTLOCK_DISCOVER_ACCOUNT_MODELS' });
+    const rows = Array.isArray(result?.catalog?.models) ? result.catalog.models : [];
+    const models = [...new Set(rows
+      .map((item) => normalizeConcreteModelId(item?.model || item?.rawId))
+      .filter(Boolean))];
+    const reasoningLevels = [...new Set((Array.isArray(result?.catalog?.reasoningLevels)
+      ? result.catalog.reasoningLevels
+      : []).map(normalizeReasoningLevel).filter(Boolean))];
+    const stored = await chrome.storage.sync.get(['discoveredModels', 'discoveredModelEvidence', 'policy']);
+    const previous = Array.isArray(stored.discoveredModels) ? stored.discoveredModels : [];
+    const discoveredModels = [...new Set([...previous, ...models].map(normalizeConcreteModelId).filter(Boolean))];
+    const evidence = stored.discoveredModelEvidence && typeof stored.discoveredModelEvidence === 'object'
+      ? { ...stored.discoveredModelEvidence }
+      : {};
+    const now = new Date().toISOString();
+    for (const model of models) {
+      const prior = evidence[model] && typeof evidence[model] === 'object' ? evidence[model] : {};
+      evidence[model] = {
+        confirmed: true,
+        sources: [...new Set([...(Array.isArray(prior.sources) ? prior.sources : []), 'account_model_catalog'])],
+        firstSeenAt: prior.firstSeenAt || now,
+        lastSeenAt: now,
+      };
+    }
+    const policy = normalizePolicy(stored.policy);
+    const patch = { discoveredModels, discoveredModelEvidence: evidence };
+    if (reasoningLevels.length) {
+      patch.policy = normalizePolicy({
+        ...policy,
+        allowedReasoningLevels: [...new Set([...policy.allowedReasoningLevels, ...reasoningLevels])],
+      });
+    }
+    await chrome.storage.sync.set(patch);
+    logRuntime('info', 'verification', 'account_model_catalog_discovered', {
+      tabId,
+      models,
+      reasoningLevels,
+      rowCount: rows.length,
+    });
+    return { models, reasoningLevels, rows };
+  } catch (error) {
+    logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
+      tabId,
+      error: errorText(error),
+    });
+    return { models: [], reasoningLevels: [], rows: [], error: errorText(error) };
+  }
+}
+
 async function autoVerify(tabId) {
   if (!masterRuntimeEnabled()) throw new Error('GPTWork is disabled / GPTWork 已关闭');
   const tab = await chrome.tabs.get(tabId);
@@ -1045,6 +1096,7 @@ async function autoVerify(tabId) {
   const coreCheck = await refreshNativeCore({ tolerateFailure: true });
   const monitorAttached = await networkMonitor.attach(tabId);
   const page = await collectPageObservation(tabId, state);
+  const accountCatalog = await discoverAccountCatalog(tabId);
 
   state.autoVerification = {
     running: true,
@@ -1259,6 +1311,8 @@ async function autoVerify(tabId) {
       pageCollectionError: page.error,
       pageModel: state.pageObservation?.model ?? null,
       pageReasoning: state.pageObservation?.reasoning ?? null,
+      discoveredModels: accountCatalog.models,
+      discoveredReasoningLevels: accountCatalog.reasoningLevels,
     },
     autoVerification: state.autoVerification,
     tabState: publicTabState(state),
