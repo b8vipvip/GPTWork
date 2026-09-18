@@ -643,6 +643,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
       preferredReasoning: verifyingAccountModel ? null : currentSettings.preferredReasoning,
+      preserveModel: verifyingAccountModel,
       preserveReasoning: verifyingAccountModel,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
     };
@@ -1188,8 +1189,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   const unique = [];
   for (const row of rows) {
     const model = normalizeConcreteModelId(row?.model || row?.rawId);
-    if (!model || unique.some((item) => item.model === model)) continue;
-    unique.push({ model, label: String(row?.label || model).slice(0, 160) });
+    const rawModel = normalizeConcreteModelId(row?.rawId);
+    if (!model || unique.some((item) => item.model === model && item.rawModel === rawModel)) continue;
+    unique.push({ model, rawModel, label: String(row?.label || model).slice(0, 160) });
   }
   state.autoVerification.catalogVerification = {
     total: unique.length,
@@ -1244,13 +1246,14 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
       const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
       const responseModel = normalizeConcreteModelId(state.lastVerification?.model);
-      const requestConfirmed = requestModel === item.model;
+      const requestConfirmed = requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel);
       const responseEvidence = state.lastVerification?.evidenceSource === 'network_response_metadata'
         ? state.lastVerification
         : null;
       const verified = requestConfirmed && Boolean(state.lastRequest?.requestId);
       const result = {
         model: item.model,
+        rawModel: item.rawModel,
         label: item.label,
         verified,
         selected: true,
@@ -1271,6 +1274,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         index: index + 1,
         total: unique.length,
         model: item.model,
+        rawModel: item.rawModel,
         label: item.label,
         verified,
         requestConfirmed,
