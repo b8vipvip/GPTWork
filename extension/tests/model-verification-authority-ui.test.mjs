@@ -42,7 +42,7 @@ test('settings runtime card has no verification action and exposes persistent ve
 
 test('model automation is composer-scoped and structurally owned', () => {
   assert.match(content, /function activeComposerSurface/);
-  assert.match(content, /Single authority: only an explicit ChatGPT composer intelligence\/model control/);
+  assert.match(content, /Single authority: ownership \+ behavior/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
   assert.match(content, /if \(unique\.length !== 1\) return null/);
   assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
@@ -57,7 +57,7 @@ test('model verification probe uses trusted send and monitor reattach', () => {
 });
 
 test('v0.5.81 model automation has one composer-scoped authority', () => {
-  assert.match(content, /Single authority: only an explicit ChatGPT composer intelligence\/model control/);
+  assert.match(content, /Single authority: ownership \+ behavior/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
   assert.match(content, /if \(unique\.length !== 1\) return null/);
   assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
@@ -118,4 +118,32 @@ test('v0.5.86 does not mistake second-layer intelligence model summaries for the
   assert.match(content, /scope\.matches\?\.\('\[data-testid="composer-intelligence-picker-content"\]'\)/);
   assert.match(content, /const uniqueExplicit = \[\.\.\.new Set\(explicit\)\]/);
   assert.doesNotMatch(content, /if \(!scope \|\| isModelListScope\(scope\)\) return null/);
+});
+
+
+test('v0.5.87 uses one composer ownership boundary instead of selector accumulation', () => {
+  assert.match(content, /function composerControlRegion/);
+  assert.match(content, /unique visible menu trigger owned by the active composer control region/);
+  assert.match(content, /querySelectorAll\('button\[aria-haspopup="menu"\],\[role="button"\]\[aria-haspopup="menu"\]'\)/);
+  assert.doesNotMatch(content, /const selectors = \[\s*'\[data-testid="model-switcher-dropdown-button"\]'/);
+});
+
+test('v0.5.87 menu cleanup is idempotent and cannot toggle a closed model trigger open', () => {
+  const start = content.indexOf('async function closeModelMenus');
+  const end = content.indexOf('async function chooseModelExact', start);
+  const closeBody = content.slice(start, end);
+  assert.match(closeBody, /Escape owns dismissal/);
+  assert.doesNotMatch(closeBody, /trustedPointer\(trigger/);
+  assert.match(closeBody, /picker_close_incomplete/);
+});
+
+test('v0.5.87 progress starts before catalog discovery so discovery failure remains visible', () => {
+  const verifyStart = background.indexOf('async function autoVerify');
+  const verifyBody = background.slice(verifyStart, verifyStart + 7000);
+  const runningAt = verifyBody.indexOf('state.autoVerification = {');
+  const broadcastAt = verifyBody.indexOf('await broadcastTabState(tabId)', runningAt);
+  const discoverAt = verifyBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
+  assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
+  assert.match(verifyBody, /maxAttempts: 0/);
+  assert.match(verifyBody, /state\.autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
 });
