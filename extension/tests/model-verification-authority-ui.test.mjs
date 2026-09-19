@@ -149,6 +149,7 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
 });
 
 
+// Safety quarantine intentionally leaves the network request authority unchanged.
 test('v0.5.88 quarantines all model-picker mutation behind one authority', () => {
   assert.match(content, /const MODEL_PICKER_MUTATION_QUARANTINED = true/);
   assert.match(content, /async function modelPickerPointer/);
