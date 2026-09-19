@@ -1208,7 +1208,11 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 
       // The UI only performs the click. The first formal request observed after it is
       // the sole authority for which model ChatGPT actually selected.
-      const attemptStartedMs = Date.now();
+      // Selection can navigate "/" -> "/c/:id". That transition temporarily detaches
+      // the debugger. Do not send the probe until the monitor is attached again, and
+      // arm the attempt timestamp only after the visible message has been accepted.
+      const reattached = await networkMonitor.attach(tabId);
+      if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
       const probe = await sendTabMessage(tabId, {
         type: 'GPTLOCK_AUTO_SEND_PROBE',
         skipAlignment: true,
@@ -1216,6 +1220,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         probeMarker: 'GPTWork 模型验证',
       });
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
+      const attemptStartedMs = Date.now() - 1500;
 
       const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
       const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
