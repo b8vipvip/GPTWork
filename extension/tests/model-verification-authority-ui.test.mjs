@@ -39,3 +39,12 @@ test('settings runtime card has no verification action and exposes persistent ve
   assert.match(background, /persistModelVerificationHistory/);
   assert.match(historyUi, /chrome\.storage\.local\.get\(MODEL_VERIFICATION_HISTORY_KEY\)/);
 });
+
+
+test('model automation is composer-scoped and cannot use arbitrary sidebar menus', () => {
+  assert.match(content, /composerRoot\.querySelectorAll\(selector\)/);
+  assert.match(content, /Never scan arbitrary global menus/);
+  assert.match(content, /verifiedModelRows/);
+  assert.match(content, /dismissWorkContinuationPrompt/);
+  assert.match(content, /留在聊天模式/);
+});
