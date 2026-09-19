@@ -59,3 +59,13 @@ test('model verification probe and progress stay visible and sidebar-safe', () =
   assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
 
+
+
+test('v0.5.81 model automation has one composer-scoped authority', () => {
+  assert.match(content, /Single authority: only an explicit ChatGPT composer intelligence\/model control/);
+  assert.doesNotMatch(content, /const scored = candidates\.map/);
+  assert.match(content, /if \(unique\.length !== 1\) return null/);
+  assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
+  assert.match(content, /gptlock-verification-progress-host/);
+  assert.match(content, /bottom:52px/);
+});
