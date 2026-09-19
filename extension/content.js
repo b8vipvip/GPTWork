@@ -88,6 +88,40 @@
     void sendMessage({ type: 'GPTLOCK_POINTER_TRACE', event, details }).catch(() => {});
   }
 
+  function pickerProbeRows(scope) {
+    if (!scope) return [];
+    return [...scope.querySelectorAll('button,[role="button"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[role="option"],[data-radix-collection-item]')]
+      .filter((element) => visible(element))
+      .slice(0, 40)
+      .map((element) => compactElementProbe(element));
+  }
+
+  function pickerTopologyProbe(stage, details = {}) {
+    const composer = activeComposerSurface();
+    const trigger = composerIntelligenceTrigger();
+    const picker = visibleIntelligencePickerContent();
+    const popups = typeof modelPopupScopes === 'function' ? modelPopupScopes() : [];
+    const composerControls = composer
+      ? [...composer.querySelectorAll('button,[role="button"],[aria-haspopup]')].filter(visible).slice(0, 30).map(compactElementProbe)
+      : [];
+    pointerTrace('picker_topology', {
+      stage,
+      href: location.href,
+      contextKind: location.pathname === '/' ? 'new-chat' : (location.pathname.startsWith('/c/') ? 'conversation' : 'other'),
+      trigger: compactElementProbe(trigger),
+      composer: compactElementProbe(composer),
+      composerControls,
+      picker: compactElementProbe(picker),
+      pickerRows: pickerProbeRows(picker),
+      popupCount: popups.length,
+      popups: popups.slice(0, 12).map((scope) => ({
+        scope: compactElementProbe(scope),
+        rows: pickerProbeRows(scope),
+      })),
+      ...details,
+    });
+  }
+
   function elementTexts(element) {
     return [
       element?.textContent?.trim(),
@@ -762,12 +796,14 @@
   async function openModernModelMenu() {
     await dismissWorkContinuationPrompt();
     const trigger = composerIntelligenceTrigger();
+    pickerTopologyProbe('before-open');
     if (!trigger) return { trigger: null, picker: null, opener: null, submenu: null, rows: [] };
 
     let picker = visibleIntelligencePickerContent();
     if (!picker) {
       await trustedPointer(trigger, 'click', 'model-picker-trigger');
       picker = await waitUntil(visibleIntelligencePickerContent, 2200, 80);
+      pickerTopologyProbe('after-trigger-click');
     }
     if (!picker) {
       try {
@@ -787,6 +823,7 @@
     }
 
     const opener = modelSubmenuOpener(picker);
+    pickerTopologyProbe('second-layer-ready', { opener: compactElementProbe(opener) });
     if (!opener) return { trigger, picker, opener: null, submenu: null, rows: [] };
 
     // Single ownership chain: the final model list does not exist for GPTWork until
@@ -800,6 +837,11 @@
       80,
     );
     const rows = submenu ? distinctModelRows(submenu) : [];
+    pickerTopologyProbe('third-layer-ready', {
+      opener: compactElementProbe(opener),
+      submenu: compactElementProbe(submenu),
+      modelRows: rows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
+    });
     return { trigger, picker, opener, submenu, rows };
   }
 
