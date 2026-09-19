@@ -36,7 +36,7 @@
     'button[aria-label*="Stop" i]',
     'button[aria-label*="停止"]',
   ];
-  const AUTO_PROBE_TEXT = 'GPTWork 自动验证测试：请只回复“验证完成”。';
+  const AUTO_PROBE_TEXT = 'GPTWork 模型验证测试：请只回复“验证完成”。';
   const BLOCKING_GUARD_HEARTBEAT_MS = 1500;
   const BLOCKING_GUARD_MAX_AGE_MS = 4500;
 
@@ -217,13 +217,19 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
       <style>
+        .indicator-shell{display:grid;gap:6px;justify-items:end}
         button{border:1px solid rgba(15,23,42,.16);border-radius:999px;padding:7px 10px;
           color:#fff;background:#64748b;font:700 12px/1.2 system-ui,sans-serif;box-shadow:0 5px 18px rgba(15,23,42,.16);cursor:pointer}
         button[data-tone="good"]{background:#15803d} button[data-tone="bad"]{background:#b91c1c}
         button[data-tone="wait"]{background:#b45309} button[data-tone="lock"]{background:#2563eb}
         button:focus{outline:3px solid #bfdbfe}
+        .model-verification-progress{width:220px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;
+          background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;
+          font:700 11px/1.35 system-ui,sans-serif}
+        .model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px}
+        .model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}
       </style>
-      <button type="button" title="打开 GPTWork 设置 / Open GPTWork settings">GPTWork · 检查中</button>`;
+      <div class="indicator-shell"><button type="button" title="打开 GPTWork 设置 / Open GPTWork settings">GPTWork · 检查中</button></div>`;
     root.querySelector('button').addEventListener('click', () => {
       void sendMessage({ type: 'GPTLOCK_OPEN_OPTIONS' }).catch(() => {});
     });
@@ -234,15 +240,34 @@
 
   function renderIndicator() {
     const host = ensureIndicator();
-    const button = host.shadowRoot.querySelector('button');
+    const root = host.shadowRoot;
+    const shell = root.querySelector('.indicator-shell');
+    const button = root.querySelector('button');
     const guard = cachedState?.guard;
     const auto = cachedState?.autoVerification;
     if (auto?.running) {
-      button.textContent = `GPTWork · 自动验证 ${auto.attempt || 1}/${auto.maxAttempts || 2}`;
+      const catalog = auto.catalogVerification;
+      const total = Math.max(0, Number(catalog?.total || auto.maxAttempts || 0));
+      const completed = Math.min(total, Math.max(0, Number(catalog?.completed || 0)));
+      let progress = root.querySelector('.model-verification-progress');
+      if (!progress) {
+        progress = document.createElement('div');
+        progress.className = 'model-verification-progress';
+        progress.innerHTML = '<div><span></span><strong></strong></div><progress value="0" max="1"></progress>';
+        shell.prepend(progress);
+      }
+      const label = catalog?.currentLabel || catalog?.currentModel || '正在发现账户模型…';
+      progress.querySelector('span').textContent = label;
+      progress.querySelector('strong').textContent = total ? `${completed} / ${total}` : '…';
+      const bar = progress.querySelector('progress');
+      bar.max = Math.max(1, total);
+      bar.value = completed;
+      button.textContent = `GPTWork · 模型验证 ${auto.attempt || 1}/${auto.maxAttempts || total || 1}`;
       button.dataset.tone = 'wait';
-      button.title = '自动验证正在进行；证据不足时会自动重试 / Auto verification is running and will retry incomplete evidence.';
+      button.title = '模型验证正在进行；最终结果以正式请求的网络元数据为准 / Model verification is running; network request metadata is authoritative.';
       return;
     }
+    root.querySelector('.model-verification-progress')?.remove();
     const labels = {
       lock_ready: ['请求已锁', 'lock'],
       verified: ['已确认', 'good'],
@@ -260,12 +285,10 @@
     const [label, tone] = labels[guard?.status] || ['检查中', 'wait'];
     button.textContent = `GPTWork · ${label}`;
     button.dataset.tone = tone;
-    const autoReason = auto?.outcome === 'model_verified_reasoning_unconfirmed'
-      ? '自动验证已重试：模型已确认，但 ChatGPT 未暴露推理强度元数据。'
-      : auto?.outcome && auto.outcome !== 'verified'
-        ? `自动验证已结束：${auto.reason || auto.outcome}；已尝试 ${auto.attempts?.length || 0} 次。`
-        : null;
-    button.title = `${autoReason || reasonText(guard)}\n点击打开设置 / Click to open settings`;
+    const verificationReason = auto?.outcome && auto.outcome !== 'verified'
+      ? `模型验证已结束：${auto.reason || auto.outcome}；已验证 ${auto.catalogVerification?.verified || 0}/${auto.catalogVerification?.total || 0}。`
+      : null;
+    button.title = `${verificationReason || reasonText(guard)}\n点击打开设置 / Click to open settings`;
   }
 
   function showNotice(guard) {
@@ -718,6 +741,34 @@
     return chooseExact(MODEL_SELECTORS, desired, normalizeDisplayedModel, { skipModern: true });
   }
 
+  async function selectModelForVerification({ model = null, selectorKey = '', label = '' } = {}) {
+    const desired = normalizeDisplayedModel(model) || String(model || '').trim().toLowerCase() || null;
+    const wantedKey = String(selectorKey || '').trim().toLowerCase();
+    const wantedLabel = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const modern = await openModernModelMenu();
+
+    if (modern.rows.length) {
+      const candidate = modern.rows.find((row) => {
+        const descriptor = rowModelDescriptor(row);
+        if (desired && (descriptor.model === desired || descriptor.rawId === desired)) return true;
+        if (wantedKey && String(descriptor.selectorKey || '').toLowerCase() === wantedKey) return true;
+        return Boolean(wantedLabel && String(descriptor.label || '').toLowerCase().replace(/\s+/g, ' ') === wantedLabel);
+      });
+      if (!candidate) {
+        await closeModelMenus(modern.trigger);
+        return { attempted: false, observation: collectObservation() };
+      }
+      const attempted = await trustedPointer(candidate, 'click');
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+      return { attempted: Boolean(attempted), observation: collectObservation() };
+    }
+
+    await closeModelMenus(modern.trigger);
+    if (!desired) return { attempted: false, observation: collectObservation() };
+    const attempted = await chooseExact(MODEL_SELECTORS, desired, normalizeDisplayedModel, { skipModern: true });
+    return { attempted: Boolean(attempted), observation: collectObservation() };
+  }
+
   async function chooseExact(triggerSelectors, desired, normalize, { skipModern = false } = {}) {
     if (!skipModern && triggerSelectors === MODEL_SELECTORS) return chooseModelExact({ model: desired, label: desired });
     const trigger = modelTrigger(triggerSelectors);
@@ -961,22 +1012,13 @@
     const label = String(message?.label || model || selectorKey || '').trim();
     if (!model && !selectorKey && !label) throw new Error('Invalid account model / 无效账户模型');
     await waitForIdle();
-    const selected = await chooseModelExact({ model, selectorKey, label });
-    const confirmedObservation = selected && model
-      ? await waitUntil(() => {
-        const observation = collectObservation();
-        return observation.model === model ? observation : null;
-      }, 3000, 100)
-      : null;
-    const observation = confirmedObservation || collectObservation();
-    const confirmed = model ? observation.model === model : selected;
+    const selection = await selectModelForVerification({ model, selectorKey, label });
     return {
       model,
       selectorKey,
       label,
-      selected,
-      confirmed,
-      observation,
+      selectionAttempted: selection.attempted === true,
+      observation: selection.observation || collectObservation(),
       capturedAt: new Date().toISOString(),
     };
   }

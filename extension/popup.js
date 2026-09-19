@@ -259,12 +259,12 @@ function render(state) {
   };
   let [title, detail, tone] = states[guard?.status] || ['无活动状态 / No active state', '请打开 chatgpt.com 后重试。', 'off'];
   if (auto?.running) {
-    title = `自动验证中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Auto verifying`;
+    title = `模型验证中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Model verification`;
     detail = '正在等待本次真实聊天响应；如果响应证据不足，程序会自动跟踪 handoff 后续流并最多再发送一次测试消息。';
     tone = 'wait';
   } else if (auto?.completedAt && autoApplies) {
     if (autoEvidenceConfirmed) {
-      title = '自动验证通过 / Verified';
+      title = '模型验证通过 / Verified';
       detail = `已完成 ${auto.attempts?.length || 1} 次尝试；后端流响应元数据确认 ${auto.responseModel} · ${auto.responseReasoning}。后续无模型字段的流帧不会抹掉这条已确认结果。`;
       tone = 'good';
     } else if (auto.outcome === 'model_verified_reasoning_unconfirmed') {
@@ -272,7 +272,7 @@ function render(state) {
       detail = `已自动重试 ${auto.retries || 0} 次；${autoReasonText(auto)}`;
       tone = 'wait';
     } else {
-      title = '自动验证未完全确认 / Auto verification incomplete';
+      title = '模型验证未完全确认 / Model verification incomplete';
       detail = `已自动尝试 ${auto.attempts?.length || 0} 次；${autoReasonText(auto) || '证据仍不足。'} 请求层锁定${auto.requestLockConfirmed ? '已确认' : '未确认'}。`;
       tone = auto.outcome === 'model_mismatch' ? 'bad' : 'wait';
     }
@@ -350,20 +350,20 @@ elements.popupPreferredReasoning?.addEventListener('change', async () => {
 });
 
 elements.autoVerify.addEventListener('click', () => {
-  elements.message.textContent = '正在自动验证；证据不足会自动跟踪后续流并重试一次 / Auto verification is running…';
+  elements.message.textContent = '正在进行模型验证；最终模型以正式请求网络元数据为准 / Model verification is running…';
   elements.autoVerify.disabled = true;
   void sendMessage({ type: 'GPTLOCK_AUTO_VERIFY' })
     .then(async (result) => {
       await load();
       if (result.outcome === 'verified') {
-        showAutoVerifyToast(`自动验证完成：已验证 ${result.catalogVerified || 0}/${result.catalogTotal || 0} 个账户模型 / Verification completed.`);
+        showAutoVerifyToast(`模型验证完成：已验证 ${result.catalogVerified || 0}/${result.catalogTotal || 0} 个账户模型 / Verification completed.`);
       } else if (result.outcome === 'model_verified_reasoning_unconfirmed') {
-        showAutoVerifyToast(`自动验证完成：模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；响应推理元数据未完全暴露。`);
+        showAutoVerifyToast(`模型验证完成：模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；响应推理元数据未完全暴露。`);
       } else {
-        showAutoVerifyToast(`自动验证完成但存在失败：${result.reason || 'metadata_incomplete'}；模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}。`);
+        showAutoVerifyToast(`模型验证完成但存在失败：${result.reason || 'metadata_incomplete'}；模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}。`);
       }
     })
-    .catch((error) => { showAutoVerifyToast(`自动验证失败 / Auto verification failed: ${error.message}`); })
+    .catch((error) => { showAutoVerifyToast(`模型验证失败 / Model verification failed: ${error.message}`); })
     .finally(() => { elements.autoVerify.disabled = false; });
 });
 

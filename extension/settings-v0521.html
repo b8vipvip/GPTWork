@@ -57,14 +57,6 @@
     <section class="card status-card" aria-labelledby="statusHeading">
       <div class="status-title">
         <h2 id="statusHeading">运行状态 <span>Runtime status</span></h2>
-        <div class="status-actions"><button id="autoVerify" class="primary" type="button" title="使用当前 GPTWork 账号权益进行自动验证">自动验证 / Auto verify</button></div>
-      </div>
-      <div id="autoVerifyProgress" class="auto-verify-progress" hidden>
-        <div class="auto-verify-progress-head">
-          <strong id="autoVerifyProgressLabel">准备自动验证…</strong>
-          <span id="autoVerifyProgressCount">0 / 0</span>
-        </div>
-        <progress id="autoVerifyProgressBar" value="0" max="1"></progress>
       </div>
       <span id="reconnect" hidden aria-hidden="true"></span>
       <span id="logs" hidden aria-hidden="true"></span>
@@ -77,6 +69,18 @@
         <p id="installDetail"></p>
         <button id="installCore" class="secondary" type="button">下载安装器 / Download installer</button>
       </div>
+    </section>
+
+    <section class="card model-verification-record-card" aria-labelledby="modelVerificationHistoryHeading">
+      <div class="model-verification-record-heading">
+        <div>
+          <h2 id="modelVerificationHistoryHeading">模型验证记录 <span>Model verification history</span></h2>
+          <p class="help">每次模型验证完成后记录本轮账户模型、正式请求实际模型和可用的响应元数据。该列表只展示结果，不参与模型选择或验证决策。</p>
+        </div>
+        <span id="modelVerificationHistoryCount" class="model-verification-history-count">最近 0 次</span>
+      </div>
+      <div id="modelVerificationHistoryList" class="model-verification-history-list"></div>
+      <p id="modelVerificationHistoryEmpty" class="model-verification-history-empty">暂无模型验证记录 / No model verification records yet.</p>
     </section>
 
     <section class="card request-history-card" aria-labelledby="requestHistoryHeading">
@@ -102,6 +106,7 @@
   <script type="module" src="extension-page-error-capture.js"></script>
   <script type="module" src="module-nav.js"></script>
   <script type="module" src="options.js"></script>
+  <script type="module" src="model-verification-history-options.js"></script>
   <script type="module" src="feature-toggle-controller.js"></script>
   <script type="module" src="request-history-options.js"></script>
   <script src="model-catalog-options.js"></script>

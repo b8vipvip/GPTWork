@@ -28,12 +28,13 @@ import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
-const AUTO_VERIFY_MAX_ATTEMPTS = 2;
 const AUTO_VERIFY_RESPONSE_TIMEOUT_MS = 45000;
 const AUTO_VERIFY_POLL_MS = 200;
 const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
 const DIAGNOSTIC_SSE_STORAGE_KEY = 'autoVerificationSseCapture';
+const MODEL_VERIFICATION_HISTORY_KEY = 'modelVerificationHistoryV1';
+const MODEL_VERIFICATION_HISTORY_LIMIT = 50;
 const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 
 let nativePort = null;
@@ -1011,50 +1012,6 @@ function resetVerificationAttempt(state) {
   state.lastError = null;
 }
 
-function requestLockConfirmed(state) {
-  const policy = runtimePolicyForTabSync(state?.tabId);
-  return Boolean(
-    state.lastRequest?.model
-      && policy.lockedModels.includes(state.lastRequest.model),
-  );
-}
-
-function verificationOutcome(state, { timedOut = false } = {}) {
-  const verification = state.lastVerification;
-  const reasons = Array.isArray(verification?.reasons) ? verification.reasons : [];
-  const policy = runtimePolicyForTabSync(state?.tabId);
-  const modelAllowed = Boolean(
-    verification?.model && policy.lockedModels.includes(verification.model),
-  );
-  if (verification?.verdict === 'verified') return { outcome: 'verified', reason: null };
-  if (reasons.includes('model_not_allowed')) {
-    return { outcome: 'model_mismatch', reason: 'confirmed_model_mismatch' };
-  }
-  if (modelAllowed && reasons.includes('reasoning_missing')) {
-    return { outcome: 'model_verified_reasoning_unconfirmed', reason: 'reasoning_not_exposed' };
-  }
-  if (timedOut) return { outcome: 'unverified', reason: 'response_verification_timeout' };
-  if (state.evidenceIssue === 'response_body_read_failed') {
-    return { outcome: 'unverified', reason: 'response_body_read_failed' };
-  }
-  if (state.streamTracking?.handoff) {
-    if ((state.streamTracking.downstreamEvidenceCount || 0) === 0) {
-      return { outcome: 'unverified', reason: 'stream_handoff_followup_not_observed' };
-    }
-    if (state.evidenceIssue === 'response_model_not_exposed' || reasons.includes('model_missing')) {
-      return { outcome: 'unverified', reason: 'downstream_model_not_exposed' };
-    }
-  }
-  if (state.evidenceIssue === 'response_model_not_exposed' || reasons.includes('model_missing')) {
-    return { outcome: 'unverified', reason: 'model_not_exposed' };
-  }
-  if (state.evidenceIssue === 'response_reasoning_not_exposed' || reasons.includes('reasoning_missing')) {
-    return { outcome: 'unverified', reason: 'reasoning_not_exposed' };
-  }
-  if (state.phase === 'error') return { outcome: 'error', reason: state.lastError || 'verification_error' };
-  return { outcome: 'unverified', reason: state.evidenceIssue || verification?.reason || 'metadata_incomplete' };
-}
-
 async function waitForAttemptVerification(tabId, startedAtMs) {
   const deadline = Date.now() + AUTO_VERIFY_RESPONSE_TIMEOUT_MS;
   let requestId = null;
@@ -1098,13 +1055,6 @@ async function waitForAttemptVerification(tabId, startedAtMs) {
     await sleep(AUTO_VERIFY_POLL_MS);
   }
   return { timedOut: true, requestId };
-}
-
-function probeText(attempt) {
-  if (attempt === 1) {
-    return 'GPTWork 自动验证 1/2：请计算 37×41，并只回复结果。';
-  }
-  return 'GPTWork 自动验证 2/2：请计算 137×29，并只回复结果。';
 }
 
 function parseModelNameMappings(text, rawIds) {
@@ -1252,10 +1202,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         label: item.label,
       });
       const selection = selectionResponse?.result || {};
-      if (selection.confirmed !== true) {
-        throw new Error(`Model selection was not confirmed: ${selection.observation?.model || 'unknown'}`);
+      if (selection.selectionAttempted !== true) {
+        throw new Error('Model selection control was not activated');
       }
 
+      // The UI only performs the click. The first formal request observed after it is
+      // the sole authority for which model ChatGPT actually selected.
       const attemptStartedMs = Date.now();
       const probe = await sendTabMessage(tabId, {
         type: 'GPTLOCK_AUTO_SEND_PROBE',
@@ -1281,7 +1233,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         selectorKey: item.selectorKey,
         label: item.label,
         verified,
-        selected: true,
+        selected: selection.selectionAttempted === true,
         requestConfirmed,
         requestId: state.lastRequest?.requestId ?? null,
         requestModel,
@@ -1341,6 +1293,49 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   });
   await broadcastTabState(tabId);
   return progress;
+}
+
+function modelVerificationHistoryRecord(tabId, autoVerification) {
+  const catalog = autoVerification?.catalogVerification || {};
+  return {
+    id: `${autoVerification?.startedAt || new Date().toISOString()}:${tabId}`,
+    tabId,
+    startedAt: autoVerification?.startedAt ?? null,
+    completedAt: autoVerification?.completedAt ?? null,
+    outcome: autoVerification?.outcome ?? 'unverified',
+    reason: autoVerification?.reason ?? null,
+    total: Number(catalog.total || 0),
+    verified: Number(catalog.verified || 0),
+    failed: Number(catalog.failed || 0),
+    results: (Array.isArray(catalog.results) ? catalog.results : []).map((item) => ({
+      model: item.model ?? null,
+      rawModel: item.rawModel ?? null,
+      selectorKey: item.selectorKey ?? null,
+      label: item.label ?? item.model ?? item.requestModel ?? 'Unknown model',
+      verified: item.verified === true,
+      requestConfirmed: item.requestConfirmed === true,
+      requestId: item.requestId ?? null,
+      requestModel: item.requestModel ?? null,
+      responseModel: item.responseModel ?? null,
+      responseReasoning: item.responseReasoning ?? null,
+      responseVerdict: item.responseVerdict ?? null,
+      evidenceSource: item.evidenceSource ?? null,
+      timedOut: item.timedOut === true,
+      error: item.error ?? null,
+    })),
+  };
+}
+
+async function persistModelVerificationHistory(tabId, autoVerification) {
+  const record = modelVerificationHistoryRecord(tabId, autoVerification);
+  const stored = await chrome.storage.local.get(MODEL_VERIFICATION_HISTORY_KEY);
+  const previous = Array.isArray(stored[MODEL_VERIFICATION_HISTORY_KEY])
+    ? stored[MODEL_VERIFICATION_HISTORY_KEY]
+    : [];
+  const next = [record, ...previous.filter((item) => item?.id !== record.id)]
+    .slice(0, MODEL_VERIFICATION_HISTORY_LIMIT);
+  await chrome.storage.local.set({ [MODEL_VERIFICATION_HISTORY_KEY]: next });
+  return record;
 }
 
 async function autoVerify(tabId) {
@@ -1438,6 +1433,11 @@ async function autoVerify(tabId) {
     await finalizeAutoVerificationStreamCapture(tabId, state.autoVerification.completedAt);
   } catch (error) {
     logRuntime('warn', 'diagnostics', 'auto_verify_stream_capture_finalize_failed', { tabId, error: errorText(error) });
+  }
+  try {
+    await persistModelVerificationHistory(tabId, state.autoVerification);
+  } catch (error) {
+    logRuntime('warn', 'verification', 'model_verification_history_write_failed', { tabId, error: errorText(error) });
   }
   await broadcastTabState(tabId);
 
