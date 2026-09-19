@@ -104,8 +104,8 @@ test('runtime logs have one diagnostics UI and are removed from settings', () =>
   assert.match(diagnosticsSource, /runtimeLogs/);
 });
 
-test('auto verification copy is account-based and legacy authorization-code copy stays absent', () => {
-  assert.match(popup, /使用当前 GPTWork 账号权益进行自动验证/);
+test('model verification copy is account-based and legacy authorization-code copy stays absent', () => {
+  assert.match(popup, /验证当前 ChatGPT 账户可用模型/);
   for (const source of [popup, popupShell, settings]) {
     assert.doesNotMatch(source, /请先验证授权码/);
     assert.doesNotMatch(source, /GPTLOCK-LICENSE|GPTLOCK_LICENSE|LICENSE_UI_STALE/);
