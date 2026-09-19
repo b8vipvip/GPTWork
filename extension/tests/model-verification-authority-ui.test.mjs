@@ -71,7 +71,7 @@ test('v0.5.82 follows the causal three-stage ChatGPT model picker', () => {
   assert.match(content, /function isModelListScope/);
   assert.match(content, /const beforeScopes = new Set\(modelPopupScopes\(\)\)/);
   assert.match(content, /await trustedPointer\(opener, 'click'\)/);
-  assert.match(content, /third-layer "Select model" menu/);
+  assert.match(content, /Single ownership chain: the final model list/);
   assert.doesNotMatch(content, /await trustedPointer\(opener, 'move'\)/);
   assert.match(content, /rows\.length < 2/);
 });
