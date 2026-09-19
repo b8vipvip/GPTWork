@@ -116,6 +116,21 @@ jobs:
           GPTAuto repair request: Actions failed for task $TASK_ID (run $FAILED_RUN_ID). The engineering agent should inspect the failed job logs, repair the current PR branch, push a new commit, and keep the same TASK_ID."
             fi
           fi
+      - name: Persist timeout recovery checkpoint
+        if: ${{ steps.state.outputs.action == 'timeout_recovery' }}
+        env:
+          TASK_ID: ${{ steps.state.outputs.task-id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ".gptauto/checkpoints"
+          cp /tmp/gptauto-action.json ".gptauto/checkpoints/$TASK_ID.json"
+          {
+            echo "## GPTAuto timeout recovery"
+            echo "- Task: $TASK_ID"
+            echo "- The current foreground ChatGPT session is no longer required for task continuity."
+            echo "- State is checkpointed in the Observer artifact; subsequent GitHub events reattach to the same TASK_ID."
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Executor summary
         if: always()
         env:
