@@ -1789,6 +1789,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         logRuntime('info', 'native', 'manual_reconnect_completed');
         return { ok: true };
       }
+      case 'GPTLOCK_POINTER_TRACE': {
+        if (!sender.tab?.id) throw new Error('Pointer trace requires a tab');
+        logRuntime('info', 'ui-pointer', String(message.event || 'trace').slice(0, 80), {
+          tabId: sender.tab.id,
+          url: sender.tab.url || null,
+          ...(message.details && typeof message.details === 'object' ? message.details : {}),
+        });
+        return { recorded: true };
+      }
       case 'GPTLOCK_TRUSTED_POINTER_PREPARE': {
         if (!sender.tab?.id) throw new Error('Trusted pointer preparation requires a tab');
         const attached = networkMonitor.isAttached(sender.tab.id) || await networkMonitor.attach(sender.tab.id);
@@ -1803,6 +1812,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error('Trusted pointer coordinates are invalid');
         }
         const action = message.action === 'move' ? 'move' : 'click';
+        logRuntime('info', 'ui-pointer', 'cdp_dispatch', {
+          tabId: sender.tab.id,
+          traceId: message.traceId ?? null,
+          source: String(message.source || 'unspecified').slice(0, 100),
+          action, x, y,
+          target: message.target ?? null,
+          hit: message.hit ?? null,
+        });
         await networkMonitor.trustedPointer(sender.tab.id, { action, x, y });
         return { action, x, y };
       }

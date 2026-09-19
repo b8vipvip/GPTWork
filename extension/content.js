@@ -53,6 +53,40 @@
   let indicator = null;
   let autoProbeRunning = false;
   let lastRuntimeContactAt = Date.now();
+  let pointerTraceSeq = 0;
+  // legacy-core-maintenance: diagnostic pointer provenance only; no selection policy or private-engine behavior.
+
+  function compactElementProbe(element) {
+    if (!element) return null;
+    const rect = element.getBoundingClientRect?.();
+    const attrs = {};
+    for (const name of ['id','class','role','aria-label','aria-haspopup','aria-expanded','aria-controls','data-testid','data-state']) {
+      const value = element.getAttribute?.(name);
+      if (value) attrs[name] = String(value).slice(0, 240);
+    }
+    const ancestors = [];
+    let node = element;
+    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+      ancestors.push({
+        tag: node.tagName?.toLowerCase?.() || '',
+        id: String(node.id || '').slice(0, 100),
+        role: String(node.getAttribute?.('role') || '').slice(0, 100),
+        testid: String(node.getAttribute?.('data-testid') || '').slice(0, 160),
+        cls: String(node.className || '').slice(0, 180),
+      });
+    }
+    return {
+      tag: element.tagName?.toLowerCase?.() || '',
+      attrs,
+      text: String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300),
+      rect: rect ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } : null,
+      ancestors,
+    };
+  }
+
+  function pointerTrace(event, details = {}) {
+    void sendMessage({ type: 'GPTLOCK_POINTER_TRACE', event, details }).catch(() => {});
+  }
 
   function elementTexts(element) {
     return [
@@ -501,7 +535,7 @@
     const stay = stayInChatModeButton();
     if (!stay) return false;
     // This is an explicit product prompt action, not model-picker discovery.
-    await trustedPointer(stay, 'click');
+    await trustedPointer(stay, 'click', 'work-continuation');
     await new Promise((resolve) => window.setTimeout(resolve, 180));
     return true;
   }
@@ -568,8 +602,17 @@
     return Boolean(hit && (hit === element || element.contains?.(hit)));
   }
 
-  async function trustedPointer(element, action = 'click') {
-    if (!element || !visible(element)) return false;
+  async function trustedPointer(element, action = 'click', source = 'unspecified') {
+    const traceId = ++pointerTraceSeq;
+    if (!element || !visible(element)) {
+      pointerTrace('rejected_invisible', { traceId, action, source, target: compactElementProbe(element) });
+      return false;
+    }
+    pointerTrace('intent', {
+      traceId, action, source, href: location.href,
+      target: compactElementProbe(element),
+      composerRoot: compactElementProbe(activeComposerSurface()),
+    });
     try { element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
     try { element.focus?.({ preventScroll: true }); } catch {}
     try {
@@ -579,15 +622,24 @@
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       if (!element.isConnected || !visible(element)) return false;
       const point = elementCenter(element);
-      if (!pointerStillOwnsPoint(element, point)) return false;
-      await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER', action, x: point.x, y: point.y });
+      if (!pointerStillOwnsPoint(element, point)) {
+        pointerTrace('rejected_hit_test', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(document.elementFromPoint(point?.x || 0, point?.y || 0)) });
+        return false;
+      }
+      const hit = document.elementFromPoint(point.x, point.y);
+      await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER', action, x: point.x, y: point.y, traceId, source, target: compactElementProbe(element), hit: compactElementProbe(hit) });
+      pointerTrace('dispatched', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(hit) });
       return true;
     } catch {
       // Synthetic fallback keeps the same DOM element as the sole action authority.
       // It never falls back to coordinates, global menus, or another candidate.
       if (!element.isConnected || !visible(element)) return false;
       const point = elementCenter(element);
-      if (!pointerStillOwnsPoint(element, point)) return false;
+      if (!pointerStillOwnsPoint(element, point)) {
+        pointerTrace('fallback_rejected_hit_test', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(document.elementFromPoint(point?.x || 0, point?.y || 0)) });
+        return false;
+      }
+      pointerTrace('synthetic_fallback', { traceId, action, source, point, target: compactElementProbe(element) });
       return dispatchSyntheticPointer(element, action);
     }
   }
@@ -714,7 +766,7 @@
 
     let picker = visibleIntelligencePickerContent();
     if (!picker) {
-      await trustedPointer(trigger, 'click');
+      await trustedPointer(trigger, 'click', 'model-picker-trigger');
       picker = await waitUntil(visibleIntelligencePickerContent, 2200, 80);
     }
     if (!picker) {
@@ -729,7 +781,7 @@
     if (!modelSubmenuOpener(picker)) {
       const advanced = advancedPickerToggle(picker);
       if (advanced) {
-        await trustedPointer(advanced, 'click');
+        await trustedPointer(advanced, 'click', 'model-picker-advanced');
         await waitUntil(() => advancedPickerView(picker), 1400, 80);
       }
     }
@@ -740,7 +792,7 @@
     // Single ownership chain: the final model list does not exist for GPTWork until
     // this exact second-layer row is activated. No pre-existing/global menu can win.
     const beforeScopes = new Set(modelPopupScopes());
-    const opened = await trustedPointer(opener, 'click');
+    const opened = await trustedPointer(opener, 'click', 'model-picker-submenu');
     if (!opened) return { trigger, picker, opener, submenu: null, rows: [] };
     const submenu = await waitUntil(
       () => visibleModelSubmenu(picker, opener, beforeScopes),
@@ -791,7 +843,7 @@
     await new Promise((resolve) => window.setTimeout(resolve, 90));
     try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); } catch {}
     await new Promise((resolve) => window.setTimeout(resolve, 120));
-    if (visibleIntelligencePickerContent() && trigger) await trustedPointer(trigger, 'click');
+    if (visibleIntelligencePickerContent() && trigger) await trustedPointer(trigger, 'click', 'model-picker-close');
   }
 
   async function chooseModelExact({ model = null, selectorKey = '', label = '' } = {}) {
@@ -836,7 +888,7 @@
         await closeModelMenus(modern.trigger);
         return { attempted: false, observation: collectObservation() };
       }
-      const attempted = await trustedPointer(candidate, 'click');
+      const attempted = await trustedPointer(candidate, 'click', 'verification-model-row');
       await new Promise((resolve) => window.setTimeout(resolve, 700));
       return { attempted: Boolean(attempted), observation: collectObservation() };
     }
@@ -1045,7 +1097,7 @@
         if (draftPreserved) setComposerText(composer, originalDraft);
         throw new Error('ChatGPT send button is unavailable / ChatGPT 发送按钮不可用');
       }
-      await trustedPointer(sendButton, 'click');
+      await trustedPointer(sendButton, 'click', 'auto-probe-send');
 
       const sent = await waitUntil(() => {
         const currentComposer = findComposer();
