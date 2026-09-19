@@ -70,7 +70,7 @@ test('v0.5.82 follows the causal three-stage ChatGPT model picker', () => {
   assert.match(content, /function distinctModelRows/);
   assert.match(content, /function isModelListScope/);
   assert.match(content, /const beforeScopes = new Set\(modelPopupScopes\(\)\)/);
-  assert.match(content, /await trustedPointer\(opener, 'click', 'model-picker-submenu'\)/);
+  assert.match(content, /await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
   assert.match(content, /Single ownership chain: the final model list/);
   assert.doesNotMatch(content, /await trustedPointer\(opener, 'move'\)/);
   assert.match(content, /rows\.length < 2/);
@@ -146,4 +146,33 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
   assert.match(verifyBody, /state\.autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
+});
+
+
+test('v0.5.88 quarantines all model-picker mutation behind one authority', () => {
+  assert.match(content, /const MODEL_PICKER_MUTATION_QUARANTINED = true/);
+  assert.match(content, /async function modelPickerPointer/);
+  assert.match(content, /model_picker_mutation_quarantined/);
+  assert.match(content, /passiveComposerTopologyProbe\('mutation-quarantined'\)/);
+
+  const openStart = content.indexOf('async function openModernModelMenu');
+  const openEnd = content.indexOf('function rowModelDescriptor', openStart);
+  const openBody = content.slice(openStart, openEnd);
+  const quarantineReturn = openBody.indexOf('quarantined: true');
+  const firstDismiss = openBody.indexOf('await dismissWorkContinuationPrompt()');
+  assert(quarantineReturn >= 0 && firstDismiss > quarantineReturn);
+  assert.doesNotMatch(openBody, /await trustedPointer\((trigger|advanced|opener)/);
+  assert.match(openBody, /await modelPickerPointer\(trigger, 'click', 'model-picker-trigger'\)/);
+  assert.match(openBody, /await modelPickerPointer\(advanced, 'click', 'model-picker-advanced'\)/);
+  assert.match(openBody, /await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
+});
+
+test('v0.5.88 account discovery has no legacy direct model-trigger click', () => {
+  const start = content.indexOf('async function discoverAccountModelMetadata');
+  const end = content.indexOf('chrome.runtime.onMessage.addListener', start);
+  const body = content.slice(start, end);
+  assert.match(body, /pickerKind: 'quarantined-passive'/);
+  assert.match(body, /mutationQuarantined: true/);
+  assert.doesNotMatch(body, /await trustedPointer\(trigger, 'click'\)/);
+  assert.match(body, /await modelPickerPointer\(trigger, 'click', 'legacy-model-trigger'\)/);
 });
