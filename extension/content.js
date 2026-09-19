@@ -39,6 +39,10 @@
   const AUTO_PROBE_TEXT = 'GPTWork 模型验证测试：请只回复“验证完成”。';
   const BLOCKING_GUARD_HEARTBEAT_MS = 1500;
   const BLOCKING_GUARD_MAX_AGE_MS = 4500;
+  // Temporary safety quarantine: model-picker DOM mutation is disabled until the
+  // current ChatGPT trigger is identified from passive topology diagnostics.
+  // One authority owns this switch; callers cannot bypass it with fallback clicks.
+  const MODEL_PICKER_MUTATION_QUARANTINED = true;
 
   let reportTimer = null;
   let alignTimer = null;
@@ -119,6 +123,25 @@
         rows: pickerProbeRows(scope),
       })),
       ...details,
+    });
+  }
+
+  function passiveComposerTopologyProbe(stage) {
+    const prompt = findComposer();
+    const ancestry = [];
+    let node = prompt;
+    for (let depth = 0; node && depth < 9; depth += 1, node = node.parentElement) {
+      const controls = [...node.querySelectorAll('button,[role="button"],[aria-haspopup]')]
+        .filter(visible)
+        .slice(0, 40)
+        .map(compactElementProbe);
+      ancestry.push({ depth, node: compactElementProbe(node), controls });
+    }
+    pointerTrace('passive_composer_topology', {
+      stage,
+      href: location.href,
+      prompt: compactElementProbe(prompt),
+      ancestry,
     });
   }
 
@@ -643,6 +666,18 @@
     return Boolean(hit && (hit === element || element.contains?.(hit)));
   }
 
+  async function modelPickerPointer(element, action = 'click', source = 'model-picker') {
+    if (MODEL_PICKER_MUTATION_QUARANTINED) {
+      pointerTrace('model_picker_mutation_quarantined', {
+        action,
+        source,
+        target: compactElementProbe(element),
+      });
+      return false;
+    }
+    return trustedPointer(element, action, source);
+  }
+
   async function trustedPointer(element, action = 'click', source = 'unspecified') {
     const traceId = ++pointerTraceSeq;
     if (!element || !visible(element)) {
@@ -811,6 +846,14 @@
   }
 
   async function openModernModelMenu() {
+    if (MODEL_PICKER_MUTATION_QUARANTINED) {
+      // Do not activate any guessed control while the live ChatGPT picker schema is
+      // unresolved. Capture enough passive structure to identify the real trigger in
+      // diagnostics, then fail closed with zero UI mutation.
+      pickerTopologyProbe('mutation-quarantined');
+      passiveComposerTopologyProbe('mutation-quarantined');
+      return { trigger: null, picker: null, opener: null, submenu: null, rows: [], quarantined: true };
+    }
     await dismissWorkContinuationPrompt();
     const trigger = composerIntelligenceTrigger();
     pickerTopologyProbe('before-open');
@@ -818,7 +861,7 @@
 
     let picker = visibleIntelligencePickerContent();
     if (!picker) {
-      await trustedPointer(trigger, 'click', 'model-picker-trigger');
+      await modelPickerPointer(trigger, 'click', 'model-picker-trigger');
       picker = await waitUntil(visibleIntelligencePickerContent, 2200, 80);
       pickerTopologyProbe('after-trigger-click');
     }
@@ -834,7 +877,7 @@
     if (!modelSubmenuOpener(picker)) {
       const advanced = advancedPickerToggle(picker);
       if (advanced) {
-        await trustedPointer(advanced, 'click', 'model-picker-advanced');
+        await modelPickerPointer(advanced, 'click', 'model-picker-advanced');
         await waitUntil(() => advancedPickerView(picker), 1400, 80);
       }
     }
@@ -846,7 +889,7 @@
     // Single ownership chain: the final model list does not exist for GPTWork until
     // this exact second-layer row is activated. No pre-existing/global menu can win.
     const beforeScopes = new Set(modelPopupScopes());
-    const opened = await trustedPointer(opener, 'click', 'model-picker-submenu');
+    const opened = await modelPickerPointer(opener, 'click', 'model-picker-submenu');
     if (!opened) return { trigger, picker, opener, submenu: null, rows: [] };
     const submenu = await waitUntil(
       () => visibleModelSubmenu(picker, opener, beforeScopes),
@@ -951,7 +994,7 @@
         await closeModelMenus(modern.trigger);
         return { attempted: false, observation: collectObservation() };
       }
-      const attempted = await trustedPointer(candidate, 'click', 'verification-model-row');
+      const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
       await new Promise((resolve) => window.setTimeout(resolve, 700));
       return { attempted: Boolean(attempted), observation: collectObservation() };
     }
@@ -1259,6 +1302,22 @@
 
     const modern = await openModernModelMenu();
     triggerFound = Boolean(modern.trigger);
+    if (modern.quarantined) {
+      const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
+      if (current?.model) {
+        models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
+      }
+      if (current?.reasoning) reasoning.add(current.reasoning);
+      return {
+        models,
+        reasoningLevels: [...reasoning],
+        capturedAt: new Date().toISOString(),
+        candidateCount: 0,
+        triggerFound: false,
+        pickerKind: 'quarantined-passive',
+        mutationQuarantined: true,
+      };
+    }
     if (modern.picker) {
       for (const row of [...modern.picker.querySelectorAll('[role="menuitemradio"],[role="radio"]')].filter(visible)) {
         for (const value of elementTexts(row)) {
@@ -1281,8 +1340,8 @@
       const wasExpanded = trigger?.getAttribute?.('aria-expanded') === 'true';
       let openedByUs = false;
       if (trigger && !wasExpanded) {
-        await trustedPointer(trigger, 'click');
-        openedByUs = true;
+        const opened = await modelPickerPointer(trigger, 'click', 'legacy-model-trigger');
+        openedByUs = Boolean(opened);
       }
       const rows = trigger
         ? (await waitUntil(() => {
