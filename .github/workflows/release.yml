@@ -1,5 +1,4 @@
 name: Release
-# v0.5.86 release trigger: ensure main push workflows run after the merged release fix.
 
 on:
   push:
@@ -20,6 +19,7 @@ concurrency:
 jobs:
   metadata:
     name: Resolve release metadata
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -69,6 +69,7 @@ jobs:
 
   wait-for-ci:
     name: Require successful main CI
+    timeout-minutes: 30
     needs: metadata
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
@@ -99,6 +100,7 @@ jobs:
 
   wait-for-governance:
     name: Require PR-only main governance
+    timeout-minutes: 30
     needs: metadata
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
@@ -129,6 +131,7 @@ jobs:
 
   linux:
     name: Linux release assets
+    timeout-minutes: 30
     needs: [metadata, wait-for-ci, wait-for-governance]
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
@@ -213,6 +216,7 @@ jobs:
 
   windows:
     name: Windows release assets
+    timeout-minutes: 30
     needs: [metadata, wait-for-ci, wait-for-governance]
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: windows-latest
@@ -351,6 +355,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
+    timeout-minutes: 30
     needs: [metadata, wait-for-ci, wait-for-governance, linux, windows]
     if: >-
       ${{
