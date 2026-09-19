@@ -82,3 +82,31 @@ test('verification progress is placed above both GPTWork floating surfaces', () 
   assert.match(content, /window\.innerHeight - top \+ 8/);
   assert.match(content, /positionVerificationProgressHost\(progressHost\)/);
 });
+
+
+test('v0.5.83 has one model UI transaction authority and never clicks from observation', () => {
+  assert.match(content, /cachedState\?\.autoVerification\?\.running/);
+  assert.match(content, /DOM observation never performs clicks/);
+  assert.doesNotMatch(content, /mutations\.some[\s\S]{0,180}dismissWorkContinuationPrompt/);
+  assert.doesNotMatch(content, /ensureIndicator\(\);\s*void dismissWorkContinuationPrompt/);
+  assert.doesNotMatch(content, /if \(isModelListScope\(picker\)\)/);
+  assert.match(content, /Single ownership chain: the final model list/);
+});
+
+test('trusted pointer attaches first and revalidates the exact DOM target after layout settles', () => {
+  assert.match(content, /GPTLOCK_TRUSTED_POINTER_PREPARE/);
+  assert.match(content, /requestAnimationFrame\(\(\) => requestAnimationFrame\(resolve\)\)/);
+  assert.match(content, /function pointerStillOwnsPoint/);
+  assert.match(content, /document\.elementFromPoint/);
+  assert.match(background, /case 'GPTLOCK_TRUSTED_POINTER_PREPARE'/);
+});
+
+test('verification request-lock mode is owned by an explicit transaction, not migrated tab UI state', () => {
+  assert.match(background, /const verificationTransactions = new Map\(\)/);
+  assert.match(background, /function verificationTransactionForTab/);
+  assert.match(background, /verificationTransactions\.set\(Number\(tabId\)/);
+  assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
+  assert.match(background, /preserveModel: Boolean\(transaction\)/);
+  assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
+  assert.doesNotMatch(background, /function autoVerificationModelForTab/);
+});
