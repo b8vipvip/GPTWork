@@ -1,5 +1,6 @@
 name: GPTAuto Executor
 on:
+  workflow_dispatch:
   workflow_run:
     workflows: [GPTAuto Observer]
     types: [completed]
@@ -10,7 +11,7 @@ permissions:
   issues: write
 concurrency:
   group: gptauto-executor-${{ github.event.workflow_run.id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   execute:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
