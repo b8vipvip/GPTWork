@@ -992,6 +992,9 @@
     const rememberRow = (row) => {
       const descriptor = rowModelDescriptor(row);
       const canonical = descriptor.model || null;
+      const unresolvedLatest = /^(latest|最新|최신)$/i.test(String(descriptor.label || '').trim());
+      const modelSignalled = /model|gpt/i.test(String(descriptor.selectorKey || ''));
+      if (!canonical && !unresolvedLatest && !modelSignalled) return;
       if (!canonical && !descriptor.selectorKey) return;
       if (!models.some((item) =>
         item.rawId === descriptor.rawId
