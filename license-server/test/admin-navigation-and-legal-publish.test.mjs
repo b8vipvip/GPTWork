@@ -109,3 +109,20 @@ test('Issues admin UI exposes first-class administrator post creation and improv
   assert.match(source, /api\('\/admin\/api\/issues',\{method:'POST'/, 'administrator composer should use the admin create endpoint');
   assert.match(source, /event\.ctrlKey\|\|event\.metaKey/, 'Issue editor should support Ctrl/Cmd+S');
 });
+
+
+test('SMTP settings have one explicit save authority separate from account settings', () => {
+  const html = readFileSync(join(PUBLIC, 'admin-settings.html'), 'utf8');
+  const source = readFileSync(join(PUBLIC, 'admin.js'), 'utf8');
+  assert.match(html, /id="saveSmtpSettings"[^>]*>保存邮件配置<\/button>/);
+  assert.match(html, /id="smtpMessage"/);
+  assert.match(source, /async function saveSmtpSettings\(\)/);
+  const baseStart = source.indexOf('async function saveSettings()');
+  const smtpStart = source.indexOf('async function saveSmtpSettings()');
+  const testStart = source.indexOf('async function sendTestEmail()', smtpStart);
+  const baseBody = source.slice(baseStart, smtpStart);
+  const smtpBody = source.slice(smtpStart, testStart);
+  assert.doesNotMatch(baseBody, /smtpHost|smtpPassword|\bsmtp\s*:/, 'base settings must not own SMTP persistence');
+  assert.match(smtpBody, /JSON\.stringify\(\{ smtp \}\)/, 'SMTP save must be the sole SMTP persistence action');
+  assert.match(source, /saveSmtpSettings\?\.addEventListener\('click'/);
+});
