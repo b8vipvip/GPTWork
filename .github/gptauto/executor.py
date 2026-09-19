@@ -14,6 +14,10 @@ def next_action(task: Task) -> dict:
     meta = task.metadata
     failed = [step.gate.value for step in task.plan if step.status == GateStatus.FAILED]
     conclusion = str(meta.get("workflow_conclusion") or "").lower()
+    time_level = str(meta.get("time_budget_level") or "NORMAL")
+    time_action = str(meta.get("time_budget_action") or "continue")
+    elapsed = meta.get("chat_session_elapsed_minutes", 0)
+
 
     if task.state == State.DONE:
         return {"action": "done", "reason": "Definition of Done is satisfied", "task_id": task.task_id}
@@ -54,6 +58,17 @@ def next_action(task: Task) -> dict:
             "reason": "Waiting for post-merge CI/release evidence",
             "task_id": task.task_id,
             "completion_gate": str(meta.get("completion_gate") or ""),
+        }
+
+    if time_action in {"checkpoint", "handoff", "detach"}:
+        return {
+            "action": "timeout_recovery",
+            "reason": f"Task time budget entered {time_level}",
+            "task_id": task.task_id,
+            "time_budget_level": time_level,
+            "elapsed_minutes": elapsed,
+            "handoff": time_action in {"handoff", "detach"},
+            "detach": time_action == "detach",
         }
 
     return {"action": "wait", "reason": "No safe executable transition is ready", "task_id": task.task_id}
