@@ -112,6 +112,7 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
 });
 
 
+// v0.5.86 fresh-chat regression: second layer is not the account catalog.
 test('v0.5.86 does not mistake second-layer intelligence model summaries for the final catalog', () => {
   assert.match(content, /composer intelligence picker can expose two model-labelled rows/);
   assert.match(content, /scope\.matches\?\.\('\[data-testid="composer-intelligence-picker-content"\]'\)/);
