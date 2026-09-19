@@ -444,23 +444,35 @@
   }
 
   function composerIntelligenceTrigger() {
+    const composer = findComposer();
+    if (!composer) return null;
+    const composerRoot = composer.closest?.('form')
+      || composer.closest?.('[data-testid*="composer"]')
+      || composer.parentElement
+      || null;
+    if (!composerRoot) return null;
+
+    // Model automation must never escape the active composer. Global selectors can
+    // match sidebar conversation menus (the recent-chat "..." button) and turn a
+    // model-verification click into Share/Rename/Delete actions.
     const direct = MODEL_SELECTORS
-      .map((selector) => document.querySelector(selector))
+      .flatMap((selector) => [...composerRoot.querySelectorAll(selector)])
       .find((element) => element && visible(element));
     if (direct) return direct;
 
     const evidenceControls = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.modelReasoningControls?.() || [];
     const evidenceTrigger = evidenceControls
       .map((item) => item?.element)
-      .find((element) => element && visible(element) && element.getAttribute?.('aria-haspopup') === 'menu');
+      .find((element) =>
+        element
+        && composerRoot.contains(element)
+        && visible(element)
+        && element.getAttribute?.('aria-haspopup') === 'menu'
+      );
     if (evidenceTrigger) return evidenceTrigger;
 
-    const composer = findComposer();
-    const composerRoot = composer?.closest?.('form') || composer?.parentElement || null;
-    const candidates = [...new Set([
-      ...composerNearbyControls(),
-      ...(composerRoot ? [...composerRoot.querySelectorAll('button,[role="button"],[aria-haspopup="menu"]')] : []),
-    ])].filter((element) => element && visible(element));
+    const candidates = [...composerRoot.querySelectorAll('button,[role="button"],[aria-haspopup="menu"]')]
+      .filter((element) => element && visible(element));
 
     const scored = candidates.map((element) => {
       const signal = [
@@ -476,10 +488,35 @@
       if (/__composer-pill/.test(signal)) score += 80;
       if (element.getAttribute?.('aria-haspopup') === 'menu') score += 40;
       if (/gpt|model|reasoning|thinking|推理|模型|思考|high|medium|low|高|中|低/i.test(signal)) score += 25;
-      if (composerRoot?.contains?.(element)) score += 20;
       return { element, score };
     }).filter((item) => item.score >= 60).sort((a, b) => b.score - a.score);
     return scored[0]?.element || null;
+  }
+
+  function stayInChatModeButton() {
+    const labels = [
+      /留在聊天模式/,
+      /stay in chat mode/i,
+      /continue in chat/i,
+    ];
+    const candidates = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+    return candidates.find((element) => {
+      const text = normalizedPickerLabel(element);
+      if (!labels.some((pattern) => pattern.test(text))) return false;
+      const context = String(
+        element.closest?.('[role="dialog"],main,section,article,div')?.innerText || ''
+      ).toLowerCase();
+      return /chatgpt work|在\s*chatgpt\s*work\s*中继续|work\s*模式|工作模式/i.test(context);
+    }) || null;
+  }
+
+  async function dismissWorkContinuationPrompt() {
+    const stay = stayInChatModeButton();
+    if (!stay) return false;
+    // This is an explicit product prompt action, not model-picker discovery.
+    await trustedPointer(stay, 'click');
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    return true;
   }
 
   function modelTrigger(triggerSelectors = MODEL_SELECTORS) {
@@ -625,6 +662,7 @@
   }
 
   async function openModernModelMenu() {
+    await dismissWorkContinuationPrompt();
     const trigger = composerIntelligenceTrigger();
     if (!trigger) return { trigger: null, picker: null, opener: null, submenu: null, rows: [] };
 
