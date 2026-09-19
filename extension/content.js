@@ -444,23 +444,35 @@
   }
 
   function composerIntelligenceTrigger() {
+    const composer = findComposer();
+    if (!composer) return null;
+    const composerRoot = composer.closest?.('form')
+      || composer.closest?.('[data-testid*="composer"]')
+      || composer.parentElement
+      || null;
+    if (!composerRoot) return null;
+
+    // Model automation must never escape the active composer. Global selectors can
+    // match sidebar conversation menus (the recent-chat "..." button) and turn a
+    // model-verification click into Share/Rename/Delete actions.
     const direct = MODEL_SELECTORS
-      .map((selector) => document.querySelector(selector))
+      .flatMap((selector) => [...composerRoot.querySelectorAll(selector)])
       .find((element) => element && visible(element));
     if (direct) return direct;
 
     const evidenceControls = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.modelReasoningControls?.() || [];
     const evidenceTrigger = evidenceControls
       .map((item) => item?.element)
-      .find((element) => element && visible(element) && element.getAttribute?.('aria-haspopup') === 'menu');
+      .find((element) =>
+        element
+        && composerRoot.contains(element)
+        && visible(element)
+        && element.getAttribute?.('aria-haspopup') === 'menu'
+      );
     if (evidenceTrigger) return evidenceTrigger;
 
-    const composer = findComposer();
-    const composerRoot = composer?.closest?.('form') || composer?.parentElement || null;
-    const candidates = [...new Set([
-      ...composerNearbyControls(),
-      ...(composerRoot ? [...composerRoot.querySelectorAll('button,[role="button"],[aria-haspopup="menu"]')] : []),
-    ])].filter((element) => element && visible(element));
+    const candidates = [...composerRoot.querySelectorAll('button,[role="button"],[aria-haspopup="menu"]')]
+      .filter((element) => element && visible(element));
 
     const scored = candidates.map((element) => {
       const signal = [
@@ -476,10 +488,28 @@
       if (/__composer-pill/.test(signal)) score += 80;
       if (element.getAttribute?.('aria-haspopup') === 'menu') score += 40;
       if (/gpt|model|reasoning|thinking|推理|模型|思考|high|medium|low|高|中|低/i.test(signal)) score += 25;
-      if (composerRoot?.contains?.(element)) score += 20;
       return { element, score };
     }).filter((item) => item.score >= 60).sort((a, b) => b.score - a.score);
     return scored[0]?.element || null;
+  }
+
+  function stayInChatModeButton() {
+    const labels = [
+      /留在聊天模式/,
+      /stay in chat mode/i,
+      /continue in chat/i,
+    ];
+    const candidates = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
+    return candidates.find((element) => labels.some((pattern) => pattern.test(normalizedPickerLabel(element)))) || null;
+  }
+
+  async function dismissWorkContinuationPrompt() {
+    const stay = stayInChatModeButton();
+    if (!stay) return false;
+    // This is an explicit product prompt action, not model-picker discovery.
+    await trustedPointer(stay, 'click');
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    return true;
   }
 
   function modelTrigger(triggerSelectors = MODEL_SELECTORS) {
@@ -569,6 +599,22 @@
       .find((element) => visible(element)) || null;
   }
 
+  function verifiedModelRows(scope) {
+    const rows = [...(scope?.querySelectorAll?.(
+      '[role="menuitemradio"],[role="radio"],[role="option"],[data-model],[data-model-id],[data-testid^="model-switcher-"]'
+    ) || [])].filter(visible);
+    return rows.filter((row) => {
+      const descriptor = rowModelDescriptor(row);
+      const signal = descriptor.values.join(' ');
+      return Boolean(
+        descriptor.model
+        || descriptor.rawId
+        || /^model-switcher-gpt-/i.test(String(row.getAttribute?.('data-testid') || ''))
+        || /\bgpt[-\s]?\d/i.test(signal)
+      );
+    });
+  }
+
   function normalizedPickerLabel(element) {
     return String([
       element?.getAttribute?.('aria-label'),
@@ -625,6 +671,7 @@
   }
 
   async function openModernModelMenu() {
+    await dismissWorkContinuationPrompt();
     const trigger = composerIntelligenceTrigger();
     if (!trigger) return { trigger: null, picker: null, opener: null, submenu: null, rows: [] };
 
@@ -652,9 +699,9 @@
 
     const opener = modelSubmenuOpener(picker);
     if (!opener) {
-      const directRows = [...(advancedPickerView(picker)?.querySelectorAll?.('[role="menuitemradio"],[role="radio"]') || [])]
-        .filter(visible);
-      return { trigger, picker, opener: null, submenu: advancedPickerView(picker), rows: directRows };
+      const directScope = advancedPickerView(picker) || picker;
+      const directRows = verifiedModelRows(directScope);
+      return { trigger, picker, opener: null, submenu: directScope, rows: directRows };
     }
 
     let submenu = visibleModelSubmenu(picker, opener);
@@ -667,9 +714,7 @@
       try { opener.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true })); } catch {}
       submenu = await waitUntil(() => visibleModelSubmenu(picker, opener), 900, 90);
     }
-    const rows = submenu
-      ? [...submenu.querySelectorAll('[role="menuitemradio"],[role="radio"],button')].filter(visible)
-      : [];
+    const rows = submenu ? verifiedModelRows(submenu) : [];
     return { trigger, picker, opener, submenu, rows };
   }
 
@@ -1066,7 +1111,10 @@
       candidateCount = modern.rows.length;
       for (const row of modern.rows) rememberRow(row);
       await closeModelMenus(modern.trigger);
-    } else {
+    } else if (!modern.picker) {
+      // Legacy fallback is permitted only when the known composer model trigger itself
+      // opened a menu. Never scan arbitrary global menus: sidebar and conversation
+      // action menus are intentionally out of scope.
       await closeModelMenus(modern.trigger);
       const trigger = modelTrigger(MODEL_SELECTORS);
       triggerFound = triggerFound || Boolean(trigger);
@@ -1078,7 +1126,10 @@
       }
       const rows = trigger
         ? (await waitUntil(() => {
-          const candidates = menuCandidates();
+          const controlsId = trigger.getAttribute?.('aria-controls') || '';
+          const controlled = controlsId ? document.getElementById(controlsId) : null;
+          const scope = controlled && visible(controlled) ? controlled : visibleIntelligencePickerContent();
+          const candidates = verifiedModelRows(scope);
           return candidates.length ? candidates : null;
         }, 2200, 80)) || []
         : [];
@@ -1090,7 +1141,10 @@
           if (level) reasoning.add(level);
         }
       }
-      if (openedByUs && trigger) await trustedPointer(trigger, 'click');
+      if (openedByUs && trigger) await closeModelMenus(trigger);
+    } else {
+      candidateCount = 0;
+      await closeModelMenus(modern.trigger);
     }
 
     const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
@@ -1153,7 +1207,12 @@
     return false;
   });
 
-  new MutationObserver(scheduleReport).observe(document.documentElement, {
+  new MutationObserver((mutations) => {
+    scheduleReport();
+    if (mutations.some((mutation) => mutation.addedNodes?.length)) {
+      void dismissWorkContinuationPrompt().catch(() => {});
+    }
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
     characterData: true,
@@ -1184,6 +1243,7 @@
   }, BLOCKING_GUARD_HEARTBEAT_MS);
 
   ensureIndicator();
+  void dismissWorkContinuationPrompt().catch(() => {});
   void sendMessage({ type: 'GPTLOCK_GET_STATE' })
     .then((state) => updateCache({ state: state.tabState, policy: state.policy, settings: state.settings }))
     .catch(() => failOpenStaleRuntime());
