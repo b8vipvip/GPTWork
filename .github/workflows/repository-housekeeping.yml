@@ -21,28 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Verify the main commit is associated with a merged PR
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.event_name }}" != "push" ]]; then
-            echo "Non-push housekeeping run; PR-only audit not applicable."
-            exit 0
-          fi
-          for attempt in $(seq 1 6); do
-            count="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length')"
-            if [[ "$count" -ge 1 ]]; then exit 0; fi
-            sleep 5
-          done
-          message="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.commit.message // ""')"
-          if [[ "$message" =~ ^Merge\ pull\ request\ \#([0-9]+)\ from\  ]]; then
-            pr_number="${BASH_REMATCH[1]}"; pr_json="$(gh api "/repos/$GITHUB_REPOSITORY/pulls/$pr_number")"
-            merged_at="$(jq -r '.merged_at // ""' <<<"$pr_json")"; base_ref="$(jq -r '.base.ref // ""' <<<"$pr_json")"; merge_sha="$(jq -r '.merge_commit_sha // ""' <<<"$pr_json")"
-            [[ -n "$merged_at" && "$base_ref" == main && "$merge_sha" == "$GITHUB_SHA" ]] && exit 0
-          fi
-          echo "::error::Direct push to main detected at $GITHUB_SHA. Repository policy requires changes to enter main through a merged pull request."
-          exit 1
+        run: bash .github/scripts/verify-pr-only-main.sh
 
   prune-stale-branches:
     name: Prune every branch older than 7 days

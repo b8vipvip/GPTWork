@@ -1,5 +1,5 @@
 name: Release
-# v0.5.86 governed release kick.
+# Governed release supports both native push runs and GPTAuto workflow_dispatch gates.
 
 on:
   push:
@@ -82,11 +82,13 @@ jobs:
           for attempt in $(seq 1 60); do
             run_json="$(gh api \
               -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=1")"
-            status="$(jq -r '.workflow_runs[0].status // "missing"' <<<"$run_json")"
-            conclusion="$(jq -r '.workflow_runs[0].conclusion // ""' <<<"$run_json")"
-            url="$(jq -r '.workflow_runs[0].html_url // ""' <<<"$run_json")"
-            echo "CI attempt $attempt: status=$status conclusion=${conclusion:-pending} $url"
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20")"
+            candidate="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | reverse | .[0] // {}' <<<"$run_json")"
+            status="$(jq -r '.status // "missing"' <<<"$candidate")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$candidate")"
+            event="$(jq -r '.event // ""' <<<"$candidate")"
+            url="$(jq -r '.html_url // ""' <<<"$candidate")"
+            echo "CI attempt $attempt: event=${event:-missing} status=$status conclusion=${conclusion:-pending} $url"
             if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
               exit 0
             fi
@@ -106,29 +108,11 @@ jobs:
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for repository governance on this commit
+      - uses: actions/checkout@v4
+      - name: Verify PR-only main governance on this commit
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in $(seq 1 60); do
-            run_json="$(gh api \
-              -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/repository-housekeeping.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=1")"
-            status="$(jq -r '.workflow_runs[0].status // "missing"' <<<"$run_json")"
-            conclusion="$(jq -r '.workflow_runs[0].conclusion // ""' <<<"$run_json")"
-            url="$(jq -r '.workflow_runs[0].html_url // ""' <<<"$run_json")"
-            echo "Governance attempt $attempt: status=$status conclusion=${conclusion:-pending} $url"
-            if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
-              exit 0
-            fi
-            if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
-              echo "Repository governance did not succeed: $conclusion" >&2
-              exit 1
-            fi
-            sleep 10
-          done
-          echo "Timed out waiting for repository governance on $GITHUB_SHA." >&2
-          exit 1
+        run: bash .github/scripts/verify-pr-only-main.sh
 
   linux:
     name: Linux release assets
