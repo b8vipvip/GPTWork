@@ -56,4 +56,6 @@ test('model verification probe and progress stay visible and sidebar-safe', () =
   assert.match(content, /await trustedPointer\(sendButton, 'click'\)/);
   assert.match(content, /\.indicator-shell\{display:flex;flex-direction:column/);
   assert.match(content, /\.model-verification-progress\{order:-1\}/);
+  assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
+
