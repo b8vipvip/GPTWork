@@ -283,6 +283,11 @@ def capture(
             current = [e for e in t.history if (e.at, e.kind, e.reason, e.gate, e.status, e.evidence) not in seen]
             t.history = list(previous.history) + current
 
+    # Persist a session time-budget checkpoint with every observation. This makes
+    # ChatGPT/UI lifetime a recoverable concern instead of a task lifetime.
+    from .time_budget import apply as apply_time_budget
+    time_budget = apply_time_budget(t)
+
     paths = write_audit(t, log_root)
     return {
         "task_id": tid,
