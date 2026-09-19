@@ -85,7 +85,7 @@ test('background derives debugger configuration from the target tab policy direc
   assert.match(background, /getLockConfiguration\(tabId\)/);
   assert.match(background, /runtimePolicyForTabSync\(tabId\)/);
   assert.match(background, /const policy = effectivePolicyForTabSync\(tabId\)/);
-  assert.match(background, /autoVerificationModelForTab\(tabId\)/);
+  assert.match(background, /verificationTransactionForTab\(tabId\)/);
   assert.match(background, /tab\.status === 'loading'/);
   assert.match(monitor, /getLockConfiguration\?\.\(tabId\)/);
   assert.doesNotMatch(background, /network-monitor-safety\.js|tab-feature-network-policy\.js/);
