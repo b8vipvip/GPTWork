@@ -238,6 +238,16 @@
     return host;
   }
 
+  function positionVerificationProgressHost(host) {
+    if (!host) return;
+    const anchors = ['gptlock-model-indicator-host', 'gptlock-indicator-host']
+      .map((id) => document.getElementById(id))
+      .filter((element) => element && element !== host && visible(element));
+    const top = anchors.reduce((value, element) => Math.min(value, element.getBoundingClientRect().top), window.innerHeight);
+    const bottom = anchors.length ? Math.max(52, Math.ceil(window.innerHeight - top + 8)) : 52;
+    host.style.bottom = `${bottom}px`;
+  }
+
   function renderIndicator() {
     const host = ensureIndicator();
     const root = host.shadowRoot;
@@ -258,6 +268,7 @@
         progressRoot.innerHTML = '<style>.model-verification-progress{width:220px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;font:700 11px/1.35 system-ui,sans-serif}.model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px}.model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}</style><div class="model-verification-progress"><div><span></span><strong></strong></div><progress value="0" max="1"></progress></div>';
         document.documentElement.append(progressHost);
       }
+      positionVerificationProgressHost(progressHost);
       const progress = progressHost.shadowRoot.querySelector('.model-verification-progress');
       const label = catalog?.currentLabel || catalog?.currentModel || '正在发现账户模型…';
       progress.querySelector('span').textContent = label;
@@ -572,9 +583,9 @@
 
   function verifiedModelRows(scope) {
     const rows = [...(scope?.querySelectorAll?.(
-      '[role="menuitemradio"],[role="radio"],[role="option"],[data-model],[data-model-id],[data-testid^="model-switcher-"]'
+      '[role="menuitemradio"],[role="radio"],[role="option"],[role="menuitem"],button,[role="button"],[data-radix-collection-item],[data-model],[data-model-id],[data-testid^="model-switcher-"]'
     ) || [])].filter(visible);
-    return rows.filter((row) => {
+    return [...new Set(rows)].filter((row) => {
       const descriptor = rowModelDescriptor(row);
       const signal = descriptor.values.join(' ');
       return Boolean(
@@ -584,6 +595,17 @@
         || /\bgpt[-\s]?\d/i.test(signal)
       );
     });
+  }
+
+  function distinctModelRows(scope) {
+    const unique = new Map();
+    for (const row of verifiedModelRows(scope)) {
+      const descriptor = rowModelDescriptor(row);
+      const key = descriptor.model || descriptor.rawId || String(descriptor.label || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!key || unique.has(key)) continue;
+      unique.set(key, row);
+    }
+    return [...unique.values()];
   }
 
   function normalizedPickerLabel(element) {
@@ -600,38 +622,73 @@
   }
 
   function advancedPickerToggle(picker) {
-    return [...(picker?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible)
+    return [...(picker?.querySelectorAll?.('[role="menuitem"],button,[role="button"]') || [])].filter(visible)
       .find((element) => /advanced|高级|進階|고급|avanzad|erweitert/i.test(normalizedPickerLabel(element))) || null;
+  }
+
+  function isModelListScope(scope) {
+    if (!scope || !visible(scope)) return false;
+    const rows = distinctModelRows(scope);
+    if (rows.length < 2) return false;
+    const label = normalizedPickerLabel(scope);
+    return /select model|choose model|选择模型|選擇模型|모델 선택|modelo|modello|modèle/i.test(label)
+      || rows.length >= 2;
+  }
+
+  function modelPopupScopes() {
+    return [...document.querySelectorAll(
+      '[role="menu"],[role="listbox"],[role="dialog"],[data-radix-menu-content],[data-radix-popper-content-wrapper]'
+    )].filter(visible);
   }
 
   function modelSubmenuOpener(picker) {
     const scope = advancedPickerView(picker) || picker;
-    const rows = [...(scope?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible);
-    const submenuRows = rows.filter((element) =>
+    if (!scope || isModelListScope(scope)) return null;
+    const currentModel = collectObservation().model;
+    const rows = [...scope.querySelectorAll('[role="menuitem"],button,[role="button"],[data-radix-collection-item]')]
+      .filter((element) => visible(element) && !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'));
+    const explicit = rows.filter((element) =>
       element.hasAttribute?.('data-has-submenu')
       || element.getAttribute?.('aria-haspopup') === 'menu'
       || Boolean(element.getAttribute?.('aria-controls')),
     );
-    const positive = submenuRows.find((element) => {
+    const semantic = rows.filter((element) => {
+      const descriptor = rowModelDescriptor(element);
       const label = normalizedPickerLabel(element);
-      return /model|模型|모델|modelo|modello|modèle/i.test(label)
-        && !/effort|reasoning|强度|強度|推理|思考|노력|추론/i.test(label);
+      const current = currentModel && (descriptor.model === currentModel || descriptor.rawId === currentModel);
+      const modelSignal = /\bgpt[-\s]?\d|astra|sol|terra|luna/i.test(label);
+      const reasoningSignal = /highest|high|medium|low|最高|高|中|低|推理|思考|reasoning|effort/i.test(label);
+      return Boolean((current || modelSignal) && (reasoningSignal || element.querySelector?.('svg')));
     });
-    return positive || [...submenuRows].reverse()[0] || null;
+    const candidates = [...new Set([...explicit, ...semantic])];
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
-  function visibleModelSubmenu(picker, opener) {
+  function visibleModelSubmenu(picker, opener, beforeScopes = new Set()) {
     const controlledId = opener?.getAttribute?.('aria-controls') || '';
     const controlled = controlledId ? document.getElementById(controlledId) : null;
-    if (controlled && visible(controlled) && verifiedModelRows(controlled).length) return controlled;
+    if (controlled && isModelListScope(controlled)) return controlled;
+
     const openerId = opener?.id || '';
-    if (!openerId) return null;
-    return [...document.querySelectorAll('[role="menu"]')]
-      .find((menu) =>
-        visible(menu)
-        && menu.getAttribute?.('aria-labelledby') === openerId
-        && verifiedModelRows(menu).length
-      ) || null;
+    if (openerId) {
+      const labelled = modelPopupScopes().find((menu) =>
+        menu.getAttribute?.('aria-labelledby') === openerId && isModelListScope(menu)
+      );
+      if (labelled) return labelled;
+    }
+
+    // ChatGPT's current three-stage picker portals the final "Select model" menu.
+    // Ownership is causal: it must be a model-list popup that became visible only
+    // after clicking the unique model/reasoning row in the composer picker.
+    const newlyVisible = modelPopupScopes()
+      .filter((scope) => !beforeScopes.has(scope) && scope !== picker && !picker?.contains?.(scope))
+      .filter(isModelListScope)
+      .sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        return (ar.width * ar.height) - (br.width * br.height);
+      });
+    return newlyVisible[0] || null;
   }
 
   async function openModernModelMenu() {
@@ -653,6 +710,10 @@
     }
     if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
 
+    if (isModelListScope(picker)) {
+      return { trigger, picker, opener: null, submenu: picker, rows: distinctModelRows(picker) };
+    }
+
     if (!modelSubmenuOpener(picker)) {
       const advanced = advancedPickerToggle(picker);
       if (advanced) {
@@ -662,23 +723,24 @@
     }
 
     const opener = modelSubmenuOpener(picker);
-    if (!opener) {
-      const directScope = advancedPickerView(picker) || picker;
-      const directRows = verifiedModelRows(directScope);
-      return { trigger, picker, opener: null, submenu: directScope, rows: directRows };
-    }
+    if (!opener) return { trigger, picker, opener: null, submenu: null, rows: [] };
 
-    let submenu = visibleModelSubmenu(picker, opener);
+    const beforeScopes = new Set(modelPopupScopes());
+    let submenu = visibleModelSubmenu(picker, opener, beforeScopes);
     if (!submenu) {
-      await trustedPointer(opener, 'move');
-      dispatchSyntheticPointer(opener, 'move');
-      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener), 1800, 90);
+      // The second layer ("Highest > / current model") must be clicked. Hovering it
+      // does not open ChatGPT's current third-layer "Select model" menu.
+      await trustedPointer(opener, 'click');
+      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener, beforeScopes), 2200, 80);
     }
     if (!submenu) {
-      try { opener.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true })); } catch {}
-      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener), 900, 90);
+      try {
+        opener.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+        opener.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      } catch {}
+      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener, beforeScopes), 1000, 80);
     }
-    const rows = submenu ? verifiedModelRows(submenu) : [];
+    const rows = submenu ? distinctModelRows(submenu) : [];
     return { trigger, picker, opener, submenu, rows };
   }
 
@@ -1214,6 +1276,10 @@
       .then((state) => updateCache({ state: state.tabState, policy: state.policy, settings: state.settings }))
       .catch(() => failOpenStaleRuntime());
   }, BLOCKING_GUARD_HEARTBEAT_MS);
+
+  window.addEventListener('resize', () => {
+    positionVerificationProgressHost(document.getElementById('gptlock-verification-progress-host'));
+  });
 
   ensureIndicator();
   void dismissWorkContinuationPrompt().catch(() => {});
