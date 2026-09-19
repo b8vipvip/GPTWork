@@ -1,1 +1,2 @@
-"""GPTAuto embedded orchestration runtime for GPTWork."""
+"""GPTAuto autonomous workflow protocol."""
+__version__ = "0.6.0"

@@ -1,0 +1,67 @@
+name: GPTAuto Observer
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+  push:
+    branches:
+      - main
+      - master
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: gptauto-observer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  observe:
+    if: ${{ github.actor != 'github-actions[bot]' || github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Capture repository-side GPTAuto task
+        id: capture
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REF_NAME: ${{ github.head_ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          PR_STATE: ${{ github.event.pull_request.state || '' }}
+          PR_MERGED: ${{ github.event.pull_request.merged || false }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha || '' }}
+          RUN_ID: ${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PYTHONPATH=.github python -m gptauto.observer capture \
+            --event "$EVENT_NAME" --repo "$REPOSITORY" --default-branch "$DEFAULT_BRANCH" \
+            --branch "$REF_NAME" --head-sha "$HEAD_SHA" --pr-number "$PR_NUMBER" \
+            --pr-title "$PR_TITLE" --pr-state "$PR_STATE" --pr-merged "$PR_MERGED" \
+            --merge-sha "$MERGE_SHA" --run-id "$RUN_ID" --actor "$ACTOR" > observer-result.json
+          cat observer-result.json
+          task_id="$(python -c 'import json;print(json.load(open("observer-result.json"))["task_id"])')"
+          echo "task-id=$task_id" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/upload-gptauto-log
+        with:
+          task-id: ${{ steps.capture.outputs.task-id }}
+          retention-days: '30'
+      - name: Summary
+        env:
+          TASK_ID: ${{ steps.capture.outputs.task-id }}
+        run: |
+          {
+            echo "## GPTAuto repository observation"
+            echo "- Task ID: `$TASK_ID`"
+            echo "- Artifact: `gptauto-$TASK_ID`"
+            echo "- Provenance: `repository_observer`"
+            echo "- This record is generated from GitHub repository events; native host telemetry, when present, is stronger evidence."
+          } >> "$GITHUB_STEP_SUMMARY"
