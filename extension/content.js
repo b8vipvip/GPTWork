@@ -217,8 +217,7 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
       <style>
-        .indicator-shell{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
-        .model-verification-progress{order:-1}
+.indicator-shell{display:block}
         button{border:1px solid rgba(15,23,42,.16);border-radius:999px;padding:7px 10px;
           color:#fff;background:#64748b;font:700 12px/1.2 system-ui,sans-serif;box-shadow:0 5px 18px rgba(15,23,42,.16);cursor:pointer}
         button[data-tone="good"]{background:#15803d} button[data-tone="bad"]{background:#b91c1c}
@@ -250,13 +249,16 @@
       const catalog = auto.catalogVerification;
       const total = Math.max(0, Number(catalog?.total || auto.maxAttempts || 0));
       const completed = Math.min(total, Math.max(0, Number(catalog?.completed || 0)));
-      let progress = root.querySelector('.model-verification-progress');
-      if (!progress) {
-        progress = document.createElement('div');
-        progress.className = 'model-verification-progress';
-        progress.innerHTML = '<div><span></span><strong></strong></div><progress value="0" max="1"></progress>';
-        shell.prepend(progress);
+      let progressHost = document.getElementById('gptlock-verification-progress-host');
+      if (!progressHost) {
+        progressHost = document.createElement('div');
+        progressHost.id = 'gptlock-verification-progress-host';
+        progressHost.style.cssText = 'all:initial;position:fixed;right:12px;bottom:52px;z-index:2147483647';
+        const progressRoot = progressHost.attachShadow({ mode: 'open' });
+        progressRoot.innerHTML = '<style>.model-verification-progress{width:220px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;font:700 11px/1.35 system-ui,sans-serif}.model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px}.model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}</style><div class="model-verification-progress"><div><span></span><strong></strong></div><progress value="0" max="1"></progress></div>';
+        document.documentElement.append(progressHost);
       }
+      const progress = progressHost.shadowRoot.querySelector('.model-verification-progress');
       const label = catalog?.currentLabel || catalog?.currentModel || '正在发现账户模型…';
       progress.querySelector('span').textContent = label;
       progress.querySelector('strong').textContent = total ? `${completed} / ${total}` : '…';
@@ -268,7 +270,7 @@
       button.title = '模型验证正在进行；最终结果以正式请求的网络元数据为准 / Model verification is running; network request metadata is authoritative.';
       return;
     }
-    root.querySelector('.model-verification-progress')?.remove();
+    document.getElementById('gptlock-verification-progress-host')?.remove();
     const labels = {
       lock_ready: ['请求已锁', 'lock'],
       verified: ['已确认', 'good'],
@@ -444,54 +446,34 @@
     return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
   }
 
-  function composerIntelligenceTrigger() {
+  function activeComposerSurface() {
     const composer = findComposer();
     if (!composer) return null;
-    const composerRoot = composer.closest?.('form')
-      || composer.closest?.('[data-testid*="composer"]')
-      || composer.parentElement
-      || null;
-    if (!composerRoot) return null;
+    const form = composer.closest?.('form');
+    if (form && visible(form)) return form;
+    const testRoot = composer.closest?.('[data-testid*="composer"]');
+    if (testRoot && visible(testRoot)) return testRoot;
+    return composer.parentElement || null;
+  }
 
-    // Model automation must never escape the active composer. Global selectors can
-    // match sidebar conversation menus (the recent-chat "..." button) and turn a
-    // model-verification click into Share/Rename/Delete actions.
-    const direct = MODEL_SELECTORS
-      .flatMap((selector) => [...composerRoot.querySelectorAll(selector)])
-      .find((element) => element && visible(element));
-    if (direct) return direct;
-
-    const evidenceControls = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.modelReasoningControls?.() || [];
-    const evidenceTrigger = evidenceControls
-      .map((item) => item?.element)
-      .find((element) =>
-        element
-        && composerRoot.contains(element)
-        && visible(element)
-        && element.getAttribute?.('aria-haspopup') === 'menu'
-      );
-    if (evidenceTrigger) return evidenceTrigger;
-
-    const candidates = [...composerRoot.querySelectorAll('button,[role="button"],[aria-haspopup="menu"]')]
-      .filter((element) => element && visible(element));
-
-    const scored = candidates.map((element) => {
-      const signal = [
-        element.getAttribute?.('data-testid'),
-        element.getAttribute?.('aria-label'),
-        element.getAttribute?.('title'),
-        element.getAttribute?.('aria-controls'),
-        element.className,
-        element.textContent,
-      ].map((value) => String(value || '')).join(' ');
-      let score = 0;
-      if (/composer-intelligence-picker-content|intelligence|model-switcher/i.test(signal)) score += 100;
-      if (/__composer-pill/.test(signal)) score += 80;
-      if (element.getAttribute?.('aria-haspopup') === 'menu') score += 40;
-      if (/gpt|model|reasoning|thinking|推理|模型|思考|high|medium|low|高|中|低/i.test(signal)) score += 25;
-      return { element, score };
-    }).filter((item) => item.score >= 60).sort((a, b) => b.score - a.score);
-    return scored[0]?.element || null;
+  function composerIntelligenceTrigger() {
+    // Single authority: only an explicit ChatGPT composer intelligence/model control
+    // is allowed to drive model automation. No scored/global/button fallback exists.
+    const root = activeComposerSurface();
+    if (!root) return null;
+    const selectors = [
+      '[data-testid="model-switcher-dropdown-button"]',
+      'button[data-testid="composer-intelligence-trigger"]',
+      'button[data-testid*="composer-intelligence"]',
+      'button[data-testid^="model-switcher-"][aria-haspopup="menu"]',
+      'button.__composer-pill[aria-haspopup="menu"]',
+      'button[class*="__composer-pill"][aria-haspopup="menu"]',
+    ];
+    const candidates = selectors.flatMap((selector) => [...root.querySelectorAll(selector)])
+      .filter((element) => element && visible(element) && element.getAttribute?.('aria-haspopup') === 'menu');
+    const unique = [...new Set(candidates)];
+    if (unique.length !== 1) return null;
+    return unique[0];
   }
 
   function stayInChatModeButton() {
@@ -641,22 +623,15 @@
   function visibleModelSubmenu(picker, opener) {
     const controlledId = opener?.getAttribute?.('aria-controls') || '';
     const controlled = controlledId ? document.getElementById(controlledId) : null;
-    if (controlled && visible(controlled) && controlled.querySelector?.('[role="menuitemradio"]')) return controlled;
-    const pickerMenu = picker?.closest?.('[role="menu"]') || null;
+    if (controlled && visible(controlled) && verifiedModelRows(controlled).length) return controlled;
     const openerId = opener?.id || '';
-    const menus = [...document.querySelectorAll('[role="menu"]')].filter((menu) =>
-      visible(menu)
-      && menu !== pickerMenu
-      && !picker?.contains?.(menu)
-      && Boolean(menu.querySelector?.('[role="menuitemradio"]')),
-    );
-    if (openerId) {
-      const labelled = menus.find((menu) => menu.getAttribute?.('aria-labelledby') === openerId);
-      if (labelled) return labelled;
-    }
-    return menus.find((menu) => /gpt|astra|sol|model|模型/i.test(menu.innerText || menu.textContent || ''))
-      || menus[0]
-      || null;
+    if (!openerId) return null;
+    return [...document.querySelectorAll('[role="menu"]')]
+      .find((menu) =>
+        visible(menu)
+        && menu.getAttribute?.('aria-labelledby') === openerId
+        && verifiedModelRows(menu).length
+      ) || null;
   }
 
   async function openModernModelMenu() {
@@ -798,9 +773,7 @@
     }
 
     await closeModelMenus(modern.trigger);
-    if (!desired) return { attempted: false, observation: collectObservation() };
-    const attempted = await chooseExact(MODEL_SELECTORS, desired, normalizeDisplayedModel, { skipModern: true });
-    return { attempted: Boolean(attempted), observation: collectObservation() };
+    return { attempted: false, observation: collectObservation() };
   }
 
   async function chooseExact(triggerSelectors, desired, normalize, { skipModern = false } = {}) {
