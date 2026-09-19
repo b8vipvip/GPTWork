@@ -72,6 +72,7 @@ def capture(
     main_ci_run_id="",
     release_conclusion="",
     release_run_id="",
+    current_pr_head_sha="",
 ):
     tid = observed_task_id(repo, pr_number, head_sha, merge_sha)
     goal = pr_title.strip() or ("Observe repository change " + (merge_sha or head_sha)[:12])
@@ -227,7 +228,9 @@ def capture(
             "provenance": "repository_observer",
             "task_type": "observed",
             "branch": branch,
-            "head_sha": head_sha,
+            "head_sha": current_pr_head_sha or head_sha,
+            "event_head_sha": head_sha,
+            "current_pr_head_sha": current_pr_head_sha or head_sha,
             "pr_number": pr_number,
             "merge_sha": merge_sha,
             "run_id": run_id,
@@ -328,6 +331,7 @@ def main():
         "main-ci-run-id",
         "release-conclusion",
         "release-run-id",
+        "current-pr-head-sha",
     ]:
         c.add_argument("--" + name, default="")
     a = p.parse_args()
@@ -357,6 +361,7 @@ def main():
                 main_ci_run_id=a.main_ci_run_id,
                 release_conclusion=a.release_conclusion,
                 release_run_id=a.release_run_id,
+                current_pr_head_sha=a.current_pr_head_sha,
             ),
             ensure_ascii=False,
         )

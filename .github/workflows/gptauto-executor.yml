@@ -50,6 +50,8 @@ jobs:
           echo "head-sha=$(jq -r '.head_sha // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
           echo "run-id=$(jq -r '.run_id // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
           echo "release-required=$(jq -r '.release_required // false' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "repair-key=$(jq -r '.repair_key // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "lease-active=$(jq -r '.completion_lease.active // false' <<<"$action")" >> "$GITHUB_OUTPUT"
       - name: Execute safe merge gate
         if: ${{ steps.state.outputs.action == 'merge' }}
         env:
@@ -101,6 +103,8 @@ jobs:
           PR_NUMBER: ${{ steps.state.outputs.pr-number }}
           TASK_ID: ${{ steps.state.outputs.task-id }}
           FAILED_RUN_ID: ${{ steps.state.outputs.run-id }}
+          HEAD_SHA: ${{ steps.state.outputs.head-sha }}
+          REPAIR_KEY: ${{ steps.state.outputs.repair-key }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -109,13 +113,24 @@ jobs:
           jq -n --arg task "$TASK_ID" --arg run "$FAILED_RUN_ID" --arg pr "$PR_NUMBER" \
             '{kind:"repair_request",task_id:$task,run_id:$run,pr_number:$pr,status:"open"}' > "$request"
           if [[ -n "$PR_NUMBER" ]]; then
-            marker="<!-- gptauto-repair:$TASK_ID:$FAILED_RUN_ID -->"
+            marker="<!-- gptauto-repair:$REPAIR_KEY -->"
             existing="$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --jq '.[].body' 2>/dev/null || true)"
             if ! grep -Fq "$marker" <<<"$existing"; then
               gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "$marker
-          GPTAuto repair request: Actions failed for task $TASK_ID (run $FAILED_RUN_ID). The engineering agent should inspect the failed job logs, repair the current PR branch, push a new commit, and keep the same TASK_ID."
+          GPTAuto repair cycle is open for task $TASK_ID on current head $HEAD_SHA (latest failed run $FAILED_RUN_ID). Do not finish the engineering task until this repair cycle is resolved and the completion lease reaches DONE."
             fi
           fi
+      - name: Persist completion lease
+        if: ${{ steps.state.outputs.lease-active == 'true' }}
+        env:
+          TASK_ID: ${{ steps.state.outputs.task-id }}
+          ACTION: ${{ steps.state.outputs.action }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .gptauto/completion-leases
+          cp /tmp/gptauto-action.json ".gptauto/completion-leases/$TASK_ID.json"
+          echo "Completion lease remains active for $TASK_ID; current decision is $ACTION." >> "$GITHUB_STEP_SUMMARY"
       - name: Persist timeout recovery checkpoint
         if: ${{ steps.state.outputs.action == 'timeout_recovery' }}
         env:
@@ -142,5 +157,6 @@ jobs:
             echo "- Task: $TASK_ID"
             echo "- Decision: $ACTION"
             echo "- Safe merge is executed only after all current head workflows are completed successfully/neutral/skipped."
-            echo "- Failures become idempotent repair requests tied to the same TASK_ID and failed run."
+            echo "- Failures become one repair cycle per TASK_ID + current PR head; superseded/cancelled runs do not create repair storms."
+            echo "- A non-DONE task keeps an explicit completion lease active; foreground completion is valid only after DoD."
           } >> "$GITHUB_STEP_SUMMARY"
