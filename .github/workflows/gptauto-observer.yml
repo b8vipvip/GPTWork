@@ -98,6 +98,15 @@ jobs:
             fi
           fi
 
+          TASK_ID="$(PYTHONPATH=.github python -c 'from gptauto.observer import observed_task_id; import os; print(observed_task_id(os.environ["REPOSITORY"], os.environ.get("PR_NUMBER",""), os.environ.get("HEAD_SHA",""), os.environ.get("MERGE_SHA","")))' )"
+          previous_artifact_id="$(gh api "repos/$REPOSITORY/actions/artifacts?name=gptauto-$TASK_ID&per_page=10" \
+            --jq '.artifacts | sort_by(.created_at) | reverse | .[0].id // empty' 2>/dev/null || true)"
+          if [[ -n "$previous_artifact_id" ]]; then
+            mkdir -p ".gptauto/logs/$TASK_ID"
+            gh api "repos/$REPOSITORY/actions/artifacts/$previous_artifact_id/zip" > /tmp/gptauto-previous.zip
+            unzip -qo /tmp/gptauto-previous.zip -d ".gptauto/logs/$TASK_ID"
+          fi
+
           PYTHONPATH=.github python -m gptauto.observer capture \
             --event "$EVENT_NAME" --repo "$REPOSITORY" --default-branch "$DEFAULT_BRANCH" \
             --branch "$REF_NAME" --head-sha "$HEAD_SHA" --pr-number "$PR_NUMBER" \

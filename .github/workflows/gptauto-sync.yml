@@ -31,10 +31,10 @@ jobs:
           cp "$tmp"/GPTAuto/gptauto/*.py .github/gptauto/
           cp "$tmp"/GPTAuto/.github/actions/upload-gptauto-log/action.yml .github/actions/upload-gptauto-log/action.yml
           cp "$tmp"/GPTAuto/consumer-template/gptauto-sync.yml .github/workflows/gptauto-sync.yml
-          cp "$tmp"/GPTAuto/consumer-template/gptauto-observer.yml .github/workflows/gptauto-observer.yml
+          cp "$tmp"/GPTAuto/consumer-template/gptauto-observer.yml .github/workflows/gptauto-observer.yml\n          cp "$tmp"/GPTAuto/consumer-template/gptauto-executor.yml .github/workflows/gptauto-executor.yml
           ver="$(grep '^version = ' "$tmp/GPTAuto/pyproject.toml" | head -1 | cut -d'"' -f2)"
           printf '%s\n' "$ver" > .github/gptauto/VERSION
-          if git diff --quiet -- .github/gptauto .github/actions/upload-gptauto-log .github/workflows/gptauto-sync.yml .github/workflows/gptauto-observer.yml; then
+          if git diff --quiet -- .github/gptauto .github/actions/upload-gptauto-log .github/workflows/gptauto-sync.yml .github/workflows/gptauto-observer.yml .github/workflows/gptauto-executor.yml; then
             echo "GPTAuto runtime already current."
             exit 0
           fi
@@ -43,7 +43,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git checkout -B "$branch"
-          git add .github/gptauto .github/actions/upload-gptauto-log .github/workflows/gptauto-sync.yml .github/workflows/gptauto-observer.yml
+          git add .github/gptauto .github/actions/upload-gptauto-log .github/workflows/gptauto-sync.yml .github/workflows/gptauto-observer.yml .github/workflows/gptauto-executor.yml
           git commit -m "chore: sync GPTAuto v$ver"
           git push --force-with-lease -u origin "$branch"
 
