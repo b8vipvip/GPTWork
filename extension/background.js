@@ -1353,14 +1353,16 @@ async function autoVerify(tabId) {
   const monitorAttached = await networkMonitor.attach(tabId);
   const page = await collectPageObservation(tabId, state);
   const restoreModel = normalizeConcreteModelId(state.pageObservation?.model);
-  const accountCatalog = await discoverAccountCatalog(tabId);
 
+  // Verification owns its visible lifecycle from the moment the transaction starts.
+  // Catalog discovery is a phase of that same transaction, not a prerequisite hidden
+  // from the progress UI.
   state.autoVerification = {
     running: true,
     startedAt,
     completedAt: null,
     attempt: 0,
-    maxAttempts: accountCatalog.rows.length,
+    maxAttempts: 0,
     retries: 0,
     outcome: 'running',
     reason: null,
@@ -1379,6 +1381,10 @@ async function autoVerify(tabId) {
   }
   resetVerificationAttempt(state);
   state.lastError = page.error;
+  await broadcastTabState(tabId);
+
+  const accountCatalog = await discoverAccountCatalog(tabId);
+  state.autoVerification.maxAttempts = accountCatalog.rows.length;
   await broadcastTabState(tabId);
 
   if (!monitorAttached) {
