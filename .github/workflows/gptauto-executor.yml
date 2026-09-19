@@ -75,7 +75,8 @@ jobs:
             -f sha="$EXPECTED_HEAD" | tee /tmp/gptauto-merge.json
           jq -e '.merged == true' /tmp/gptauto-merge.json >/dev/null
           merge_sha="$(jq -r '.sha' /tmp/gptauto-merge.json)"
-          echo "Merged as $merge_sha; ensuring post-merge workflows are running."
+          default_branch="$(gh api "repos/$REPOSITORY" --jq '.default_branch')"
+          echo "Merged as $merge_sha; ensuring post-merge workflows are running on $default_branch."
 
           # A merge performed with GITHUB_TOKEN does not normally emit push-triggered
           # workflow runs. Explicit workflow_dispatch is therefore the continuation
@@ -84,12 +85,12 @@ jobs:
           runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$merge_sha&per_page=100")"
           ci_count="$(jq '[.workflow_runs[] | select(.name == "CI")] | length' <<<"$runs")"
           if [[ "$ci_count" == "0" ]]; then
-            gh workflow run CI --repo "$REPOSITORY" --ref "$merge_sha"
+            gh workflow run CI --repo "$REPOSITORY" --ref "$default_branch"
           fi
           if [[ "${{ steps.state.outputs.release-required }}" == "true" ]]; then
             release_count="$(jq '[.workflow_runs[] | select(.name == "Release")] | length' <<<"$runs")"
             if [[ "$release_count" == "0" ]]; then
-              gh workflow run Release --repo "$REPOSITORY" --ref "$merge_sha"
+              gh workflow run Release --repo "$REPOSITORY" --ref "$default_branch"
             fi
           fi
       - name: Emit repair request
