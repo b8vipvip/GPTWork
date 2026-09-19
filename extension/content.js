@@ -730,6 +730,10 @@
 
   function isModelListScope(scope) {
     if (!scope || !visible(scope)) return false;
+    // The composer intelligence picker can expose two model-labelled rows while it is
+    // still the second layer. Those rows are navigation/summary controls, not the
+    // authoritative final account model catalog.
+    if (scope.matches?.('[data-testid="composer-intelligence-picker-content"]')) return false;
     const rows = distinctModelRows(scope);
     if (rows.length < 2) return false;
     const label = normalizedPickerLabel(scope);
@@ -745,7 +749,7 @@
 
   function modelSubmenuOpener(picker) {
     const scope = advancedPickerView(picker) || picker;
-    if (!scope || isModelListScope(scope)) return null;
+    if (!scope) return null;
     const currentModel = collectObservation().model;
     const rows = [...scope.querySelectorAll('[role="menuitem"],button,[role="button"],[data-radix-collection-item]')]
       .filter((element) => visible(element) && !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'));
@@ -762,8 +766,14 @@
       const reasoningSignal = /highest|high|medium|low|最高|高|中|低|推理|思考|reasoning|effort/i.test(label);
       return Boolean((current || modelSignal) && (reasoningSignal || element.querySelector?.('svg')));
     });
-    const candidates = [...new Set([...explicit, ...semantic])];
-    return candidates.length === 1 ? candidates[0] : null;
+    // Structural ownership wins. Do not merge structural and semantic candidates:
+    // doing so lets harmless model-labelled summary rows make the unique submenu
+    // opener ambiguous on a fresh ChatGPT conversation.
+    const uniqueExplicit = [...new Set(explicit)];
+    if (uniqueExplicit.length === 1) return uniqueExplicit[0];
+    if (uniqueExplicit.length > 1) return null;
+    const uniqueSemantic = [...new Set(semantic)];
+    return uniqueSemantic.length === 1 ? uniqueSemantic[0] : null;
   }
 
   function visibleModelSubmenu(picker, opener, beforeScopes = new Set()) {
