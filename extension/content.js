@@ -217,7 +217,8 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
       <style>
-        .indicator-shell{display:grid;gap:6px;justify-items:end}
+        .indicator-shell{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+        .model-verification-progress{order:-1}
         button{border:1px solid rgba(15,23,42,.16);border-radius:999px;padding:7px 10px;
           color:#fff;background:#64748b;font:700 12px/1.2 system-ui,sans-serif;box-shadow:0 5px 18px rgba(15,23,42,.16);cursor:pointer}
         button[data-tone="good"]{background:#15803d} button[data-tone="bad"]{background:#b91c1c}
@@ -521,25 +522,13 @@
     return composerIntelligenceTrigger();
   }
 
-  function menuCandidates() {
-    const selectors = [
-      '[role="menu"] [role="menuitem"]',
-      '[role="menu"] [role="menuitemradio"]',
-      '[role="menu"] [role="radio"]',
-      '[role="menu"] button',
-      '[role="listbox"] [role="option"]',
-      '[role="listbox"] [role="radio"]',
-      '[role="listbox"] button',
-      '[data-radix-menu-content] [role="menuitem"]',
-      '[data-radix-menu-content] [role="menuitemradio"]',
-      '[data-radix-menu-content] [role="radio"]',
-      '[data-radix-menu-content] button',
-      '[data-testid="modal-intelligence-menu"] [role="radio"]',
-      '[data-testid="composer-intelligence-picker-content"] [role="menuitemradio"]',
-      '[data-model]',
-      '[data-model-id]',
-    ];
-    return [...new Set([...document.querySelectorAll(selectors.join(','))])].filter(visible);
+  function menuCandidates(scope = null) {
+    // Never expose arbitrary page menus to model automation. In particular, the
+    // recent-conversation action menu is a Radix [role=menu] with Share/Rename/Delete
+    // and is structurally indistinguishable from a generic menu if searched globally.
+    const safeScope = scope || visibleIntelligencePickerContent();
+    if (!safeScope) return [];
+    return verifiedModelRows(safeScope);
   }
 
   function elementCenter(element) {
@@ -815,14 +804,25 @@
   }
 
   async function chooseExact(triggerSelectors, desired, normalize, { skipModern = false } = {}) {
-    if (!skipModern && triggerSelectors === MODEL_SELECTORS) return chooseModelExact({ model: desired, label: desired });
+    if (triggerSelectors === MODEL_SELECTORS) {
+      if (!skipModern) return chooseModelExact({ model: desired, label: desired });
+      // There is deliberately no generic legacy fallback for model selection.
+      // A failed modern picker lookup must fail closed rather than clicking another
+      // visible Radix menu such as the recent-chat "..." action menu.
+      return false;
+    }
     const trigger = modelTrigger(triggerSelectors);
     if (!trigger) return false;
     const current = elementTexts(trigger).map(normalize).find(Boolean);
     if (current === desired) return true;
     await trustedPointer(trigger, 'click');
+    const controlledId = trigger.getAttribute?.('aria-controls') || '';
+    const controlled = controlledId ? document.getElementById(controlledId) : null;
     const candidates = await waitUntil(() => {
-      const rows = menuCandidates();
+      const scope = controlled && visible(controlled) ? controlled : null;
+      const rows = scope
+        ? [...scope.querySelectorAll('[role="menuitemradio"],[role="radio"],[role="option"]')].filter(visible)
+        : [];
       return rows.length ? rows : null;
     }, 2500, 80);
     const candidate = (candidates || []).find((element) => {
@@ -1000,7 +1000,7 @@
         if (draftPreserved) setComposerText(composer, originalDraft);
         throw new Error('ChatGPT send button is unavailable / ChatGPT 发送按钮不可用');
       }
-      sendButton.click();
+      await trustedPointer(sendButton, 'click');
 
       const sent = await waitUntil(() => {
         const currentComposer = findComposer();

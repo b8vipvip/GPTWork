@@ -48,3 +48,14 @@ test('model automation is composer-scoped and cannot use arbitrary sidebar menus
   assert.match(content, /dismissWorkContinuationPrompt/);
   assert.match(content, /留在聊天模式/);
 });
+
+
+test('model verification probe and progress stay visible and sidebar-safe', () => {
+  assert.match(content, /There is deliberately no generic legacy fallback for model selection/);
+  assert.match(content, /recent-chat "\.\.\." action menu/);
+  assert.match(content, /await trustedPointer\(sendButton, 'click'\)/);
+  assert.match(content, /\.indicator-shell\{display:flex;flex-direction:column/);
+  assert.match(content, /\.model-verification-progress\{order:-1\}/);
+  assert.match(background, /Request lock monitor did not reattach after model selection/);
+});
+
