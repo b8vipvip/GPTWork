@@ -1759,6 +1759,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         logRuntime('info', 'native', 'manual_reconnect_completed');
         return { ok: true };
       }
+      case 'GPTLOCK_TRUSTED_POINTER': {
+        if (!sender.tab?.id) throw new Error('Trusted pointer input requires a tab');
+        const x = Number(message.x);
+        const y = Number(message.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) {
+          throw new Error('Trusted pointer coordinates are invalid');
+        }
+        const action = message.action === 'move' ? 'move' : 'click';
+        await networkMonitor.trustedPointer(sender.tab.id, { action, x, y });
+        return { action, x, y };
+      }
       case 'GPTLOCK_PAGE_OBSERVATION': {
         if (!sender.tab?.id) throw new Error('Page observation requires a tab');
         const state = ensureTabState(sender.tab.id, sender.tab.url);
