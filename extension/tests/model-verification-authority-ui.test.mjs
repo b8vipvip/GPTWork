@@ -12,15 +12,14 @@ test('model verification has one model-identity authority: the formal network re
   assert.match(content, /selectionAttempted/);
   assert.match(background, /sole authority for which model ChatGPT actually selected/);
   assert.match(background, /requestModel === item\.model/);
+  assert.match(background, /probeMarker: 'GPTWork 模型验证'/);
   assert.doesNotMatch(background, /Model selection was not confirmed/);
-  assert.doesNotMatch(background, /function verificationOutcome/);
-  assert.doesNotMatch(background, /function requestLockConfirmed/);
-  assert.doesNotMatch(background, /function probeText/);
 });
 
-test('verification progress lives on the in-page GPTWork indicator and is removed when the run ends', () => {
-  assert.match(content, /model-verification-progress/);
-  assert.match(content, /root\.querySelector\('\.model-verification-progress'\)\?\.remove\(\)/);
+test('verification progress is a separate fixed host above the status indicator', () => {
+  assert.match(content, /gptlock-verification-progress-host/);
+  assert.match(content, /position:fixed;right:12px;bottom:52px/);
+  assert.match(content, /document\.getElementById\('gptlock-verification-progress-host'\)\?\.remove\(\)/);
   assert.doesNotMatch(popup, /id="autoVerifyProgress"/);
   assert.match(popup, />模型验证<\/button>/);
 });
@@ -41,25 +40,21 @@ test('settings runtime card has no verification action and exposes persistent ve
 });
 
 
-test('model automation is composer-scoped and cannot use arbitrary sidebar menus', () => {
-  assert.match(content, /composerRoot\.querySelectorAll\(selector\)/);
-  assert.match(content, /Never scan arbitrary global menus/);
+test('model automation is composer-scoped and structurally owned', () => {
+  assert.match(content, /function activeComposerSurface/);
+  assert.match(content, /Single authority: only an explicit ChatGPT composer intelligence\/model control/);
+  assert.doesNotMatch(content, /const scored = candidates\.map/);
+  assert.match(content, /if \(unique\.length !== 1\) return null/);
+  assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
   assert.match(content, /verifiedModelRows/);
   assert.match(content, /dismissWorkContinuationPrompt/);
   assert.match(content, /留在聊天模式/);
 });
 
-
-test('model verification probe and progress stay visible and sidebar-safe', () => {
-  assert.match(content, /There is deliberately no generic legacy fallback for model selection/);
-  assert.match(content, /recent-chat "\.\.\." action menu/);
+test('model verification probe uses trusted send and monitor reattach', () => {
   assert.match(content, /await trustedPointer\(sendButton, 'click'\)/);
-  assert.match(content, /\.indicator-shell\{display:flex;flex-direction:column/);
-  assert.match(content, /\.model-verification-progress\{order:-1\}/);
   assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
-
-
 
 test('v0.5.81 model automation has one composer-scoped authority', () => {
   assert.match(content, /Single authority: only an explicit ChatGPT composer intelligence\/model control/);
