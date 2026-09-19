@@ -9,6 +9,7 @@ test('network monitor serializes debugger attach and detach per tab', async () =
   let attachCalls = 0;
   let detachCalls = 0;
   let fetchEnableCalls = 0;
+  const inputEvents = [];
 
   globalThis.chrome = {
     runtime: { lastError: null },
@@ -21,8 +22,9 @@ test('network monitor serializes debugger attach and detach per tab', async () =
         detachCalls += 1;
         delayedCallback(callback);
       },
-      sendCommand(_target, command, _params, callback) {
+      sendCommand(_target, command, params, callback) {
         if (command === 'Fetch.enable') fetchEnableCalls += 1;
+        if (command === 'Input.dispatchMouseEvent') inputEvents.push(params);
         delayedCallback(callback, 1);
       },
       onEvent: { addListener() {} },
@@ -60,4 +62,13 @@ test('network monitor serializes debugger attach and detach per tab', async () =
   assert.equal(detachCalls, 2);
   assert.equal(attachCalls, 3, 'attach requested during detach must run after detach completes');
   assert.equal(monitor.isAttached(17), true);
+
+  await monitor.trustedPointer(17, { action: 'click', x: 120, y: 240 });
+  assert.deepEqual(inputEvents.slice(-3).map((event) => event.type), [
+    'mouseMoved',
+    'mousePressed',
+    'mouseReleased',
+  ]);
+  assert.equal(inputEvents.at(-1).x, 120);
+  assert.equal(inputEvents.at(-1).y, 240);
 });
