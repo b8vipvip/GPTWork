@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+from pathlib import Path
 
 from .audit import write_audit
 from .model import Criterion, CriterionStatus, Event, Gate, GateStatus, GateStep, State, Task, utcnow
@@ -264,6 +265,24 @@ def capture(
             ),
         )
     ]
+    # Hydrate the previous observer artifact into one cumulative task ledger.
+    # The consumer workflow restores the latest artifact into log_root before capture().
+    previous_state = Path(log_root) / tid / "state.json"
+    if previous_state.exists():
+        try:
+            previous = Task.from_dict(json.loads(previous_state.read_text(encoding="utf-8")))
+        except (OSError, ValueError, KeyError, TypeError):
+            previous = None
+        if previous and previous.task_id == tid:
+            t.created_at = previous.created_at
+            # Preserve durable metadata that a later GitHub event may not carry.
+            merged_metadata = dict(previous.metadata)
+            merged_metadata.update({k: v for k, v in t.metadata.items() if v not in ("", None)})
+            t.metadata = merged_metadata
+            seen = {(e.at, e.kind, e.reason, e.gate, e.status, e.evidence) for e in previous.history}
+            current = [e for e in t.history if (e.at, e.kind, e.reason, e.gate, e.status, e.evidence) not in seen]
+            t.history = list(previous.history) + current
+
     paths = write_audit(t, log_root)
     return {
         "task_id": tid,

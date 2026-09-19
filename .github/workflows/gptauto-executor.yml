@@ -6,7 +6,7 @@ on:
     types: [completed]
 permissions:
   contents: write
-  actions: read
+  actions: write
   pull-requests: write
   issues: write
 concurrency:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   execute:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -27,10 +27,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          OBSERVER_RUN_ID: ${{ github.event.workflow_run.id }}
+          OBSERVER_RUN_ID: ${{ github.event.workflow_run.id || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
+          if [[ -z "$OBSERVER_RUN_ID" ]]; then
+            OBSERVER_RUN_ID="$(gh api "repos/$REPOSITORY/actions/workflows/gptauto-observer.yml/runs?status=success&per_page=20" --jq '.workflow_runs[0].id // empty')"
+          fi
+          [[ -n "$OBSERVER_RUN_ID" ]] || { echo "::error::No successful GPTAuto Observer run found"; exit 1; }
           artifact_id="$(gh api "repos/$REPOSITORY/actions/runs/$OBSERVER_RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("gptauto-GA-")) | .id' | head -n1)"
           [[ -n "$artifact_id" ]] || { echo "No GPTAuto artifact on observer run"; exit 0; }
           mkdir -p /tmp/gptauto-state
@@ -45,10 +49,11 @@ jobs:
           echo "pr-number=$(jq -r '.pr_number // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
           echo "head-sha=$(jq -r '.head_sha // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
           echo "run-id=$(jq -r '.run_id // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "release-required=$(jq -r '.release_required // false' <<<"$action")" >> "$GITHUB_OUTPUT"
       - name: Execute safe merge gate
         if: ${{ steps.state.outputs.action == 'merge' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GPTAUTO_EXECUTOR_TOKEN || github.token }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.state.outputs.pr-number }}
           EXPECTED_HEAD: ${{ steps.state.outputs.head-sha }}
@@ -69,6 +74,24 @@ jobs:
             -f merge_method=squash \
             -f sha="$EXPECTED_HEAD" | tee /tmp/gptauto-merge.json
           jq -e '.merged == true' /tmp/gptauto-merge.json >/dev/null
+          merge_sha="$(jq -r '.sha' /tmp/gptauto-merge.json)"
+          echo "Merged as $merge_sha; ensuring post-merge workflows are running."
+
+          # A merge performed with GITHUB_TOKEN does not normally emit push-triggered
+          # workflow runs. Explicit workflow_dispatch is therefore the continuation
+          # mechanism; with a dedicated token we first avoid duplicate push runs.
+          sleep 2
+          runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$merge_sha&per_page=100")"
+          ci_count="$(jq '[.workflow_runs[] | select(.name == "CI")] | length' <<<"$runs")"
+          if [[ "$ci_count" == "0" ]]; then
+            gh workflow run CI --repo "$REPOSITORY" --ref "$merge_sha"
+          fi
+          if [[ "${{ steps.state.outputs.release-required }}" == "true" ]]; then
+            release_count="$(jq '[.workflow_runs[] | select(.name == "Release")] | length' <<<"$runs")"
+            if [[ "$release_count" == "0" ]]; then
+              gh workflow run Release --repo "$REPOSITORY" --ref "$merge_sha"
+            fi
+          fi
       - name: Emit repair request
         if: ${{ steps.state.outputs.action == 'repair_request' }}
         env:
@@ -89,7 +112,7 @@ jobs:
             existing="$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --jq '.[].body' 2>/dev/null || true)"
             if ! grep -Fq "$marker" <<<"$existing"; then
               gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "$marker
-          GPTAuto repair request: Actions failed for task `$TASK_ID` (run `$FAILED_RUN_ID`). The engineering agent should inspect the failed job logs, repair the current PR branch, push a new commit, and keep the same TASK_ID."
+          GPTAuto repair request: Actions failed for task $TASK_ID (run $FAILED_RUN_ID). The engineering agent should inspect the failed job logs, repair the current PR branch, push a new commit, and keep the same TASK_ID."
             fi
           fi
       - name: Executor summary
@@ -100,8 +123,8 @@ jobs:
         run: |
           {
             echo "## GPTAuto Executor"
-            echo "- Task: `$TASK_ID`"
-            echo "- Decision: `$ACTION`"
+            echo "- Task: $TASK_ID"
+            echo "- Decision: $ACTION"
             echo "- Safe merge is executed only after all current head workflows are completed successfully/neutral/skipped."
             echo "- Failures become idempotent repair requests tied to the same TASK_ID and failed run."
           } >> "$GITHUB_STEP_SUMMARY"

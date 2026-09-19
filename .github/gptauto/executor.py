@@ -45,6 +45,7 @@ def next_action(task: Task) -> dict:
             "task_id": task.task_id,
             "pr_number": str(meta.get("pr_number")),
             "head_sha": str(meta.get("head_sha") or ""),
+            "release_required": bool(meta.get("release_required")),
         }
 
     if task.state == State.VERIFY:
