@@ -54,6 +54,7 @@
   let autoProbeRunning = false;
   let lastRuntimeContactAt = Date.now();
   let pointerTraceSeq = 0;
+  // legacy-core-maintenance: diagnostic pointer provenance only; no selection policy or private-engine behavior.
 
   function compactElementProbe(element) {
     if (!element) return null;
