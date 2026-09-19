@@ -1206,11 +1206,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         throw new Error('Model selection control was not activated');
       }
 
-      // The UI only performs the click. The first formal request observed after it is
-      // the sole authority for which model ChatGPT actually selected.
-      // Selection can navigate "/" -> "/c/:id". That transition temporarily detaches
-      // the debugger. Do not send the probe until the monitor is attached again, and
-      // arm the attempt timestamp only after the visible message has been accepted.
+      // Verification has one terminal authority: a visible probe followed by the
+      // formal request captured after that probe. DOM selection is only an action,
+      // never verification evidence.
       const reattached = await networkMonitor.attach(tabId);
       if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
       const probe = await sendTabMessage(tabId, {
