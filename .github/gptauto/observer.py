@@ -11,12 +11,18 @@ from .model import Criterion, CriterionStatus, Event, Gate, GateStatus, GateStep
 _VERSION_RE = re.compile(r"(?<![\w.])v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(?![\w.])", re.I)
 _RELEASE_RE = re.compile(r"\b(?:release|publish|published|shipping)\b|正式版|发布|发版", re.I)
 _RELEASE_WORKFLOW_RE = re.compile(r"(?:^|[\s_-])(?:release|publish)(?:$|[\s_-])", re.I)
+_NON_RELEASE_PREFIX_RE = re.compile(r"^\s*(?:chore|docs|test|ci|build|deps|refactor)(?:\([^)]*\))?\s*:", re.I)
 _FAILURES = {"failure", "timed_out", "action_required", "startup_failure"}
 
 
 def release_expected(*texts):
-    text = " ".join(str(value or "") for value in texts)
-    return bool(_VERSION_RE.search(text) or _RELEASE_RE.search(text))
+    values = [str(value or "") for value in texts]
+    text = " ".join(values)
+    if _RELEASE_RE.search(text):
+        return True
+    if values and _NON_RELEASE_PREFIX_RE.search(values[0]):
+        return False
+    return bool(_VERSION_RE.search(text))
 
 
 def observed_task_id(repo, pr_number="", head_sha="", merge_sha=""):
@@ -60,13 +66,15 @@ def capture(
     pr_ci_run_id="",
     main_ci_conclusion="",
     main_ci_run_id="",
+    release_conclusion="",
+    release_run_id="",
 ):
     tid = observed_task_id(repo, pr_number, head_sha, merge_sha)
     goal = pr_title.strip() or ("Observe repository change " + (merge_sha or head_sha)[:12])
     merged = str(pr_merged).lower() == "true"
     release_required = release_expected(pr_title, pr_body, release_tag)
     workflow_success = _passed(workflow_conclusion)
-    release_done = (
+    release_done = _passed(release_conclusion) or (
         event == "release" and str(release_state or "").lower() in {"published", "released"}
     ) or (
         event == "workflow_run"
@@ -139,7 +147,7 @@ def capture(
                     Gate.RELEASE,
                     status=release_status,
                     evidence=(
-                        release_tag or f"{workflow_name} run {run_id}"
+                        release_tag or f"Release run {release_run_id or run_id}"
                         if release_done
                         else "Release completion not yet observed"
                     ),
@@ -175,7 +183,7 @@ def capture(
                     "Requested release completed successfully",
                     CriterionStatus.PASSED if release_done else CriterionStatus.PENDING,
                     (
-                        release_tag or f"workflow={workflow_name}; run={run_id}"
+                        release_tag or f"release_run={release_run_id or run_id}"
                         if release_done
                         else ""
                     ),
@@ -230,6 +238,7 @@ def capture(
             "completion_gate": completion_gate,
             "pr_ci_run_id": pr_ci_run_id,
             "main_ci_run_id": main_ci_run_id,
+            "release_run_id": release_run_id,
         },
     )
     t.history = [
@@ -290,6 +299,8 @@ def main():
         "pr-ci-run-id",
         "main-ci-conclusion",
         "main-ci-run-id",
+        "release-conclusion",
+        "release-run-id",
     ]:
         c.add_argument("--" + name, default="")
     a = p.parse_args()
@@ -317,6 +328,8 @@ def main():
                 pr_ci_run_id=a.pr_ci_run_id,
                 main_ci_conclusion=a.main_ci_conclusion,
                 main_ci_run_id=a.main_ci_run_id,
+                release_conclusion=a.release_conclusion,
+                release_run_id=a.release_run_id,
             ),
             ensure_ascii=False,
         )
