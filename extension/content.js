@@ -500,14 +500,7 @@
       /continue in chat/i,
     ];
     const candidates = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
-    return candidates.find((element) => {
-      const text = normalizedPickerLabel(element);
-      if (!labels.some((pattern) => pattern.test(text))) return false;
-      const context = String(
-        element.closest?.('[role="dialog"],main,section,article,div')?.innerText || ''
-      ).toLowerCase();
-      return /chatgpt work|在\s*chatgpt\s*work\s*中继续|work\s*模式|工作模式/i.test(context);
-    }) || null;
+    return candidates.find((element) => labels.some((pattern) => pattern.test(normalizedPickerLabel(element)))) || null;
   }
 
   async function dismissWorkContinuationPrompt() {
@@ -1214,7 +1207,12 @@
     return false;
   });
 
-  new MutationObserver(scheduleReport).observe(document.documentElement, {
+  new MutationObserver((mutations) => {
+    scheduleReport();
+    if (mutations.some((mutation) => mutation.addedNodes?.length)) {
+      void dismissWorkContinuationPrompt().catch(() => {});
+    }
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
     characterData: true,
@@ -1245,6 +1243,7 @@
   }, BLOCKING_GUARD_HEARTBEAT_MS);
 
   ensureIndicator();
+  void dismissWorkContinuationPrompt().catch(() => {});
   void sendMessage({ type: 'GPTLOCK_GET_STATE' })
     .then((state) => updateCache({ state: state.tabState, policy: state.policy, settings: state.settings }))
     .catch(() => failOpenStaleRuntime());
