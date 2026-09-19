@@ -17,12 +17,15 @@ _FAILURES = {"failure", "timed_out", "action_required", "startup_failure"}
 
 def release_expected(*texts):
     values = [str(value or "") for value in texts]
-    text = " ".join(values)
-    if _RELEASE_RE.search(text):
+    primary = values[0] if values else ""
+    if _RELEASE_RE.search(primary):
         return True
-    if values and _NON_RELEASE_PREFIX_RE.search(values[0]):
+    if _NON_RELEASE_PREFIX_RE.search(primary):
         return False
-    return bool(_VERSION_RE.search(text))
+    if _VERSION_RE.search(primary):
+        return True
+    secondary = " ".join(values[1:])
+    return bool(_RELEASE_RE.search(secondary))
 
 
 def observed_task_id(repo, pr_number="", head_sha="", merge_sha=""):
