@@ -1,5 +1,6 @@
 name: GPTAuto Observer
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, closed]
   push:
@@ -41,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          python .github/gptauto/observer.py capture \
+          PYTHONPATH=.github python -m gptauto.observer capture \
             --event "$EVENT_NAME" --repo "$REPOSITORY" --default-branch "$DEFAULT_BRANCH" \
             --branch "$REF_NAME" --head-sha "$HEAD_SHA" --pr-number "$PR_NUMBER" \
             --pr-title "$PR_TITLE" --pr-state "$PR_STATE" --pr-merged "$PR_MERGED" \
