@@ -1,0 +1,106 @@
+name: GPTAuto Executor
+on:
+  workflow_run:
+    workflows: [GPTAuto Observer]
+    types: [completed]
+permissions:
+  contents: write
+  actions: read
+  pull-requests: write
+  issues: write
+concurrency:
+  group: gptauto-executor-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+jobs:
+  execute:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download observer state
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          OBSERVER_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          artifact_id="$(gh api "repos/$REPOSITORY/actions/runs/$OBSERVER_RUN_ID/artifacts" --jq '.artifacts[] | select(.name | startswith("gptauto-GA-")) | .id' | head -n1)"
+          [[ -n "$artifact_id" ]] || { echo "No GPTAuto artifact on observer run"; exit 0; }
+          mkdir -p /tmp/gptauto-state
+          gh api "repos/$REPOSITORY/actions/artifacts/$artifact_id/zip" > /tmp/gptauto.zip
+          unzip -q /tmp/gptauto.zip -d /tmp/gptauto-state
+          state="$(find /tmp/gptauto-state -name state.json -type f | head -n1)"
+          [[ -n "$state" ]] || { echo "::error::state.json missing from GPTAuto artifact"; exit 1; }
+          action="$(PYTHONPATH=.github python -m gptauto.executor "$state")"
+          echo "$action" | tee /tmp/gptauto-action.json
+          echo "action=$(jq -r '.action' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "task-id=$(jq -r '.task_id' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "pr-number=$(jq -r '.pr_number // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "head-sha=$(jq -r '.head_sha // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
+          echo "run-id=$(jq -r '.run_id // empty' <<<"$action")" >> "$GITHUB_OUTPUT"
+      - name: Execute safe merge gate
+        if: ${{ steps.state.outputs.action == 'merge' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.state.outputs.pr-number }}
+          EXPECTED_HEAD: ${{ steps.state.outputs.head-sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          pr="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          actual_head="$(jq -r '.head.sha' <<<"$pr")"
+          [[ "$actual_head" == "$EXPECTED_HEAD" ]] || { echo "::error::PR head moved; refusing stale merge"; exit 1; }
+          [[ "$(jq -r '.draft' <<<"$pr")" == "false" ]] || { echo "::error::PR is draft"; exit 1; }
+          [[ "$(jq -r '.mergeable' <<<"$pr")" != "false" ]] || { echo "::error::PR is not mergeable"; exit 1; }
+
+          runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$EXPECTED_HEAD&per_page=100")"
+          blocking="$(jq '[.workflow_runs[] | select(.name != "GPTAuto Observer" and .name != "GPTAuto Executor") | select(.status != "completed" or (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length' <<<"$runs")"
+          [[ "$blocking" == "0" ]] || { echo "::error::$blocking workflow run(s) are not safely complete"; exit 1; }
+
+          gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f merge_method=squash \
+            -f sha="$EXPECTED_HEAD" | tee /tmp/gptauto-merge.json
+          jq -e '.merged == true' /tmp/gptauto-merge.json >/dev/null
+      - name: Emit repair request
+        if: ${{ steps.state.outputs.action == 'repair_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.state.outputs.pr-number }}
+          TASK_ID: ${{ steps.state.outputs.task-id }}
+          FAILED_RUN_ID: ${{ steps.state.outputs.run-id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p .gptauto/repair-requests
+          request=".gptauto/repair-requests/$TASK_ID.json"
+          jq -n --arg task "$TASK_ID" --arg run "$FAILED_RUN_ID" --arg pr "$PR_NUMBER" \
+            '{kind:"repair_request",task_id:$task,run_id:$run,pr_number:$pr,status:"open"}' > "$request"
+          if [[ -n "$PR_NUMBER" ]]; then
+            marker="<!-- gptauto-repair:$TASK_ID:$FAILED_RUN_ID -->"
+            existing="$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --jq '.[].body' 2>/dev/null || true)"
+            if ! grep -Fq "$marker" <<<"$existing"; then
+              gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "$marker
+          GPTAuto repair request: Actions failed for task `$TASK_ID` (run `$FAILED_RUN_ID`). The engineering agent should inspect the failed job logs, repair the current PR branch, push a new commit, and keep the same TASK_ID."
+            fi
+          fi
+      - name: Executor summary
+        if: always()
+        env:
+          ACTION: ${{ steps.state.outputs.action }}
+          TASK_ID: ${{ steps.state.outputs.task-id }}
+        run: |
+          {
+            echo "## GPTAuto Executor"
+            echo "- Task: `$TASK_ID`"
+            echo "- Decision: `$ACTION`"
+            echo "- Safe merge is executed only after all current head workflows are completed successfully/neutral/skipped."
+            echo "- Failures become idempotent repair requests tied to the same TASK_ID and failed run."
+          } >> "$GITHUB_STEP_SUMMARY"
