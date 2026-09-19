@@ -14,7 +14,7 @@ const el = {
   freeDays: $('freeDays'), freeDevices: $('freeDevices'), sessionDays: $('sessionDays'),
   emailVerificationRequired: $('emailVerificationRequired'),
   smtpHost: $('smtpHost'),
-  smtpPort: $('smtpPort'), smtpSecure: $('smtpSecure'), smtpUsername: $('smtpUsername'), smtpPassword: $('smtpPassword'), smtpFromEmail: $('smtpFromEmail'), smtpFromName: $('smtpFromName'), testEmail: $('testEmail'), sendTestEmail: $('sendTestEmail'), smtpState: $('smtpState'),
+  smtpPort: $('smtpPort'), smtpSecure: $('smtpSecure'), smtpUsername: $('smtpUsername'), smtpPassword: $('smtpPassword'), smtpFromEmail: $('smtpFromEmail'), smtpFromName: $('smtpFromName'), testEmail: $('testEmail'), sendTestEmail: $('sendTestEmail'), saveSmtpSettings: $('saveSmtpSettings'), smtpState: $('smtpState'), smtpMessage: $('smtpMessage'),
   wechatEnabled: $('wechatEnabled'), wechatUrl: $('wechatUrl'), wechatInstructions: $('wechatInstructions'),
   alipayEnabled: $('alipayEnabled'), alipayUrl: $('alipayUrl'), alipayInstructions: $('alipayInstructions'), saveSettings: $('saveSettings'), settingsMessage: $('settingsMessage'),
   runtimeLog: $('runtimeLog'), refreshRuntime: $('refreshRuntime'), exportRuntime: $('exportRuntime'), audit: $('audit'),
@@ -442,30 +442,37 @@ async function saveSettings() {
     free: { days: Number(el.freeDays.value), maxDevices: Number(el.freeDevices.value) },
     sessionDays: Number(el.sessionDays.value),
     emailVerificationRequired: el.emailVerificationRequired.checked,
-    smtp: {
-      host: el.smtpHost.value.trim(), port: Number(el.smtpPort.value), secure: el.smtpSecure.checked, username: el.smtpUsername.value.trim(),
-      fromEmail: el.smtpFromEmail.value.trim(), fromName: el.smtpFromName.value.trim(),
-      ...(el.smtpPassword.value ? { password: el.smtpPassword.value } : {}),
-    },
-    paymentMethods: [
-      { code: 'wechat', enabled: el.wechatEnabled.checked, payUrl: el.wechatUrl.value.trim(), instructions: el.wechatInstructions.value.trim() },
-      { code: 'alipay', enabled: el.alipayEnabled.checked, payUrl: el.alipayUrl.value.trim(), instructions: el.alipayInstructions.value.trim() },
-    ],
   };
   const data = await api('/admin/api/account/settings', { method: 'PUT', body: JSON.stringify(body) });
+  renderSettings(data);
+  setMessage(el.settingsMessage, '基础配置已保存。客户端下次刷新账户配置时生效。', 'good');
+}
+
+async function saveSmtpSettings() {
+  setMessage(el.smtpMessage, '正在保存邮件配置…');
+  const smtp = {
+    host: el.smtpHost.value.trim(),
+    port: Number(el.smtpPort.value),
+    secure: el.smtpSecure.checked,
+    username: el.smtpUsername.value.trim(),
+    fromEmail: el.smtpFromEmail.value.trim(),
+    fromName: el.smtpFromName.value.trim(),
+    ...(el.smtpPassword.value ? { password: el.smtpPassword.value } : {}),
+  };
+  const data = await api('/admin/api/account/settings', { method: 'PUT', body: JSON.stringify({ smtp }) });
   el.smtpPassword.value = '';
   renderSettings(data);
-  setMessage(el.settingsMessage, '配置已保存。客户端下次刷新账户配置时生效。', 'good');
+  setMessage(el.smtpMessage, '邮件配置已保存。', 'good');
 }
 
 async function sendTestEmail() {
   const email = el.testEmail.value.trim();
-  if (!email) return setMessage(el.settingsMessage, '请输入测试收件邮箱。', 'bad');
+  if (!email) return setMessage(el.smtpMessage, '请输入测试收件邮箱。', 'bad');
   el.sendTestEmail.disabled = true;
   try {
     await api('/admin/api/account/settings/test-email', { method: 'POST', body: JSON.stringify({ email }) });
-    setMessage(el.settingsMessage, `测试邮件已提交发送至 ${email}。`, 'good');
-  } catch (error) { setMessage(el.settingsMessage, `测试邮件失败：${error.message}`, 'bad'); }
+    setMessage(el.smtpMessage, `测试邮件已提交发送至 ${email}。`, 'good');
+  } catch (error) { setMessage(el.smtpMessage, `测试邮件失败：${error.message}`, 'bad'); }
   finally { el.sendTestEmail.disabled = false; }
 }
 
@@ -583,6 +590,10 @@ el.refreshOrders?.addEventListener('click', () => void loadOrders());
 el.saveSettings?.addEventListener('click', () => {
   el.saveSettings.disabled = true;
   void saveSettings().catch((error) => setMessage(el.settingsMessage, error.message, 'bad')).finally(() => { el.saveSettings.disabled = false; });
+});
+el.saveSmtpSettings?.addEventListener('click', () => {
+  el.saveSmtpSettings.disabled = true;
+  void saveSmtpSettings().catch((error) => setMessage(el.smtpMessage, error.message, 'bad')).finally(() => { el.saveSmtpSettings.disabled = false; });
 });
 el.sendTestEmail?.addEventListener('click', () => void sendTestEmail());
 el.refreshRuntime?.addEventListener('click', () => void Promise.all([loadRuntimeLogs(), loadAudit()]));

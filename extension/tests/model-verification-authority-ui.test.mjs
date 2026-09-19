@@ -177,3 +177,14 @@ test('v0.5.88 account discovery has no legacy direct model-trigger click', () =>
   assert.doesNotMatch(body, /await trustedPointer\(trigger, 'click'\)/);
   assert.match(body, /await modelPickerPointer\(trigger, 'click', 'legacy-model-trigger'\)/);
 });
+
+
+test('quarantine disables background alignment and passively captures manually opened picker DOM', () => {
+  const alignStart = content.indexOf('async function alignSelection');
+  const alignEnd = content.indexOf('function scheduleAlign', alignStart);
+  const body = content.slice(alignStart, alignEnd);
+  assert.match(body, /if \(MODEL_PICKER_MUTATION_QUARANTINED\) return false/);
+  assert.match(content, /function startPassivePickerObserver/);
+  assert.match(content, /new MutationObserver/);
+  assert.match(content, /passive_picker_snapshot/);
+});

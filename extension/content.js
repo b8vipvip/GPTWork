@@ -145,6 +145,40 @@
     });
   }
 
+  let passivePickerObserver = null;
+  let passivePickerFingerprint = '';
+
+  function passivePickerSnapshot(reason = 'dom-change') {
+    const popups = typeof modelPopupScopes === 'function' ? modelPopupScopes() : [];
+    const visiblePopups = popups.filter(visible);
+    const modelLike = visiblePopups.map((scope) => ({
+      scope: compactElementProbe(scope),
+      rows: pickerProbeRows(scope),
+    }));
+    const fingerprint = JSON.stringify(modelLike.map((entry) => ({
+      role: entry.scope?.attrs?.role || '',
+      text: entry.scope?.text || '',
+      rows: entry.rows.map((row) => row.text || ''),
+    })));
+    if (!fingerprint || fingerprint === passivePickerFingerprint) return;
+    passivePickerFingerprint = fingerprint;
+    pointerTrace('passive_picker_snapshot', { reason, popups: modelLike });
+  }
+
+  function startPassivePickerObserver() {
+    if (passivePickerObserver || !document.documentElement) return;
+    passivePickerObserver = new MutationObserver(() => passivePickerSnapshot('mutation'));
+    passivePickerObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['role','aria-haspopup','aria-expanded','aria-controls','data-state','data-testid'],
+    });
+    passivePickerSnapshot('observer-start');
+  }
+
+  startPassivePickerObserver();
+
   function elementTexts(element) {
     return [
       element?.textContent?.trim(),
@@ -1045,6 +1079,10 @@
   }
 
   async function alignSelection({ force = false } = {}) {
+    // v0.5.89 safety rule: while picker mutation is quarantined, background alignment
+    // must also be read-only. Otherwise reasoning alignment can still click a generic
+    // menu trigger independently of model verification.
+    if (MODEL_PICKER_MUTATION_QUARANTINED) return false;
     // Verification owns the model UI for its entire transaction. Background alignment
     // is suspended instead of becoming a second model-selection authority.
     if (cachedState?.autoVerification?.running) return false;

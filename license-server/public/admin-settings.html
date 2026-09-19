@@ -39,7 +39,7 @@
         </section>
 
         <section id="mail-settings" class="card settings-card">
-          <div class="section-title"><div><span class="settings-kicker">MAIL</span><h2>邮件服务 / SMTP</h2><p class="muted">用于邮箱验证、找回密码和系统测试邮件。</p></div><span id="smtpState" class="config-state">尚未读取 SMTP 状态</span></div>
+          <div class="section-title"><div><span class="settings-kicker">MAIL</span><h2>邮件服务 / SMTP</h2><p class="muted">用于邮箱验证、找回密码和系统测试邮件。</p></div><div class="provider-actions"><span id="smtpState" class="config-state">尚未读取 SMTP 状态</span><button id="saveSmtpSettings" type="button" class="primary">保存邮件配置</button></div></div>
           <div class="settings-field-grid three-col">
             <label>SMTP 主机<input id="smtpHost" placeholder="smtp.example.com"></label>
             <label>端口<input id="smtpPort" type="number" min="1" max="65535"></label>
@@ -51,6 +51,7 @@
             <label>测试收件邮箱<input id="testEmail" type="email"></label>
             <div class="field-action"><button id="sendTestEmail" type="button">发送测试邮件</button></div>
           </div>
+          <p id="smtpMessage" class="message"></p>
         </section>
 
         <section id="official-payments" class="card settings-card official-payment-section">
