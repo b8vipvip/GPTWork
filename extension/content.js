@@ -562,16 +562,32 @@
     return true;
   }
 
+  function pointerStillOwnsPoint(element, point) {
+    if (!element?.isConnected || !point) return false;
+    const hit = document.elementFromPoint(point.x, point.y);
+    return Boolean(hit && (hit === element || element.contains?.(hit)));
+  }
+
   async function trustedPointer(element, action = 'click') {
     if (!element || !visible(element)) return false;
     try { element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
     try { element.focus?.({ preventScroll: true }); } catch {}
-    const point = elementCenter(element);
-    if (!point) return false;
     try {
+      // Attaching chrome.debugger can show Chrome's debugging infobar and move the
+      // entire viewport. Never compute coordinates until that layout change is over.
+      await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER_PREPARE' });
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      if (!element.isConnected || !visible(element)) return false;
+      const point = elementCenter(element);
+      if (!pointerStillOwnsPoint(element, point)) return false;
       await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER', action, x: point.x, y: point.y });
       return true;
     } catch {
+      // Synthetic fallback keeps the same DOM element as the sole action authority.
+      // It never falls back to coordinates, global menus, or another candidate.
+      if (!element.isConnected || !visible(element)) return false;
+      const point = elementCenter(element);
+      if (!pointerStillOwnsPoint(element, point)) return false;
       return dispatchSyntheticPointer(element, action);
     }
   }
@@ -710,10 +726,6 @@
     }
     if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
 
-    if (isModelListScope(picker)) {
-      return { trigger, picker, opener: null, submenu: picker, rows: distinctModelRows(picker) };
-    }
-
     if (!modelSubmenuOpener(picker)) {
       const advanced = advancedPickerToggle(picker);
       if (advanced) {
@@ -725,21 +737,16 @@
     const opener = modelSubmenuOpener(picker);
     if (!opener) return { trigger, picker, opener: null, submenu: null, rows: [] };
 
+    // Single ownership chain: the final model list does not exist for GPTWork until
+    // this exact second-layer row is activated. No pre-existing/global menu can win.
     const beforeScopes = new Set(modelPopupScopes());
-    let submenu = visibleModelSubmenu(picker, opener, beforeScopes);
-    if (!submenu) {
-      // The second layer ("Highest > / current model") must be clicked. Hovering it
-      // does not open ChatGPT's current third-layer "Select model" menu.
-      await trustedPointer(opener, 'click');
-      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener, beforeScopes), 2200, 80);
-    }
-    if (!submenu) {
-      try {
-        opener.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-        opener.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-      } catch {}
-      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener, beforeScopes), 1000, 80);
-    }
+    const opened = await trustedPointer(opener, 'click');
+    if (!opened) return { trigger, picker, opener, submenu: null, rows: [] };
+    const submenu = await waitUntil(
+      () => visibleModelSubmenu(picker, opener, beforeScopes),
+      2400,
+      80,
+    );
     const rows = submenu ? distinctModelRows(submenu) : [];
     return { trigger, picker, opener, submenu, rows };
   }
@@ -880,6 +887,9 @@
   }
 
   async function alignSelection({ force = false } = {}) {
+    // Verification owns the model UI for its entire transaction. Background alignment
+    // is suspended instead of becoming a second model-selection authority.
+    if (cachedState?.autoVerification?.running) return false;
     if (!cachedSettings?.enabled || !cachedSettings.autoAlignSelection || !cachedPolicy || document.querySelector(GENERATING_SELECTORS.join(','))) return false;
     const observation = collectObservation();
     const desiredModel = cachedPolicy.lockedModels?.[0];
@@ -1242,11 +1252,10 @@
     return false;
   });
 
-  new MutationObserver((mutations) => {
+  new MutationObserver(() => {
+    // DOM observation never performs clicks. All ChatGPT UI mutation is owned by an
+    // explicit model-selection transaction.
     scheduleReport();
-    if (mutations.some((mutation) => mutation.addedNodes?.length)) {
-      void dismissWorkContinuationPrompt().catch(() => {});
-    }
   }).observe(document.documentElement, {
     childList: true,
     subtree: true,
@@ -1282,7 +1291,6 @@
   });
 
   ensureIndicator();
-  void dismissWorkContinuationPrompt().catch(() => {});
   void sendMessage({ type: 'GPTLOCK_GET_STATE' })
     .then((state) => updateCache({ state: state.tabState, policy: state.policy, settings: state.settings }))
     .catch(() => failOpenStaleRuntime());

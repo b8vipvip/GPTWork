@@ -46,6 +46,10 @@ let coreConnection = { connected: false, error: null };
 let initializeTask = null;
 const pendingRequests = new Map();
 const tabStates = new Map();
+// Ephemeral per-tab verification transaction. This is the sole authority that can
+// temporarily change request-lock behavior while a catalog model is being probed.
+// It is intentionally independent of URL/context state migration.
+const verificationTransactions = new Map();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 
@@ -243,27 +247,15 @@ function effectiveSettingsForState(state) {
   };
 }
 
-function autoVerificationModelForTab(tabId) {
-  return normalizeConcreteModelId(
-    tabStates.get(Number(tabId))?.autoVerification?.catalogVerification?.currentModel,
-  );
-}
-
-function autoVerificationSelectionActiveForTab(tabId) {
-  const auto = tabStates.get(Number(tabId))?.autoVerification;
-  const progress = auto?.catalogVerification;
-  return Boolean(
-    auto?.running
-      && progress
-      && (progress.currentModel || progress.currentSelectorKey || progress.currentLabel),
-  );
+function verificationTransactionForTab(tabId) {
+  return verificationTransactions.get(Number(tabId)) || null;
 }
 
 function runtimePolicyForTabSync(tabId) {
   const policy = effectivePolicyForTabSync(tabId);
-  const verificationModel = autoVerificationModelForTab(tabId);
-  return verificationModel
-    ? normalizePolicy({ ...policy, lockedModels: [verificationModel] })
+  const transaction = verificationTransactionForTab(tabId);
+  return transaction?.model
+    ? normalizePolicy({ ...policy, lockedModels: [transaction.model] })
     : policy;
 }
 
@@ -649,13 +641,13 @@ async function applyNetworkEvidence(tabId, evidence) {
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
-    const verifyingAccountModel = autoVerificationSelectionActiveForTab(tabId);
+    const transaction = verificationTransactionForTab(tabId);
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: verifyingAccountModel ? null : currentSettings.preferredReasoning,
-      preserveModel: verifyingAccountModel,
-      preserveReasoning: verifyingAccountModel,
+      preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
+      preserveModel: Boolean(transaction),
+      preserveReasoning: Boolean(transaction),
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
     };
   },
@@ -1186,6 +1178,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
     state.autoVerification.attempt = index + 1;
+    verificationTransactions.set(Number(tabId), {
+      model: item.model || null,
+      selectorKey: item.selectorKey || '',
+      label: item.label || '',
+      startedAt: Date.now(),
+    });
     resetVerificationAttempt(state);
     await broadcastTabState(tabId);
     logRuntime('info', 'verification', 'account_model_verification_model_started', {
@@ -1274,10 +1272,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       });
     }
 
+    verificationTransactions.delete(Number(tabId));
     progress.completed = index + 1;
     await broadcastTabState(tabId);
   }
 
+  verificationTransactions.delete(Number(tabId));
   const progress = state.autoVerification.catalogVerification;
   progress.currentModel = null;
   progress.currentSelectorKey = null;
@@ -1788,6 +1788,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await initializeAfterCurrentTask();
         logRuntime('info', 'native', 'manual_reconnect_completed');
         return { ok: true };
+      }
+      case 'GPTLOCK_TRUSTED_POINTER_PREPARE': {
+        if (!sender.tab?.id) throw new Error('Trusted pointer preparation requires a tab');
+        const attached = networkMonitor.isAttached(sender.tab.id) || await networkMonitor.attach(sender.tab.id);
+        if (!attached) throw new Error('Debugger is not attached for trusted pointer input');
+        return { attached: true };
       }
       case 'GPTLOCK_TRUSTED_POINTER': {
         if (!sender.tab?.id) throw new Error('Trusted pointer input requires a tab');
