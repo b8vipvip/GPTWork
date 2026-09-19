@@ -546,13 +546,38 @@
       .find((element) => visible(element)) || null;
   }
 
+  function normalizedPickerLabel(element) {
+    return String([
+      element?.getAttribute?.('aria-label'),
+      element?.getAttribute?.('title'),
+      element?.innerText,
+      element?.textContent,
+    ].filter(Boolean).join(' ')).toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  function advancedPickerView(picker) {
+    return picker?.querySelector?.('[data-testid="composer-model-picker-slider-advanced-view"]') || null;
+  }
+
+  function advancedPickerToggle(picker) {
+    return [...(picker?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible)
+      .find((element) => /advanced|高级|進階|고급|avanzad|erweitert/i.test(normalizedPickerLabel(element))) || null;
+  }
+
   function modelSubmenuOpener(picker) {
-    const rows = [...(picker?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible);
-    return [...rows].reverse().find((element) =>
+    const scope = advancedPickerView(picker) || picker;
+    const rows = [...(scope?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible);
+    const submenuRows = rows.filter((element) =>
       element.hasAttribute?.('data-has-submenu')
       || element.getAttribute?.('aria-haspopup') === 'menu'
       || Boolean(element.getAttribute?.('aria-controls')),
-    ) || null;
+    );
+    const positive = submenuRows.find((element) => {
+      const label = normalizedPickerLabel(element);
+      return /model|模型|모델|modelo|modello|modèle/i.test(label)
+        && !/effort|reasoning|强度|強度|推理|思考|노력|추론/i.test(label);
+    });
+    return positive || [...submenuRows].reverse()[0] || null;
   }
 
   function visibleModelSubmenu(picker, opener) {
@@ -594,8 +619,20 @@
     }
     if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
 
+    if (!modelSubmenuOpener(picker)) {
+      const advanced = advancedPickerToggle(picker);
+      if (advanced) {
+        await trustedPointer(advanced, 'click');
+        await waitUntil(() => advancedPickerView(picker), 1400, 80);
+      }
+    }
+
     const opener = modelSubmenuOpener(picker);
-    if (!opener) return { trigger, picker, opener: null, submenu: null, rows: [] };
+    if (!opener) {
+      const directRows = [...(advancedPickerView(picker)?.querySelectorAll?.('[role="menuitemradio"],[role="radio"]') || [])]
+        .filter(visible);
+      return { trigger, picker, opener: null, submenu: advancedPickerView(picker), rows: directRows };
+    }
 
     let submenu = visibleModelSubmenu(picker, opener);
     if (!submenu) {
@@ -617,10 +654,11 @@
     const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
     const testId = String(row?.getAttribute?.('data-testid') || '').trim();
     const testIdModel = testId.match(/^model-switcher-(gpt-[a-z0-9._:-]+)$/i)?.[1] || null;
+    const dataValue = String(row?.getAttribute?.('data-value') || '').trim();
     const attributes = [
       row?.getAttribute?.('data-model'),
       row?.getAttribute?.('data-model-id'),
-      row?.getAttribute?.('data-value'),
+      dataValue,
       testIdModel,
     ].map((value) => String(value || '').trim()).filter(Boolean);
     const values = [
@@ -636,11 +674,15 @@
     const model = values.map((value) => normalizeDisplayedModel(value)).find(Boolean)
       || values.map((value) => evidence?.modelFromText?.(value)).find(Boolean)
       || rawId;
-    const label = values.find((value) => /gpt|astra|sol|thinking|latest|最新|pro|terra|luna/i.test(value))
+    const label = values.find((value) => /gpt|astra|sol|thinking|latest|最新|최신|pro|terra|luna/i.test(value))
+      || values.find(Boolean)
       || model
       || rawId
       || '';
-    return { rawId, model, label, values };
+    const selectorKey = testId
+      || dataValue
+      || String(label || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return { rawId, model, label, selectorKey, values };
   }
 
   async function closeModelMenus(trigger = null) {
@@ -651,26 +693,33 @@
     if (visibleIntelligencePickerContent() && trigger) await trustedPointer(trigger, 'click');
   }
 
-  async function chooseModelExact(desired) {
+  async function chooseModelExact({ model = null, selectorKey = '', label = '' } = {}) {
+    const desired = normalizeDisplayedModel(model) || String(model || '').trim().toLowerCase() || null;
+    const wantedKey = String(selectorKey || '').trim().toLowerCase();
+    const wantedLabel = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ');
     const modern = await openModernModelMenu();
     if (modern.rows.length) {
       const candidate = modern.rows.find((row) => {
         const descriptor = rowModelDescriptor(row);
-        return descriptor.model === desired || descriptor.rawId === desired;
+        if (desired && (descriptor.model === desired || descriptor.rawId === desired)) return true;
+        if (wantedKey && String(descriptor.selectorKey || '').toLowerCase() === wantedKey) return true;
+        return Boolean(wantedLabel && String(descriptor.label || '').toLowerCase().replace(/\s+/g, ' ') === wantedLabel);
       });
       if (candidate) {
         await trustedPointer(candidate, 'click');
         await new Promise((resolve) => window.setTimeout(resolve, 700));
+        if (!desired) return true;
         const confirmed = await waitUntil(() => collectObservation().model === desired, 3000, 100);
         if (confirmed) return true;
       }
       await closeModelMenus(modern.trigger);
     }
+    if (!desired) return false;
     return chooseExact(MODEL_SELECTORS, desired, normalizeDisplayedModel, { skipModern: true });
   }
 
   async function chooseExact(triggerSelectors, desired, normalize, { skipModern = false } = {}) {
-    if (!skipModern && triggerSelectors === MODEL_SELECTORS) return chooseModelExact(desired);
+    if (!skipModern && triggerSelectors === MODEL_SELECTORS) return chooseModelExact({ model: desired, label: desired });
     const trigger = modelTrigger(triggerSelectors);
     if (!trigger) return false;
     const current = elementTexts(trigger).map(normalize).find(Boolean);
@@ -907,22 +956,25 @@
   }
 
   async function verifyAccountModel(message) {
-    const model = normalizeDisplayedModel(message?.model) || String(message?.model || '').trim().toLowerCase();
-    if (!model) throw new Error('Invalid account model / 无效账户模型');
+    const model = normalizeDisplayedModel(message?.model) || String(message?.model || '').trim().toLowerCase() || null;
+    const selectorKey = String(message?.selectorKey || '').trim();
+    const label = String(message?.label || model || selectorKey || '').trim();
+    if (!model && !selectorKey && !label) throw new Error('Invalid account model / 无效账户模型');
     await waitForIdle();
-    const selected = await chooseModelExact(model);
-    const confirmedObservation = selected
+    const selected = await chooseModelExact({ model, selectorKey, label });
+    const confirmedObservation = selected && model
       ? await waitUntil(() => {
         const observation = collectObservation();
         return observation.model === model ? observation : null;
       }, 3000, 100)
       : null;
     const observation = confirmedObservation || collectObservation();
-    const confirmed = observation.model === model;
+    const confirmed = model ? observation.model === model : selected;
     return {
       model,
-      label: message?.label || model,
-      selected: selected || confirmed,
+      selectorKey,
+      label,
+      selected,
       confirmed,
       observation,
       capturedAt: new Date().toISOString(),
@@ -939,10 +991,19 @@
 
     const rememberRow = (row) => {
       const descriptor = rowModelDescriptor(row);
-      const canonical = descriptor.model;
-      if (!canonical) return;
-      if (!models.some((item) => item.rawId === descriptor.rawId && item.model === canonical)) {
-        models.push({ rawId: descriptor.rawId, model: canonical, label: descriptor.label || canonical });
+      const canonical = descriptor.model || null;
+      if (!canonical && !descriptor.selectorKey) return;
+      if (!models.some((item) =>
+        item.rawId === descriptor.rawId
+        && item.model === canonical
+        && item.selectorKey === descriptor.selectorKey
+      )) {
+        models.push({
+          rawId: descriptor.rawId,
+          model: canonical,
+          selectorKey: descriptor.selectorKey,
+          label: descriptor.label || canonical || descriptor.selectorKey,
+        });
       }
     };
 
