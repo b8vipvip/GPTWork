@@ -4,6 +4,9 @@
     'button[data-testid*="model-switcher"]',
     'button[aria-label*="model" i][aria-haspopup="menu"]',
     'button[aria-label*="模型"][aria-haspopup="menu"]',
+    'button.__composer-pill[aria-haspopup="menu"]',
+    'button[class*="__composer-pill"][aria-haspopup="menu"]',
+    'button[aria-haspopup="menu"][data-tone="neutral"]',
   ];
   const REASONING_SELECTORS = [
     '[data-testid*="reasoning"] button',
@@ -417,15 +420,52 @@
     return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
   }
 
-  function modelTrigger(triggerSelectors = MODEL_SELECTORS) {
-    const direct = triggerSelectors
+  function composerIntelligenceTrigger() {
+    const direct = MODEL_SELECTORS
       .map((selector) => document.querySelector(selector))
       .find((element) => element && visible(element));
     if (direct) return direct;
-    if (triggerSelectors !== MODEL_SELECTORS) return null;
-    return composerNearbyControls().find((element) =>
-      elementTexts(element).some((text) => Boolean(normalizeDisplayedModel(text))),
-    ) || null;
+
+    const evidenceControls = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.modelReasoningControls?.() || [];
+    const evidenceTrigger = evidenceControls
+      .map((item) => item?.element)
+      .find((element) => element && visible(element) && element.getAttribute?.('aria-haspopup') === 'menu');
+    if (evidenceTrigger) return evidenceTrigger;
+
+    const composer = findComposer();
+    const composerRoot = composer?.closest?.('form') || composer?.parentElement || null;
+    const candidates = [...new Set([
+      ...composerNearbyControls(),
+      ...(composerRoot ? [...composerRoot.querySelectorAll('button,[role="button"],[aria-haspopup="menu"]')] : []),
+    ])].filter((element) => element && visible(element));
+
+    const scored = candidates.map((element) => {
+      const signal = [
+        element.getAttribute?.('data-testid'),
+        element.getAttribute?.('aria-label'),
+        element.getAttribute?.('title'),
+        element.getAttribute?.('aria-controls'),
+        element.className,
+        element.textContent,
+      ].map((value) => String(value || '')).join(' ');
+      let score = 0;
+      if (/composer-intelligence-picker-content|intelligence|model-switcher/i.test(signal)) score += 100;
+      if (/__composer-pill/.test(signal)) score += 80;
+      if (element.getAttribute?.('aria-haspopup') === 'menu') score += 40;
+      if (/gpt|model|reasoning|thinking|推理|模型|思考|high|medium|low|高|中|低/i.test(signal)) score += 25;
+      if (composerRoot?.contains?.(element)) score += 20;
+      return { element, score };
+    }).filter((item) => item.score >= 60).sort((a, b) => b.score - a.score);
+    return scored[0]?.element || null;
+  }
+
+  function modelTrigger(triggerSelectors = MODEL_SELECTORS) {
+    if (triggerSelectors !== MODEL_SELECTORS) {
+      return triggerSelectors
+        .map((selector) => document.querySelector(selector))
+        .find((element) => element && visible(element)) || null;
+    }
+    return composerIntelligenceTrigger();
   }
 
   function menuCandidates() {
@@ -441,18 +481,250 @@
       '[data-radix-menu-content] [role="menuitemradio"]',
       '[data-radix-menu-content] [role="radio"]',
       '[data-radix-menu-content] button',
+      '[data-testid="modal-intelligence-menu"] [role="radio"]',
+      '[data-testid="composer-intelligence-picker-content"] [role="menuitemradio"]',
       '[data-model]',
       '[data-model-id]',
     ];
     return [...new Set([...document.querySelectorAll(selectors.join(','))])].filter(visible);
   }
 
-  async function chooseExact(triggerSelectors, desired, normalize) {
+  function elementCenter(element) {
+    const rect = element?.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: rect.left + Math.max(1, rect.width / 2),
+      y: rect.top + Math.max(1, rect.height / 2),
+    };
+  }
+
+  function dispatchSyntheticPointer(element, action = 'click') {
+    const point = elementCenter(element);
+    if (!point) return false;
+    const common = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX: point.x,
+      clientY: point.y,
+    };
+    const PointerCtor = window.PointerEvent || window.MouseEvent;
+    if (action === 'move') {
+      for (const type of ['pointerover', 'pointerenter', 'pointermove']) {
+        try { element.dispatchEvent(new PointerCtor(type, { ...common, pointerType: 'mouse', isPrimary: true })); } catch {}
+      }
+      for (const type of ['mouseover', 'mouseenter', 'mousemove']) {
+        try { element.dispatchEvent(new MouseEvent(type, common)); } catch {}
+      }
+      return true;
+    }
+    try { element.dispatchEvent(new PointerCtor('pointerover', { ...common, pointerType: 'mouse', isPrimary: true, buttons: 0 })); } catch {}
+    try { element.dispatchEvent(new PointerCtor('pointerdown', { ...common, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 1 })); } catch {}
+    try { element.dispatchEvent(new MouseEvent('mousedown', { ...common, button: 0, buttons: 1 })); } catch {}
+    try { element.dispatchEvent(new PointerCtor('pointerup', { ...common, pointerType: 'mouse', isPrimary: true, button: 0, buttons: 0 })); } catch {}
+    try { element.dispatchEvent(new MouseEvent('mouseup', { ...common, button: 0, buttons: 0 })); } catch {}
+    try { element.dispatchEvent(new MouseEvent('click', { ...common, button: 0, buttons: 0, detail: 1 })); } catch {}
+    return true;
+  }
+
+  async function trustedPointer(element, action = 'click') {
+    if (!element || !visible(element)) return false;
+    try { element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch {}
+    try { element.focus?.({ preventScroll: true }); } catch {}
+    const point = elementCenter(element);
+    if (!point) return false;
+    try {
+      await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER', action, x: point.x, y: point.y });
+      return true;
+    } catch {
+      return dispatchSyntheticPointer(element, action);
+    }
+  }
+
+  function visibleIntelligencePickerContent() {
+    return [...document.querySelectorAll('[data-testid="composer-intelligence-picker-content"]')]
+      .find((element) => visible(element)) || null;
+  }
+
+  function normalizedPickerLabel(element) {
+    return String([
+      element?.getAttribute?.('aria-label'),
+      element?.getAttribute?.('title'),
+      element?.innerText,
+      element?.textContent,
+    ].filter(Boolean).join(' ')).toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  function advancedPickerView(picker) {
+    return picker?.querySelector?.('[data-testid="composer-model-picker-slider-advanced-view"]') || null;
+  }
+
+  function advancedPickerToggle(picker) {
+    return [...(picker?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible)
+      .find((element) => /advanced|高级|進階|고급|avanzad|erweitert/i.test(normalizedPickerLabel(element))) || null;
+  }
+
+  function modelSubmenuOpener(picker) {
+    const scope = advancedPickerView(picker) || picker;
+    const rows = [...(scope?.querySelectorAll?.('[role="menuitem"]') || [])].filter(visible);
+    const submenuRows = rows.filter((element) =>
+      element.hasAttribute?.('data-has-submenu')
+      || element.getAttribute?.('aria-haspopup') === 'menu'
+      || Boolean(element.getAttribute?.('aria-controls')),
+    );
+    const positive = submenuRows.find((element) => {
+      const label = normalizedPickerLabel(element);
+      return /model|模型|모델|modelo|modello|modèle/i.test(label)
+        && !/effort|reasoning|强度|強度|推理|思考|노력|추론/i.test(label);
+    });
+    return positive || [...submenuRows].reverse()[0] || null;
+  }
+
+  function visibleModelSubmenu(picker, opener) {
+    const controlledId = opener?.getAttribute?.('aria-controls') || '';
+    const controlled = controlledId ? document.getElementById(controlledId) : null;
+    if (controlled && visible(controlled) && controlled.querySelector?.('[role="menuitemradio"]')) return controlled;
+    const pickerMenu = picker?.closest?.('[role="menu"]') || null;
+    const openerId = opener?.id || '';
+    const menus = [...document.querySelectorAll('[role="menu"]')].filter((menu) =>
+      visible(menu)
+      && menu !== pickerMenu
+      && !picker?.contains?.(menu)
+      && Boolean(menu.querySelector?.('[role="menuitemradio"]')),
+    );
+    if (openerId) {
+      const labelled = menus.find((menu) => menu.getAttribute?.('aria-labelledby') === openerId);
+      if (labelled) return labelled;
+    }
+    return menus.find((menu) => /gpt|astra|sol|model|模型/i.test(menu.innerText || menu.textContent || ''))
+      || menus[0]
+      || null;
+  }
+
+  async function openModernModelMenu() {
+    const trigger = composerIntelligenceTrigger();
+    if (!trigger) return { trigger: null, picker: null, opener: null, submenu: null, rows: [] };
+
+    let picker = visibleIntelligencePickerContent();
+    if (!picker) {
+      await trustedPointer(trigger, 'click');
+      picker = await waitUntil(visibleIntelligencePickerContent, 2200, 80);
+    }
+    if (!picker) {
+      try {
+        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+        trigger.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+      } catch {}
+      picker = await waitUntil(visibleIntelligencePickerContent, 1200, 80);
+    }
+    if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
+
+    if (!modelSubmenuOpener(picker)) {
+      const advanced = advancedPickerToggle(picker);
+      if (advanced) {
+        await trustedPointer(advanced, 'click');
+        await waitUntil(() => advancedPickerView(picker), 1400, 80);
+      }
+    }
+
+    const opener = modelSubmenuOpener(picker);
+    if (!opener) {
+      const directRows = [...(advancedPickerView(picker)?.querySelectorAll?.('[role="menuitemradio"],[role="radio"]') || [])]
+        .filter(visible);
+      return { trigger, picker, opener: null, submenu: advancedPickerView(picker), rows: directRows };
+    }
+
+    let submenu = visibleModelSubmenu(picker, opener);
+    if (!submenu) {
+      await trustedPointer(opener, 'move');
+      dispatchSyntheticPointer(opener, 'move');
+      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener), 1800, 90);
+    }
+    if (!submenu) {
+      try { opener.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true })); } catch {}
+      submenu = await waitUntil(() => visibleModelSubmenu(picker, opener), 900, 90);
+    }
+    const rows = submenu
+      ? [...submenu.querySelectorAll('[role="menuitemradio"],[role="radio"],button')].filter(visible)
+      : [];
+    return { trigger, picker, opener, submenu, rows };
+  }
+
+  function rowModelDescriptor(row) {
+    const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
+    const testId = String(row?.getAttribute?.('data-testid') || '').trim();
+    const testIdModel = testId.match(/^model-switcher-(gpt-[a-z0-9._:-]+)$/i)?.[1] || null;
+    const dataValue = String(row?.getAttribute?.('data-value') || '').trim();
+    const attributes = [
+      row?.getAttribute?.('data-model'),
+      row?.getAttribute?.('data-model-id'),
+      dataValue,
+      testIdModel,
+    ].map((value) => String(value || '').trim()).filter(Boolean);
+    const values = [
+      ...attributes,
+      row?.getAttribute?.('aria-label'),
+      row?.getAttribute?.('title'),
+      row?.innerText,
+      row?.textContent,
+    ].map((value) => String(value || '').trim()).filter(Boolean);
+    const rawId = attributes.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt/i.test(value))
+      || values.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt/i.test(value))
+      || null;
+    const model = values.map((value) => normalizeDisplayedModel(value)).find(Boolean)
+      || values.map((value) => evidence?.modelFromText?.(value)).find(Boolean)
+      || rawId;
+    const label = values.find((value) => /gpt|astra|sol|thinking|latest|最新|최신|pro|terra|luna/i.test(value))
+      || values.find(Boolean)
+      || model
+      || rawId
+      || '';
+    const selectorKey = testId
+      || dataValue
+      || String(label || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return { rawId, model, label, selectorKey, values };
+  }
+
+  async function closeModelMenus(trigger = null) {
+    try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); } catch {}
+    await new Promise((resolve) => window.setTimeout(resolve, 90));
+    try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); } catch {}
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+    if (visibleIntelligencePickerContent() && trigger) await trustedPointer(trigger, 'click');
+  }
+
+  async function chooseModelExact({ model = null, selectorKey = '', label = '' } = {}) {
+    const desired = normalizeDisplayedModel(model) || String(model || '').trim().toLowerCase() || null;
+    const wantedKey = String(selectorKey || '').trim().toLowerCase();
+    const wantedLabel = String(label || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const modern = await openModernModelMenu();
+    if (modern.rows.length) {
+      const candidate = modern.rows.find((row) => {
+        const descriptor = rowModelDescriptor(row);
+        if (desired && (descriptor.model === desired || descriptor.rawId === desired)) return true;
+        if (wantedKey && String(descriptor.selectorKey || '').toLowerCase() === wantedKey) return true;
+        return Boolean(wantedLabel && String(descriptor.label || '').toLowerCase().replace(/\s+/g, ' ') === wantedLabel);
+      });
+      if (candidate) {
+        await trustedPointer(candidate, 'click');
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+        if (!desired) return true;
+        const confirmed = await waitUntil(() => collectObservation().model === desired, 3000, 100);
+        if (confirmed) return true;
+      }
+      await closeModelMenus(modern.trigger);
+    }
+    if (!desired) return false;
+    return chooseExact(MODEL_SELECTORS, desired, normalizeDisplayedModel, { skipModern: true });
+  }
+
+  async function chooseExact(triggerSelectors, desired, normalize, { skipModern = false } = {}) {
+    if (!skipModern && triggerSelectors === MODEL_SELECTORS) return chooseModelExact({ model: desired, label: desired });
     const trigger = modelTrigger(triggerSelectors);
     if (!trigger) return false;
     const current = elementTexts(trigger).map(normalize).find(Boolean);
     if (current === desired) return true;
-    trigger.click();
+    await trustedPointer(trigger, 'click');
     const candidates = await waitUntil(() => {
       const rows = menuCandidates();
       return rows.length ? rows : null;
@@ -462,15 +734,16 @@
         element.getAttribute?.('data-model'),
         element.getAttribute?.('data-model-id'),
         element.getAttribute?.('data-value'),
+        element.getAttribute?.('data-testid'),
         ...elementTexts(element),
       ].filter(Boolean);
       return values.some((text) => normalize(text) === desired);
     });
     if (!candidate) {
-      trigger.click();
+      await trustedPointer(trigger, 'click');
       return false;
     }
-    candidate.click();
+    await trustedPointer(candidate, 'click');
     await new Promise((resolve) => window.setTimeout(resolve, 450));
     return true;
   }
@@ -683,22 +956,25 @@
   }
 
   async function verifyAccountModel(message) {
-    const model = normalizeDisplayedModel(message?.model) || String(message?.model || '').trim().toLowerCase();
-    if (!model) throw new Error('Invalid account model / 无效账户模型');
+    const model = normalizeDisplayedModel(message?.model) || String(message?.model || '').trim().toLowerCase() || null;
+    const selectorKey = String(message?.selectorKey || '').trim();
+    const label = String(message?.label || model || selectorKey || '').trim();
+    if (!model && !selectorKey && !label) throw new Error('Invalid account model / 无效账户模型');
     await waitForIdle();
-    const selected = await chooseExact(MODEL_SELECTORS, model, normalizeDisplayedModel);
-    const confirmedObservation = selected
+    const selected = await chooseModelExact({ model, selectorKey, label });
+    const confirmedObservation = selected && model
       ? await waitUntil(() => {
         const observation = collectObservation();
         return observation.model === model ? observation : null;
       }, 3000, 100)
       : null;
     const observation = confirmedObservation || collectObservation();
-    const confirmed = observation.model === model;
+    const confirmed = model ? observation.model === model : selected;
     return {
       model,
-      label: message?.label || model,
-      selected: selected || confirmed,
+      selectorKey,
+      label,
+      selected,
       confirmed,
       observation,
       capturedAt: new Date().toISOString(),
@@ -708,55 +984,73 @@
   async function discoverAccountModelMetadata() {
     const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
     const currentBeforeOpen = collectObservation();
-    const trigger = modelTrigger(MODEL_SELECTORS);
-    const wasExpanded = trigger?.getAttribute?.('aria-expanded') === 'true';
-    let openedByUs = false;
-    if (trigger && !wasExpanded) {
-      trigger.click();
-      openedByUs = true;
-    }
-
-    const rows = trigger
-      ? (await waitUntil(() => {
-        const candidates = menuCandidates();
-        return candidates.length ? candidates : null;
-      }, 3000, 80)) || []
-      : [];
-
     const models = [];
     const reasoning = new Set();
-    for (const row of rows) {
-      const attributes = [
-        row.getAttribute?.('data-model'),
-        row.getAttribute?.('data-model-id'),
-        row.getAttribute?.('data-value'),
-      ].map((value) => String(value || '').trim()).filter(Boolean);
-      const values = [
-        ...attributes,
-        row.getAttribute?.('aria-label'),
-        row.getAttribute?.('title'),
-        row.innerText,
-        row.textContent,
-      ].map((value) => String(value || '').trim()).filter(Boolean);
-      const rawId = attributes.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt|model/i.test(value))
-        || values.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt|model/i.test(value))
-        || null;
-      const canonical = values.map((value) => normalizeDisplayedModel(value)).find(Boolean)
-        || values.map((value) => evidence?.modelFromText?.(value)).find(Boolean)
-        || rawId;
-      const level = values.map((value) => evidence?.reasoningFromText?.(value)).find(Boolean);
-      if (level) reasoning.add(level);
-      if (!canonical) continue;
-      const label = values.find((value) => /gpt|astra|sol|thinking|pro|terra|luna/i.test(value)) || canonical;
-      if (!models.some((item) => item.rawId === rawId && item.model === canonical)) {
-        models.push({ rawId, model: canonical, label });
+    let candidateCount = 0;
+    let triggerFound = false;
+
+    const rememberRow = (row) => {
+      const descriptor = rowModelDescriptor(row);
+      const canonical = descriptor.model || null;
+      const unresolvedLatest = /^(latest|最新|최신)$/i.test(String(descriptor.label || '').trim());
+      const modelSignalled = /model|gpt/i.test(String(descriptor.selectorKey || ''));
+      if (!canonical && !unresolvedLatest && !modelSignalled) return;
+      if (!canonical && !descriptor.selectorKey) return;
+      if (!models.some((item) =>
+        item.rawId === descriptor.rawId
+        && item.model === canonical
+        && item.selectorKey === descriptor.selectorKey
+      )) {
+        models.push({
+          rawId: descriptor.rawId,
+          model: canonical,
+          selectorKey: descriptor.selectorKey,
+          label: descriptor.label || canonical || descriptor.selectorKey,
+        });
+      }
+    };
+
+    const modern = await openModernModelMenu();
+    triggerFound = Boolean(modern.trigger);
+    if (modern.picker) {
+      for (const row of [...modern.picker.querySelectorAll('[role="menuitemradio"],[role="radio"]')].filter(visible)) {
+        for (const value of elementTexts(row)) {
+          const level = normalizeDisplayedReasoning(value) || evidence?.reasoningFromText?.(value);
+          if (level) reasoning.add(level);
+        }
       }
     }
-
-    if (openedByUs && trigger) {
-      trigger.click();
-      await new Promise((resolve) => window.setTimeout(resolve, 180));
+    if (modern.rows.length) {
+      candidateCount = modern.rows.length;
+      for (const row of modern.rows) rememberRow(row);
+      await closeModelMenus(modern.trigger);
+    } else {
+      await closeModelMenus(modern.trigger);
+      const trigger = modelTrigger(MODEL_SELECTORS);
+      triggerFound = triggerFound || Boolean(trigger);
+      const wasExpanded = trigger?.getAttribute?.('aria-expanded') === 'true';
+      let openedByUs = false;
+      if (trigger && !wasExpanded) {
+        await trustedPointer(trigger, 'click');
+        openedByUs = true;
+      }
+      const rows = trigger
+        ? (await waitUntil(() => {
+          const candidates = menuCandidates();
+          return candidates.length ? candidates : null;
+        }, 2200, 80)) || []
+        : [];
+      candidateCount = rows.length;
+      for (const row of rows) {
+        rememberRow(row);
+        for (const value of elementTexts(row)) {
+          const level = normalizeDisplayedReasoning(value) || evidence?.reasoningFromText?.(value);
+          if (level) reasoning.add(level);
+        }
+      }
+      if (openedByUs && trigger) await trustedPointer(trigger, 'click');
     }
+
     const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
     if (current?.model && !models.some((item) => item.model === current.model)) {
       models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
@@ -766,8 +1060,9 @@
       models,
       reasoningLevels: [...reasoning],
       capturedAt: new Date().toISOString(),
-      candidateCount: rows.length,
-      triggerFound: Boolean(trigger),
+      candidateCount,
+      triggerFound,
+      pickerKind: modern.picker ? 'unified-intelligence' : 'legacy',
     };
   }
 

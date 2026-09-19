@@ -206,6 +206,55 @@ export class ChatGptNetworkMonitor {
     return this.attachedTabs.has(tabId);
   }
 
+  async trustedPointer(tabId, { action = 'click', x, y } = {}) {
+    const clientX = Number(x);
+    const clientY = Number(y);
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+      throw new Error('Trusted pointer coordinates are invalid');
+    }
+    const attached = this.isAttached(tabId) || await this.attach(tabId);
+    if (!attached) throw new Error('Debugger is not attached for trusted pointer input');
+    const target = this.target(tabId);
+    if (action === 'move') {
+      await debuggerCall('sendCommand', target, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: clientX,
+        y: clientY,
+        button: 'none',
+        buttons: 0,
+        pointerType: 'mouse',
+      });
+      return true;
+    }
+    await debuggerCall('sendCommand', target, 'Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: clientX,
+      y: clientY,
+      button: 'none',
+      buttons: 0,
+      pointerType: 'mouse',
+    });
+    await debuggerCall('sendCommand', target, 'Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: clientX,
+      y: clientY,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+      pointerType: 'mouse',
+    });
+    await debuggerCall('sendCommand', target, 'Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: clientX,
+      y: clientY,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+      pointerType: 'mouse',
+    });
+    return true;
+  }
+
   key(tabId, requestId) {
     return `${tabId}:${requestId}`;
   }

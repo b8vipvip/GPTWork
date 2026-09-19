@@ -68,7 +68,15 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /gptworkModelNameMappingsV1/);
   assert.match(contentSource, /GPTLOCK_VERIFY_ACCOUNT_MODEL/);
   assert.match(contentSource, /role="menuitemradio"/);
-  assert.match(contentSource, /candidateCount: rows\.length/);
+  assert.match(contentSource, /button\.__composer-pill\[aria-haspopup="menu"\]/);
+  assert.match(contentSource, /composer-intelligence-picker-content/);
+  assert.match(contentSource, /composer-model-picker-slider-advanced-view/);
+  assert.match(contentSource, /GPTLOCK_TRUSTED_POINTER/);
+  assert.match(contentSource, /unresolvedLatest/);
+  assert.match(contentSource, /selectorKey/);
+  assert.match(backgroundSource, /currentSelectorKey/);
+  assert.match(backgroundSource, /autoVerificationSelectionActiveForTab/);
+  assert.match(backgroundSource, /networkMonitor\.trustedPointer/);
   assert.match(backgroundSource, /account_model_verification_started/);
   assert.match(backgroundSource, /account_model_verification_model_completed/);
   assert.match(backgroundSource, /account_model_verification_completed/);
