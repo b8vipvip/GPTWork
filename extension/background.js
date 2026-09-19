@@ -248,6 +248,16 @@ function autoVerificationModelForTab(tabId) {
   );
 }
 
+function autoVerificationSelectionActiveForTab(tabId) {
+  const auto = tabStates.get(Number(tabId))?.autoVerification;
+  const progress = auto?.catalogVerification;
+  return Boolean(
+    auto?.running
+      && progress
+      && (progress.currentModel || progress.currentSelectorKey || progress.currentLabel),
+  );
+}
+
 function runtimePolicyForTabSync(tabId) {
   const policy = effectivePolicyForTabSync(tabId);
   const verificationModel = autoVerificationModelForTab(tabId);
@@ -638,7 +648,7 @@ async function applyNetworkEvidence(tabId, evidence) {
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
-    const verifyingAccountModel = Boolean(autoVerificationModelForTab(tabId));
+    const verifyingAccountModel = autoVerificationSelectionActiveForTab(tabId);
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
@@ -1172,6 +1182,7 @@ async function discoverAccountCatalog(tabId) {
       rowCount: rows.length,
       candidateCount: Number(result?.catalog?.candidateCount || 0),
       triggerFound: result?.catalog?.triggerFound === true,
+      pickerKind: result?.catalog?.pickerKind ?? null,
       nameMappings,
     });
     return { models, reasoningLevels, rows, nameMappings };
@@ -1190,8 +1201,16 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   for (const row of rows) {
     const model = normalizeConcreteModelId(row?.model || row?.rawId);
     const rawModel = normalizeConcreteModelId(row?.rawId);
-    if (!model || unique.some((item) => item.model === model && item.rawModel === rawModel)) continue;
-    unique.push({ model, rawModel, label: String(row?.label || model).slice(0, 160) });
+    const selectorKey = String(row?.selectorKey || '').trim().slice(0, 200);
+    const label = String(row?.label || model || selectorKey || '').trim().slice(0, 160);
+    if (!model && !selectorKey && !label) continue;
+    if (unique.some((item) =>
+      item.model === model
+      && item.rawModel === rawModel
+      && item.selectorKey === selectorKey
+      && item.label === label
+    )) continue;
+    unique.push({ model, rawModel, selectorKey, label });
   }
   state.autoVerification.catalogVerification = {
     total: unique.length,
@@ -1199,6 +1218,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     verified: 0,
     failed: 0,
     currentModel: null,
+    currentSelectorKey: null,
     currentLabel: null,
     results: [],
   };
@@ -1206,19 +1226,20 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   logRuntime(unique.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
     tabId,
     total: unique.length,
-    models: unique.map((item) => item.model),
+    models: unique.map((item) => item.model || item.label),
   });
 
   for (let index = 0; index < unique.length; index += 1) {
     const item = unique[index];
     const progress = state.autoVerification.catalogVerification;
     progress.currentModel = item.model;
+    progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
     state.autoVerification.attempt = index + 1;
     resetVerificationAttempt(state);
     await broadcastTabState(tabId);
     logRuntime('info', 'verification', 'account_model_verification_model_started', {
-      tabId, index: index + 1, total: unique.length, model: item.model, label: item.label,
+      tabId, index: index + 1, total: unique.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
     });
 
     try {
@@ -1227,6 +1248,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const selectionResponse = await sendTabMessage(tabId, {
         type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
         model: item.model,
+        selectorKey: item.selectorKey,
         label: item.label,
       });
       const selection = selectionResponse?.result || {};
@@ -1246,14 +1268,17 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
       const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
       const responseModel = normalizeConcreteModelId(state.lastVerification?.model);
-      const requestConfirmed = requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel);
+      const requestConfirmed = item.model
+        ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
+        : Boolean(requestModel);
       const responseEvidence = state.lastVerification?.evidenceSource === 'network_response_metadata'
         ? state.lastVerification
         : null;
       const verified = requestConfirmed && Boolean(state.lastRequest?.requestId);
       const result = {
-        model: item.model,
-        rawModel: item.rawModel,
+        model: item.model || requestModel,
+        rawModel: item.rawModel || requestModel,
+        selectorKey: item.selectorKey,
         label: item.label,
         verified,
         selected: true,
@@ -1273,8 +1298,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         tabId,
         index: index + 1,
         total: unique.length,
-        model: item.model,
-        rawModel: item.rawModel,
+        model: result.model,
+        rawModel: result.rawModel,
+        selectorKey: item.selectorKey,
         label: item.label,
         verified,
         requestConfirmed,
@@ -1287,9 +1313,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       });
     } catch (error) {
       progress.failed += 1;
-      progress.results.push({ model: item.model, label: item.label, verified: false, error: errorText(error) });
+      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, verified: false, error: errorText(error) });
       logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
-        tabId, index: index + 1, total: unique.length, model: item.model, label: item.label, error: errorText(error),
+        tabId, index: index + 1, total: unique.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
       });
     }
 
@@ -1299,6 +1325,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 
   const progress = state.autoVerification.catalogVerification;
   progress.currentModel = null;
+  progress.currentSelectorKey = null;
   progress.currentLabel = null;
   if (restoreModel && unique.some((item) => item.model === restoreModel)) {
     try {
@@ -1335,7 +1362,7 @@ async function autoVerify(tabId) {
     startedAt,
     completedAt: null,
     attempt: 0,
-    maxAttempts: accountCatalog.models.length,
+    maxAttempts: accountCatalog.rows.length,
     retries: 0,
     outcome: 'running',
     reason: null,
