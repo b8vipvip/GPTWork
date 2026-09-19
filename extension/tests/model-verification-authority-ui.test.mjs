@@ -64,3 +64,21 @@ test('v0.5.81 model automation has one composer-scoped authority', () => {
   assert.match(content, /gptlock-verification-progress-host/);
   assert.match(content, /bottom:52px/);
 });
+
+
+test('v0.5.82 follows the causal three-stage ChatGPT model picker', () => {
+  assert.match(content, /function distinctModelRows/);
+  assert.match(content, /function isModelListScope/);
+  assert.match(content, /const beforeScopes = new Set\(modelPopupScopes\(\)\)/);
+  assert.match(content, /await trustedPointer\(opener, 'click'\)/);
+  assert.match(content, /third-layer "Select model" menu/);
+  assert.doesNotMatch(content, /await trustedPointer\(opener, 'move'\)/);
+  assert.match(content, /rows\.length < 2/);
+});
+
+test('verification progress is placed above both GPTWork floating surfaces', () => {
+  assert.match(content, /function positionVerificationProgressHost/);
+  assert.match(content, /'gptlock-model-indicator-host', 'gptlock-indicator-host'/);
+  assert.match(content, /window\.innerHeight - top \+ 8/);
+  assert.match(content, /positionVerificationProgressHost\(progressHost\)/);
+});
