@@ -52,7 +52,7 @@ test('model automation is composer-scoped and structurally owned', () => {
 });
 
 test('model verification probe uses trusted send and monitor reattach', () => {
-  assert.match(content, /await trustedPointer\(sendButton, 'click'\)/);
+  assert.match(content, /await trustedPointer\(sendButton, 'click', 'auto-probe-send'\)/);
   assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
 
@@ -70,7 +70,7 @@ test('v0.5.82 follows the causal three-stage ChatGPT model picker', () => {
   assert.match(content, /function distinctModelRows/);
   assert.match(content, /function isModelListScope/);
   assert.match(content, /const beforeScopes = new Set\(modelPopupScopes\(\)\)/);
-  assert.match(content, /await trustedPointer\(opener, 'click'\)/);
+  assert.match(content, /await trustedPointer\(opener, 'click', 'model-picker-submenu'\)/);
   assert.match(content, /Single ownership chain: the final model list/);
   assert.doesNotMatch(content, /await trustedPointer\(opener, 'move'\)/);
   assert.match(content, /rows\.length < 2/);
