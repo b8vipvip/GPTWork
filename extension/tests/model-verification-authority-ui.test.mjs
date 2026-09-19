@@ -110,3 +110,11 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
   assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
   assert.doesNotMatch(background, /function autoVerificationModelForTab/);
 });
+
+
+test('v0.5.86 does not mistake second-layer intelligence model summaries for the final catalog', () => {
+  assert.match(content, /composer intelligence picker can expose two model-labelled rows/);
+  assert.match(content, /scope\.matches\?\.\('\[data-testid="composer-intelligence-picker-content"\]'\)/);
+  assert.match(content, /const uniqueExplicit = \[\.\.\.new Set\(explicit\)\]/);
+  assert.doesNotMatch(content, /if \(!scope \|\| isModelListScope\(scope\)\) return null/);
+});
