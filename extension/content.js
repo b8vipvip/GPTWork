@@ -535,24 +535,31 @@
     return composer.parentElement || null;
   }
 
+  function composerControlRegion() {
+    // One ownership boundary for every model action: start from the active composer
+    // and expand only through its own form / composer container. Never search the page.
+    const surface = activeComposerSurface();
+    if (!surface) return null;
+    return surface.closest?.('form')
+      || surface.closest?.('[data-testid*="composer"]')
+      || surface;
+  }
+
   function composerIntelligenceTrigger() {
-    // Single authority: only an explicit ChatGPT composer intelligence/model control
-    // is allowed to drive model automation. No scored/global/button fallback exists.
-    const root = activeComposerSurface();
+    // Single authority: ownership + behavior, not a growing selector whitelist.
+    // ChatGPT may rename/remove data-testid and CSS classes; the model control remains
+    // the unique visible menu trigger owned by the active composer control region.
+    const root = composerControlRegion();
     if (!root) return null;
-    const selectors = [
-      '[data-testid="model-switcher-dropdown-button"]',
-      'button[data-testid="composer-intelligence-trigger"]',
-      'button[data-testid*="composer-intelligence"]',
-      'button[data-testid^="model-switcher-"][aria-haspopup="menu"]',
-      'button.__composer-pill[aria-haspopup="menu"]',
-      'button[class*="__composer-pill"][aria-haspopup="menu"]',
-    ];
-    const candidates = selectors.flatMap((selector) => [...root.querySelectorAll(selector)])
-      .filter((element) => element && visible(element) && element.getAttribute?.('aria-haspopup') === 'menu');
-    const unique = [...new Set(candidates)];
-    if (unique.length !== 1) return null;
-    return unique[0];
+    const menuTriggers = [...root.querySelectorAll('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"]')]
+      .filter((element) => element && visible(element) && !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'));
+    const expanded = menuTriggers.filter((element) =>
+      element.getAttribute?.('aria-expanded') === 'true'
+      && Boolean(visibleIntelligencePickerContent())
+    );
+    if (expanded.length === 1) return expanded[0];
+    if (menuTriggers.length === 1) return menuTriggers[0];
+    return null;
   }
 
   function stayInChatModeButton() {
@@ -891,11 +898,15 @@
   }
 
   async function closeModelMenus(trigger = null) {
+    // Close is idempotent and never toggles the opener. Escape owns dismissal;
+    // a closed trigger must never be clicked as cleanup.
     try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); } catch {}
     await new Promise((resolve) => window.setTimeout(resolve, 90));
     try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })); } catch {}
     await new Promise((resolve) => window.setTimeout(resolve, 120));
-    if (visibleIntelligencePickerContent() && trigger) await trustedPointer(trigger, 'click', 'model-picker-close');
+    if (visibleIntelligencePickerContent()) {
+      pointerTrace('picker_close_incomplete', { source: 'escape-only', trigger: compactElementProbe(trigger) });
+    }
   }
 
   async function chooseModelExact({ model = null, selectorKey = '', label = '' } = {}) {
