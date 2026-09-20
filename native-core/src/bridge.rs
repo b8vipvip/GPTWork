@@ -184,7 +184,9 @@ fn handle_message(state: &Arc<AppState>, message: Value) -> Value {
                     if records.len() > 100 {
                         anyhow::bail!("too many runtime log records");
                     }
-                    state.append_runtime_logs(records).map(|written| json!({ "written": written }))
+                    state
+                        .append_runtime_logs(records)
+                        .map(|written| json!({ "written": written }))
                 });
             records
         }
