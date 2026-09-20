@@ -55,6 +55,7 @@
   let sendConsumedAt = 0;
   let indicator = null;
   let autoProbeRunning = false;
+  let autoVerificationRunning = false;
   let lastRuntimeContactAt = Date.now();
   let pointerTraceSeq = 0;
   // legacy-core-maintenance: diagnostic pointer provenance only; no selection policy or private-engine behavior.
@@ -85,6 +86,12 @@
       rect: rect ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) } : null,
       ancestors,
     };
+  }
+
+  function setAutoVerificationOwnership(running) {
+    autoVerificationRunning = running === true;
+    if (autoVerificationRunning) document.documentElement.dataset.gptworkAutoVerification = 'running';
+    else delete document.documentElement.dataset.gptworkAutoVerification;
   }
 
   function pointerTrace(event, details = {}) {
@@ -193,7 +200,7 @@
       target,
       historyOptions,
       autoProbeRunning,
-      autoVerificationRunning: cachedState?.autoVerification?.running === true,
+      autoVerificationRunning: autoVerificationRunning || cachedState?.autoVerification?.running === true,
       lastAlignAttempt,
       lastAlignAt,
       pointerTraceSeq,
@@ -511,6 +518,7 @@ document.addEventListener('pointerdown', (event) => {
 
   function updateCache(payload) {
     if (payload?.state !== undefined) cachedState = payload.state;
+    setAutoVerificationOwnership(cachedState?.autoVerification?.running === true);
     if (payload?.policy) cachedPolicy = payload.policy;
     if (payload?.settings) cachedSettings = payload.settings;
     renderIndicator();
