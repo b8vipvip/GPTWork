@@ -77,10 +77,18 @@
           <h2 id="modelVerificationHistoryHeading">模型验证记录 <span>Model verification history</span></h2>
           <p class="help">每次模型验证完成后记录本轮账户模型、正式请求实际模型和可用的响应元数据。该列表只展示结果，不参与模型选择或验证决策。</p>
         </div>
-        <span id="modelVerificationHistoryCount" class="model-verification-history-count">最近 0 次</span>
+        <div class="model-verification-history-toolbar">
+          <span id="modelVerificationHistoryCount" class="model-verification-history-count">共 0 次</span>
+          <button id="modelVerificationHistoryClear" class="secondary" type="button">清空记录</button>
+        </div>
       </div>
       <div id="modelVerificationHistoryList" class="model-verification-history-list"></div>
       <p id="modelVerificationHistoryEmpty" class="model-verification-history-empty">暂无模型验证记录 / No model verification records yet.</p>
+      <div id="modelVerificationHistoryPagination" class="request-history-pagination" hidden>
+        <button id="modelVerificationHistoryPrev" class="secondary request-history-page-button" type="button">上一页 / Previous</button>
+        <span id="modelVerificationHistoryPageInfo" class="request-history-page-info">第 1 / 1 页</span>
+        <button id="modelVerificationHistoryNext" class="secondary request-history-page-button" type="button">下一页 / Next</button>
+      </div>
     </section>
 
     <section class="card request-history-card" aria-labelledby="requestHistoryHeading">

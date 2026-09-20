@@ -277,3 +277,18 @@ test('v0.5.100 correlates response evidence to the active formal request', () =>
   assert.match(background, /state\.lastVerification\?\.requestId === `cdp-\$\{tabId\}-\$\{requestId\}`/);
   assert.match(background, /state\.lastResponseEvidence\?\.requestId === requestId/);
 });
+
+
+test('v0.5.101 distinguishes new-chat direct picker from existing-chat layered picker', () => {
+  assert.match(content, /function verificationPageContext\(\)/);
+  assert.match(content, /pageContext === 'new_chat'/);
+  assert.match(content, /new-chat-direct-model-list/);
+  assert.match(content, /existing_chat/);
+});
+
+test('v0.5.101 verification history supports reports, clear and eight-row pagination', () => {
+  assert.match(historyUi, /const PAGE_SIZE = 8/);
+  assert.match(historyUi, /modelVerificationHistoryClear/);
+  assert.match(historyUi, /导出报告/);
+  assert.match(historyUi, /downloadReport/);
+});
