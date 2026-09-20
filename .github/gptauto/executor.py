@@ -37,7 +37,20 @@ def next_action(task: Task) -> dict:
     elapsed = meta.get("chat_session_elapsed_minutes", 0)
 
     if task.state == State.DONE:
-        return _with_lease(task, {"action": "done", "reason": "Definition of Done is satisfied", "task_id": task.task_id})
+        return _with_lease(task, {
+            "action": "done",
+            "reason": "Definition of Done is satisfied",
+            "task_id": task.task_id,
+            "completion_receipt": {
+                "completion_gate": str(meta.get("completion_gate") or ""),
+                "release_required": bool(meta.get("release_required")),
+                "pr_number": str(meta.get("pr_number") or ""),
+                "merge_sha": str(meta.get("merge_sha") or ""),
+                "pr_ci_run_id": str(meta.get("pr_ci_run_id") or ""),
+                "main_ci_run_id": str(meta.get("main_ci_run_id") or ""),
+                "release_run_id": str(meta.get("release_run_id") or ""),
+            },
+        })
 
     if superseded and conclusion in (_FAILURES | {"cancelled"}):
         return _with_lease(task, {
