@@ -102,6 +102,20 @@ def capture(
         and not _release_workflow(workflow_name)
     )
 
+    # Normalize the evidence run IDs when completion is learned directly from the
+    # current workflow_run event. This keeps the terminal receipt self-contained
+    # even when the caller did not separately resolve the same historical run.
+    effective_pr_ci_run_id = str(pr_ci_run_id or "")
+    effective_main_ci_run_id = str(main_ci_run_id or "")
+    effective_release_run_id = str(release_run_id or "")
+    if event == "workflow_run" and workflow_success:
+        if _release_workflow(workflow_name):
+            effective_release_run_id = effective_release_run_id or str(run_id or "")
+        elif merged and branch == default_branch:
+            effective_main_ci_run_id = effective_main_ci_run_id or str(run_id or "")
+        elif pr_number and not merged and branch != default_branch:
+            effective_pr_ci_run_id = effective_pr_ci_run_id or str(run_id or "")
+
     plan = [
         GateStep(Gate.INSPECT, status=GateStatus.PASSED, evidence=f"GitHub {event} event"),
         GateStep(Gate.COMMIT, status=GateStatus.PASSED, evidence=head_sha or merge_sha),
@@ -115,7 +129,7 @@ def capture(
                     required=False,
                     status=GateStatus.PASSED if pr_ci_done else GateStatus.WAITING,
                     evidence=(
-                        f"CI run {pr_ci_run_id or run_id}"
+                        f"CI run {effective_pr_ci_run_id or run_id}"
                         if pr_ci_done
                         else "No successful PR CI evidence observed yet"
                     ),
@@ -133,7 +147,7 @@ def capture(
                 Gate.MAIN_CI,
                 status=GateStatus.PASSED if main_ci_done else GateStatus.WAITING,
                 evidence=(
-                    f"main CI run {main_ci_run_id or run_id}"
+                    f"main CI run {effective_main_ci_run_id or run_id}"
                     if main_ci_done
                     else "Post-merge CI not yet successful"
                 ),
@@ -152,7 +166,7 @@ def capture(
                     Gate.RELEASE,
                     status=release_status,
                     evidence=(
-                        release_tag or f"Release run {release_run_id or run_id}"
+                        release_tag or f"Release run {effective_release_run_id or run_id}"
                         if release_done
                         else "Release completion not yet observed"
                     ),
@@ -179,7 +193,7 @@ def capture(
             Criterion(
                 "Post-merge CI completed successfully",
                 CriterionStatus.PASSED if main_ci_done else CriterionStatus.PENDING,
-                f"run={main_ci_run_id or run_id}" if main_ci_done else "",
+                f"run={effective_main_ci_run_id or run_id}" if main_ci_done else "",
             )
         )
         if release_required:
@@ -188,7 +202,7 @@ def capture(
                     "Requested release completed successfully",
                     CriterionStatus.PASSED if release_done else CriterionStatus.PENDING,
                     (
-                        release_tag or f"release_run={release_run_id or run_id}"
+                        release_tag or f"release_run={effective_release_run_id or run_id}"
                         if release_done
                         else ""
                     ),
@@ -243,9 +257,9 @@ def capture(
             "release_tag": release_tag,
             "release_required": release_required,
             "completion_gate": completion_gate,
-            "pr_ci_run_id": pr_ci_run_id,
-            "main_ci_run_id": main_ci_run_id,
-            "release_run_id": release_run_id,
+            "pr_ci_run_id": effective_pr_ci_run_id,
+            "main_ci_run_id": effective_main_ci_run_id,
+            "release_run_id": effective_release_run_id,
         },
     )
     t.history = [
