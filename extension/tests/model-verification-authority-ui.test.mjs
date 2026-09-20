@@ -116,7 +116,8 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
 test('v0.5.86 does not mistake second-layer intelligence model summaries for the final catalog', () => {
   assert.match(content, /composer intelligence picker can expose two model-labelled rows/);
   assert.match(content, /scope\.matches\?\.\('\[data-testid="composer-intelligence-picker-content"\]'\)/);
-  assert.match(content, /const uniqueExplicit = \[\.\.\.new Set\(explicit\)\]/);
+  assert.match(content, /const openers = rows\.filter/);
+  assert.match(content, /select model\|choose model\|选择模型\|選擇模型\|모델 선택/);
   assert.doesNotMatch(content, /if \(!scope \|\| isModelListScope\(scope\)\) return null/);
 });
 
@@ -174,4 +175,18 @@ test('v0.5.90 observer remains page-wide read-only while executor stays transact
   assert.match(content, /async function modelPickerPointer/);
   assert.match(content, /return trustedPointer\(element, action, source\)/);
   assert.doesNotMatch(content, /pickerKind: 'quarantined-passive'/);
+});
+
+
+test('v0.5.91 third-layer transition is owned by the exact accessible Select model control', () => {
+  assert.match(content, /function modelSubmenuOpener\(picker\)/);
+  assert.match(content, /select model\|choose model\|选择模型\|選擇模型\|모델 선택/);
+  assert.match(content, /return openers\.length === 1 \? openers\[0\] : null/);
+  assert.doesNotMatch(content, /const reasoningSignal = \/highest\|high\|medium\|low/);
+});
+
+test('v0.5.91 recent-chat menu provenance is observation-only', () => {
+  assert.match(content, /external_menu_trigger_click/);
+  assert.match(content, /isTrusted: event\.isTrusted === true/);
+  assert.match(content, /if \(composer\?\.contains\?\.\(trigger\)\) return/);
 });
