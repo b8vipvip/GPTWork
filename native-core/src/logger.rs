@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -15,6 +16,81 @@ use crate::verifier::{
 const AUDIT_FILE_NAME: &str = "audit.jsonl";
 const ROTATED_AUDIT_FILE_NAME: &str = "audit.1.jsonl";
 const MAX_AUDIT_BYTES: u64 = 10 * 1024 * 1024;
+
+
+const RUNTIME_FILE_NAME: &str = "runtime-current.jsonl";
+const MAX_RUNTIME_FILE_BYTES: u64 = 1024 * 1024;
+const RUNTIME_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+
+#[derive(Debug, Clone)]
+pub struct RuntimeLogger {
+    dir: PathBuf,
+    path: PathBuf,
+    write_lock: Arc<Mutex<()>>,
+}
+
+impl RuntimeLogger {
+    pub fn new(logs_dir: PathBuf) -> Result<Self> {
+        fs::create_dir_all(&logs_dir).context("create GPTWork runtime log directory")?;
+        let logger = Self {
+            path: logs_dir.join(RUNTIME_FILE_NAME),
+            dir: logs_dir,
+            write_lock: Arc::new(Mutex::new(())),
+        };
+        logger.cleanup_expired()?;
+        Ok(logger)
+    }
+
+    pub fn append_records(&self, records: &[Value]) -> Result<usize> {
+        let _guard = self.write_lock.lock().map_err(|_| anyhow::anyhow!("runtime log lock is poisoned"))?;
+        self.cleanup_expired()?;
+        let mut written = 0usize;
+        for record in records {
+            let mut line = serde_json::to_vec(record).context("serialize GPTWork runtime record")?;
+            line.push(b'\n');
+            self.rotate_if_needed(line.len() as u64)?;
+            let mut options = OpenOptions::new();
+            options.create(true).append(true);
+            set_private_file_options(&mut options);
+            let mut file = options.open(&self.path).context("open GPTWork runtime log")?;
+            set_private_file_permissions(&file)?;
+            file.write_all(&line).context("append GPTWork runtime log")?;
+            file.flush().context("flush GPTWork runtime log")?;
+            written += 1;
+        }
+        Ok(written)
+    }
+
+    fn rotate_if_needed(&self, incoming: u64) -> Result<()> {
+        let current = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
+        if current == 0 || current.saturating_add(incoming) <= MAX_RUNTIME_FILE_BYTES {
+            return Ok(());
+        }
+        let stamp = Utc::now().format("%Y%m%d-%H%M%S-%3f");
+        let rotated = self.dir.join(format!("runtime-{stamp}.jsonl"));
+        fs::rename(&self.path, rotated).context("rotate GPTWork runtime log")?;
+        Ok(())
+    }
+
+    fn cleanup_expired(&self) -> Result<()> {
+        let now = SystemTime::now();
+        for entry in fs::read_dir(&self.dir).context("scan GPTWork runtime log directory")? {
+            let entry = entry?;
+            let path = entry.path();
+            if path == self.path || path.extension().and_then(|v| v.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if !path.file_name().and_then(|v| v.to_str()).is_some_and(|v| v.starts_with("runtime-")) {
+                continue;
+            }
+            let modified = entry.metadata()?.modified().unwrap_or(now);
+            if now.duration_since(modified).unwrap_or_default() > RUNTIME_RETENTION {
+                let _ = fs::remove_file(path);
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AuditLogger {
