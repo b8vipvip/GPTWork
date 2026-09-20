@@ -149,42 +149,29 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
 });
 
 
-// Safety quarantine intentionally leaves the network request authority unchanged.
-test('v0.5.88 quarantines all model-picker mutation behind one authority', () => {
-  assert.match(content, /const MODEL_PICKER_MUTATION_QUARANTINED = true/);
-  assert.match(content, /async function modelPickerPointer/);
-  assert.match(content, /model_picker_mutation_quarantined/);
-  assert.match(content, /passiveComposerTopologyProbe\('mutation-quarantined'\)/);
-
-  const openStart = content.indexOf('async function openModernModelMenu');
-  const openEnd = content.indexOf('function rowModelDescriptor', openStart);
-  const openBody = content.slice(openStart, openEnd);
-  const quarantineReturn = openBody.indexOf('quarantined: true');
-  const firstDismiss = openBody.indexOf('await dismissWorkContinuationPrompt()');
-  assert(quarantineReturn >= 0 && firstDismiss > quarantineReturn);
-  assert.doesNotMatch(openBody, /await trustedPointer\((trigger|advanced|opener)/);
-  assert.match(openBody, /await modelPickerPointer\(trigger, 'click', 'model-picker-trigger'\)/);
-  assert.match(openBody, /await modelPickerPointer\(advanced, 'click', 'model-picker-advanced'\)/);
-  assert.match(openBody, /await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
+// v0.5.90 removes the temporary quarantine and gives execution one causal owner.
+test('v0.5.90 executes only through the active composer model trigger', () => {
+  assert.doesNotMatch(content, /MODEL_PICKER_MUTATION_QUARANTINED/);
+  assert.match(content, /const valueBearing = menuTriggers\.filter/);
+  assert.match(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
+  assert.doesNotMatch(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
+  assert.match(content, /page\/sidebar menus are outside/);
 });
 
-test('v0.5.88 account discovery has no legacy direct model-trigger click', () => {
-  const start = content.indexOf('async function discoverAccountModelMetadata');
-  const end = content.indexOf('chrome.runtime.onMessage.addListener', start);
-  const body = content.slice(start, end);
-  assert.match(body, /pickerKind: 'quarantined-passive'/);
-  assert.match(body, /mutationQuarantined: true/);
-  assert.doesNotMatch(body, /await trustedPointer\(trigger, 'click'\)/);
-  assert.match(body, /await modelPickerPointer\(trigger, 'click', 'legacy-model-trigger'\)/);
+test('v0.5.90 binds first-layer picker to the exact trigger by relation or causal appearance', () => {
+  assert.match(content, /function popupOwnedByTrigger/);
+  assert.match(content, /const controlledId = trigger\.getAttribute\?\.\('aria-controls'\)/);
+  assert.match(content, /scope\.getAttribute\?\.\('aria-labelledby'\) === triggerId/);
+  assert.match(content, /const beforeTriggerScopes = new Set\(modelPopupScopes\(\)\)/);
+  assert.match(content, /popupOwnedByTrigger\(trigger, beforeTriggerScopes\)/);
+  assert.match(content, /newlyVisible\.length === 1 \? newlyVisible\[0\] : null/);
 });
 
-
-test('quarantine disables background alignment and passively captures manually opened picker DOM', () => {
-  const alignStart = content.indexOf('async function alignSelection');
-  const alignEnd = content.indexOf('function scheduleAlign', alignStart);
-  const body = content.slice(alignStart, alignEnd);
-  assert.match(body, /if \(MODEL_PICKER_MUTATION_QUARANTINED\) return false/);
+test('v0.5.90 observer remains page-wide read-only while executor stays transaction-scoped', () => {
   assert.match(content, /function startPassivePickerObserver/);
-  assert.match(content, /new MutationObserver/);
   assert.match(content, /passive_picker_snapshot/);
+  assert.match(content, /DOM observation never performs clicks/);
+  assert.match(content, /async function modelPickerPointer/);
+  assert.match(content, /return trustedPointer\(element, action, source\)/);
+  assert.doesNotMatch(content, /pickerKind: 'quarantined-passive'/);
 });
