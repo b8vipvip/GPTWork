@@ -1244,7 +1244,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
       const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
-      const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
+      // The formal network request is the sole authority for which model ChatGPT actually selected.\n      const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
       const responseModel = normalizeConcreteModelId(state.lastVerification?.model);
       const requestConfirmed = item.model
         ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
