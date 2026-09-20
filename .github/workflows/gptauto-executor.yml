@@ -147,7 +147,7 @@ jobs:
             -f task_id="$TASK_ID" -f pr_number="$PR_NUMBER" \
             -f head_sha="$HEAD_SHA" -f failed_run_id="$FAILED_RUN_ID"
           gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "$marker
-GPTAuto dispatched the autonomous repair agent for task $TASK_ID on head $HEAD_SHA. The Completion Lease remains active until the repaired head passes its gates."
+          GPTAuto dispatched the autonomous repair agent for task $TASK_ID on head $HEAD_SHA. The Completion Lease remains active until the repaired head passes its gates."
           echo "Dispatched autonomous repair agent for $TASK_ID / $HEAD_SHA."
       - name: Persist completion lease
         if: ${{ steps.state.outputs.lease-active == 'true' }}
