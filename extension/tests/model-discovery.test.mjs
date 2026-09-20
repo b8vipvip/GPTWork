@@ -82,7 +82,9 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /account_model_verification_completed/);
   assert.match(contentSource, /selectModelForVerification/);
   assert.match(contentSource, /selectionAttempted/);
-  assert.match(backgroundSource, /sole authority for which model ChatGPT actually selected/);
+  assert.match(backgroundSource, /Evidence priority is explicit/);
+  assert.match(backgroundSource, /responseConfirmed/);
+  assert.match(backgroundSource, /bypassRewrite: Boolean\(transaction\)/);
   assert.doesNotMatch(backgroundSource, /Model selection was not confirmed/);
   assert.match(backgroundSource, /probeMarker: 'GPTWork 模型验证'/);
   assert.match(backgroundSource, /skipAlignment: true/);
