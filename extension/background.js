@@ -1138,24 +1138,14 @@ async function discoverAccountCatalog(tabId) {
 }
 
 async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
-  const rows = Array.isArray(accountCatalog?.rows) ? accountCatalog.rows : [];
-  const unique = [];
-  for (const row of rows) {
-    const model = normalizeConcreteModelId(row?.model || row?.rawId);
-    const rawModel = normalizeConcreteModelId(row?.rawId);
-    const selectorKey = String(row?.selectorKey || '').trim().slice(0, 200);
-    const label = String(row?.label || model || selectorKey || '').trim().slice(0, 160);
-    if (!model && !selectorKey && !label) continue;
-    if (unique.some((item) =>
-      item.model === model
-      && item.rawModel === rawModel
-      && item.selectorKey === selectorKey
-      && item.label === label
-    )) continue;
-    unique.push({ model, rawModel, selectorKey, label });
-  }
-  state.autoVerification.catalogVerification = {
-    total: unique.length,
+  // v0.5.95: ChatGPT can expose only a starter catalog in a fresh chat and unlock
+  // additional models/reasoning after real turns. Treat discovery as a growing set,
+  // not a one-time snapshot. Network metadata remains the sole verification authority.
+  const queue = [];
+  const knownKeys = new Set();
+  const reasoningLevels = new Set();
+  const progress = state.autoVerification.catalogVerification = {
+    total: 0,
     completed: 0,
     verified: 0,
     failed: 0,
@@ -1163,17 +1153,58 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     currentSelectorKey: null,
     currentLabel: null,
     results: [],
+    discoveryPasses: 0,
+    stablePasses: 0,
+    reasoningLevels: [],
   };
+
+  const mergeCatalog = (catalog, phase) => {
+    let added = 0;
+    for (const level of (catalog?.reasoningLevels || [])) reasoningLevels.add(level);
+    for (const row of (Array.isArray(catalog?.rows) ? catalog.rows : [])) {
+      const model = normalizeConcreteModelId(row?.model || row?.rawId);
+      const rawModel = normalizeConcreteModelId(row?.rawId);
+      const selectorKey = String(row?.selectorKey || '').trim().slice(0, 200);
+      const label = String(row?.label || model || selectorKey || '').trim().slice(0, 160);
+      if (!model && !selectorKey && !label) continue;
+      const key = [model || '', rawModel || '', selectorKey, label].join('|').toLowerCase();
+      if (knownKeys.has(key)) continue;
+      knownKeys.add(key);
+      queue.push({ model, rawModel, selectorKey, label });
+      added += 1;
+    }
+    progress.total = queue.length;
+    progress.reasoningLevels = [...reasoningLevels];
+    state.autoVerification.maxAttempts = queue.length;
+    logRuntime('info', 'verification', 'account_model_catalog_merged', {
+      tabId, phase, added, total: queue.length, reasoningLevels: progress.reasoningLevels,
+    });
+    return added;
+  };
+
+  mergeCatalog(accountCatalog, 'initial');
   await broadcastTabState(tabId);
-  logRuntime(unique.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
-    tabId,
-    total: unique.length,
-    models: unique.map((item) => item.model || item.label),
+  logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
+    tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
   });
 
-  for (let index = 0; index < unique.length; index += 1) {
-    const item = unique[index];
-    const progress = state.autoVerification.catalogVerification;
+  let index = 0;
+  let stablePasses = 0;
+  while (index < queue.length || stablePasses < 2) {
+    if (index >= queue.length) {
+      const rediscovered = await discoverAccountCatalog(tabId);
+      progress.discoveryPasses += 1;
+      const added = mergeCatalog(rediscovered, 'settle');
+      stablePasses = added ? 0 : stablePasses + 1;
+      progress.stablePasses = stablePasses;
+      await broadcastTabState(tabId);
+      if (index >= queue.length && stablePasses < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 650));
+      }
+      continue;
+    }
+
+    const item = queue[index];
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
@@ -1187,7 +1218,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     resetVerificationAttempt(state);
     await broadcastTabState(tabId);
     logRuntime('info', 'verification', 'account_model_verification_model_started', {
-      tabId, index: index + 1, total: unique.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
+      tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
     });
 
     try {
@@ -1200,99 +1231,81 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         label: item.label,
       });
       const selection = selectionResponse?.result || {};
-      if (selection.selectionAttempted !== true) {
-        throw new Error('Model selection control was not activated');
-      }
+      if (selection.selectionAttempted !== true) throw new Error('Model selection control was not activated');
 
-      // The formal request captured after the visible per-model probe is the
-      // sole authority for which model ChatGPT actually selected. DOM selection is
-      // only an action and never verification evidence.
       const reattached = await networkMonitor.attach(tabId);
       if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
       const probe = await sendTabMessage(tabId, {
         type: 'GPTLOCK_AUTO_SEND_PROBE',
         skipAlignment: true,
-        probeText: `GPTWork 模型验证 ${index + 1}/${unique.length}：请只回复“验证完成”。`,
+        probeText: `GPTWork 模型验证 ${index + 1}/${queue.length}：请只回复“验证完成”。`,
         probeMarker: 'GPTWork 模型验证',
       });
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
-
       const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
-      const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
+      // The formal network request is the sole authority for which model ChatGPT actually selected.\n      const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
       const responseModel = normalizeConcreteModelId(state.lastVerification?.model);
       const requestConfirmed = item.model
         ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
         : Boolean(requestModel);
       const responseEvidence = state.lastVerification?.evidenceSource === 'network_response_metadata'
-        ? state.lastVerification
-        : null;
+        ? state.lastVerification : null;
       const verified = requestConfirmed && Boolean(state.lastRequest?.requestId);
       const result = {
-        model: item.model || requestModel,
-        rawModel: item.rawModel || requestModel,
-        selectorKey: item.selectorKey,
-        label: item.label,
-        verified,
-        selected: selection.selectionAttempted === true,
-        requestConfirmed,
-        requestId: state.lastRequest?.requestId ?? null,
-        requestModel,
-        responseModel,
+        model: item.model || requestModel, rawModel: item.rawModel || requestModel,
+        selectorKey: item.selectorKey, label: item.label, verified,
+        selected: selection.selectionAttempted === true, requestConfirmed,
+        requestId: state.lastRequest?.requestId ?? null, requestModel, responseModel,
         responseReasoning: responseEvidence?.reasoning ?? null,
         responseVerdict: responseEvidence?.verdict ?? null,
         evidenceSource: responseEvidence?.evidenceSource ?? 'network_request_metadata',
-        timedOut: waited.timedOut,
-        observation: selection.observation || null,
+        timedOut: waited.timedOut, observation: selection.observation || null,
       };
       progress.results.push(result);
       if (verified) progress.verified += 1; else progress.failed += 1;
       logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
-        tabId,
-        index: index + 1,
-        total: unique.length,
-        model: result.model,
-        rawModel: result.rawModel,
-        selectorKey: item.selectorKey,
-        label: item.label,
-        verified,
-        requestConfirmed,
-        requestId: result.requestId,
-        requestModel,
-        responseModel,
-        responseVerdict: result.responseVerdict,
-        evidenceSource: result.evidenceSource,
-        timedOut: waited.timedOut,
+        tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
+        selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed,
+        requestId: result.requestId, requestModel, responseModel,
+        responseVerdict: result.responseVerdict, evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
       });
     } catch (error) {
       progress.failed += 1;
       progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, verified: false, error: errorText(error) });
       logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
-        tabId, index: index + 1, total: unique.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
+        tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
       });
     }
 
     verificationTransactions.delete(Number(tabId));
-    progress.completed = index + 1;
+    index += 1;
+    progress.completed = index;
+    await broadcastTabState(tabId);
+
+    // A completed real turn may unlock account models/capabilities in a fresh chat.
+    const rediscovered = await discoverAccountCatalog(tabId);
+    progress.discoveryPasses += 1;
+    const added = mergeCatalog(rediscovered, 'post-turn');
+    stablePasses = added ? 0 : stablePasses + 1;
+    progress.stablePasses = stablePasses;
     await broadcastTabState(tabId);
   }
 
   verificationTransactions.delete(Number(tabId));
-  const progress = state.autoVerification.catalogVerification;
   progress.currentModel = null;
   progress.currentSelectorKey = null;
   progress.currentLabel = null;
-  if (restoreModel && unique.some((item) => item.model === restoreModel)) {
-    try {
-      await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: restoreModel, label: restoreModel });
-    } catch (error) {
-      logRuntime('warn', 'verification', 'account_model_verification_restore_failed', {
-        tabId, model: restoreModel, error: errorText(error),
-      });
+  if (restoreModel && queue.some((item) => item.model === restoreModel)) {
+    try { await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: restoreModel, label: restoreModel }); }
+    catch (error) {
+      logRuntime('warn', 'verification', 'account_model_verification_restore_failed', { tabId, model: restoreModel, error: errorText(error) });
     }
   }
   logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
-    tabId, total: progress.total, verified: progress.verified, failed: progress.failed, results: progress.results,
+    tabId, total: progress.total, verified: progress.verified, failed: progress.failed,
+    discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
+    reasoningLevels: progress.reasoningLevels, results: progress.results,
   });
   await broadcastTabState(tabId);
   return progress;
