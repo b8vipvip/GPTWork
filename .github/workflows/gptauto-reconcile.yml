@@ -59,7 +59,15 @@ jobs:
               exit 1
             fi
             if [[ "$ci_status" == "completed" && "$ci_conclusion" == "success" && "$release_status" == "completed" && "$release_conclusion" == "success" ]]; then
-              gh workflow run gptauto-observer.yml --repo "$REPOSITORY"                 --ref "$(gh api "repos/$REPOSITORY" --jq '.default_branch')"                 -f pr_number="$PR_NUMBER" -f head_sha="$MERGE_SHA" -f merge_sha="$MERGE_SHA"
+              ci_run_id="$(jq -r '[.workflow_runs[] | select(.name == "CI" and .conclusion == "success")] | sort_by(.created_at) | reverse | .[0].id // empty' <<<"$runs")"
+              release_run_id=""
+              if [[ "$RELEASE_REQUIRED" == "true" ]]; then
+                release_run_id="$(jq -r '[.workflow_runs[] | select(.name == "Release" and .conclusion == "success")] | sort_by(.created_at) | reverse | .[0].id // empty' <<<"$runs")"
+              fi
+              gh workflow run gptauto-observer.yml --repo "$REPOSITORY" \
+                --ref "$(gh api "repos/$REPOSITORY" --jq '.default_branch')" \
+                -f pr_number="$PR_NUMBER" -f head_sha="$MERGE_SHA" -f merge_sha="$MERGE_SHA" \
+                -f main_ci_run_id="$ci_run_id" -f release_run_id="$release_run_id"
               {
                 echo "## GPTAuto post-merge reconciliation"
                 echo "- Task: $TASK_ID"
