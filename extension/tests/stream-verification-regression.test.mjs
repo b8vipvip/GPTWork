@@ -5,6 +5,7 @@ import { extractResponseEvidence } from '../network-evidence.js';
 import {
   ChatGptNetworkMonitor,
   hasCompleteResponseEvidence,
+  hasResponseMetadataEvidence,
   webSocketFrameMatchesHandoff,
 } from '../network-monitor.js';
 
@@ -69,6 +70,21 @@ test('consistent disallowed backend model remains complete evidence', () => {
   assert.equal(evidence.reasoning, 'high');
   assert.equal(evidence.conflicts.model, false);
   assert.equal(hasCompleteResponseEvidence(evidence), true);
+});
+
+test('model-only response metadata is retained even when reasoning is not exposed', () => {
+  const evidence = extractResponseEvidence({
+    body: embeddedFrame({
+      resolved_model_slug: 'gpt-6-astra',
+      model_slug: 'gpt-6-astra',
+    }),
+    mimeType: 'application/json',
+  });
+
+  assert.equal(evidence.model, 'gpt-6-astra');
+  assert.equal(evidence.reasoning, null);
+  assert.equal(hasResponseMetadataEvidence(evidence), true);
+  assert.equal(hasCompleteResponseEvidence(evidence), false);
 });
 
 test('metadata-empty control frames are not verification-bearing evidence', () => {
