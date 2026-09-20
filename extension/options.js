@@ -205,6 +205,7 @@ function renderAutoVerifyProgress(autoVerification = null) {
   const running = autoVerification?.running === true;
   const total = Math.max(0, Number(progress?.total || autoVerification?.maxAttempts || 0));
   const completed = Math.min(total, Math.max(0, Number(progress?.completed || 0)));
+  const requestConfirmed = Math.max(0, Number(progress?.requestConfirmed || 0));
   const verified = Math.max(0, Number(progress?.verified || 0));
   const failed = Math.max(0, Number(progress?.failed || 0));
   const current = progress?.currentLabel || progress?.currentModel || null;
@@ -215,7 +216,9 @@ function renderAutoVerifyProgress(autoVerification = null) {
     elements.autoVerifyProgressBar.value = completed;
   }
   if (elements.autoVerifyProgressCount) {
-    elements.autoVerifyProgressCount.textContent = total ? `${completed} / ${total}` : '发现中…';
+    elements.autoVerifyProgressCount.textContent = total
+      ? `执行进度 ${completed}/${total} · 验证成功 ${verified}/${total} · 请求确认 ${requestConfirmed}/${total}`
+      : '发现中…';
   }
   if (elements.autoVerifyProgressLabel) {
     elements.autoVerifyProgressLabel.textContent = running
@@ -223,7 +226,7 @@ function renderAutoVerifyProgress(autoVerification = null) {
         ? `正在验证：${modelLabel(current)}`
         : '正在发现当前账户可用模型…'
       : total
-        ? `自动验证完成：${verified} 成功 / ${failed} 失败`
+        ? `执行完成 ${completed}/${total} · 验证成功 ${verified}/${total} · 未确认 ${failed}`
         : '未发现可验证模型';
   }
 }
@@ -417,7 +420,7 @@ elements.autoVerify?.addEventListener('click', () => {
     .then(async (result) => {
       await load();
       showMessage(result.catalogTotal
-        ? `自动验证完成：${result.catalogVerified}/${result.catalogTotal} 个模型已取得可信请求证据`
+        ? `自动验证完成：执行 ${result.catalogTotal}/${result.catalogTotal}；验证成功 ${result.catalogVerified}/${result.catalogTotal}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal}`
         : `自动验证未发现模型 / No account models discovered · ${result.reason || 'unknown'}`,
         result.catalogFailed || !result.catalogTotal ? 'bad' : 'good',
       );

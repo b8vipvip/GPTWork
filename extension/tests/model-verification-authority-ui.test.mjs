@@ -8,10 +8,13 @@ const settings = await readFile(new URL('../settings-v0521.html', import.meta.ur
 const popup = await readFile(new URL('../popup-v0513.html', import.meta.url), 'utf8');
 const historyUi = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
 
-test('model verification has one model-identity authority: the formal network request', () => {
+test('model verification separates request confirmation from backend response verification', () => {
   assert.match(content, /selectionAttempted/);
-  assert.match(background, /sole authority for which model ChatGPT actually selected/);
+  assert.match(background, /Evidence priority is explicit/);
   assert.match(background, /requestModel === item\.model/);
+  assert.match(background, /responseModel === item\.model/);
+  assert.match(background, /responseConfirmed/);
+  assert.match(background, /evidenceModel = responseModel \|\| \(requestConfirmed \? requestModel : null\)/);
   assert.match(background, /probeMarker: 'GPTWork 模型验证'/);
   assert.doesNotMatch(background, /Model selection was not confirmed/);
 });
@@ -108,6 +111,7 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
   assert.match(background, /verificationTransactions\.set\(Number\(tabId\)/);
   assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
   assert.match(background, /preserveModel: Boolean\(transaction\)/);
+  assert.match(background, /bypassRewrite: Boolean\(transaction\)/);
   assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
   assert.doesNotMatch(background, /function autoVerificationModelForTab/);
 });
@@ -247,4 +251,20 @@ test('v0.5.98 ignores hidden stale stop controls between verification models', (
   assert.match(content, /find\(\(element\) => visible\(element\)\)/);
   assert.match(content, /\(\) => !visibleGeneratingControl\(\)/);
   assert.doesNotMatch(content, /!document\.querySelector\(GENERATING_SELECTORS\.join\(','\)\)/);
+});
+
+
+test('v0.5.99 bypasses request rewriting during verification and keeps partial response evidence', async () => {
+  const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
+  const options = await readFile(new URL('../options.js', import.meta.url), 'utf8');
+  assert.match(monitor, /configuration\.bypassRewrite === true/);
+  assert.match(monitor, /reason: 'verification_passthrough'/);
+  assert.match(monitor, /hasResponseMetadataEvidence/);
+  assert.match(background, /lastResponseEvidence/);
+  assert.match(background, /responseConfirmed/);
+  assert.match(background, /catalogRequestConfirmed/);
+  assert.match(content, />执行进度</);
+  assert.match(content, />验证成功</);
+  assert.match(options, /执行进度/);
+  assert.match(options, /验证成功/);
 });

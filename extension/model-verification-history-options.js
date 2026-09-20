@@ -35,7 +35,7 @@ function renderModelResult(item) {
   const reasoning = item?.responseReasoning || '未暴露';
   detail.textContent = item?.error
     ? `失败：${item.error}`
-    : `请求模型 ${request} · 响应模型 ${response} · 推理 ${reasoning}`;
+    : `请求确认 ${item?.requestConfirmed ? '是' : '否'} · 请求模型 ${request} · 响应确认 ${item?.responseConfirmed ? '是' : '否'} · 响应模型 ${response} · 推理 ${reasoning}`;
   row.append(title, detail);
   return row;
 }
@@ -63,7 +63,7 @@ function renderHistory(records = []) {
     summary.className = 'model-verification-history-summary';
     summary.textContent = record?.reason
       ? `结果：${record.reason}`
-      : `成功 ${Number(record?.verified || 0)} · 失败 ${Number(record?.failed || 0)}`;
+      : `验证成功 ${Number(record?.verified || 0)} · 未确认 ${Number(record?.failed || 0)}`;
 
     const models = document.createElement('div');
     models.className = 'model-verification-history-models';

@@ -463,20 +463,24 @@ document.addEventListener('pointerdown', (event) => {
         progressHost.id = 'gptlock-verification-progress-host';
         progressHost.style.cssText = 'all:initial;position:fixed;right:12px;bottom:52px;z-index:2147483647';
         const progressRoot = progressHost.attachShadow({ mode: 'open' });
-        progressRoot.innerHTML = '<style>.model-verification-progress{width:220px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;font:700 11px/1.35 system-ui,sans-serif}.model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px}.model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}</style><div class="model-verification-progress"><div><span></span><strong></strong></div><progress value="0" max="1"></progress></div>';
+        progressRoot.innerHTML = '<style>.model-verification-progress{width:240px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;font:700 11px/1.35 system-ui,sans-serif}.model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.model-verification-progress .current{font-weight:600;color:#475569}.model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}</style><div class="model-verification-progress"><div class="current"><span></span></div><div><span>执行进度</span><strong class="execution"></strong></div><div><span>验证成功</span><strong class="verified"></strong></div><div><span>请求确认</span><strong class="requested"></strong></div><progress value="0" max="1"></progress></div>';
         document.documentElement.append(progressHost);
       }
       positionVerificationProgressHost(progressHost);
       const progress = progressHost.shadowRoot.querySelector('.model-verification-progress');
       const label = catalog?.currentLabel || catalog?.currentModel || '正在发现账户模型…';
-      progress.querySelector('span').textContent = label;
-      progress.querySelector('strong').textContent = total ? `${completed} / ${total}` : '…';
+      const verified = Math.max(0, Number(catalog?.verified || 0));
+      const requestConfirmed = Math.max(0, Number(catalog?.requestConfirmed || 0));
+      progress.querySelector('.current span').textContent = label;
+      progress.querySelector('.execution').textContent = total ? `${completed} / ${total}` : '…';
+      progress.querySelector('.verified').textContent = total ? `${verified} / ${total}` : '…';
+      progress.querySelector('.requested').textContent = total ? `${requestConfirmed} / ${total}` : '…';
       const bar = progress.querySelector('progress');
       bar.max = Math.max(1, total);
       bar.value = completed;
       button.textContent = `GPTWork · 模型验证 ${auto.attempt || 1}/${auto.maxAttempts || total || 1}`;
       button.dataset.tone = 'wait';
-      button.title = '模型验证正在进行；最终结果以正式请求的网络元数据为准 / Model verification is running; network request metadata is authoritative.';
+      button.title = '模型验证正在进行；执行进度与验证成功分开统计。响应/流模型元数据优先用于验证，请求模型保留为请求确认。';
       return;
     }
     document.getElementById('gptlock-verification-progress-host')?.remove();

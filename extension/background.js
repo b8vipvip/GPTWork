@@ -187,6 +187,7 @@ function createTabState(tabId, url = '') {
     lastRewrite: null,
     lastRequest: null,
     lastVerification: null,
+    lastResponseEvidence: null,
     lastEvidenceDiagnostics: null,
     streamTracking: null,
     evidenceIssue: null,
@@ -284,6 +285,7 @@ function publicTabState(state) {
     lastRewrite: state.lastRewrite,
     lastRequest: state.lastRequest,
     lastVerification: state.lastVerification,
+    lastResponseEvidence: state.lastResponseEvidence,
     lastEvidenceDiagnostics: state.lastEvidenceDiagnostics,
     streamTracking: state.streamTracking,
     evidenceIssue: state.evidenceIssue,
@@ -569,6 +571,43 @@ async function verifyObservation(observation, policy = currentPolicy) {
   return result;
 }
 
+function mergeResponseEvidence(state, evidence) {
+  const requestId = evidence?.streamContext?.initialRequestId
+    || state.lastRequest?.requestId
+    || evidence?.requestId
+    || null;
+  const previous = state.lastResponseEvidence?.requestId === requestId
+    ? state.lastResponseEvidence
+    : null;
+  const modelConflict = Boolean(
+    evidence?.conflicts?.model
+      || previous?.conflicts?.model
+      || (previous?.model && evidence?.model && previous.model !== evidence.model),
+  );
+  const reasoningConflict = Boolean(
+    evidence?.conflicts?.reasoning
+      || previous?.conflicts?.reasoning
+      || (previous?.reasoning && evidence?.reasoning && previous.reasoning !== evidence.reasoning),
+  );
+  const merged = {
+    requestId,
+    capturedAt: evidence?.capturedAt ?? previous?.capturedAt ?? new Date().toISOString(),
+    model: modelConflict ? null : evidence?.model || previous?.model || null,
+    reasoning: reasoningConflict ? null : evidence?.reasoning || previous?.reasoning || null,
+    conflicts: { model: modelConflict, reasoning: reasoningConflict },
+    fields: {
+      model: evidence?.fields?.model || previous?.fields?.model || null,
+      reasoning: evidence?.fields?.reasoning || previous?.fields?.reasoning || null,
+    },
+    bodyError: evidence?.bodyError || previous?.bodyError || null,
+    evidenceSource: 'network_response_metadata',
+    diagnostics: evidence?.diagnostics ?? previous?.diagnostics ?? null,
+    streamContext: evidence?.streamContext ?? previous?.streamContext ?? null,
+  };
+  state.lastResponseEvidence = merged;
+  return merged;
+}
+
 function diagnoseEvidenceIssue(evidence, result) {
   if (evidence.bodyError) return 'response_body_read_failed';
   if (evidence.conflicts?.model || evidence.conflicts?.reasoning) return 'response_metadata_conflict';
@@ -615,19 +654,20 @@ async function applyNetworkEvidence(tabId, evidence) {
   } finally {
     evidence.rawResponseBody = null;
   }
-  state.lastEvidenceDiagnostics = evidence.diagnostics ?? null;
+  const responseEvidence = mergeResponseEvidence(state, evidence);
+  state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
   if (!masterRuntimeEnabled()) return;
   try {
     const result = await verifyObservation({
-      model: evidence.conflicts?.model ? null : evidence.model,
-      reasoning: evidence.conflicts?.reasoning ? null : evidence.reasoning,
+      model: responseEvidence.conflicts?.model ? null : responseEvidence.model,
+      reasoning: responseEvidence.conflicts?.reasoning ? null : responseEvidence.reasoning,
       evidenceSource: 'network_response_metadata',
-      capturedAt: evidence.capturedAt,
-      requestId: `cdp-${tabId}-${evidence.requestId}`,
+      capturedAt: responseEvidence.capturedAt,
+      requestId: `cdp-${tabId}-${responseEvidence.requestId || evidence.requestId}`,
     }, runtimePolicyForTabSync(tabId));
     state.lastVerification = result;
-    state.evidenceIssue = diagnoseEvidenceIssue(evidence, result);
-    state.lastError = evidence.bodyError || (evidence.conflicts?.model || evidence.conflicts?.reasoning
+    state.evidenceIssue = diagnoseEvidenceIssue(responseEvidence, result);
+    state.lastError = responseEvidence.bodyError || (responseEvidence.conflicts?.model || responseEvidence.conflicts?.reasoning
       ? 'conflicting_response_metadata'
       : null);
     state.phase = result.verdict;
@@ -642,7 +682,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       reasoning: result.reasoning,
       evidenceSource: result.evidenceSource,
       evidenceIssue: state.evidenceIssue,
-      diagnostics: evidence.diagnostics ?? null,
+      diagnostics: responseEvidence.diagnostics ?? null,
     });
   } catch (error) {
     state.phase = 'error';
@@ -668,7 +708,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
       preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
       preserveModel: Boolean(transaction),
       preserveReasoning: Boolean(transaction),
-      responseVerificationEnabled: currentSettings.networkVerificationEnabled,
+      bypassRewrite: Boolean(transaction),
+      responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
     };
   },
   onStatus(tabId, monitor) {
@@ -725,6 +766,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       ? 'conflicting_request_metadata'
       : null;
     state.evidenceIssue = null;
+    state.lastResponseEvidence = null;
     state.lastEvidenceDiagnostics = null;
     logRuntime('info', 'network', 'formal_conversation_request_detected', {
       tabId,
@@ -1018,6 +1060,7 @@ function resetVerificationAttempt(state) {
   state.lastRewrite = null;
   state.lastRequest = null;
   state.lastVerification = null;
+  state.lastResponseEvidence = null;
   state.lastEvidenceDiagnostics = null;
   state.streamTracking = null;
   state.evidenceIssue = null;
@@ -1167,6 +1210,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   const progress = state.autoVerification.catalogVerification = {
     total: 0,
     completed: 0,
+    requestConfirmed: 0,
     verified: 0,
     failed: 0,
     currentModel: null,
@@ -1264,32 +1308,45 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
       const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
-      // The formal network request is the sole authority for which model ChatGPT actually selected.
+      // Evidence priority is explicit: correlated response/stream metadata proves the
+      // backend model when exposed; the formal request model remains durable request
+      // confirmation and is never erased merely because a response frame omits model.
       const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
-      const responseModel = normalizeConcreteModelId(state.lastVerification?.model);
+      const responseModel = normalizeConcreteModelId(state.lastResponseEvidence?.model);
       const requestConfirmed = item.model
         ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
         : Boolean(requestModel);
-      const responseEvidence = state.lastVerification?.evidenceSource === 'network_response_metadata'
-        ? state.lastVerification : null;
-      const verified = requestConfirmed && Boolean(state.lastRequest?.requestId);
+      const responseConfirmed = item.model
+        ? responseModel === item.model || Boolean(item.rawModel && responseModel === item.rawModel)
+        : Boolean(responseModel);
+      const requestMismatch = Boolean(requestModel) && !requestConfirmed;
+      const verified = Boolean(state.lastRequest?.requestId) && responseConfirmed && !requestMismatch;
+      const evidenceModel = responseModel || (requestConfirmed ? requestModel : null);
+      const evidenceSource = responseModel
+        ? 'network_response_metadata'
+        : requestConfirmed
+          ? 'network_request_metadata'
+          : null;
       const result = {
         model: item.model || requestModel, rawModel: item.rawModel || requestModel,
         selectorKey: item.selectorKey, label: item.label, verified,
-        selected: selection.selectionAttempted === true, requestConfirmed,
-        requestId: state.lastRequest?.requestId ?? null, requestModel, responseModel,
-        responseReasoning: responseEvidence?.reasoning ?? null,
-        responseVerdict: responseEvidence?.verdict ?? null,
-        evidenceSource: responseEvidence?.evidenceSource ?? 'network_request_metadata',
+        selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
+        requestId: state.lastRequest?.requestId ?? null, requestModel, responseModel, evidenceModel,
+        responseReasoning: state.lastResponseEvidence?.reasoning ?? null,
+        responseVerdict: state.lastVerification?.verdict ?? null,
+        responseIssue: state.evidenceIssue ?? null,
+        evidenceSource,
         timedOut: waited.timedOut, observation: selection.observation || null,
       };
       progress.results.push(result);
+      if (requestConfirmed) progress.requestConfirmed += 1;
       if (verified) progress.verified += 1; else progress.failed += 1;
       logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
         tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
-        selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed,
-        requestId: result.requestId, requestModel, responseModel,
-        responseVerdict: result.responseVerdict, evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
+        selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed, responseConfirmed,
+        requestId: result.requestId, requestModel, responseModel, evidenceModel: result.evidenceModel,
+        responseVerdict: result.responseVerdict, responseIssue: result.responseIssue,
+        evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
       });
     } catch (error) {
       progress.failed += 1;
@@ -1324,7 +1381,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     }
   }
   logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
-    tabId, total: progress.total, verified: progress.verified, failed: progress.failed,
+    tabId, total: progress.total, requestConfirmed: progress.requestConfirmed,
+    verified: progress.verified, failed: progress.failed,
     discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
     reasoningLevels: progress.reasoningLevels, results: progress.results,
   });
@@ -1351,11 +1409,14 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
       label: item.label ?? item.model ?? item.requestModel ?? 'Unknown model',
       verified: item.verified === true,
       requestConfirmed: item.requestConfirmed === true,
+      responseConfirmed: item.responseConfirmed === true,
       requestId: item.requestId ?? null,
       requestModel: item.requestModel ?? null,
       responseModel: item.responseModel ?? null,
+      evidenceModel: item.evidenceModel ?? null,
       responseReasoning: item.responseReasoning ?? null,
       responseVerdict: item.responseVerdict ?? null,
+      responseIssue: item.responseIssue ?? null,
       evidenceSource: item.evidenceSource ?? null,
       timedOut: item.timedOut === true,
       error: item.error ?? null,
@@ -1440,7 +1501,10 @@ async function autoVerify(tabId) {
     requestLockConfirmed: item.requestConfirmed === true,
     requestModel: item.requestModel ?? null,
     responseModel: item.responseModel ?? null,
+    responseConfirmed: item.responseConfirmed === true,
+    evidenceModel: item.evidenceModel ?? null,
     responseReasoning: item.responseReasoning ?? null,
+    responseIssue: item.responseIssue ?? null,
     evidenceSource: item.evidenceSource ?? null,
     verdict: item.responseVerdict ?? null,
     outcome: item.verified ? 'verified' : 'unverified',
@@ -1448,7 +1512,10 @@ async function autoVerify(tabId) {
   }));
 
   const successful = catalogVerification.results.filter((item) => item.verified);
+  const requestConfirmedResults = catalogVerification.results.filter((item) => item.requestConfirmed);
+  const lastResult = catalogVerification.results.at(-1) ?? null;
   const lastVerified = successful.at(-1) ?? null;
+  const lastRequestConfirmed = requestConfirmedResults.at(-1) ?? null;
   const finalOutcome = catalogVerification.total === 0
     ? 'unverified'
     : catalogVerification.failed === 0 && catalogVerification.verified === catalogVerification.total
@@ -1459,7 +1526,9 @@ async function autoVerify(tabId) {
   const finalReason = catalogVerification.total === 0
     ? 'account_model_catalog_empty'
     : catalogVerification.failed
-      ? 'account_model_verification_incomplete'
+      ? catalogVerification.requestConfirmed === catalogVerification.total
+        ? 'response_model_evidence_incomplete'
+        : 'account_model_verification_incomplete'
       : null;
 
   state.autoVerification.running = false;
@@ -1467,11 +1536,16 @@ async function autoVerify(tabId) {
   state.autoVerification.outcome = finalOutcome;
   state.autoVerification.reason = finalReason;
   state.autoVerification.retries = 0;
-  state.autoVerification.requestLockConfirmed = Boolean(lastVerified?.requestConfirmed);
-  state.autoVerification.requestModel = lastVerified?.requestModel ?? null;
+  state.autoVerification.requestLockConfirmed = catalogVerification.total > 0
+    && catalogVerification.requestConfirmed === catalogVerification.total;
+  state.autoVerification.requestModel = lastResult?.requestModel ?? lastRequestConfirmed?.requestModel ?? null;
   state.autoVerification.responseModel = lastVerified?.responseModel ?? null;
   state.autoVerification.responseReasoning = lastVerified?.responseReasoning ?? null;
-  state.autoVerification.evidenceSource = lastVerified?.evidenceSource ?? null;
+  state.autoVerification.evidenceSource = lastVerified
+    ? 'network_response_metadata'
+    : lastRequestConfirmed
+      ? 'network_request_metadata'
+      : null;
   try {
     await finalizeAutoVerificationStreamCapture(tabId, state.autoVerification.completedAt);
   } catch (error) {
@@ -1489,13 +1563,17 @@ async function autoVerify(tabId) {
     outcome: finalOutcome,
     reason: finalReason,
     catalogTotal: catalogVerification.total,
+    catalogRequestConfirmed: catalogVerification.requestConfirmed,
     catalogVerified: catalogVerification.verified,
     catalogFailed: catalogVerification.failed,
     models: catalogVerification.results.map((item) => ({
       model: item.model,
       verified: item.verified,
+      requestConfirmed: item.requestConfirmed === true,
+      responseConfirmed: item.responseConfirmed === true,
       requestModel: item.requestModel ?? null,
       responseModel: item.responseModel ?? null,
+      evidenceModel: item.evidenceModel ?? null,
       evidenceSource: item.evidenceSource ?? null,
     })),
   });
@@ -1513,6 +1591,7 @@ async function autoVerify(tabId) {
     responseReasoning: state.autoVerification.responseReasoning,
     evidenceSource: state.autoVerification.evidenceSource,
     catalogTotal: catalogVerification.total,
+    catalogRequestConfirmed: catalogVerification.requestConfirmed,
     catalogVerified: catalogVerification.verified,
     catalogFailed: catalogVerification.failed,
     checks: {
@@ -1550,6 +1629,7 @@ function diagnosticTabState(state) {
       diagnostics: state.lastRequest.diagnostics,
     } : null,
     lastVerification: state.lastVerification,
+    lastResponseEvidence: state.lastResponseEvidence,
     lastEvidenceDiagnostics: state.lastEvidenceDiagnostics,
     streamTracking: state.streamTracking,
     evidenceIssue: state.evidenceIssue,

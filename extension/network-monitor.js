@@ -80,6 +80,15 @@ export function hasCompleteResponseEvidence(evidence) {
   );
 }
 
+export function hasResponseMetadataEvidence(evidence) {
+  return Boolean(
+    evidence?.model
+      || evidence?.reasoning
+      || evidence?.conflicts?.model
+      || evidence?.conflicts?.reasoning,
+  );
+}
+
 export function webSocketFrameMatchesHandoff(payload, handoff) {
   return Boolean(handoff && streamPayloadMatches(payload, handoff));
 }
@@ -417,10 +426,41 @@ export class ChatGptNetworkMonitor {
       return;
     }
 
+    const configuration = this.configuration(tabId);
+    if (configuration.bypassRewrite === true) {
+      try {
+        const postData = await this.pausedPostData(tabId, params);
+        const observed = extractRequestEvidence(postData);
+        await this.continuePaused(tabId, requestId);
+        this.onRewrite?.(tabId, {
+          endpoint,
+          requestId: params.networkId ? String(params.networkId) : null,
+          changed: false,
+          reason: 'verification_passthrough',
+          modelBefore: observed.model,
+          modelAfter: observed.model,
+          reasoningBefore: observed.reasoning,
+          reasoningAfter: observed.reasoning,
+          reasoningFields: [],
+        });
+      } catch (error) {
+        const detail = safeError(error);
+        this.onRewrite?.(tabId, {
+          endpoint,
+          requestId: params.networkId ? String(params.networkId) : null,
+          changed: false,
+          reason: 'verification_passthrough_failed_open',
+          error: detail,
+        });
+        try { await this.continuePaused(tabId, requestId); } catch {}
+      }
+      return;
+    }
+
     let rewrite = null;
     try {
       const postData = await this.pausedPostData(tabId, params);
-      rewrite = rewriteConversationPostData(postData, this.configuration(tabId));
+      rewrite = rewriteConversationPostData(postData, configuration);
       await this.continuePaused(tabId, requestId, rewrite.changed ? rewrite.postData : null);
       this.onRewrite?.(tabId, {
         endpoint,
@@ -615,7 +655,7 @@ export class ChatGptNetworkMonitor {
       ...evidence.diagnostics,
     };
 
-    if (!bodyError && !hasCompleteResponseEvidence(evidence)) {
+    if (!bodyError && !hasResponseMetadataEvidence(evidence)) {
       this.onStreamData?.(tabId, {
         requestId: record.requestId,
         capturedAt: new Date().toISOString(),
@@ -727,7 +767,7 @@ export class ChatGptNetworkMonitor {
         : evidence.diagnostics?.bodyFormat,
     };
 
-    if (!hasCompleteResponseEvidence(evidence)) {
+    if (!hasResponseMetadataEvidence(evidence)) {
       this.onStreamData?.(tabId, {
         requestId: frameId,
         capturedAt: new Date().toISOString(),
