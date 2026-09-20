@@ -1,0 +1,77 @@
+name: GPTAuto Reconcile
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Stable GPTAuto task ID
+        required: true
+      pr_number:
+        description: Merged PR number
+        required: true
+      merge_sha:
+        description: Merge commit SHA
+        required: true
+      release_required:
+        description: Whether Release must succeed
+        required: true
+        default: 'false'
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+concurrency:
+  group: gptauto-reconcile-${{ inputs.task_id }}
+  cancel-in-progress: true
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Wait for terminal post-merge gates
+        env:
+          GH_TOKEN: ${{ secrets.GPTAUTO_EXECUTOR_TOKEN || github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TASK_ID: ${{ inputs.task_id }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          MERGE_SHA: ${{ inputs.merge_sha }}
+          RELEASE_REQUIRED: ${{ inputs.release_required }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          deadline=$((SECONDS + 1800))
+          while (( SECONDS < deadline )); do
+            runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$MERGE_SHA&per_page=100")"
+            ci_status="$(jq -r '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | reverse | .[0].status // "missing"' <<<"$runs")"
+            ci_conclusion="$(jq -r '[.workflow_runs[] | select(.name == "CI")] | sort_by(.created_at) | reverse | .[0].conclusion // ""' <<<"$runs")"
+            release_status="completed"
+            release_conclusion="success"
+            if [[ "$RELEASE_REQUIRED" == "true" ]]; then
+              release_status="$(jq -r '[.workflow_runs[] | select(.name == "Release")] | sort_by(.created_at) | reverse | .[0].status // "missing"' <<<"$runs")"
+              release_conclusion="$(jq -r '[.workflow_runs[] | select(.name == "Release")] | sort_by(.created_at) | reverse | .[0].conclusion // ""' <<<"$runs")"
+            fi
+            echo "task=$TASK_ID ci=$ci_status/$ci_conclusion release=$release_status/$release_conclusion"
+            if [[ "$ci_status" == "completed" && "$ci_conclusion" != "success" ]]; then
+              echo "::error::Post-merge CI finished with $ci_conclusion"
+              exit 1
+            fi
+            if [[ "$RELEASE_REQUIRED" == "true" && "$release_status" == "completed" && "$release_conclusion" != "success" ]]; then
+              echo "::error::Release finished with $release_conclusion"
+              exit 1
+            fi
+            if [[ "$ci_status" == "completed" && "$ci_conclusion" == "success" && "$release_status" == "completed" && "$release_conclusion" == "success" ]]; then
+              gh workflow run gptauto-observer.yml --repo "$REPOSITORY"                 --ref "$(gh api "repos/$REPOSITORY" --jq '.default_branch')"                 -f pr_number="$PR_NUMBER" -f head_sha="$MERGE_SHA" -f merge_sha="$MERGE_SHA"
+              {
+                echo "## GPTAuto post-merge reconciliation"
+                echo "- Task: $TASK_ID"
+                echo "- Merge: $MERGE_SHA"
+                echo "- CI: success"
+                echo "- Release required: $RELEASE_REQUIRED"
+                echo "- Release: $release_conclusion"
+                echo "- Dispatched Observer to emit terminal DONE evidence."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::Timed out waiting for post-merge completion gates"
+          exit 1

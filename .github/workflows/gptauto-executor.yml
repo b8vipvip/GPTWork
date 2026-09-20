@@ -59,6 +59,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ steps.state.outputs.pr-number }}
           EXPECTED_HEAD: ${{ steps.state.outputs.head-sha }}
+          TASK_ID: ${{ steps.state.outputs.task-id }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -95,6 +96,12 @@ jobs:
               gh workflow run Release --repo "$REPOSITORY" --ref "$default_branch"
             fi
           fi
+          # workflow_dispatch runs started with GITHUB_TOKEN do not reliably create
+          # another workflow_run chain. A dedicated reconciler owns the long wait
+          # and explicitly re-dispatches Observer once post-merge gates are terminal.
+          gh workflow run gptauto-reconcile.yml --repo "$REPOSITORY" --ref "$default_branch" \
+            -f task_id="$TASK_ID" -f pr_number="$PR_NUMBER" -f merge_sha="$merge_sha" \
+            -f release_required="${{ steps.state.outputs.release-required }}"
       - name: Emit repair request
         if: ${{ steps.state.outputs.action == 'repair_request' }}
         env:
