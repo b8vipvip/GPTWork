@@ -1417,7 +1417,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 
 function modelVerificationHistoryRecord(tabId, autoVerification) {
   const catalog = autoVerification?.catalogVerification || {};
-  return {
+  const record = {
     id: `${autoVerification?.startedAt || new Date().toISOString()}:${tabId}`,
     tabId,
     startedAt: autoVerification?.startedAt ?? null,
@@ -1427,6 +1427,7 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
     total: Number(catalog.total || 0),
     verified: Number(catalog.verified || 0),
     failed: Number(catalog.failed || 0),
+    pageContext: autoVerification?.pageContext ?? null,
     results: (Array.isArray(catalog.results) ? catalog.results : []).map((item) => ({
       model: item.model ?? null,
       rawModel: item.rawModel ?? null,
@@ -1447,6 +1448,13 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
       error: item.error ?? null,
     })),
   };
+  record.report = {
+    schemaVersion: 1,
+    type: 'gptwork-model-verification-report',
+    generatedAt: record.completedAt || new Date().toISOString(),
+    verification: { ...record },
+  };
+  return record;
 }
 
 async function persistModelVerificationHistory(tabId, autoVerification) {
@@ -1467,7 +1475,8 @@ async function autoVerify(tabId) {
   if (!isChatGptUrl(tab.url ?? '')) throw new Error('Open chatgpt.com first / 请先打开 chatgpt.com');
   const state = ensureTabState(tabId, tab.url);
   const startedAt = new Date().toISOString();
-  logRuntime('info', 'verification', 'auto_verify_started', { tabId });
+  const pageContext = /^https:\/\/chatgpt\.com\/c\/[^/?#]+/i.test(tab.url || '') ? 'existing_chat' : 'new_chat';
+  logRuntime('info', 'verification', 'auto_verify_started', { tabId, pageContext });
 
   const coreCheck = await refreshNativeCore({ tolerateFailure: true });
   const monitorAttached = await networkMonitor.attach(tabId);
@@ -1481,6 +1490,7 @@ async function autoVerify(tabId) {
     running: true,
     startedAt,
     completedAt: null,
+    pageContext,
     attempt: 0,
     maxAttempts: 0,
     retries: 0,
