@@ -44,7 +44,7 @@ test('model automation is composer-scoped and structurally owned', () => {
   assert.match(content, /function activeComposerSurface/);
   assert.match(content, /Single authority: first bind execution to the active composer/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
-  assert.match(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
+  assert.match(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
   assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
   assert.match(content, /verifiedModelRows/);
   assert.match(content, /dismissWorkContinuationPrompt/);
@@ -59,7 +59,7 @@ test('model verification probe uses trusted send and monitor reattach', () => {
 test('v0.5.81 model automation has one composer-scoped authority', () => {
   assert.match(content, /Single authority: first bind execution to the active composer/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
-  assert.match(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
+  assert.match(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
   assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
   assert.match(content, /gptlock-verification-progress-host/);
   assert.match(content, /bottom:52px/);
@@ -154,7 +154,7 @@ test('v0.5.90 executes only through the active composer model trigger', () => {
   assert.doesNotMatch(content, /MODEL_PICKER_MUTATION_QUARANTINED/);
   assert.match(content, /const valueBearing = menuTriggers\.filter/);
   assert.match(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
-  assert.doesNotMatch(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
+  assert.doesNotMatch(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
   assert.match(content, /page\/sidebar menus are outside/);
 });
 
