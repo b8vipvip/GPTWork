@@ -29,17 +29,26 @@ jobs:
   generate-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      ai-enabled: ${{ steps.provider.outputs.enabled }}
     steps:
-      - name: Require repair-agent credential
+      - name: Resolve optional AI provider
+        id: provider
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_API_KEY: ${{ secrets.GPTAUTO_AI_API_KEY }}
+          RESPONSES_ENDPOINT: ${{ vars.GPTAUTO_AI_RESPONSES_ENDPOINT }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          if [[ -z "$OPENAI_API_KEY" ]]; then
-            echo "::error::OPENAI_API_KEY is not configured. GPTAuto cannot launch the Codex repair agent."
-            exit 1
+          if [[ -z "$AI_API_KEY" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GPTAUTO_AI_API_KEY is not configured; autonomous AI repair is disabled. Core GPTAuto orchestration remains active."
+            exit 0
           fi
+          if [[ -n "$RESPONSES_ENDPOINT" && "$RESPONSES_ENDPOINT" != */responses* ]]; then
+            echo "::warning::GPTAUTO_AI_RESPONSES_ENDPOINT should be the full Responses API endpoint (normally ending in /v1/responses)."
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
@@ -65,7 +74,7 @@ jobs:
           echo "superseded=false" >> "$GITHUB_ENV"
 
       - name: Collect failed-run evidence
-        if: env.superseded != 'true'
+        if: steps.provider.outputs.enabled == 'true' && env.superseded != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -101,18 +110,19 @@ jobs:
           } > /tmp/gptauto-repair/prompt.md
 
       - name: Run Codex repair agent
-        if: env.superseded != 'true'
+        if: steps.provider.outputs.enabled == 'true' && env.superseded != 'true'
         id: codex
         uses: openai/codex-action@v1
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          openai-api-key: ${{ secrets.GPTAUTO_AI_API_KEY }}
+          responses-api-endpoint: ${{ vars.GPTAUTO_AI_RESPONSES_ENDPOINT }}
           prompt-file: /tmp/gptauto-repair/prompt.md
           output-file: /tmp/gptauto-repair/final-message.md
           sandbox: workspace-write
           safety-strategy: drop-sudo
 
       - name: Serialize repair patch
-        if: env.superseded != 'true'
+        if: steps.provider.outputs.enabled == 'true' && env.superseded != 'true'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -125,7 +135,7 @@ jobs:
           git status --short > /tmp/gptauto-repair/status.txt
 
       - name: Upload repair proposal
-        if: env.superseded != 'true'
+        if: steps.provider.outputs.enabled == 'true' && env.superseded != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gptauto-repair-${{ inputs.task_id }}-${{ inputs.head_sha }}
@@ -137,7 +147,7 @@ jobs:
 
   apply-fix:
     needs: generate-fix
-    if: ${{ needs.generate-fix.result == 'success' }}
+    if: ${{ needs.generate-fix.result == 'success' && needs.generate-fix.outputs.ai-enabled == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
