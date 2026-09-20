@@ -16,6 +16,9 @@ import {
   createDiagnosticSseCapture,
   finalizeDiagnosticSseCapture,
   getRuntimeLogs,
+  markRuntimeLogsNative,
+  runtimeLogNativeBatch,
+  RUNTIME_LOG_UPLOAD_ALARM,
   sanitizeLogValue,
 } from './runtime-log.js';
 import { createAccountClient } from './account-client.js';
@@ -515,6 +518,23 @@ function sendNative(type, payload = {}) {
       reject(error);
     }
   });
+}
+
+async function syncRuntimeLogsToNative() {
+  if (!masterRuntimeEnabled()) return { written: 0, skipped: 'master_disabled' };
+  let total = 0;
+  // Drain several small batches without blocking ordinary verification messages for long.
+  for (let pass = 0; pass < 4; pass += 1) {
+    const records = await runtimeLogNativeBatch(50);
+    if (!records.length) break;
+    const result = await sendNative('append_runtime_logs', { records });
+    const written = Number(result?.written || 0);
+    if (written <= 0) break;
+    await markRuntimeLogsNative(records.slice(0, written).map((entry) => entry.id));
+    total += written;
+    if (records.length < 50) break;
+  }
+  return { written: total };
 }
 
 async function syncPolicy() {
@@ -1617,6 +1637,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       if (enabled) return refreshAccountHeartbeat();
       return chrome.alarms.clear(ACCOUNT_REFRESH_ALARM);
     });
+  }
+  if (alarm.name === RUNTIME_LOG_UPLOAD_ALARM) {
+    void syncRuntimeLogsToNative().catch(() => {});
   }
 });
 
