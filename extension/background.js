@@ -571,10 +571,15 @@ async function verifyObservation(observation, policy = currentPolicy) {
   return result;
 }
 
-function mergeResponseEvidence(state, evidence) {
-  const requestId = evidence?.streamContext?.initialRequestId
-    || state.lastRequest?.requestId
+function responseEvidenceRequestId(evidence) {
+  return evidence?.streamContext?.initialRequestId
     || evidence?.requestId
+    || null;
+}
+
+function mergeResponseEvidence(state, evidence) {
+  const requestId = responseEvidenceRequestId(evidence)
+    || state.lastRequest?.requestId
     || null;
   const previous = state.lastResponseEvidence?.requestId === requestId
     ? state.lastResponseEvidence
@@ -622,6 +627,18 @@ function diagnoseEvidenceIssue(evidence, result) {
 
 async function applyNetworkEvidence(tabId, evidence) {
   const state = ensureTabState(tabId);
+  const evidenceRequestId = responseEvidenceRequestId(evidence);
+  const currentRequestId = state.lastRequest?.requestId || null;
+  if (currentRequestId && evidenceRequestId && evidenceRequestId !== currentRequestId) {
+    logRuntime('info', 'network', 'response_evidence_ignored_stale_request', {
+      tabId,
+      currentRequestId,
+      evidenceRequestId,
+      transport: evidence?.streamContext?.transport || evidence?.diagnostics?.transport || null,
+    });
+    evidence.rawResponseBody = null;
+    return;
+  }
   const handoff = evidence?.diagnostics?.streamHandoff;
   if (handoff) {
     state.streamTracking = {
@@ -1079,7 +1096,11 @@ async function waitForAttemptVerification(tabId, startedAtMs) {
       && requestTime >= startedAtMs - 1500
     ) requestId = state.lastRequest.requestId;
 
-    if (requestId && state.lastVerification?.verdict === 'verified') {
+    if (
+      requestId
+      && state.lastVerification?.verdict === 'verified'
+      && state.lastVerification?.requestId === `cdp-${tabId}-${requestId}`
+    ) {
       return { timedOut: false, requestId, verified: true };
     }
     const tracking = state.streamTracking;
@@ -1311,8 +1332,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       // Evidence priority is explicit: correlated response/stream metadata proves the
       // backend model when exposed; the formal request model remains durable request
       // confirmation and is never erased merely because a response frame omits model.
+      const requestId = state.lastRequest?.requestId ?? null;
       const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
-      const responseModel = normalizeConcreteModelId(state.lastResponseEvidence?.model);
+      const responseEvidence = state.lastResponseEvidence?.requestId === requestId
+        ? state.lastResponseEvidence
+        : null;
+      const responseModel = normalizeConcreteModelId(responseEvidence?.model);
       const requestConfirmed = item.model
         ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
         : Boolean(requestModel);
@@ -1331,8 +1356,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         model: item.model || requestModel, rawModel: item.rawModel || requestModel,
         selectorKey: item.selectorKey, label: item.label, verified,
         selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
-        requestId: state.lastRequest?.requestId ?? null, requestModel, responseModel, evidenceModel,
-        responseReasoning: state.lastResponseEvidence?.reasoning ?? null,
+        requestId, requestModel, responseModel, evidenceModel,
+        responseReasoning: responseEvidence?.reasoning ?? null,
         responseVerdict: state.lastVerification?.verdict ?? null,
         responseIssue: state.evidenceIssue ?? null,
         evidenceSource,

@@ -268,3 +268,12 @@ test('v0.5.99 bypasses request rewriting during verification and keeps partial r
   assert.match(options, /执行进度/);
   assert.match(options, /验证成功/);
 });
+
+
+test('v0.5.100 correlates response evidence to the active formal request', () => {
+  assert.match(background, /function responseEvidenceRequestId\(evidence\)/);
+  assert.match(background, /evidence\?\.streamContext\?\.initialRequestId\s*\|\|\s*evidence\?\.requestId/);
+  assert.match(background, /response_evidence_ignored_stale_request/);
+  assert.match(background, /state\.lastVerification\?\.requestId === `cdp-\$\{tabId\}-\$\{requestId\}`/);
+  assert.match(background, /state\.lastResponseEvidence\?\.requestId === requestId/);
+});
