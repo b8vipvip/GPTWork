@@ -983,8 +983,13 @@ document.addEventListener('pointerdown', (event) => {
     return newlyVisible[0] || null;
   }
 
+  function verificationPageContext() {
+    return /^\/c\/[^/]+/.test(location.pathname) ? 'existing_chat' : 'new_chat';
+  }
+
   async function openModernModelMenu() {
     await dismissWorkContinuationPrompt();
+    const pageContext = verificationPageContext();
     const trigger = composerIntelligenceTrigger();
     pickerTopologyProbe('before-open');
     if (!trigger) return { trigger: null, picker: null, opener: null, submenu: null, rows: [] };
@@ -997,7 +1002,23 @@ document.addEventListener('pointerdown', (event) => {
       picker = await waitUntil(() => popupOwnedByTrigger(trigger, beforeTriggerScopes), 2200, 80);
       pickerTopologyProbe('after-trigger-click', { ownedPicker: compactElementProbe(picker) });
     }
-    if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
+    if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [], pageContext };
+
+    // New-chat pages currently expose the account model rows directly in the
+    // composer-owned first popup. Existing /c/:id conversations use the layered
+    // intelligence picker (Advanced -> Select model -> catalog). Keep these DOM
+    // contracts explicit so one topology cannot accidentally drive the other.
+    if (pageContext === 'new_chat') {
+      const directRows = distinctModelRows(picker);
+      if (directRows.length >= 2) {
+        pickerTopologyProbe('new-chat-direct-model-list', {
+          pageContext,
+          ownedPicker: compactElementProbe(picker),
+          modelRows: directRows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
+        });
+        return { trigger, picker, opener: null, submenu: picker, rows: directRows, pageContext };
+      }
+    }
 
     if (!modelSubmenuOpener(picker)) {
       const advanced = advancedPickerToggle(picker);
@@ -1027,7 +1048,7 @@ document.addEventListener('pointerdown', (event) => {
       submenu: compactElementProbe(submenu),
       modelRows: rows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
     });
-    return { trigger, picker, opener, submenu, rows };
+    return { trigger, picker, opener, submenu, rows, pageContext };
   }
 
   function rowModelDescriptor(row) {
