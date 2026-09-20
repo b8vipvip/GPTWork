@@ -292,3 +292,16 @@ test('v0.5.101 verification history supports reports, clear and eight-row pagina
   assert.match(historyUi, /导出报告/);
   assert.match(historyUi, /downloadReport/);
 });
+
+
+test('v0.5.102 accepts an already checked owned model row on new chat', () => {
+  assert.match(content, /verification-model-row-already-checked/);
+  assert.match(content, /candidate\.getAttribute\('data-state'\) === 'checked'/);
+});
+
+test('v0.5.102 canonicalizes wm transport ids for discovered model families', async () => {
+  const policy = await readFile(new URL('../policy.js', import.meta.url), 'utf8');
+  assert.match(policy, /'gpt-5\.6-terra-wm': 'gpt-5\.6-terra'/);
+  assert.match(policy, /'gpt-5\.6-luna-wm': 'gpt-5\.6-luna'/);
+  assert.match(policy, /'gpt-5\.5-wm': 'gpt-5\.5'/);
+});
