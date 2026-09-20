@@ -210,3 +210,15 @@ test('v0.5.94 accepts only the composer-owned in-place advanced catalog after Se
   assert.match(content, /return inPlaceCatalog/);
   assert.match(content, /const opened = await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
 });
+
+
+test('v0.5.95 verification dynamically converges a growing account model catalog', async () => {
+  const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+  assert.match(background, /account_model_catalog_merged/);
+  assert.match(background, /while \(index < queue\.length \|\| stablePasses < 2\)/);
+  assert.match(background, /discoverAccountCatalog\(tabId\)/);
+  assert.match(background, /mergeCatalog\(rediscovered, 'post-turn'\)/);
+  assert.match(background, /mergeCatalog\(rediscovered, 'settle'\)/);
+  assert.match(background, /progress\.total = queue\.length/);
+  assert.match(background, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
+});
