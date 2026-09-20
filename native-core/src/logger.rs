@@ -241,3 +241,22 @@ fn set_private_file_permissions(file: &std::fs::File) -> Result<()> {
 fn set_private_file_permissions(_file: &std::fs::File) -> Result<()> {
     Ok(())
 }
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn runtime_logger_writes_jsonl_and_rotates_near_one_mib() {
+        let temp = tempfile::tempdir().unwrap();
+        let logger = RuntimeLogger::new(temp.path().to_path_buf()).unwrap();
+        let payload = "x".repeat(70_000);
+        for index in 0..18 {
+            logger.append_records(&[json!({"index": index, "payload": payload})]).unwrap();
+        }
+        let files = fs::read_dir(temp.path()).unwrap().count();
+        assert!(files >= 2);
+        assert!(fs::metadata(temp.path().join(RUNTIME_FILE_NAME)).unwrap().len() <= MAX_RUNTIME_FILE_BYTES);
+    }
+}
