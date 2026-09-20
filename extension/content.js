@@ -788,11 +788,32 @@ document.addEventListener('pointerdown', (event) => {
       // Attaching chrome.debugger can show Chrome's debugging infobar and move the
       // entire viewport. Never compute coordinates until that layout change is over.
       await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER_PREPARE' });
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      if (!element.isConnected || !visible(element)) return false;
-      const point = elementCenter(element);
-      if (!pointerStillOwnsPoint(element, point)) {
-        pointerTrace('rejected_hit_test', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(document.elementFromPoint(point?.x || 0, point?.y || 0)) });
+      // chrome.debugger's infobar and Radix slider transitions can both move the picker.
+      // Wait for the exact owned element to stop moving AND own its center before dispatch.
+      // This is a readiness barrier, not a second selector/authority path.
+      let point = null;
+      let previousPoint = null;
+      let stableFrames = 0;
+      const ready = await waitUntil(() => {
+        if (!element.isConnected || !visible(element)) return null;
+        const nextPoint = elementCenter(element);
+        const ownsPoint = pointerStillOwnsPoint(element, nextPoint);
+        const stable = previousPoint
+          && Math.abs(nextPoint.x - previousPoint.x) < 1
+          && Math.abs(nextPoint.y - previousPoint.y) < 1;
+        previousPoint = nextPoint;
+        stableFrames = stable && ownsPoint ? stableFrames + 1 : 0;
+        if (stableFrames < 2) return null;
+        point = nextPoint;
+        return nextPoint;
+      }, 1800, 80);
+      if (!ready || !point) {
+        const fallbackPoint = element.isConnected && visible(element) ? elementCenter(element) : null;
+        pointerTrace('rejected_unstable_hit_test', {
+          traceId, action, source, point: fallbackPoint,
+          target: compactElementProbe(element),
+          hit: compactElementProbe(fallbackPoint ? document.elementFromPoint(fallbackPoint.x, fallbackPoint.y) : null),
+        });
         return false;
       }
       const hit = document.elementFromPoint(point.x, point.y);
@@ -1089,8 +1110,22 @@ document.addEventListener('pointerdown', (event) => {
         return { attempted: false, observation: collectObservation() };
       }
       const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
-      return { attempted: Boolean(attempted), observation: collectObservation() };
+      if (!attempted) return { attempted: false, observation: collectObservation() };
+      // A dispatched click is not a completed model selection. Wait until ChatGPT's
+      // Composer reflects the requested model before allowing the probe transaction.
+      const confirmed = desired
+        ? await waitUntil(() => collectObservation().model === desired, 3500, 100)
+        : await waitUntil(() => !visible(candidate) || !visibleIntelligencePickerContent(), 1800, 100);
+      const observation = collectObservation();
+      pointerTrace(confirmed ? 'verification_model_selection_confirmed' : 'verification_model_selection_unconfirmed', {
+        source: 'verification-model-row', desired, selectorKey: wantedKey, label: wantedLabel,
+        observation,
+      });
+      if (!confirmed) {
+        await closeModelMenus(modern.trigger);
+        return { attempted: false, observation };
+      }
+      return { attempted: true, observation };
     }
 
     await closeModelMenus(modern.trigger);
