@@ -39,10 +39,9 @@
   const AUTO_PROBE_TEXT = 'GPTWork 模型验证测试：请只回复“验证完成”。';
   const BLOCKING_GUARD_HEARTBEAT_MS = 1500;
   const BLOCKING_GUARD_MAX_AGE_MS = 4500;
-  // Temporary safety quarantine: model-picker DOM mutation is disabled until the
-  // current ChatGPT trigger is identified from passive topology diagnostics.
-  // One authority owns this switch; callers cannot bypass it with fallback clicks.
-  const MODEL_PICKER_MUTATION_QUARANTINED = true;
+  // Model-picker mutation has one authority: an explicit composer-owned transaction.
+  // Observation may inspect page-wide topology, but execution may only follow DOM
+  // elements causally owned by the active composer trigger.
 
   let reportTimer = null;
   let alignTimer = null;
@@ -603,19 +602,18 @@
   }
 
   function composerIntelligenceTrigger() {
-    // Single authority: ownership + behavior, not a growing selector whitelist.
-    // ChatGPT may rename/remove data-testid and CSS classes; the model control remains
-    // the unique visible menu trigger owned by the active composer control region.
+    // Single authority: first bind execution to the active composer, then select the
+    // one text-bearing menu control inside that owner. The attachment "+" control is
+    // also aria-haspopup=menu but has no visible value; page/sidebar menus are outside
+    // this ownership boundary and therefore never enter the executable candidate set.
     const root = composerControlRegion();
     if (!root) return null;
     const menuTriggers = [...root.querySelectorAll('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"]')]
       .filter((element) => element && visible(element) && !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'));
-    const expanded = menuTriggers.filter((element) =>
-      element.getAttribute?.('aria-expanded') === 'true'
-      && Boolean(visibleIntelligencePickerContent())
+    const valueBearing = menuTriggers.filter((element) =>
+      String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim().length > 0
     );
-    if (expanded.length === 1) return expanded[0];
-    if (menuTriggers.length === 1) return menuTriggers[0];
+    if (valueBearing.length === 1) return valueBearing[0];
     return null;
   }
 
@@ -701,14 +699,6 @@
   }
 
   async function modelPickerPointer(element, action = 'click', source = 'model-picker') {
-    if (MODEL_PICKER_MUTATION_QUARANTINED) {
-      pointerTrace('model_picker_mutation_quarantined', {
-        action,
-        source,
-        target: compactElementProbe(element),
-      });
-      return false;
-    }
     return trustedPointer(element, action, source);
   }
 
@@ -757,6 +747,26 @@
   function visibleIntelligencePickerContent() {
     return [...document.querySelectorAll('[data-testid="composer-intelligence-picker-content"]')]
       .find((element) => visible(element)) || null;
+  }
+
+  function popupOwnedByTrigger(trigger, beforeScopes = new Set()) {
+    if (!trigger) return null;
+    const controlledId = trigger.getAttribute?.('aria-controls') || '';
+    const controlled = controlledId ? document.getElementById(controlledId) : null;
+    if (controlled && visible(controlled)) return controlled;
+
+    const triggerId = trigger.id || '';
+    if (triggerId) {
+      const labelled = modelPopupScopes().find((scope) =>
+        scope.getAttribute?.('aria-labelledby') === triggerId
+      );
+      if (labelled) return labelled;
+    }
+
+    // Causal ownership is the fallback authority: only a popup that became visible
+    // after this exact composer trigger was activated can belong to this transaction.
+    const newlyVisible = modelPopupScopes().filter((scope) => !beforeScopes.has(scope));
+    return newlyVisible.length === 1 ? newlyVisible[0] : null;
   }
 
   function verifiedModelRows(scope) {
@@ -880,31 +890,18 @@
   }
 
   async function openModernModelMenu() {
-    if (MODEL_PICKER_MUTATION_QUARANTINED) {
-      // Do not activate any guessed control while the live ChatGPT picker schema is
-      // unresolved. Capture enough passive structure to identify the real trigger in
-      // diagnostics, then fail closed with zero UI mutation.
-      pickerTopologyProbe('mutation-quarantined');
-      passiveComposerTopologyProbe('mutation-quarantined');
-      return { trigger: null, picker: null, opener: null, submenu: null, rows: [], quarantined: true };
-    }
     await dismissWorkContinuationPrompt();
     const trigger = composerIntelligenceTrigger();
     pickerTopologyProbe('before-open');
     if (!trigger) return { trigger: null, picker: null, opener: null, submenu: null, rows: [] };
 
-    let picker = visibleIntelligencePickerContent();
+    const beforeTriggerScopes = new Set(modelPopupScopes());
+    let picker = popupOwnedByTrigger(trigger, beforeTriggerScopes);
     if (!picker) {
-      await modelPickerPointer(trigger, 'click', 'model-picker-trigger');
-      picker = await waitUntil(visibleIntelligencePickerContent, 2200, 80);
-      pickerTopologyProbe('after-trigger-click');
-    }
-    if (!picker) {
-      try {
-        trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-        trigger.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-      } catch {}
-      picker = await waitUntil(visibleIntelligencePickerContent, 1200, 80);
+      const opened = await modelPickerPointer(trigger, 'click', 'model-picker-trigger');
+      if (!opened) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
+      picker = await waitUntil(() => popupOwnedByTrigger(trigger, beforeTriggerScopes), 2200, 80);
+      pickerTopologyProbe('after-trigger-click', { ownedPicker: compactElementProbe(picker) });
     }
     if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [] };
 
@@ -1079,10 +1076,6 @@
   }
 
   async function alignSelection({ force = false } = {}) {
-    // v0.5.89 safety rule: while picker mutation is quarantined, background alignment
-    // must also be read-only. Otherwise reasoning alignment can still click a generic
-    // menu trigger independently of model verification.
-    if (MODEL_PICKER_MUTATION_QUARANTINED) return false;
     // Verification owns the model UI for its entire transaction. Background alignment
     // is suspended instead of becoming a second model-selection authority.
     if (cachedState?.autoVerification?.running) return false;
@@ -1340,22 +1333,6 @@
 
     const modern = await openModernModelMenu();
     triggerFound = Boolean(modern.trigger);
-    if (modern.quarantined) {
-      const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
-      if (current?.model) {
-        models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
-      }
-      if (current?.reasoning) reasoning.add(current.reasoning);
-      return {
-        models,
-        reasoningLevels: [...reasoning],
-        capturedAt: new Date().toISOString(),
-        candidateCount: 0,
-        triggerFound: false,
-        pickerKind: 'quarantined-passive',
-        mutationQuarantined: true,
-      };
-    }
     if (modern.picker) {
       for (const row of [...modern.picker.querySelectorAll('[role="menuitemradio"],[role="radio"]')].filter(visible)) {
         for (const value of elementTexts(row)) {
