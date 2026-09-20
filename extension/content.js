@@ -178,7 +178,7 @@
 
   startPassivePickerObserver();
 
-  // Observation only: record menu-trigger clicks outside the active composer.
+  // legacy-core-maintenance: diagnostic provenance for programmatic external-menu events only.\n  // Observation only: record menu-trigger clicks outside the active composer.
   // This gives the next diagnostic bundle provenance for the recent-chat "..." issue
   // without allowing the observer to click, close, or choose anything.
     function externalMenuProgrammaticTrace(event, trigger) {
