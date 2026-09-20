@@ -83,8 +83,30 @@
     return null;
   }
 
-  function menuCandidates() {
-    return [...document.querySelectorAll([
+  function activeComposerSurface() {
+    const composer = [
+      document.querySelector('#prompt-textarea'),
+      document.querySelector('textarea[data-testid*="prompt"]'),
+      document.querySelector('[contenteditable="true"][data-testid*="composer"]'),
+      document.querySelector('.ProseMirror[contenteditable="true"]'),
+    ].find((element) => element && visible(element));
+    if (!composer) return null;
+    const form = composer.closest?.('form');
+    if (form && visible(form)) return form;
+    const testRoot = composer.closest?.('[data-testid*="composer"]');
+    if (testRoot && visible(testRoot)) return testRoot;
+    return composer.parentElement || null;
+  }
+
+  function ownedTrigger(selectors) {
+    const composer = activeComposerSurface();
+    if (!composer) return null;
+    const matches = selectors.flatMap((selector) => [...composer.querySelectorAll(selector)]).filter(visible);
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function menuCandidates(scope = document) {
+    return [...scope.querySelectorAll([
       '[role="menu"] [role="menuitem"]',
       '[role="listbox"] [role="option"]',
       '[data-radix-menu-content] [role="menuitem"]',
@@ -92,12 +114,17 @@
   }
 
   async function chooseExact(selectors, desired, normalize) {
-    const trigger = selectors.flatMap((selector) => [...document.querySelectorAll(selector)]).find(visible);
+    // Single mutation authority: multi-window sync may only start from a unique
+    // control owned by the active composer. Sidebar/history controls can never enter
+    // this candidate set, even if ChatGPT reuses matching aria/testid semantics.
+    const trigger = ownedTrigger(selectors);
     if (!trigger) return { changed: false, retry: true };
     trigger.click();
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     const candidate = menuCandidates().find((element) =>
-      elementTexts(element).some((text) => normalize(text) === desired),
+      elementTexts(element).some((text) => normalize(text) === desired)
+      && !element.closest?.('[data-testid^="history-item-"]')
+      && !element.closest?.('nav,aside'),
     );
     if (!candidate) {
       document.body?.click?.();
@@ -148,6 +175,12 @@
   async function alignNow() {
     timer = null;
     if (syncing || !pending) return;
+    // Verification owns model-picker mutation while its transaction is active.
+    // Ordinary cross-window alignment waits rather than competing for the same UI.
+    if (document.documentElement?.dataset?.gptworkAutoVerification === 'running') {
+      scheduleRetry();
+      return;
+    }
     if (!featureEnabled || settings?.enabled === false) {
       finishSync();
       return;
