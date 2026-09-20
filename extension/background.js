@@ -524,7 +524,7 @@ async function syncRuntimeLogsToNative() {
   if (!masterRuntimeEnabled()) return { written: 0, skipped: 'master_disabled' };
   let total = 0;
   // Drain several small batches without blocking ordinary verification messages for long.
-  for (let pass = 0; pass < 4; pass += 1) {
+  for (let pass = 0; pass < 40; pass += 1) {
     const records = await runtimeLogNativeBatch(50);
     if (!records.length) break;
     const result = await sendNative('append_runtime_logs', { records });
