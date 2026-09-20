@@ -178,6 +178,23 @@
 
   startPassivePickerObserver();
 
+  // Observation only: record menu-trigger clicks outside the active composer.
+  // This gives the next diagnostic bundle provenance for the recent-chat "..." issue
+  // without allowing the observer to click, close, or choose anything.
+  document.addEventListener('click', (event) => {
+    const trigger = event.target?.closest?.('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"]');
+    if (!trigger || trigger.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host')) return;
+    const composer = activeComposerSurface();
+    if (composer?.contains?.(trigger)) return;
+    pointerTrace('external_menu_trigger_click', {
+      isTrusted: event.isTrusted === true,
+      href: location.href,
+      x: Number.isFinite(event.clientX) ? event.clientX : null,
+      y: Number.isFinite(event.clientY) ? event.clientY : null,
+      target: compactElementProbe(trigger),
+    });
+  }, true);
+
   function elementTexts(element) {
     return [
       element?.textContent?.trim(),
@@ -834,32 +851,18 @@
   }
 
   function modelSubmenuOpener(picker) {
-    const scope = advancedPickerView(picker) || picker;
-    if (!scope) return null;
-    const currentModel = collectObservation().model;
-    const rows = [...scope.querySelectorAll('[role="menuitem"],button,[role="button"],[data-radix-collection-item]')]
+    if (!picker) return null;
+    // v0.5.90 diagnostics captured the current ChatGPT contract: the third-layer
+    // catalog is owned by one menuitem whose accessible name is Select model.
+    // Model-labelled rows are previews, never opener candidates.
+    const rows = [...picker.querySelectorAll('[role="menuitem"],button,[role="button"]')]
       .filter((element) => visible(element) && !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'));
-    const explicit = rows.filter((element) =>
-      element.hasAttribute?.('data-has-submenu')
-      || element.getAttribute?.('aria-haspopup') === 'menu'
-      || Boolean(element.getAttribute?.('aria-controls')),
+    const openers = rows.filter((element) =>
+      /^(select model|choose model|选择模型|選擇模型|모델 선택)$/i.test(
+        String(element.getAttribute?.('aria-label') || element.getAttribute?.('title') || '').trim()
+      )
     );
-    const semantic = rows.filter((element) => {
-      const descriptor = rowModelDescriptor(element);
-      const label = normalizedPickerLabel(element);
-      const current = currentModel && (descriptor.model === currentModel || descriptor.rawId === currentModel);
-      const modelSignal = /\bgpt[-\s]?\d|astra|sol|terra|luna/i.test(label);
-      const reasoningSignal = /highest|high|medium|low|最高|高|中|低|推理|思考|reasoning|effort/i.test(label);
-      return Boolean((current || modelSignal) && (reasoningSignal || element.querySelector?.('svg')));
-    });
-    // Structural ownership wins. Do not merge structural and semantic candidates:
-    // doing so lets harmless model-labelled summary rows make the unique submenu
-    // opener ambiguous on a fresh ChatGPT conversation.
-    const uniqueExplicit = [...new Set(explicit)];
-    if (uniqueExplicit.length === 1) return uniqueExplicit[0];
-    if (uniqueExplicit.length > 1) return null;
-    const uniqueSemantic = [...new Set(semantic)];
-    return uniqueSemantic.length === 1 ? uniqueSemantic[0] : null;
+    return openers.length === 1 ? openers[0] : null;
   }
 
   function visibleModelSubmenu(picker, opener, beforeScopes = new Set()) {
