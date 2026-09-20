@@ -154,7 +154,7 @@ test('v0.5.90 executes only through the active composer model trigger', () => {
   assert.doesNotMatch(content, /MODEL_PICKER_MUTATION_QUARANTINED/);
   assert.match(content, /const valueBearing = menuTriggers\.filter/);
   assert.match(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
-  assert.doesNotMatch(content, /if \(valueBearing\.length === 1\) return valueBearing\[0\]/);
+  assert.doesNotMatch(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
   assert.match(content, /page\/sidebar menus are outside/);
 });
 
