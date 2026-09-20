@@ -95,7 +95,7 @@ test('v0.5.83 has one model UI transaction authority and never clicks from obser
 
 test('trusted pointer attaches first and revalidates the exact DOM target after layout settles', () => {
   assert.match(content, /GPTLOCK_TRUSTED_POINTER_PREPARE/);
-  assert.match(content, /requestAnimationFrame\(\(\) => requestAnimationFrame\(resolve\)\)/);
+  assert.match(content, /stableFrames < 2/);\n  assert.match(content, /rejected_unstable_hit_test/);
   assert.match(content, /function pointerStillOwnsPoint/);
   assert.match(content, /document\.elementFromPoint/);
   assert.match(background, /case 'GPTLOCK_TRUSTED_POINTER_PREPARE'/);
