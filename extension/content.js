@@ -178,16 +178,44 @@
 
   startPassivePickerObserver();
 
-  // Observation only: record menu-trigger clicks outside the active composer.
+  // legacy-core-maintenance: diagnostic provenance for programmatic external-menu events only.\n  // Observation only: record menu-trigger clicks outside the active composer.
   // This gives the next diagnostic bundle provenance for the recent-chat "..." issue
   // without allowing the observer to click, close, or choose anything.
-  document.addEventListener('pointerdown', (event) => {
+    function externalMenuProgrammaticTrace(event, trigger) {
+    const target = compactElementProbe(trigger);
+    const historyOptions = /^history-item-\d+-options$/i.test(String(trigger?.getAttribute?.('data-testid') || ''));
+    const details = {
+      isTrusted: event.isTrusted === true,
+      href: location.href,
+      eventType: event.type,
+      x: Number.isFinite(event.clientX) ? event.clientX : null,
+      y: Number.isFinite(event.clientY) ? event.clientY : null,
+      target,
+      historyOptions,
+      autoProbeRunning,
+      autoVerificationRunning: cachedState?.autoVerification?.running === true,
+      lastAlignAttempt,
+      lastAlignAt,
+      pointerTraceSeq,
+    };
+    if (event.isTrusted !== true) {
+      // Synthetic DOM events have no browser-generated call stack. Capture the
+      // listener stack anyway so diagnostics can distinguish page dispatch from
+      // GPTWork-owned execution, then correlate with the latest GPTWork pointer intent.
+      try { details.listenerStack = String(new Error('GPTWork synthetic external menu event').stack || '').slice(0, 6000); } catch {}
+      pointerTrace(historyOptions ? 'history_menu_programmatic_event' : 'external_menu_programmatic_event', details);
+    }
+    return details;
+  }
+
+document.addEventListener('pointerdown', (event) => {
     const trigger = event.target?.closest?.('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"]');
     if (!trigger || trigger.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host')) return;
     const composer = activeComposerSurface();
     if (composer?.contains?.(trigger)) return;
+    const programmatic = externalMenuProgrammaticTrace(event, trigger);
     pointerTrace('external_menu_trigger_pointerdown', {
-      isTrusted: event.isTrusted === true,
+      ...programmatic,
       href: location.href,
       button: Number.isFinite(event.button) ? event.button : null,
       x: Number.isFinite(event.clientX) ? event.clientX : null,
@@ -201,8 +229,9 @@
     if (!trigger || trigger.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host')) return;
     const composer = activeComposerSurface();
     if (composer?.contains?.(trigger)) return;
+    const programmatic = externalMenuProgrammaticTrace(event, trigger);
     pointerTrace('external_menu_trigger_click', {
-      isTrusted: event.isTrusted === true,
+      ...programmatic,
       href: location.href,
       x: Number.isFinite(event.clientX) ? event.clientX : null,
       y: Number.isFinite(event.clientY) ? event.clientY : null,
