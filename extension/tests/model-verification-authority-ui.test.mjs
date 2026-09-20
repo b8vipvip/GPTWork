@@ -42,7 +42,7 @@ test('settings runtime card has no verification action and exposes persistent ve
 
 test('model automation is composer-scoped and structurally owned', () => {
   assert.match(content, /function activeComposerSurface/);
-  assert.match(content, /Single authority: ownership \+ behavior/);
+  assert.match(content, /Single authority: first bind execution to the active composer/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
   assert.match(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
   assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
@@ -57,7 +57,7 @@ test('model verification probe uses trusted send and monitor reattach', () => {
 });
 
 test('v0.5.81 model automation has one composer-scoped authority', () => {
-  assert.match(content, /Single authority: ownership \+ behavior/);
+  assert.match(content, /Single authority: first bind execution to the active composer/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
   assert.match(content, /if \(menuTriggers\.length === 1\) return menuTriggers\[0\]/);
   assert.match(content, /menu\.getAttribute\?\.\('aria-labelledby'\) === openerId/);
