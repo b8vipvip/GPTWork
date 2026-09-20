@@ -136,4 +136,5 @@ jobs:
             echo "- Provenance: \`repository_observer\`"
             echo "- PR/push/main-CI/release events are re-associated through the PR before TASK_ID generation."
             echo "- A merged PR is VERIFY, not DONE; release/main-CI evidence is reconstructed from successful historical runs, so event order does not affect DONE."
+            echo "- DONE artifacts include completion.json: a single terminal receipt with merge, CI, release, gate, and DoD evidence."
           } >> "$GITHUB_STEP_SUMMARY"
