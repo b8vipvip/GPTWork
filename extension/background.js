@@ -187,6 +187,7 @@ function createTabState(tabId, url = '') {
     lastRewrite: null,
     lastRequest: null,
     lastVerification: null,
+    lastResponseEvidence: null,
     lastEvidenceDiagnostics: null,
     streamTracking: null,
     evidenceIssue: null,
@@ -284,6 +285,7 @@ function publicTabState(state) {
     lastRewrite: state.lastRewrite,
     lastRequest: state.lastRequest,
     lastVerification: state.lastVerification,
+    lastResponseEvidence: state.lastResponseEvidence,
     lastEvidenceDiagnostics: state.lastEvidenceDiagnostics,
     streamTracking: state.streamTracking,
     evidenceIssue: state.evidenceIssue,
@@ -569,6 +571,43 @@ async function verifyObservation(observation, policy = currentPolicy) {
   return result;
 }
 
+function mergeResponseEvidence(state, evidence) {
+  const requestId = evidence?.streamContext?.initialRequestId
+    || state.lastRequest?.requestId
+    || evidence?.requestId
+    || null;
+  const previous = state.lastResponseEvidence?.requestId === requestId
+    ? state.lastResponseEvidence
+    : null;
+  const modelConflict = Boolean(
+    evidence?.conflicts?.model
+      || previous?.conflicts?.model
+      || (previous?.model && evidence?.model && previous.model !== evidence.model),
+  );
+  const reasoningConflict = Boolean(
+    evidence?.conflicts?.reasoning
+      || previous?.conflicts?.reasoning
+      || (previous?.reasoning && evidence?.reasoning && previous.reasoning !== evidence.reasoning),
+  );
+  const merged = {
+    requestId,
+    capturedAt: evidence?.capturedAt ?? previous?.capturedAt ?? new Date().toISOString(),
+    model: modelConflict ? null : evidence?.model || previous?.model || null,
+    reasoning: reasoningConflict ? null : evidence?.reasoning || previous?.reasoning || null,
+    conflicts: { model: modelConflict, reasoning: reasoningConflict },
+    fields: {
+      model: evidence?.fields?.model || previous?.fields?.model || null,
+      reasoning: evidence?.fields?.reasoning || previous?.fields?.reasoning || null,
+    },
+    bodyError: evidence?.bodyError || previous?.bodyError || null,
+    evidenceSource: 'network_response_metadata',
+    diagnostics: evidence?.diagnostics ?? previous?.diagnostics ?? null,
+    streamContext: evidence?.streamContext ?? previous?.streamContext ?? null,
+  };
+  state.lastResponseEvidence = merged;
+  return merged;
+}
+
 function diagnoseEvidenceIssue(evidence, result) {
   if (evidence.bodyError) return 'response_body_read_failed';
   if (evidence.conflicts?.model || evidence.conflicts?.reasoning) return 'response_metadata_conflict';
@@ -615,19 +654,20 @@ async function applyNetworkEvidence(tabId, evidence) {
   } finally {
     evidence.rawResponseBody = null;
   }
-  state.lastEvidenceDiagnostics = evidence.diagnostics ?? null;
+  const responseEvidence = mergeResponseEvidence(state, evidence);
+  state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
   if (!masterRuntimeEnabled()) return;
   try {
     const result = await verifyObservation({
-      model: evidence.conflicts?.model ? null : evidence.model,
-      reasoning: evidence.conflicts?.reasoning ? null : evidence.reasoning,
+      model: responseEvidence.conflicts?.model ? null : responseEvidence.model,
+      reasoning: responseEvidence.conflicts?.reasoning ? null : responseEvidence.reasoning,
       evidenceSource: 'network_response_metadata',
-      capturedAt: evidence.capturedAt,
-      requestId: `cdp-${tabId}-${evidence.requestId}`,
+      capturedAt: responseEvidence.capturedAt,
+      requestId: `cdp-${tabId}-${responseEvidence.requestId || evidence.requestId}`,
     }, runtimePolicyForTabSync(tabId));
     state.lastVerification = result;
-    state.evidenceIssue = diagnoseEvidenceIssue(evidence, result);
-    state.lastError = evidence.bodyError || (evidence.conflicts?.model || evidence.conflicts?.reasoning
+    state.evidenceIssue = diagnoseEvidenceIssue(responseEvidence, result);
+    state.lastError = responseEvidence.bodyError || (responseEvidence.conflicts?.model || responseEvidence.conflicts?.reasoning
       ? 'conflicting_response_metadata'
       : null);
     state.phase = result.verdict;
@@ -642,7 +682,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       reasoning: result.reasoning,
       evidenceSource: result.evidenceSource,
       evidenceIssue: state.evidenceIssue,
-      diagnostics: evidence.diagnostics ?? null,
+      diagnostics: responseEvidence.diagnostics ?? null,
     });
   } catch (error) {
     state.phase = 'error';
@@ -668,7 +708,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
       preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
       preserveModel: Boolean(transaction),
       preserveReasoning: Boolean(transaction),
-      responseVerificationEnabled: currentSettings.networkVerificationEnabled,
+      bypassRewrite: Boolean(transaction),
+      responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
     };
   },
   onStatus(tabId, monitor) {
@@ -725,6 +766,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       ? 'conflicting_request_metadata'
       : null;
     state.evidenceIssue = null;
+    state.lastResponseEvidence = null;
     state.lastEvidenceDiagnostics = null;
     logRuntime('info', 'network', 'formal_conversation_request_detected', {
       tabId,
@@ -1018,6 +1060,7 @@ function resetVerificationAttempt(state) {
   state.lastRewrite = null;
   state.lastRequest = null;
   state.lastVerification = null;
+  state.lastResponseEvidence = null;
   state.lastEvidenceDiagnostics = null;
   state.streamTracking = null;
   state.evidenceIssue = null;
@@ -1550,6 +1593,7 @@ function diagnosticTabState(state) {
       diagnostics: state.lastRequest.diagnostics,
     } : null,
     lastVerification: state.lastVerification,
+    lastResponseEvidence: state.lastResponseEvidence,
     lastEvidenceDiagnostics: state.lastEvidenceDiagnostics,
     streamTracking: state.streamTracking,
     evidenceIssue: state.evidenceIssue,
