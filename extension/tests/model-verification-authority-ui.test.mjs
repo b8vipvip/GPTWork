@@ -222,3 +222,21 @@ test('v0.5.95 verification dynamically converges a growing account model catalog
   assert.match(background, /progress\.total = queue\.length/);
   assert.match(background, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
 });
+
+
+test('v0.5.96 waits for stable picker geometry and confirms the selected model before probing', async () => {
+  assert.match(content, /stableFrames < 2/);
+  assert.match(content, /rejected_unstable_hit_test/);
+  assert.match(content, /verification_model_selection_confirmed/);
+  assert.match(content, /collectObservation\(\)\.model === desired/);
+  const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+  assert.match(background, /const requestModel = normalizeConcreteModelId\(state\.lastRequest\?\.model\)/);
+  assert.doesNotMatch(background, /selected\\n\s+const requestModel/);
+});
+
+test('v0.5.96 diagnostics lazily pretty-print heavy runtime details', async () => {
+  const diagnostics = await readFile(new URL('../diagnostics.js', import.meta.url), 'utf8');
+  assert.match(diagnostics, /Expand to load details/);
+  assert.match(diagnostics, /details\.addEventListener\('toggle'/);
+  assert.match(diagnostics, /pre\.dataset\.loaded = '1'/);
+});
