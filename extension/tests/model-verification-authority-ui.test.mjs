@@ -149,7 +149,7 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
 });
 
 
-// v0.5.90 removes the temporary quarantine and gives execution one causal owner.
+// v0.5.90 explicit legacy-core maintenance: remove quarantine and give execution one causal owner.
 test('v0.5.90 executes only through the active composer model trigger', () => {
   assert.doesNotMatch(content, /MODEL_PICKER_MUTATION_QUARANTINED/);
   assert.match(content, /const valueBearing = menuTriggers\.filter/);
