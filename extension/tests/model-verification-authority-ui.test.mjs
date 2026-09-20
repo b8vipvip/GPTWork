@@ -287,8 +287,8 @@ test('v0.5.101 distinguishes new-chat direct picker from existing-chat layered p
 });
 
 test('v0.5.101 verification history supports reports, clear and eight-row pagination', () => {
-  assert.match(historyOptions, /const PAGE_SIZE = 8/);
-  assert.match(historyOptions, /modelVerificationHistoryClear/);
-  assert.match(historyOptions, /导出报告/);
-  assert.match(historyOptions, /downloadReport/);
+  assert.match(historyUi, /const PAGE_SIZE = 8/);
+  assert.match(historyUi, /modelVerificationHistoryClear/);
+  assert.match(historyUi, /导出报告/);
+  assert.match(historyUi, /downloadReport/);
 });
