@@ -1140,6 +1140,17 @@ document.addEventListener('pointerdown', (event) => {
         await closeModelMenus(modern.trigger);
         return { attempted: false, observation: collectObservation() };
       }
+      // The catalog row may already be the active model (especially the default model
+      // on a fresh new-chat page). Treat the owned checked radio as a real selection
+      // acknowledgement instead of requiring a no-op click to dispatch.
+      if (candidate.getAttribute('data-state') === 'checked') {
+        const observation = collectObservation();
+        pointerTrace('verification_model_selection_confirmed', {
+          source: 'verification-model-row-already-checked', desired, selectorKey: wantedKey, label: wantedLabel,
+          observation,
+        });
+        return { attempted: true, observation };
+      }
       const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
       if (!attempted) return { attempted: false, observation: collectObservation() };
       // A dispatched click is not a completed model selection. Wait until ChatGPT's
