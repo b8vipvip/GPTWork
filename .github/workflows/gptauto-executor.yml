@@ -120,6 +120,35 @@ jobs:
           GPTAuto repair cycle is open for task $TASK_ID on current head $HEAD_SHA (latest failed run $FAILED_RUN_ID). Do not finish the engineering task until this repair cycle is resolved and the completion lease reaches DONE."
             fi
           fi
+      - name: Dispatch autonomous repair agent
+        if: ${{ steps.state.outputs.action == 'repair_request' }}
+        env:
+          GH_TOKEN: ${{ secrets.GPTAUTO_EXECUTOR_TOKEN || github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TASK_ID: ${{ steps.state.outputs.task-id }}
+          PR_NUMBER: ${{ steps.state.outputs.pr-number }}
+          HEAD_SHA: ${{ steps.state.outputs.head-sha }}
+          FAILED_RUN_ID: ${{ steps.state.outputs.run-id }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ -n "$PR_NUMBER" && -n "$HEAD_SHA" && -n "$FAILED_RUN_ID" ]] || {
+            echo "::error::Repair dispatch is missing PR/head/run identity."
+            exit 1
+          }
+          marker="<!-- gptauto-repair-dispatched:$TASK_ID:$HEAD_SHA -->"
+          comments="$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --jq '.[].body' 2>/dev/null || true)"
+          if grep -Fq "$marker" <<<"$comments"; then
+            echo "Repair agent already dispatched for $TASK_ID / $HEAD_SHA; keeping the same repair lease."
+            exit 0
+          fi
+          gh workflow run gptauto-repair.yml --repo "$REPOSITORY" \
+            --ref "$(gh api "repos/$REPOSITORY" --jq '.default_branch')" \
+            -f task_id="$TASK_ID" -f pr_number="$PR_NUMBER" \
+            -f head_sha="$HEAD_SHA" -f failed_run_id="$FAILED_RUN_ID"
+          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "$marker
+GPTAuto dispatched the autonomous repair agent for task $TASK_ID on head $HEAD_SHA. The Completion Lease remains active until the repaired head passes its gates."
+          echo "Dispatched autonomous repair agent for $TASK_ID / $HEAD_SHA."
       - name: Persist completion lease
         if: ${{ steps.state.outputs.lease-active == 'true' }}
         env:
