@@ -1,6 +1,7 @@
 export const RUNTIME_LOG_STORAGE_KEY = 'runtimeLogs';
 export const MAX_RUNTIME_LOG_ENTRIES = 2000;
 export const RUNTIME_LOG_UPLOADED_IDS_KEY = 'runtimeLogUploadedIds';
+export const RUNTIME_LOG_NATIVE_IDS_KEY = 'runtimeLogNativeIds';
 export const RUNTIME_LOG_UPLOAD_ALARM = 'gptlock-runtime-log-upload';
 export const RUNTIME_LOG_UPLOAD_BATCH_SIZE = 50;
 
@@ -273,6 +274,27 @@ export async function getRuntimeLogs() {
   return logs;
 }
 
+export async function runtimeLogNativeBatch(limit = RUNTIME_LOG_UPLOAD_BATCH_SIZE) {
+  await writeQueue.catch(() => {});
+  const stored = await chrome.storage.local.get([RUNTIME_LOG_STORAGE_KEY, RUNTIME_LOG_NATIVE_IDS_KEY]);
+  const logs = filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
+  const persisted = new Set(Array.isArray(stored[RUNTIME_LOG_NATIVE_IDS_KEY]) ? stored[RUNTIME_LOG_NATIVE_IDS_KEY] : []);
+  return logs.filter((entry) => entry?.id && !persisted.has(entry.id)).slice(0, Math.max(1, limit));
+}
+
+export async function markRuntimeLogsNative(ids) {
+  const acknowledged = new Set((Array.isArray(ids) ? ids : []).filter(Boolean));
+  if (!acknowledged.size) return;
+  const stored = await chrome.storage.local.get([RUNTIME_LOG_STORAGE_KEY, RUNTIME_LOG_NATIVE_IDS_KEY]);
+  const logs = boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
+  const liveIds = new Set(logs.map((entry) => entry?.id).filter(Boolean));
+  const persisted = new Set(Array.isArray(stored[RUNTIME_LOG_NATIVE_IDS_KEY]) ? stored[RUNTIME_LOG_NATIVE_IDS_KEY] : []);
+  for (const id of acknowledged) if (liveIds.has(id)) persisted.add(id);
+  await chrome.storage.local.set({
+    [RUNTIME_LOG_NATIVE_IDS_KEY]: [...persisted].filter((id) => liveIds.has(id)).slice(-MAX_RUNTIME_LOG_ENTRIES),
+  });
+}
+
 async function runtimeLogUploadBatch(limit = RUNTIME_LOG_UPLOAD_BATCH_SIZE) {
   await writeQueue.catch(() => {});
   const stored = await chrome.storage.local.get([RUNTIME_LOG_STORAGE_KEY, RUNTIME_LOG_UPLOADED_IDS_KEY]);
@@ -352,6 +374,7 @@ export async function clearRuntimeLogs() {
   await chrome.storage.local.set({
     [RUNTIME_LOG_STORAGE_KEY]: [],
     [RUNTIME_LOG_UPLOADED_IDS_KEY]: [],
+    [RUNTIME_LOG_NATIVE_IDS_KEY]: [],
   });
 }
 
