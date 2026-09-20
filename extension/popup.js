@@ -119,12 +119,8 @@ function hasConfirmedAutoEvidence(auto, policy, tab) {
   return Boolean(
     auto
       && !auto.running
-      && auto.outcome === 'verified'
       && auto.evidenceSource === 'network_response_metadata'
       && auto.responseModel
-      && auto.responseReasoning
-      && policy?.lockedModels?.includes(auto.responseModel)
-      && policy?.allowedReasoningLevels?.includes(auto.responseReasoning)
       && autoVerificationAppliesToLatestRequest(auto, tab),
   );
 }
@@ -136,6 +132,7 @@ function autoReasonText(auto) {
     model_not_exposed: '正式请求已经锁定，但流式响应和会话详情都没有暴露可验证模型元数据。',
     downstream_model_not_exposed: '已跟踪 handoff 后续流，但尚未从嵌套流元数据中解析出模型。',
     response_verification_timeout: '等待响应确认超时。',
+    response_model_evidence_incomplete: '逐模型执行已经完成，但仍有模型只取得请求确认，响应/流未暴露可核验模型字段。',
     conversation_evidence_fetch_failed: '流式响应证据不足，且会话详情回查失败。',
     response_body_read_failed: '浏览器无法读取响应体。',
     metadata_incomplete: '响应元数据仍不完整。',
@@ -228,7 +225,9 @@ function render(state) {
   elements.pageState.textContent = valuePair(tab?.pageObservation?.model, tab?.pageObservation?.reasoning);
   const responseValue = autoEvidenceConfirmed
     ? valuePair(auto.responseModel, auto.responseReasoning)
-    : valuePair(tab?.lastVerification?.model, tab?.lastVerification?.reasoning);
+    : auto?.completedAt && autoApplies && auto?.requestModel
+      ? `未暴露 / Not exposed · 请求已确认 ${auto.requestModel}`
+      : valuePair(tab?.lastVerification?.model, tab?.lastVerification?.reasoning);
   elements.responseState.textContent = tab?.evidenceIssue && !autoEvidenceConfirmed
     ? `${responseValue} · ${tab.evidenceIssue}`
     : responseValue;
@@ -263,17 +262,20 @@ function render(state) {
     detail = '正在等待本次真实聊天响应；如果响应证据不足，程序会自动跟踪 handoff 后续流并最多再发送一次测试消息。';
     tone = 'wait';
   } else if (auto?.completedAt && autoApplies) {
-    if (autoEvidenceConfirmed) {
+    if (autoEvidenceConfirmed && auto.outcome === 'verified') {
       title = '模型验证通过 / Verified';
       detail = `已完成 ${auto.attempts?.length || 1} 次尝试；后端流响应元数据确认 ${auto.responseModel} · ${auto.responseReasoning}。后续无模型字段的流帧不会抹掉这条已确认结果。`;
       tone = 'good';
-    } else if (auto.outcome === 'model_verified_reasoning_unconfirmed') {
-      title = '模型已确认，推理未确认 / Partial verification';
-      detail = `已自动重试 ${auto.retries || 0} 次；${autoReasonText(auto)}`;
-      tone = 'wait';
     } else {
-      title = '模型验证未完全确认 / Model verification incomplete';
-      detail = `已自动尝试 ${auto.attempts?.length || 0} 次；${autoReasonText(auto) || '证据仍不足。'} 请求层锁定${auto.requestLockConfirmed ? '已确认' : '未确认'}。`;
+      const catalog = auto.catalogVerification || {};
+      const total = Number(catalog.total || auto.attempts?.length || 0);
+      const completed = Number(catalog.completed || auto.attempts?.length || 0);
+      const verified = Number(catalog.verified || 0);
+      const requested = Number(catalog.requestConfirmed || 0);
+      title = auto.outcome === 'partial'
+        ? '模型验证部分完成 / Partial verification'
+        : '模型验证未完全确认 / Model verification incomplete';
+      detail = `执行进度 ${completed}/${total}；验证成功 ${verified}/${total}；请求确认 ${requested}/${total}。 ${autoReasonText(auto) || '证据仍不足。'}`;
       tone = auto.outcome === 'model_mismatch' ? 'bad' : 'wait';
     }
   }
@@ -356,11 +358,11 @@ elements.autoVerify.addEventListener('click', () => {
     .then(async (result) => {
       await load();
       if (result.outcome === 'verified') {
-        showAutoVerifyToast(`模型验证完成：已验证 ${result.catalogVerified || 0}/${result.catalogTotal || 0} 个账户模型 / Verification completed.`);
+        showAutoVerifyToast(`模型验证完成：执行 ${result.catalogTotal || 0}/${result.catalogTotal || 0}；验证成功 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal || 0}。`);
       } else if (result.outcome === 'model_verified_reasoning_unconfirmed') {
         showAutoVerifyToast(`模型验证完成：模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；响应推理元数据未完全暴露。`);
       } else {
-        showAutoVerifyToast(`模型验证完成但存在失败：${result.reason || 'metadata_incomplete'}；模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}。`);
+        showAutoVerifyToast(`模型验证完成：执行 ${result.catalogTotal || 0}/${result.catalogTotal || 0}；验证成功 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal || 0}。原因：${result.reason || 'metadata_incomplete'}。`);
       }
     })
     .catch((error) => { showAutoVerifyToast(`模型验证失败 / Model verification failed: ${error.message}`); })
