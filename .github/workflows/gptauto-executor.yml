@@ -142,6 +142,10 @@ jobs:
             echo "Repair agent already dispatched for $TASK_ID / $HEAD_SHA; keeping the same repair lease."
             exit 0
           fi
+          if [[ -z "${{ secrets.GPTAUTO_AI_API_KEY }}" ]]; then
+            echo "::notice::No GPTAUTO_AI_API_KEY configured. Keeping repair_request and Completion Lease active without dispatching an AI repair workflow."
+            exit 0
+          fi
           gh workflow run gptauto-repair.yml --repo "$REPOSITORY" \
             --ref "$(gh api "repos/$REPOSITORY" --jq '.default_branch')" \
             -f task_id="$TASK_ID" -f pr_number="$PR_NUMBER" \
