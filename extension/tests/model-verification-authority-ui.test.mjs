@@ -123,7 +123,7 @@ test('v0.5.86 does not mistake second-layer intelligence model summaries for the
 
 test('v0.5.87 uses one composer ownership boundary instead of selector accumulation', () => {
   assert.match(content, /function composerControlRegion/);
-  assert.match(content, /unique visible menu trigger owned by the active composer control region/);
+  assert.match(content, /one text-bearing menu control inside that owner/);
   assert.match(content, /querySelectorAll\('button\[aria-haspopup="menu"\],\[role="button"\]\[aria-haspopup="menu"\]'\)/);
   assert.doesNotMatch(content, /const selectors = \[\s*'\[data-testid="model-switcher-dropdown-button"\]'/);
 });
