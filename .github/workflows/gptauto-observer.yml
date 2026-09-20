@@ -11,6 +11,12 @@ on:
       merge_sha:
         description: Merge SHA to reconcile
         required: false
+      main_ci_run_id:
+        description: Successful post-merge CI run ID verified by reconciler
+        required: false
+      release_run_id:
+        description: Successful Release run ID verified by reconciler
+        required: false
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, closed]
   push:
@@ -31,7 +37,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   observe:
-    if: ${{ github.event_name == 'workflow_run' || github.event_name == 'release' || github.actor != 'github-actions[bot]' || github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run' || github.event_name == 'release' || github.actor != 'github-actions[bot]' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -57,6 +63,8 @@ jobs:
           PR_MERGED: ${{ github.event.pull_request.merged || false }}
           MERGE_SHA: ${{ inputs.merge_sha || github.event.pull_request.merge_commit_sha || '' }}
           RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+          RECONCILED_MAIN_CI_RUN_ID: ${{ inputs.main_ci_run_id || '' }}
+          RECONCILED_RELEASE_RUN_ID: ${{ inputs.release_run_id || '' }}
           ACTOR: ${{ github.actor }}
           WORKFLOW_NAME: ${{ github.event.workflow_run.name || '' }}
           WORKFLOW_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
@@ -84,6 +92,16 @@ jobs:
           MAIN_CI_RUN_ID=""
           RELEASE_CONCLUSION=""
           RELEASE_RUN_ID=""
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ -n "$RECONCILED_MAIN_CI_RUN_ID" ]]; then
+              MAIN_CI_RUN_ID="$RECONCILED_MAIN_CI_RUN_ID"
+              MAIN_CI_CONCLUSION="success"
+            fi
+            if [[ -n "$RECONCILED_RELEASE_RUN_ID" ]]; then
+              RELEASE_RUN_ID="$RECONCILED_RELEASE_RUN_ID"
+              RELEASE_CONCLUSION="success"
+            fi
+          fi
           if [[ -n "$PR_NUMBER" ]]; then
             pr_json="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
             PR_TITLE="$(jq -r '.title // ""' <<<"$pr_json")"
