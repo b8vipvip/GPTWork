@@ -1,6 +1,6 @@
 #define MyAppName "GPTWork"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.96"
+  #define MyAppVersion "0.5.97"
 #endif
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
@@ -65,6 +65,7 @@ Source: "Repair-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\native-messaging"
+Name: "{app}\log"
 
 [Registry]
 Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core"; ValueType: string; ValueName: ""; ValueData: "{app}\native-messaging\chrome.json"; Flags: uninsdeletekey; Check: ChromeSelected

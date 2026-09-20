@@ -70,7 +70,7 @@ test('popup update action opens the dedicated update center and requests an imme
   assert.doesNotMatch(client, /chrome\.runtime\.reload\(/);
 });
 
-test('settings no longer embeds update center and all standalone modules share navigation', async () => {
+test('settings no longer embeds update center and remaining standalone modules share navigation', async () => {
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   const settingsUrl = new URL(`../${manifest.options_ui.page}`, import.meta.url);
   const pages = [
@@ -78,7 +78,6 @@ test('settings no longer embeds update center and all standalone modules share n
     ['account', new URL('../account.html', import.meta.url)],
     ['help', new URL('../help.html', import.meta.url)],
     ['update', updateHtml],
-    ['diagnostics', new URL('../diagnostics.html', import.meta.url)],
   ];
   const navigation = await readFile(moduleNav, 'utf8');
   const settings = await readFile(settingsUrl, 'utf8');
@@ -91,7 +90,7 @@ test('settings no longer embeds update center and all standalone modules share n
     assert.match(html, /module-nav\.css/);
     assert.match(html, /module-nav\.js/);
   }
-  for (const path of ['account.html', 'settings-v0521.html', 'help.html', 'update.html', 'diagnostics.html']) {
+  for (const path of ['account.html', 'settings-v0521.html', 'help.html', 'update.html']) {
     assert.match(navigation, new RegExp(path.replace('.', '\\.')));
   }
   assert.match(navigation, /aria-current/);

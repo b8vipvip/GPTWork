@@ -175,6 +175,21 @@ fn handle_message(state: &Arc<AppState>, message: Value) -> Value {
             })
             .and_then(prepare_update)
             .and_then(|result| serde_json::to_value(result).map_err(Into::into)),
+        "append_runtime_logs" => {
+            let records = message
+                .get("records")
+                .and_then(Value::as_array)
+                .ok_or_else(|| anyhow::anyhow!("records are required / 缺少 records"))
+                .and_then(|records| {
+                    if records.len() > 100 {
+                        anyhow::bail!("too many runtime log records");
+                    }
+                    state
+                        .append_runtime_logs(records)
+                        .map(|written| json!({ "written": written }))
+                });
+            records
+        }
         "get_status" => state
             .status()
             .and_then(|status| serde_json::to_value(status).map_err(Into::into)),

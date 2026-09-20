@@ -14,7 +14,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use config::{ConfigStore, Policy};
-use logger::AuditLogger;
+use logger::{AuditLogger, RuntimeLogger};
 use verifier::{VerificationRequest, VerificationResult};
 
 pub const NATIVE_HOST_NAME: &str = "com.gptlock.core";
@@ -23,6 +23,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub struct AppState {
     store: ConfigStore,
     audit: AuditLogger,
+    runtime_log: RuntimeLogger,
     api_token: String,
     started_at: Instant,
     last_verification: RwLock<Option<VerificationResult>>,
@@ -33,11 +34,14 @@ impl AppState {
         store.initialize()?;
         let api_token = store.load_or_create_api_token()?;
         let audit = AuditLogger::new(store.logs_dir())?;
+        let runtime_log_dir = runtime_log_directory(&store);
+        let runtime_log = RuntimeLogger::new(runtime_log_dir)?;
         let last_verification = store.load_last_verification().unwrap_or(None);
 
         Ok(Arc::new(Self {
             store,
             audit,
+            runtime_log,
             api_token,
             started_at: Instant::now(),
             last_verification: RwLock::new(last_verification),
@@ -156,6 +160,22 @@ impl AppState {
     pub fn recent_audit_records(&self, limit: usize) -> Result<Vec<Value>> {
         self.audit.recent_records(limit)
     }
+
+    pub fn append_runtime_logs(&self, records: &[Value]) -> Result<usize> {
+        self.runtime_log.append_records(records)
+    }
+}
+
+fn runtime_log_directory(store: &ConfigStore) -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(app_dir) = exe.parent().and_then(|bin| bin.parent()) {
+                return app_dir.join("log");
+            }
+        }
+    }
+    store.logs_dir()
 }
 
 fn stable_device_id(token: &str) -> String {

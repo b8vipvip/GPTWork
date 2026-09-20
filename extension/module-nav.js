@@ -3,7 +3,6 @@ const MODULES = [
   { id: 'settings', href: 'settings-v0521.html', label: '设置', english: 'Settings' },
   { id: 'help', href: 'help.html', label: '使用帮助', english: 'Help' },
   { id: 'update', href: 'update.html', label: '版本更新', english: 'Update' },
-  { id: 'diagnostics', href: 'diagnostics.html', label: '诊断日志', english: 'Diagnostics' },
 ];
 
 function buildModuleLink(module, current) {

@@ -1114,7 +1114,14 @@ document.addEventListener('pointerdown', (event) => {
       // A dispatched click is not a completed model selection. Wait until ChatGPT's
       // Composer reflects the requested model before allowing the probe transaction.
       const confirmed = desired
-        ? await waitUntil(() => collectObservation().model === desired, 3500, 100)
+        ? await waitUntil(() => {
+            // In the new-chat Composer ChatGPT can intentionally hide the model label
+            // after a successful row click and leave only the reasoning control visible.
+            // The exact owned catalog row's radio state is therefore the primary UI
+            // acknowledgement; Composer model text remains a secondary read-only signal.
+            if (candidate.isConnected && candidate.getAttribute('data-state') === 'checked') return true;
+            return collectObservation().model === desired;
+          }, 3500, 100)
         : await waitUntil(() => !visible(candidate) || !visibleIntelligencePickerContent(), 1800, 100);
       const observation = collectObservation();
       pointerTrace(confirmed ? 'verification_model_selection_confirmed' : 'verification_model_selection_unconfirmed', {

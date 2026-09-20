@@ -235,9 +235,8 @@ test('v0.5.96 waits for stable picker geometry and confirms the selected model b
   assert.doesNotMatch(background, /selected\\n\s+const requestModel/);
 });
 
-test('v0.5.96 diagnostics lazily pretty-print heavy runtime details', async () => {
-  const diagnostics = await readFile(new URL('../diagnostics.js', import.meta.url), 'utf8');
-  assert.match(diagnostics, /Expand to load details/);
-  assert.match(diagnostics, /details\.addEventListener\('toggle'/);
-  assert.match(diagnostics, /pre\.dataset\.loaded = '1'/);
+test('v0.5.97 accepts the exact owned catalog radio state as selection acknowledgement', () => {
+  assert.match(content, /candidate\.getAttribute\('data-state'\) === 'checked'/);
+  assert.match(content, /return collectObservation\(\)\.model === desired/);
+  assert.match(content, /verification_model_selection_confirmed/);
 });
