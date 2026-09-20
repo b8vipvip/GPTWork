@@ -37,6 +37,12 @@
     'button[aria-label*="停止"]',
   ];
   const AUTO_PROBE_TEXT = 'GPTWork 模型验证测试：请只回复“验证完成”。';
+
+  function visibleGeneratingControl() {
+    return GENERATING_SELECTORS
+      .flatMap((selector) => [...document.querySelectorAll(selector)])
+      .find((element) => visible(element)) || null;
+  }
   const BLOCKING_GUARD_HEARTBEAT_MS = 1500;
   const BLOCKING_GUARD_MAX_AGE_MS = 4500;
   // Model-picker mutation has one authority: an explicit composer-owned transaction.
@@ -1184,7 +1190,7 @@ document.addEventListener('pointerdown', (event) => {
     // Verification owns the model UI for its entire transaction. Background alignment
     // is suspended instead of becoming a second model-selection authority.
     if (cachedState?.autoVerification?.running) return false;
-    if (!cachedSettings?.enabled || !cachedSettings.autoAlignSelection || !cachedPolicy || document.querySelector(GENERATING_SELECTORS.join(','))) return false;
+    if (!cachedSettings?.enabled || !cachedSettings.autoAlignSelection || !cachedPolicy || visibleGeneratingControl()) return false;
     const observation = collectObservation();
     const desiredModel = cachedPolicy.lockedModels?.[0];
     const preferred = cachedPolicy.allowedReasoningLevels?.includes(cachedSettings.preferredReasoning)
@@ -1302,7 +1308,7 @@ document.addEventListener('pointerdown', (event) => {
 
   async function waitForIdle() {
     const idle = await waitUntil(
-      () => !document.querySelector(GENERATING_SELECTORS.join(',')),
+      () => !visibleGeneratingControl(),
       30000,
       250,
     );
@@ -1344,7 +1350,7 @@ document.addEventListener('pointerdown', (event) => {
       const sent = await waitUntil(() => {
         const currentComposer = findComposer();
         const current = composerText(currentComposer);
-        return !current.includes(probeMarker) || Boolean(document.querySelector(GENERATING_SELECTORS.join(',')));
+        return !current.includes(probeMarker) || Boolean(visibleGeneratingControl());
       }, 5000, 100);
       if (!sent) {
         if (draftPreserved) setComposerText(composer, originalDraft);

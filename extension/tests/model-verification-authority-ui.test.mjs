@@ -240,3 +240,11 @@ test('v0.5.97 accepts the exact owned catalog radio state as selection acknowled
   assert.match(content, /return collectObservation\(\)\.model === desired/);
   assert.match(content, /verification_model_selection_confirmed/);
 });
+
+test('v0.5.98 ignores hidden stale stop controls between verification models', () => {
+  assert.match(content, /function visibleGeneratingControl\(\)/);
+  assert.match(content, /querySelectorAll\(selector\)/);
+  assert.match(content, /find\(\(element\) => visible\(element\)\)/);
+  assert.match(content, /\(\) => !visibleGeneratingControl\(\)/);
+  assert.doesNotMatch(content, /!document\.querySelector\(GENERATING_SELECTORS\.join\(','\)\)/);
+});
