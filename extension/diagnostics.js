@@ -67,9 +67,17 @@ function render() {
     event.className = 'event';
     event.textContent = entry.event;
     summary.append(time, level, component, event);
+    // Keep the log list cheap to open. Picker topology entries can contain deep DOM
+    // probes; pretty-printing up to 2,000 of them eagerly blocks the diagnostics page.
+    // Materialize one entry's JSON only when the user expands that row.
     const pre = document.createElement('pre');
-    pre.textContent = JSON.stringify(entry.details ?? {}, null, 2);
+    pre.textContent = '展开后加载详情 / Expand to load details';
     details.append(summary, pre);
+    details.addEventListener('toggle', () => {
+      if (!details.open || pre.dataset.loaded === '1') return;
+      pre.textContent = JSON.stringify(entry.details ?? {}, null, 2);
+      pre.dataset.loaded = '1';
+    });
     elements.logs.append(details);
   }
 }
