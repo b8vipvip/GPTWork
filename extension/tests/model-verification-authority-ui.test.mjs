@@ -190,3 +190,15 @@ test('v0.5.91 recent-chat menu provenance is observation-only', () => {
   assert.match(content, /isTrusted: event\.isTrusted === true/);
   assert.match(content, /if \(composer\?\.contains\?\.\(trigger\)\) return/);
 });
+
+
+test('v0.5.93 multi-window sync mutates only composer-owned controls and pauses for verification', async () => {
+  const sync = await readFile(new URL('../multi-window-lock-sync.js', import.meta.url), 'utf8');
+  assert.match(sync, /function activeComposerSurface/);
+  assert.match(sync, /function ownedTrigger/);
+  assert.match(sync, /\.\.\.composer\.querySelectorAll\(selector\)/);
+  assert.doesNotMatch(sync, /selectors\.flatMap\(\(selector\) => \[\.\.\.document\.querySelectorAll\(selector\)\]\)\.find\(visible\)/);
+  assert.match(sync, /!element\.closest\?\.\('\[data-testid\^="history-item-"\]'\)/);
+  assert.match(sync, /dataset\?\.gptworkAutoVerification === 'running'/);
+  assert.match(content, /document\.documentElement\.dataset\.gptworkAutoVerification = 'running'/);
+});
