@@ -181,6 +181,21 @@
   // Observation only: record menu-trigger clicks outside the active composer.
   // This gives the next diagnostic bundle provenance for the recent-chat "..." issue
   // without allowing the observer to click, close, or choose anything.
+  document.addEventListener('pointerdown', (event) => {
+    const trigger = event.target?.closest?.('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"]');
+    if (!trigger || trigger.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host')) return;
+    const composer = activeComposerSurface();
+    if (composer?.contains?.(trigger)) return;
+    pointerTrace('external_menu_trigger_pointerdown', {
+      isTrusted: event.isTrusted === true,
+      href: location.href,
+      button: Number.isFinite(event.button) ? event.button : null,
+      x: Number.isFinite(event.clientX) ? event.clientX : null,
+      y: Number.isFinite(event.clientY) ? event.clientY : null,
+      target: compactElementProbe(trigger),
+    });
+  }, true);
+
   document.addEventListener('click', (event) => {
     const trigger = event.target?.closest?.('button[aria-haspopup="menu"],[role="button"][aria-haspopup="menu"]');
     if (!trigger || trigger.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host')) return;
