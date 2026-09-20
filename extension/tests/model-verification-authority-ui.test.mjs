@@ -202,3 +202,11 @@ test('v0.5.93 multi-window sync mutates only composer-owned controls and pauses 
   assert.match(sync, /dataset\?\.gptworkAutoVerification === 'running'/);
   assert.match(content, /document\.documentElement\.dataset\.gptworkAutoVerification = 'running'/);
 });
+
+
+test('v0.5.94 accepts only the composer-owned in-place advanced catalog after Select model activation', () => {
+  assert.match(content, /const inPlaceCatalog = advancedPickerView\(picker\)/);
+  assert.match(content, /visible\(inPlaceCatalog\) && distinctModelRows\(inPlaceCatalog\)\.length >= 2/);
+  assert.match(content, /return inPlaceCatalog/);
+  assert.match(content, /const opened = await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
+});

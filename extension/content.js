@@ -918,6 +918,14 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   function visibleModelSubmenu(picker, opener, beforeScopes = new Set()) {
+    // Current ChatGPT may slide the authoritative catalog into the SAME owned
+    // composer-intelligence picker instead of creating a third portal. That in-place
+    // advanced view is valid only after the exact Select model opener was activated.
+    const inPlaceCatalog = advancedPickerView(picker);
+    if (inPlaceCatalog && visible(inPlaceCatalog) && distinctModelRows(inPlaceCatalog).length >= 2) {
+      return inPlaceCatalog;
+    }
+
     const controlledId = opener?.getAttribute?.('aria-controls') || '';
     const controlled = controlledId ? document.getElementById(controlledId) : null;
     if (controlled && isModelListScope(controlled)) return controlled;
