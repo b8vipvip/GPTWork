@@ -76,15 +76,27 @@ impl RuntimeLogger {
         if previous != version {
             if fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0) > 0 {
                 let stamp = Utc::now().format("%Y%m%d-%H%M%S-%3f");
-                let from = if previous.is_empty() { "unknown" } else { previous };
+                let from = if previous.is_empty() {
+                    "unknown"
+                } else {
+                    previous
+                };
                 let rotated = self.dir.join(format!(
                     "runtime-v{}-to-v{}-{stamp}.jsonl",
-                    from.replace(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-', "_"),
-                    version.replace(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-', "_"),
+                    from.replace(
+                        |c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-',
+                        "_"
+                    ),
+                    version.replace(
+                        |c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-',
+                        "_"
+                    ),
                 ));
-                fs::rename(&self.path, rotated).context("archive GPTWork runtime log on version change")?;
+                fs::rename(&self.path, rotated)
+                    .context("archive GPTWork runtime log on version change")?;
             }
-            fs::write(&marker, format!("{version}\n")).context("write GPTWork runtime log version marker")?;
+            fs::write(&marker, format!("{version}\n"))
+                .context("write GPTWork runtime log version marker")?;
         }
         Ok(())
     }
@@ -289,10 +301,16 @@ mod runtime_tests {
         let _next = RuntimeLogger::new(temp.path().to_path_buf()).unwrap();
         assert!(!temp.path().join(RUNTIME_FILE_NAME).exists());
         assert!(fs::read_dir(temp.path()).unwrap().any(|entry| {
-            entry.unwrap().file_name().to_string_lossy().starts_with("runtime-v0.0.0-to-v")
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("runtime-v0.0.0-to-v")
         }));
         assert_eq!(
-            fs::read_to_string(temp.path().join(RUNTIME_VERSION_FILE_NAME)).unwrap().trim(),
+            fs::read_to_string(temp.path().join(RUNTIME_VERSION_FILE_NAME))
+                .unwrap()
+                .trim(),
             env!("CARGO_PKG_VERSION")
         );
     }
