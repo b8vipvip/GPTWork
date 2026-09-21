@@ -115,4 +115,7 @@ test('v0.5.109 recovery tears down performance and resize observers from the rep
   assert.match(lifecycle, /resizeObservers\.clear\(\)/);
   assert.match(lifecycle, /globalThis\.PerformanceObserver = original\.PerformanceObserver/);
   assert.match(lifecycle, /globalThis\.ResizeObserver = original\.ResizeObserver/);
+  assert.match(lifecycle, /patchChromeEvent\(globalThis\.chrome\?\.runtime\?\.onMessage\)/);
+  assert.match(lifecycle, /patchChromeEvent\(globalThis\.chrome\?\.storage\?\.onChanged\)/);
+  assert.match(lifecycle, /chromeEventListeners\.clear\(\)/);
 });
