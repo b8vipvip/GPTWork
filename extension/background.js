@@ -791,8 +791,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
       error: rewrite.error ?? null,
     };
     if (rewrite.error) state.lastError = rewrite.error;
+    const verification = verificationTransactionForTab(tabId);
     logRuntime(rewrite.error ? 'warn' : 'info', 'lock', rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked', {
       tabId,
+      verificationActive: Boolean(verification),
+      verificationModel: verification?.model ?? null,
       ...state.lastRewrite,
     });
     void broadcastTabState(tabId);
@@ -2095,6 +2098,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           checkpointMatched: details.checkpointMatched === true,
           checkpointRestored: details.checkpointRestored === true,
           hardLimitObservedCount: Math.max(0, Math.floor(Number(details.hardLimitObservedCount) || 0)),
+        });
+        return { recorded: true };
+      }
+      case 'GPTLOCK_PERFORMANCE_DIAGNOSTIC': {
+        if (!sender.tab?.id) throw new Error('Performance diagnostic requires a tab');
+        const details = message.details && typeof message.details === 'object' ? message.details : {};
+        logRuntime('warn', 'performance', 'page_responsiveness_sample', {
+          tabId: sender.tab.id,
+          url: sender.tab.url || null,
+          eventLoopLagMs: Math.max(0, Math.min(60000, Number(details.eventLoopLagMs) || 0)),
+          maxLongTaskMs: Math.max(0, Math.min(60000, Number(details.maxLongTaskMs) || 0)),
+          longTaskCount: Math.max(0, Math.min(10000, Number(details.longTaskCount) || 0)),
+          mutationCount: Math.max(0, Math.min(1000000, Number(details.mutationCount) || 0)),
+          mutationCallbacks: Math.max(0, Math.min(100000, Number(details.mutationCallbacks) || 0)),
+          maxMutationCallbackMs: Math.max(0, Math.min(60000, Number(details.maxMutationCallbackMs) || 0)),
+          verificationRunning: details.verificationRunning === true,
+          documentVisibility: String(details.documentVisibility || '').slice(0, 32),
         });
         return { recorded: true };
       }
