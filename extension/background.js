@@ -1457,6 +1457,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
     });
 
+    let abortForPendingTurn = false;
     try {
       const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
       if (!attached) throw new Error(state.monitor?.error || 'Request lock monitor is not attached');
@@ -1479,7 +1480,18 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       });
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
-      const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
+      const [waited, turnSettled] = await Promise.all([
+        waitForAttemptVerification(tabId, attemptStartedMs),
+        sendTabMessage(tabId, {
+          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+          assistantCountBefore: probe.assistantCountBefore ?? 0,
+          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+        }),
+      ]);
+      if (turnSettled?.settled !== true) {
+        abortForPendingTurn = true;
+        throw new Error('ChatGPT response did not reach a terminal idle state; verification stopped before touching the model picker');
+      }
       // Evidence priority is explicit: correlated response/stream metadata proves the
       // backend model when exposed; the formal request model remains durable request
       // confirmation and is never erased merely because a response frame omits model.
@@ -1513,7 +1525,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
         pickerMode: item.pickerMode || null,
         evidenceSource,
-        timedOut: waited.timedOut, observation: selection.observation || null,
+        timedOut: waited.timedOut, turnSettled: true, observation: selection.observation || null,
       };
       progress.results.push(result);
       if (requestConfirmed) progress.requestConfirmed += 1;
@@ -1537,6 +1549,11 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     index += 1;
     progress.completed = index;
     await broadcastTabState(tabId);
+
+    if (abortForPendingTurn) {
+      logRuntime('warn', 'verification', 'account_model_verification_aborted_pending_response', { tabId, index, total: queue.length });
+      break;
+    }
 
     // A completed real turn may unlock account models/capabilities in a fresh chat.
     const rediscovered = await discoverAccountCatalog(tabId);
@@ -1599,6 +1616,7 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
       evidenceSource: item.evidenceSource ?? null,
       pickerMode: item.pickerMode ?? null,
       timedOut: item.timedOut === true,
+      turnSettled: item.turnSettled === true,
       error: item.error ?? null,
     })),
   };
