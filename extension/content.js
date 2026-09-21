@@ -478,9 +478,15 @@ document.addEventListener('pointerdown', (event) => {
       const verified = Math.max(0, Number(catalog?.verified || 0));
       const requestConfirmed = Math.max(0, Number(catalog?.requestConfirmed || 0));
       progress.querySelector('.current span').textContent = label;
-      progress.querySelector('.execution').textContent = total ? `${completed} / ${total}` : '…';
-      progress.querySelector('.verified').textContent = total ? `${verified} / ${total}` : '…';
-      progress.querySelector('.requested').textContent = total ? `${requestConfirmed} / ${total}` : '…';
+      const catalogStable = catalog?.catalogStable === true;
+      // The account catalog grows after real turns. A changing denominator (2→6→7→8)
+      // looked like stacked verification stages even though it was one queue. Do not
+      // present a denominator as final until discovery has reached its terminal state.
+      progress.querySelector('.execution').textContent = total
+        ? (catalogStable ? `${completed} / ${total}` : `${completed} · 已发现 ${total}`)
+        : '正在发现…';
+      progress.querySelector('.verified').textContent = catalogStable ? `${verified} / ${total}` : `${verified}`;
+      progress.querySelector('.requested').textContent = catalogStable ? `${requestConfirmed} / ${total}` : `${requestConfirmed}`;
       const bar = progress.querySelector('progress');
       bar.max = Math.max(1, total);
       bar.value = completed;
