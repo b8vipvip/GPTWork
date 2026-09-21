@@ -120,3 +120,24 @@ test('v0.5.114 verification can ignore only a stale generating control after ter
   assert.match(contentSource, /snapshot\.composerVisible && snapshot\.sendReady/);
   assert.match(contentSource, /Date\.now\(\) - stableSince >= 1500/);
 });
+
+
+test('v0.5.116 keeps known page selection authoritative across UI alignment and request lock', () => {
+  assert.match(backgroundSource, /knownModels: \[\.\.\.sharedKnownModelIds\]/);
+  assert.match(backgroundSource, /knownModels: \[\.\.\.sharedKnownModelIds\]/);
+  assert.match(contentSource, /pageModelIsKnown/);
+  assert.match(contentSource, /!pageModelIsKnown && observation\.model !== desiredModel/);
+});
+
+test('v0.5.116 rejects reasoning-decorated pseudo model rows', () => {
+  assert.match(contentSource, /reasoningDecorated/);
+  assert.match(contentSource, /!descriptor\.explicitModelId/);
+  assert.match(contentSource, /explicitModelId/);
+});
+
+test('v0.5.116 distinguishes backend resolution metadata from selected-model evidence', () => {
+  assert.match(backgroundSource, /verificationResponseObservation/);
+  assert.match(backgroundSource, /backend_resolution_not_selected_model/);
+  assert.match(backgroundSource, /backend_model_resolution_observed/);
+  assert.match(backgroundSource, /selectedModelEvidenceDowngraded/);
+});
