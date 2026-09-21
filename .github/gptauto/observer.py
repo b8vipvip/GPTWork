@@ -47,6 +47,15 @@ def _release_workflow(name):
     return bool(_RELEASE_WORKFLOW_RE.search(str(name or "")))
 
 
+def _release_required_with_override(override, *texts):
+    value = str(override or "").strip().lower()
+    if value in {"true", "1", "yes"}:
+        return True
+    if value in {"false", "0", "no"}:
+        return False
+    return release_expected(*texts)
+
+
 def capture(
     repo,
     event,
@@ -73,11 +82,16 @@ def capture(
     release_conclusion="",
     release_run_id="",
     current_pr_head_sha="",
+    release_required_override="",
+    provenance="repository_observer",
 ):
     tid = observed_task_id(repo, pr_number, head_sha, merge_sha)
     goal = pr_title.strip() or ("Observe repository change " + (merge_sha or head_sha)[:12])
     merged = str(pr_merged).lower() == "true"
-    release_required = release_expected(pr_title, pr_body, release_tag)
+    release_required = _release_required_with_override(
+        release_required_override, pr_title, pr_body, release_tag
+    )
+    evidence_provenance = str(provenance or "repository_observer").strip() or "repository_observer"
     workflow_success = _passed(workflow_conclusion)
     release_done = _passed(release_conclusion) or (
         event == "release" and str(release_state or "").lower() in {"published", "released"}
@@ -239,7 +253,7 @@ def capture(
         state=state,
         plan=plan,
         metadata={
-            "provenance": "repository_observer",
+            "provenance": evidence_provenance,
             "task_type": "observed",
             "branch": branch,
             "head_sha": current_pr_head_sha or head_sha,
@@ -309,7 +323,7 @@ def capture(
     return {
         "task_id": tid,
         "state": state.value,
-        "provenance": "repository_observer",
+        "provenance": evidence_provenance,
         "artifact_name": "gptauto-" + tid,
         "completion_gate": completion_gate,
         "release_required": release_required,
@@ -346,6 +360,8 @@ def main():
         "release-conclusion",
         "release-run-id",
         "current-pr-head-sha",
+        "release-required-override",
+        "provenance",
     ]:
         c.add_argument("--" + name, default="")
     a = p.parse_args()
@@ -376,6 +392,8 @@ def main():
                 release_conclusion=a.release_conclusion,
                 release_run_id=a.release_run_id,
                 current_pr_head_sha=a.current_pr_head_sha,
+                release_required_override=a.release_required_override,
+                provenance=a.provenance,
             ),
             ensure_ascii=False,
         )
