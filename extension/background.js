@@ -18,6 +18,7 @@ import {
   getRuntimeLogs,
   markRuntimeLogsNative,
   runtimeLogNativeBatch,
+  uploadRuntimeLogBatch,
   RUNTIME_LOG_UPLOAD_ALARM,
   sanitizeLogValue,
 } from './runtime-log.js';
@@ -73,8 +74,22 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+let runtimeLogFlushTimer = null;
+function scheduleRuntimeLogDelivery() {
+  if (runtimeLogFlushTimer !== null) return;
+  runtimeLogFlushTimer = setTimeout(() => {
+    runtimeLogFlushTimer = null;
+    // Browser storage is the canonical log. Native-file and server copies are delivery
+    // sinks only; both consume the same immutable entry ids and acknowledge independently.
+    void syncRuntimeLogsToNative().catch(() => {});
+    void uploadRuntimeLogBatch().catch(() => {});
+  }, 750);
+}
+
 function logRuntime(level, component, event, details = {}) {
-  void appendRuntimeLog(level, component, event, details).catch(() => {});
+  void appendRuntimeLog(level, component, event, details)
+    .then(() => scheduleRuntimeLogDelivery())
+    .catch(() => {});
 }
 
 async function startAutoVerificationStreamCapture(tabId, startedAt) {
@@ -241,6 +256,17 @@ function accountAllowsState(state) {
 }
 
 function effectiveSettingsForState(state) {
+  const verification = verificationTransactionForTab(state?.tabId);
+  if (verification) {
+    // Model verification is an isolated measurement transaction. User Work/model-lock
+    // switches must not block the fixed probe or alter the model ChatGPT actually sends.
+    return {
+      ...currentSettings,
+      enabled: true,
+      networkVerificationEnabled: true,
+      autoAlignSelection: false,
+    };
+  }
   return {
     ...currentSettings,
     enabled: Boolean(
@@ -2053,8 +2079,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GPTLOCK_SEND_STARTED': {
         if (!sender.tab?.id) throw new Error('Send event requires a tab');
         const state = ensureTabState(sender.tab.id, sender.tab.url);
+        const verification = verificationTransactionForTab(sender.tab.id);
         const guard = guardFor(state);
-        if (!guard.canSend) {
+        if (!verification && !guard.canSend) {
           logRuntime('warn', 'guard', 'send_rejected', {
             tabId: sender.tab.id,
             status: guard.status,
