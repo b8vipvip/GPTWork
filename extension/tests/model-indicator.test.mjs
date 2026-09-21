@@ -17,7 +17,7 @@ test('model indicator receives event-driven state and keeps a live fallback refr
   assert.match(source, /GPTLOCK_GUARD_STATE/);
   assert.match(source, /GPTLOCK_GET_STATE/);
   assert.match(source, /MutationObserver/);
-  assert.match(source, /STATE_REFRESH_MS = 1200/);
+  assert.match(source, /STATE_REFRESH_MS = 10000/);
   assert.match(source, /setInterval/);
   assert.match(source, /detectPageModel/);
 });
