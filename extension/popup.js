@@ -43,8 +43,11 @@ const elements = {
 let lastState = null;
 let updateStatus = null;
 
-function lockModelLabel(id) {
-  return KNOWN_MODELS.find((model) => model.id === id)?.label || id;
+function lockModelLabel(id, stored = null) {
+  const shared = Array.isArray(stored?.gptworkSharedKnownModelsV1) ? stored.gptworkSharedKnownModelsV1 : [];
+  return KNOWN_MODELS.find((model) => model.id === id)?.label
+    || shared.find((model) => normalizeConcreteModelId(model?.model) === id)?.label
+    || id;
 }
 
 function popupModelIds(stored, policy) {
@@ -68,7 +71,7 @@ function renderPopupLockEditor(stored, policy, settings) {
     input.value = model;
     input.checked = policy.lockedModels.includes(model);
     const label = document.createElement('span');
-    label.textContent = lockModelLabel(model);
+    label.textContent = lockModelLabel(model, stored);
     row.append(input, label);
     elements.popupModelChoices.append(row);
   }
@@ -88,7 +91,7 @@ async function renderPopupLockSummary() {
   const settings = normalizeSettings(stored.settings);
   if (elements.popupLockedModels) {
     elements.popupLockedModels.textContent = policy.lockedModels
-      .map((model) => `${lockModelLabel(model)} · ${settings.preferredReasoning}`)
+      .map((model) => `${lockModelLabel(model, stored)} · ${settings.preferredReasoning}`)
       .join(' / ') || '—';
   }
   renderPopupLockEditor(stored, policy, settings);
