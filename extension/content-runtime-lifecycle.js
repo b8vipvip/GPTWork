@@ -119,7 +119,7 @@
     if (typeof original.removeEventListener !== 'function') return;
     for (const record of eventListeners) {
       try {
-        original.removeEventListener.call(record.target, record.type, record.listener, record.options);
+        original.removeEventListener.call(record.target, record.type, record.wrapped || record.listener, record.options);
       } catch {}
     }
     eventListeners.clear();
@@ -200,7 +200,7 @@
     resizeObservers.clear();
     removeTrackedListeners();
     for (const record of chromeEventListeners) {
-      try { record.remove.call(record.event, record.listener); } catch {}
+      try { record.remove.call(record.event, record.wrapped || record.listener); } catch {}
     }
     chromeEventListeners.clear();
     restorePatchedGlobals();
@@ -331,17 +331,31 @@
 
   function trackedAddEventListener(type, listener, options) {
     if (typeof original.addEventListener !== 'function') return undefined;
-    eventListeners.add({ target: this, type, listener, options });
-    return original.addEventListener.call(this, type, listener, options);
+    let wrapped = listener;
+    if (typeof listener === 'function') {
+      wrapped = function measuredDomEventListener(...args) {
+        return measureCallback('domEvent', listener.bind(this), args);
+      };
+    } else if (listener && typeof listener.handleEvent === 'function') {
+      wrapped = {
+        handleEvent(...args) {
+          return measureCallback('domEvent', listener.handleEvent.bind(listener), args);
+        },
+      };
+    }
+    eventListeners.add({ target: this, type, listener, wrapped, options });
+    return original.addEventListener.call(this, type, wrapped, options);
   }
 
   function trackedRemoveEventListener(type, listener, options) {
+    let wrapped = listener;
     for (const record of eventListeners) {
       if (record.target === this && record.type === type && record.listener === listener) {
+        wrapped = record.wrapped || listener;
         eventListeners.delete(record);
       }
     }
-    return original.removeEventListener.call(this, type, listener, options);
+    return original.removeEventListener.call(this, type, wrapped, options);
   }
 
   function patchChromeEvent(event) {
@@ -349,14 +363,22 @@
     const add = event.addListener;
     const remove = event.removeListener;
     const trackedAdd = function trackedChromeAddListener(listener) {
-      if (typeof listener === 'function') chromeEventListeners.add({ event, listener, remove });
-      return add.call(event, listener);
+      if (typeof listener !== 'function') return add.call(event, listener);
+      const wrapped = function measuredChromeEventListener(...args) {
+        return measureCallback('chromeEvent', listener, args);
+      };
+      chromeEventListeners.add({ event, listener, wrapped, remove });
+      return add.call(event, wrapped);
     };
     const trackedRemove = function trackedChromeRemoveListener(listener) {
+      let wrapped = listener;
       for (const record of chromeEventListeners) {
-        if (record.event === event && record.listener === listener) chromeEventListeners.delete(record);
+        if (record.event === event && record.listener === listener) {
+          wrapped = record.wrapped || listener;
+          chromeEventListeners.delete(record);
+        }
       }
-      return remove.call(event, listener);
+      return remove.call(event, wrapped);
     };
     try {
       event.addListener = trackedAdd;
