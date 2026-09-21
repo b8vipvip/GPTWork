@@ -32,7 +32,7 @@ function renderModelResult(item) {
   const detail = document.createElement('span');
   detail.textContent = item?.error
     ? `失败：${item.error}`
-    : `请求确认 ${item?.requestConfirmed ? '是' : '否'} · 请求模型 ${item?.requestModel || '—'} · 响应确认 ${item?.responseConfirmed ? '是' : '否'} · 响应模型 ${item?.responseModel || '未暴露'} · 推理 ${item?.responseReasoning || '未暴露'}`;
+    : `选择器 ${item?.pickerMode || '—'} · 请求确认 ${item?.requestConfirmed ? '是' : '否'} · 请求模型 ${item?.requestModel || '—'} · 响应确认 ${item?.responseConfirmed ? '是' : '否'} · 响应模型 ${item?.responseModel || '未暴露'} · 推理 ${item?.responseReasoning || '未暴露'}`;
   row.append(title, detail);
   return row;
 }
@@ -74,7 +74,8 @@ function renderHistory(records = []) {
     actions.append(time, exportButton); head.append(title, actions);
     const summary = document.createElement('p'); summary.className = 'model-verification-history-summary';
     const context = record?.pageContext === 'existing_chat' ? '旧聊天' : record?.pageContext === 'new_chat' ? '新聊天' : '未知页面';
-    summary.textContent = record?.reason ? `${context} · 结果：${record.reason}` : `${context} · 验证成功 ${Number(record?.verified || 0)} · 未确认 ${Number(record?.failed || 0)}`;
+    const pickerModes = Array.isArray(record?.pickerModes) && record.pickerModes.length ? ` · 选择器 ${record.pickerModes.join('→')}` : '';
+    summary.textContent = record?.reason ? `${context}${pickerModes} · 结果：${record.reason}` : `${context}${pickerModes} · 验证成功 ${Number(record?.verified || 0)} · 未确认 ${Number(record?.failed || 0)}`;
     const models = document.createElement('div'); models.className = 'model-verification-history-models';
     for (const result of Array.isArray(record?.results) ? record.results : []) models.append(renderModelResult(result));
     item.append(head, summary, models); elements.list.append(item);
