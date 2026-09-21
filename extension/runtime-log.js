@@ -4,6 +4,7 @@ export const RUNTIME_LOG_UPLOADED_IDS_KEY = 'runtimeLogUploadedIds';
 export const RUNTIME_LOG_NATIVE_IDS_KEY = 'runtimeLogNativeIds';
 export const RUNTIME_LOG_UPLOAD_ALARM = 'gptlock-runtime-log-upload';
 export const RUNTIME_LOG_UPLOAD_BATCH_SIZE = 50;
+export const RUNTIME_LOG_SYNC_KEY = 'gptworkRuntimeLogSyncEnabled';
 
 const MAX_STRING_LENGTH = 2000;
 const MAX_ARRAY_ITEMS = 300;
@@ -120,6 +121,11 @@ export function finalizeDiagnosticSseCapture(capture, completedAt = null) {
 
 let writeQueue = Promise.resolve();
 let uploadQueue = Promise.resolve();
+let pendingLogEntries = [];
+let pendingLogWaiters = [];
+let logWriteTimer = null;
+const LOG_WRITE_COALESCE_MS = 250;
+const LOG_WRITE_MAX_BATCH = 25;
 
 function clipString(value) {
   if (value.length <= MAX_STRING_LENGTH) return value;
@@ -247,24 +253,50 @@ export function prepareRuntimeLogUploadEntry(entry) {
   return safe;
 }
 
-export function appendRuntimeLog(level, component, event, details = {}) {
-  if (!shouldPersistRuntimeLog(level, component, event, details)) return Promise.resolve(null);
-  const entry = createEntry(level, component, event, details);
+function flushPendingRuntimeLogs() {
+  if (logWriteTimer !== null) {
+    clearTimeout(logWriteTimer);
+    logWriteTimer = null;
+  }
+  if (!pendingLogEntries.length) return writeQueue;
+  const entries = pendingLogEntries;
+  const waiters = pendingLogWaiters;
+  pendingLogEntries = [];
+  pendingLogWaiters = [];
   writeQueue = writeQueue
     .catch(() => {})
     .then(async () => {
       const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
       const logs = boundRuntimeLogs([
         ...filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]),
-        entry,
+        ...entries,
       ]);
       await chrome.storage.local.set({ [RUNTIME_LOG_STORAGE_KEY]: logs });
     });
+  writeQueue.then(
+    () => waiters.forEach(({ resolve }, index) => resolve(entries[index] || null)),
+    (error) => waiters.forEach(({ reject }) => reject(error)),
+  );
   return writeQueue;
 }
 
+export function appendRuntimeLog(level, component, event, details = {}) {
+  if (!shouldPersistRuntimeLog(level, component, event, details)) return Promise.resolve(null);
+  const entry = createEntry(level, component, event, details);
+  const completion = new Promise((resolve, reject) => {
+    pendingLogEntries.push(entry);
+    pendingLogWaiters.push({ resolve, reject });
+  });
+  if (pendingLogEntries.length >= LOG_WRITE_MAX_BATCH) {
+    void flushPendingRuntimeLogs();
+  } else if (logWriteTimer === null) {
+    logWriteTimer = setTimeout(() => void flushPendingRuntimeLogs(), LOG_WRITE_COALESCE_MS);
+  }
+  return completion;
+}
+
 export async function getRuntimeLogs() {
-  await writeQueue.catch(() => {});
+  await flushPendingRuntimeLogs().catch(() => {});
   const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
   const raw = boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
   const logs = filterRuntimeLogs(raw);
@@ -275,7 +307,7 @@ export async function getRuntimeLogs() {
 }
 
 export async function runtimeLogNativeBatch(limit = RUNTIME_LOG_UPLOAD_BATCH_SIZE) {
-  await writeQueue.catch(() => {});
+  await flushPendingRuntimeLogs().catch(() => {});
   const stored = await chrome.storage.local.get([RUNTIME_LOG_STORAGE_KEY, RUNTIME_LOG_NATIVE_IDS_KEY]);
   const logs = filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
   const persisted = new Set(Array.isArray(stored[RUNTIME_LOG_NATIVE_IDS_KEY]) ? stored[RUNTIME_LOG_NATIVE_IDS_KEY] : []);
@@ -296,7 +328,7 @@ export async function markRuntimeLogsNative(ids) {
 }
 
 async function runtimeLogUploadBatch(limit = RUNTIME_LOG_UPLOAD_BATCH_SIZE) {
-  await writeQueue.catch(() => {});
+  await flushPendingRuntimeLogs().catch(() => {});
   const stored = await chrome.storage.local.get([RUNTIME_LOG_STORAGE_KEY, RUNTIME_LOG_UPLOADED_IDS_KEY]);
   let logs = filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
   let changed = false;
@@ -328,7 +360,8 @@ export async function uploadRuntimeLogBatch() {
     return { uploaded: 0, skipped: 'runtime_unavailable' };
   }
   uploadQueue = uploadQueue.catch(() => {}).then(async () => {
-    const identity = await chrome.storage.local.get([SESSION_KEY, DEVICE_KEY, BROWSER_KEY]);
+    const identity = await chrome.storage.local.get([SESSION_KEY, DEVICE_KEY, BROWSER_KEY, RUNTIME_LOG_SYNC_KEY]);
+    if (identity[RUNTIME_LOG_SYNC_KEY] !== true) return { uploaded: 0, skipped: 'sync_disabled' };
     const token = typeof identity[SESSION_KEY] === 'string' ? identity[SESSION_KEY] : '';
     if (!token) return { uploaded: 0, skipped: 'no_account_session' };
     const pending = await runtimeLogUploadBatch();
@@ -370,7 +403,7 @@ export async function uploadRuntimeLogBatch() {
 }
 
 export async function clearRuntimeLogs() {
-  await writeQueue.catch(() => {});
+  await flushPendingRuntimeLogs().catch(() => {});
   await chrome.storage.local.set({
     [RUNTIME_LOG_STORAGE_KEY]: [],
     [RUNTIME_LOG_UPLOADED_IDS_KEY]: [],
