@@ -691,6 +691,23 @@ function mergeResponseEvidence(state, evidence) {
   return merged;
 }
 
+function verificationResponseObservation(tabId, responseEvidence) {
+  const transaction = verificationTransactionForTab(tabId);
+  const target = normalizeConcreteModelId(transaction?.model);
+  const observed = normalizeConcreteModelId(responseEvidence?.model);
+  const field = String(responseEvidence?.fields?.model || '');
+  const backendResolutionOnly = /(?:^|\.)(?:resolved_model_slug|default_model_slug)$/i.test(field);
+  if (target && observed && observed !== target && backendResolutionOnly) {
+    return {
+      model: null,
+      backendResolvedModel: observed,
+      downgraded: true,
+      reason: 'backend_resolution_not_selected_model',
+    };
+  }
+  return { model: responseEvidence?.conflicts?.model ? null : observed, backendResolvedModel: null, downgraded: false, reason: null };
+}
+
 function diagnoseEvidenceIssue(evidence, result) {
   if (evidence.bodyError) return 'response_body_read_failed';
   if (evidence.conflicts?.model || evidence.conflicts?.reasoning) return 'response_metadata_conflict';
@@ -753,8 +770,24 @@ async function applyNetworkEvidence(tabId, evidence) {
   state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
   if (!masterRuntimeEnabled()) return;
   try {
+    const modelObservation = verificationResponseObservation(tabId, responseEvidence);
+    if (modelObservation.downgraded) {
+      responseEvidence.diagnostics = {
+        ...(responseEvidence.diagnostics || {}),
+        backendResolvedModel: modelObservation.backendResolvedModel,
+        selectedModelEvidenceDowngraded: true,
+        selectedModelEvidenceReason: modelObservation.reason,
+      };
+      state.lastEvidenceDiagnostics = responseEvidence.diagnostics;
+      logRuntime('info', 'verification', 'backend_model_resolution_observed', {
+        tabId,
+        verificationModel: verificationTransactionForTab(tabId)?.model ?? null,
+        backendResolvedModel: modelObservation.backendResolvedModel,
+        field: responseEvidence.fields?.model ?? null,
+      });
+    }
     const result = await verifyObservation({
-      model: responseEvidence.conflicts?.model ? null : responseEvidence.model,
+      model: modelObservation.model,
       reasoning: responseEvidence.conflicts?.reasoning ? null : responseEvidence.reasoning,
       evidenceSource: 'network_response_metadata',
       capturedAt: responseEvidence.capturedAt,
