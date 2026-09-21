@@ -15,6 +15,8 @@ test('client runtime logs are uploaded in authenticated batches', async () => {
   assert.match(source, /authorization:\s*`Bearer \$\{token\}`/);
   assert.match(source, /periodInMinutes:\s*1/);
   assert.match(source, /acknowledgedIds/);
+  assert.match(source, /RUNTIME_LOG_SYNC_KEY\s*=\s*'gptworkRuntimeLogSyncEnabled'/);
+  assert.match(source, /skipped:\s*'sync_disabled'/);
 });
 
 test('server routes client runtime logs and exposes a dedicated admin page', async () => {
@@ -32,6 +34,10 @@ test('server routes client runtime logs and exposes a dedicated admin page', asy
   assert.match(clientLogsHtml, /data-admin-page="client-logs"/);
   assert.match(clientLogsHtml, /id="clientLogs"/);
   assert.match(clientLogsHtml, /src="\/client-runtime-admin\.js"/);
+  assert.match(clientLogsHtml, /id="clientLogSyncEnabled"/);
+  assert.match(clientLogsHtml, /同步日志/);
   assert.match(adminSource, /\/admin\/api\/client-runtime-logs/);
   assert.match(adminSource, /清空当前筛选/);
+  assert.match(adminSource, /runtimeLogSyncEnabled/);
+  assert.match(adminSource, /\/admin\/api\/client-feature-settings/);
 });
