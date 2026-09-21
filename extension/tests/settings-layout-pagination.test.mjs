@@ -7,6 +7,9 @@ const historyOptionsSource = await readFile(new URL('../request-history-options.
 const historyCss = await readFile(new URL('../request-history.css', import.meta.url), 'utf8');
 const verificationHistorySource = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
 const backgroundSource = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
+const lifecycleSource = await readFile(new URL('../content-runtime-lifecycle.js', import.meta.url), 'utf8');
+const runtimeLogSource = await readFile(new URL('../runtime-log.js', import.meta.url), 'utf8');
 
 test('compact lock editor sits directly after feature gates and request history is the last settings card', () => {
   const featureIndex = settingsHtml.indexOf('id="globalHeading"');
@@ -53,4 +56,16 @@ test('request and model-verification histories are opt-in and default off', () =
   assert.match(verificationHistorySource, /gptworkModelVerificationHistoryEnabled/);
   assert.match(verificationHistorySource, /stored\[MODEL_VERIFICATION_HISTORY_ENABLED_KEY\] === true/);
   assert.match(backgroundSource, /stored\[MODEL_VERIFICATION_HISTORY_ENABLED_KEY\] !== true\) return null/);
+});
+
+
+test('v0.5.111 diagnostics attribute runtime callback pressure and preserve ordered verification evidence', () => {
+  assert.match(lifecycleSource, /diagnosticsSnapshot/);
+  assert.match(lifecycleSource, /callbackStats/);
+  assert.match(contentSource, /runtimeLifecycle/);
+  assert.match(contentSource, /performanceTickVisibility/);
+  assert.match(backgroundSource, /networkMonitor\.diagnosticsSnapshot\(\{ reset: true \}\)/);
+  assert.match(runtimeLogSource, /RUNTIME_LOG_SESSION_ID/);
+  assert.match(runtimeLogSource, /component === 'verification'/);
+  assert.match(runtimeLogSource, /sequence: runtimeLogSequence/);
 });

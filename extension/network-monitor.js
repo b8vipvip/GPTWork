@@ -112,6 +112,13 @@ export class ChatGptNetworkMonitor {
     this.lastFormalRequestByTab = new Map();
     this.webSocketSequence = 0;
     this.lastPurgeAt = 0;
+    this.diagnosticCounters = {
+      startedAt: Date.now(),
+      cdpEvents: 0,
+      fetchPaused: 0,
+      networkEvents: 0,
+      webSocketFrames: 0,
+    };
     chrome.debugger.onEvent.addListener((source, method, params) => {
       void this.handleEvent(source, method, params);
     });
@@ -212,6 +219,31 @@ export class ChatGptNetworkMonitor {
 
   responseCaptureCount() {
     return this.responseCaptureTabs.size;
+  }
+
+  diagnosticsSnapshot({ reset = false } = {}) {
+    const now = Date.now();
+    const elapsedMs = Math.max(1, now - Number(this.diagnosticCounters.startedAt || now));
+    const snapshot = {
+      elapsedMs,
+      attachedTabs: this.attachedTabs.size,
+      responseCaptureTabs: this.responseCaptureTabs.size,
+      cdpEvents: this.diagnosticCounters.cdpEvents,
+      fetchPaused: this.diagnosticCounters.fetchPaused,
+      networkEvents: this.diagnosticCounters.networkEvents,
+      webSocketFrames: this.diagnosticCounters.webSocketFrames,
+      cdpEventsPerSecond: Math.round((this.diagnosticCounters.cdpEvents * 10000) / elapsedMs) / 10,
+    };
+    if (reset) {
+      this.diagnosticCounters = {
+        startedAt: now,
+        cdpEvents: 0,
+        fetchPaused: 0,
+        networkEvents: 0,
+        webSocketFrames: 0,
+      };
+    }
+    return snapshot;
   }
 
   async performDetach(tabId) {
@@ -397,6 +429,12 @@ export class ChatGptNetworkMonitor {
   async handleEvent(source, method, params = {}) {
     const tabId = source.tabId;
     if (!tabId || !this.attachedTabs.has(tabId)) return;
+    this.diagnosticCounters.cdpEvents += 1;
+    if (method === 'Fetch.requestPaused') this.diagnosticCounters.fetchPaused += 1;
+    if (method.startsWith('Network.')) this.diagnosticCounters.networkEvents += 1;
+    if (method === 'Network.webSocketFrameSent' || method === 'Network.webSocketFrameReceived') {
+      this.diagnosticCounters.webSocketFrames += 1;
+    }
     if (method.startsWith('Network.') && !this.responseCaptureTabs.has(tabId)) return;
     const now = Date.now();
     if (now - this.lastPurgeAt >= 5000) {

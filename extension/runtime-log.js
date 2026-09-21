@@ -126,6 +126,8 @@ let pendingLogWaiters = [];
 let logWriteTimer = null;
 const LOG_WRITE_COALESCE_MS = 250;
 const LOG_WRITE_MAX_BATCH = 25;
+const RUNTIME_LOG_SESSION_ID = `runtime:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+let runtimeLogSequence = 0;
 
 function clipString(value) {
   if (value.length <= MAX_STRING_LENGTH) return value;
@@ -223,7 +225,10 @@ export function filterRuntimeLogs(entries) {
 }
 
 function createEntry(level, component, event, details) {
+  runtimeLogSequence += 1;
   return {
+    sessionId: RUNTIME_LOG_SESSION_ID,
+    sequence: runtimeLogSequence,
     id: randomLogId(),
     timestamp: new Date().toISOString(),
     level: ['debug', 'info', 'warn', 'error'].includes(level) ? level : 'info',
@@ -270,7 +275,14 @@ function flushPendingRuntimeLogs() {
       const logs = boundRuntimeLogs([
         ...filterRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]),
         ...entries,
-      ]);
+      ].sort((left, right) => {
+        const timeDelta = Date.parse(left?.timestamp || 0) - Date.parse(right?.timestamp || 0);
+        if (Number.isFinite(timeDelta) && timeDelta !== 0) return timeDelta;
+        if (left?.sessionId && left.sessionId === right?.sessionId) {
+          return Number(left?.sequence || 0) - Number(right?.sequence || 0);
+        }
+        return 0;
+      }));
       await chrome.storage.local.set({ [RUNTIME_LOG_STORAGE_KEY]: logs });
     });
   writeQueue.then(
@@ -287,7 +299,10 @@ export function appendRuntimeLog(level, component, event, details = {}) {
     pendingLogEntries.push(entry);
     pendingLogWaiters.push({ resolve, reject });
   });
-  if (pendingLogEntries.length >= LOG_WRITE_MAX_BATCH) {
+  const critical = level === 'error'
+    || component === 'verification'
+    || /(?:completed|failed|aborted|terminal|recovery)/i.test(String(event || ''));
+  if (critical || pendingLogEntries.length >= LOG_WRITE_MAX_BATCH) {
     void flushPendingRuntimeLogs();
   } else if (logWriteTimer === null) {
     logWriteTimer = setTimeout(() => void flushPendingRuntimeLogs(), LOG_WRITE_COALESCE_MS);
@@ -299,8 +314,15 @@ export async function getRuntimeLogs() {
   await flushPendingRuntimeLogs().catch(() => {});
   const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
   const raw = boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
-  const logs = filterRuntimeLogs(raw);
-  if (logs.length !== raw.length) {
+  const logs = filterRuntimeLogs(raw).sort((left, right) => {
+    const timeDelta = Date.parse(left?.timestamp || 0) - Date.parse(right?.timestamp || 0);
+    if (Number.isFinite(timeDelta) && timeDelta !== 0) return timeDelta;
+    if (left?.sessionId && left.sessionId === right?.sessionId) {
+      return Number(left?.sequence || 0) - Number(right?.sequence || 0);
+    }
+    return 0;
+  });
+  if (logs.length !== raw.length || logs.some((entry, index) => entry !== raw[index])) {
     await chrome.storage.local.set({ [RUNTIME_LOG_STORAGE_KEY]: logs });
   }
   return logs;

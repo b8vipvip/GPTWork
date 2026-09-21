@@ -410,9 +410,10 @@ test('v0.5.109 verification owns Work discovery independently and waits for term
   assert.match(content, /stillGenerating/);
 });
 
-test('v0.5.109 performance topology diagnostics are compact and sampled less often', () => {
+test('v0.5.111 performance diagnostics stay compact and sample every 30 seconds', () => {
   assert.match(content, /function lightElementProbe/);
-  assert.match(content, /lastReportedAt < 30000/);
+  assert.match(content, /periodicDue = now - performanceTelemetry\.lastReportedAt >= 30000/);
+  assert.match(content, /performanceTickVisibility/);
   assert.match(content, /performance\.now\(\) \+ 5000/);
   assert.doesNotMatch(content, /composerControls,/);
 });
