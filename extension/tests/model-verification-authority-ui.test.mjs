@@ -347,3 +347,14 @@ test('v0.5.105 progress UI separates executed work from growing discovery', () =
   assert.match(content, /已执行 · \$\{total\} 已发现/);
   assert.match(content, /模型验证 · 已执行/);
 });
+
+
+test('v0.5.106 normalizes GPT-5.6 thinking transport and records performance evidence', () => {
+  assert.match(policy, /'gpt-5-6-thinking': 'gpt-5\.6-sol'/);
+  assert.match(background, /GPTLOCK_PERFORMANCE_DIAGNOSTIC/);
+  assert.match(background, /page_responsiveness_sample/);
+  assert.match(background, /verificationActive: Boolean\(verification\)/);
+  assert.match(content, /PerformanceObserver/);
+  assert.match(content, /eventLoopLagMs/);
+  assert.match(content, /maxMutationCallbackMs/);
+});
