@@ -16,7 +16,7 @@
   const IMAGE_TOKEN_ESTIMATE = 1_200;
   const ATTACHMENT_TOKEN_ESTIMATE = 4_000;
   const MAX_ADAPTIVE_LIMIT_TOKENS = 16_000_000;
-  const REFRESH_MS = 750;
+  const REFRESH_MS = 30_000;
   const DIAGNOSTIC_MIN_INTERVAL_MS = 5_000;
   const HARD_LIMIT_ACTION_PATTERN = /开始新(?:对话|聊天)|新建(?:对话|聊天)|start (?:a )?new chat|new chat/i;
   const COMPOSER_SELECTORS = [
@@ -529,11 +529,23 @@
   window.addEventListener('gptlock:context-limit-learned', scheduleRefresh);
   window.addEventListener('popstate', scheduleRefresh);
   window.addEventListener('hashchange', scheduleRefresh);
-  new MutationObserver(scheduleRefresh).observe(document.documentElement, {
+  new MutationObserver((mutations) => {
+    // Streaming assistant text is extremely mutation-heavy and context-budget.js
+    // already emits authoritative budget events. Only structural changes outside
+    // transcript turns need to remount/reconcile this indicator.
+    const relevant = mutations.some((mutation) => {
+      const target = mutation.target?.nodeType === Node.ELEMENT_NODE
+        ? mutation.target
+        : mutation.target?.parentElement;
+      if (target?.closest?.('[data-message-author-role]')) return false;
+      return mutation.type === 'childList';
+    });
+    if (relevant) scheduleRefresh();
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
   });
-  window.setInterval(render, REFRESH_MS);
+  // Low-frequency self-heal only; normal updates are event-driven.
+  window.setInterval(scheduleRefresh, REFRESH_MS);
   render();
 })();

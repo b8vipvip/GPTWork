@@ -696,16 +696,25 @@ function verificationResponseObservation(tabId, responseEvidence) {
   const target = normalizeConcreteModelId(transaction?.model);
   const observed = normalizeConcreteModelId(responseEvidence?.model);
   const field = String(responseEvidence?.fields?.model || '');
-  const backendResolutionOnly = /(?:^|\.)(?:resolved_model_slug|default_model_slug)$/i.test(field);
-  if (target && observed && observed !== target && backendResolutionOnly) {
+  // default_model_slug describes a fallback/default and is not proof of the model
+  // that served this turn. In contrast resolved/served/used model fields describe
+  // backend execution and MUST remain authoritative for strict page=request=response
+  // verification. A mismatch there is a real mismatch, not evidence to hide.
+  const weakDefaultOnly = /(?:^|\.)default_model_slug$/i.test(field);
+  if (observed && weakDefaultOnly) {
     return {
       model: null,
       backendResolvedModel: observed,
       downgraded: true,
-      reason: 'backend_resolution_not_selected_model',
+      reason: 'default_model_not_served_model',
     };
   }
-  return { model: responseEvidence?.conflicts?.model ? null : observed, backendResolvedModel: null, downgraded: false, reason: null };
+  return {
+    model: responseEvidence?.conflicts?.model ? null : observed,
+    backendResolvedModel: target && observed && observed !== target ? observed : null,
+    downgraded: false,
+    reason: target && observed && observed !== target ? 'served_model_mismatch' : null,
+  };
 }
 
 function diagnoseEvidenceIssue(evidence, result) {
@@ -1596,7 +1605,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const responseEvidence = state.lastResponseEvidence?.requestId === requestId
         ? state.lastResponseEvidence
         : null;
-      const responseModel = normalizeConcreteModelId(responseEvidence?.model);
+      const responseObservation = verificationResponseObservation(tabId, responseEvidence);
+      const responseModel = normalizeConcreteModelId(responseObservation.model);
       const requestConfirmed = item.model
         ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
         : Boolean(requestModel);

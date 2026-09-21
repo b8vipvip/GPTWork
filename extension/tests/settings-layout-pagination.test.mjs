@@ -135,9 +135,24 @@ test('v0.5.116 rejects reasoning-decorated pseudo model rows', () => {
   assert.match(contentSource, /explicitModelId/);
 });
 
-test('v0.5.116 distinguishes backend resolution metadata from selected-model evidence', () => {
-  assert.match(backgroundSource, /verificationResponseObservation/);
-  assert.match(backgroundSource, /backend_resolution_not_selected_model/);
-  assert.match(backgroundSource, /backend_model_resolution_observed/);
-  assert.match(backgroundSource, /selectedModelEvidenceDowngraded/);
+test('v0.5.116 response evidence regression is superseded by strict v0.5.117 semantics', () => {
+  assert.match(backgroundSource, /default_model_not_served_model/);
+  assert.match(backgroundSource, /served_model_mismatch/);
+});
+
+
+test('v0.5.117 treats served/resolved model mismatch as strict response evidence', () => {
+  assert.match(backgroundSource, /served_model_mismatch/);
+  assert.match(backgroundSource, /default_model_not_served_model/);
+  assert.match(backgroundSource, /const responseObservation = verificationResponseObservation\(tabId, responseEvidence\)/);
+  assert.doesNotMatch(backgroundSource, /backend_resolution_not_selected_model/);
+});
+
+test('v0.5.117 removes 750ms chat-length renderer polling', async () => {
+  const indicator = await readFile(new URL('../chat-length-remaining-indicator.js', import.meta.url), 'utf8');
+  assert.match(indicator, /const REFRESH_MS = 30_000/);
+  assert.match(indicator, /window\.setInterval\(scheduleRefresh, REFRESH_MS\)/);
+  assert.doesNotMatch(indicator, /window\.setInterval\(render, REFRESH_MS\)/);
+  assert.match(indicator, /new MutationObserver\(\(mutations\) =>/);
+  assert.match(indicator, /target\?\.closest\?\.\('\[data-message-author-role\]'\)/);
 });
