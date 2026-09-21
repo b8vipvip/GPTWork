@@ -12,7 +12,7 @@ test('auto alignment does not probe generic ChatGPT menu/composer/form buttons',
 });
 
 test('unknown page model/reasoning values are never force-clicked', () => {
-  assert.match(content, /desiredModel && observation\.model && observation\.model !== desiredModel/);
+  assert.match(content, /desiredModel && observation\.model && !pageModelIsKnown && observation\.model !== desiredModel/);
   assert.match(content, /preferred && !changed && afterModel\.reasoning && afterModel\.reasoning !== preferred/);
 });
 

@@ -1008,6 +1008,11 @@ document.addEventListener('pointerdown', (event) => {
     return [...new Set(rows)].filter((row) => {
       const descriptor = rowModelDescriptor(row);
       const signal = descriptor.values.join(' ');
+      // Reasoning rows can repeat the active model name (for example
+      // "GPT-5.6 Luna 高"). They are not additional account models. Require
+      // explicit model metadata for any row that also carries a reasoning label.
+      const reasoningDecorated = Boolean(normalizeDisplayedReasoning(descriptor.label));
+      if (reasoningDecorated && !descriptor.explicitModelId) return false;
       return Boolean(
         descriptor.model
         || descriptor.rawId
@@ -1206,7 +1211,8 @@ document.addEventListener('pointerdown', (event) => {
       row?.innerText,
       row?.textContent,
     ].map((value) => String(value || '').trim()).filter(Boolean);
-    const rawId = attributes.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt/i.test(value))
+    const explicitModelId = attributes.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt/i.test(value)) || null;
+    const rawId = explicitModelId
       || values.find((value) => /^[a-z0-9._:-]{2,128}$/i.test(value) && /gpt/i.test(value))
       || null;
     const model = values.map((value) => normalizeDisplayedModel(value)).find(Boolean)
@@ -1220,7 +1226,7 @@ document.addEventListener('pointerdown', (event) => {
     const selectorKey = testId
       || dataValue
       || String(label || '').toLowerCase().replace(/\s+/g, ' ').trim();
-    return { rawId, model, label, selectorKey, values };
+    return { rawId, model, label, selectorKey, values, explicitModelId };
   }
 
   async function closeModelMenus(trigger = null) {
@@ -1366,6 +1372,8 @@ document.addEventListener('pointerdown', (event) => {
     if (!cachedSettings?.enabled || !cachedSettings.autoAlignSelection || !cachedPolicy || visibleGeneratingControl()) return false;
     const observation = collectObservation();
     const desiredModel = cachedPolicy.lockedModels?.[0];
+    const knownModels = new Set(Array.isArray(cachedState?.knownModels) ? cachedState.knownModels : []);
+    const pageModelIsKnown = Boolean(observation.model && knownModels.has(observation.model));
     const preferred = cachedPolicy.allowedReasoningLevels?.includes(cachedSettings.preferredReasoning)
       ? cachedSettings.preferredReasoning
       : cachedPolicy.allowedReasoningLevels?.[0];
@@ -1375,7 +1383,7 @@ document.addEventListener('pointerdown', (event) => {
     lastAlignAt = Date.now();
 
     let changed = false;
-    if (desiredModel && observation.model && observation.model !== desiredModel) {
+    if (desiredModel && observation.model && !pageModelIsKnown && observation.model !== desiredModel) {
       changed = await chooseExact(MODEL_SELECTORS, desiredModel, normalizeDisplayedModel);
     }
     const afterModel = changed ? collectObservation() : observation;
