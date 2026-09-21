@@ -32,7 +32,7 @@ import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
-const AUTO_VERIFY_RESPONSE_TIMEOUT_MS = 45000;
+const AUTO_VERIFY_RESPONSE_TIMEOUT_MS = 120000;
 const AUTO_VERIFY_POLL_MS = 200;
 const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
@@ -57,6 +57,7 @@ const tabStates = new Map();
 const verificationTransactions = new Map();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
+let sharedModelCatalogUnavailableUntil = 0;
 
 function masterRuntimeEnabled() {
   return localEnabledOverride === true && currentSettings.enabled === true;
@@ -1226,6 +1227,10 @@ async function resolveUnknownCatalogNames(tabId, rows) {
 }
 
 async function syncSharedKnownModels() {
+  if (Date.now() < sharedModelCatalogUnavailableUntil) {
+    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
+    return Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+  }
   try {
     const result = await accountClient.sharedModelCatalog();
     const models = (Array.isArray(result?.models) ? result.models : [])
@@ -1245,9 +1250,36 @@ async function syncSharedKnownModels() {
     }
     return models;
   } catch (error) {
-    logRuntime('warn', 'verification', 'shared_model_catalog_sync_failed', { error: errorText(error) });
+    const unsupported = Number(error?.status) === 404 || /not found/i.test(errorText(error));
+    if (unsupported) sharedModelCatalogUnavailableUntil = Date.now() + 5 * 60 * 1000;
+    logRuntime(unsupported ? 'info' : 'warn', 'verification', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
+      error: errorText(error), retryAfterMs: unsupported ? 5 * 60 * 1000 : 0,
+    });
     return [];
   }
+}
+
+function mergeAccountCatalogs(...catalogs) {
+  const rows = [];
+  const seen = new Set();
+  const models = new Set();
+  const reasoningLevels = new Set();
+  let pickerMode = null;
+  for (const catalog of catalogs.filter(Boolean)) {
+    if (['A', 'B'].includes(catalog?.pickerMode)) pickerMode = catalog.pickerMode;
+    for (const level of catalog?.reasoningLevels || []) reasoningLevels.add(level);
+    for (const row of catalog?.rows || []) {
+      const model = normalizeConcreteModelId(row?.model || row?.rawId);
+      const selectorKey = String(row?.selectorKey || '').trim();
+      const label = String(row?.label || '').trim();
+      const key = model ? 'model:' + model : selectorKey ? 'selector:' + selectorKey : 'label:' + label;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (model) models.add(model);
+      rows.push({ ...row, pickerMode: row?.pickerMode || catalog?.pickerMode || null });
+    }
+  }
+  return { rows, models: [...models], reasoningLevels: [...reasoningLevels], pickerMode };
 }
 
 async function publishVerifiedModels(progress) {
@@ -1306,7 +1338,8 @@ async function discoverAccountCatalog(tabId) {
       pickerMode: result?.catalog?.pickerMode ?? null,
       nameMappings,
     });
-    return { models, reasoningLevels, rows, nameMappings, pickerMode: result?.catalog?.pickerMode ?? null };
+    const pickerMode = result?.catalog?.pickerMode ?? null;
+    return { models, reasoningLevels, rows: rows.map((row) => ({ ...row, pickerMode })), nameMappings, pickerMode };
   } catch (error) {
     logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
       tabId,
