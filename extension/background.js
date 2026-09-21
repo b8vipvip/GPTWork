@@ -840,14 +840,15 @@ const networkMonitor = new ChatGptNetworkMonitor({
     const policy = runtimePolicyForTabSync(tabId);
     const transaction = verificationTransactionForTab(tabId);
     return {
-      lockedModels: policy.lockedModels,
+      lockedModels: transaction?.model ? [transaction.model] : policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
       preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
-      preserveModel: Boolean(transaction),
+      preserveModel: false,
       preserveReasoning: Boolean(transaction),
-      bypassRewrite: Boolean(transaction),
+      bypassRewrite: false,
+      forceModel: transaction?.model ?? null,
       responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
-      knownModels: [...sharedKnownModelIds],
+      knownModels: [...new Set([...sharedKnownModelIds, ...(transaction?.model ? [transaction.model] : [])])],
     };
   },
   onStatus(tabId, monitor) {
