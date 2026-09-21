@@ -10,7 +10,7 @@ let busy = false;
 let currentTabId = null;
 let currentAccount = { authenticated: false, entitlement: { active: false } };
 let lastFeatureState = null;
-let refreshTimers = [];
+let refreshTimer = null;
 let reconcileGeneration = 0;
 
 function withTimeout(promise, ms = STATE_TIMEOUT_MS) {
@@ -169,8 +169,11 @@ function bindFeatureToggle(toggle, kind) {
 }
 
 function scheduleReconcile() {
-  for (const timer of refreshTimers) clearTimeout(timer);
-  refreshTimers = [0, 120, 450].map((delay) => setTimeout(() => void reconcile().catch(() => {}), delay));
+  if (refreshTimer !== null) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    void reconcile().catch(() => {});
+  }, 120);
 }
 
 bindFeatureToggle(workToggle, 'work');
