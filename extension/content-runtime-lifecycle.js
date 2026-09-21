@@ -41,18 +41,62 @@
   let terminalReason = null;
   let healthTimer = null;
   const callbackStats = new Map();
+  const callbackSourceStats = new Map();
+  const recentSlowCallbacks = [];
+  const SLOW_CALLBACK_MS = 20;
 
-  function measureCallback(kind, callback, args) {
+  function callbackSource(kind) {
+    try {
+      const stack = String(new Error('GPTWork callback source').stack || '').split('\n');
+      const frame = stack.find((line) =>
+        /chrome-extension:\/\//.test(line)
+        && !/content-runtime-lifecycle\.js/.test(line)
+      );
+      return String(frame || stack[2] || kind || 'unknown')
+        .trim()
+        .replace(/^at\s+/, '')
+        .slice(0, 240);
+    } catch {
+      return String(kind || 'unknown');
+    }
+  }
+
+  function measureCallback(kind, callback, args, source = kind) {
     const startedAt = performance.now();
     try {
       return callback(...args);
     } finally {
-      const elapsed = Math.max(0, performance.now() - startedAt);
+      const endedAt = performance.now();
+      const elapsed = Math.max(0, endedAt - startedAt);
       const current = callbackStats.get(kind) || { count: 0, totalMs: 0, maxMs: 0 };
       current.count += 1;
       current.totalMs += elapsed;
       current.maxMs = Math.max(current.maxMs, elapsed);
       callbackStats.set(kind, current);
+
+      const sourceKey = `${kind}:${source || 'unknown'}`;
+      const sourceCurrent = callbackSourceStats.get(sourceKey) || {
+        kind,
+        source: String(source || 'unknown').slice(0, 240),
+        count: 0,
+        totalMs: 0,
+        maxMs: 0,
+      };
+      sourceCurrent.count += 1;
+      sourceCurrent.totalMs += elapsed;
+      sourceCurrent.maxMs = Math.max(sourceCurrent.maxMs, elapsed);
+      callbackSourceStats.set(sourceKey, sourceCurrent);
+
+      if (elapsed >= SLOW_CALLBACK_MS) {
+        recentSlowCallbacks.push({
+          kind,
+          source: sourceCurrent.source,
+          durationMs: Math.round(elapsed * 10) / 10,
+          startedAt: Math.round(startedAt * 10) / 10,
+          endedAt: Math.round(endedAt * 10) / 10,
+        });
+        if (recentSlowCallbacks.length > 24) recentSlowCallbacks.splice(0, recentSlowCallbacks.length - 24);
+      }
     }
   }
 
@@ -65,6 +109,16 @@
         maxMs: Math.round(value.maxMs * 10) / 10,
       };
     }
+    const callbackSources = [...callbackSourceStats.values()]
+      .sort((a, b) => (b.maxMs - a.maxMs) || (b.totalMs - a.totalMs))
+      .slice(0, 16)
+      .map((value) => ({
+        kind: value.kind,
+        source: value.source,
+        count: value.count,
+        totalMs: Math.round(value.totalMs * 10) / 10,
+        maxMs: Math.round(value.maxMs * 10) / 10,
+      }));
     const snapshot = {
       active: !disposed,
       terminalReason,
@@ -79,8 +133,14 @@
         chromeEventListeners: chromeEventListeners.size,
       },
       callbacks,
+      callbackSources,
+      recentSlowCallbacks: recentSlowCallbacks.slice(-12),
     };
-    if (resetCallbacks) callbackStats.clear();
+    if (resetCallbacks) {
+      callbackStats.clear();
+      callbackSourceStats.clear();
+      recentSlowCallbacks.length = 0;
+    }
     return snapshot;
   }
 
@@ -228,11 +288,12 @@
 
   function trackedSetTimeout(callback, delay, ...args) {
     let id = null;
+    const source = typeof callback === 'function' ? callbackSource('timeout') : 'string-callback';
     const wrapped = typeof callback === 'function'
       ? (...callbackArgs) => {
         timeouts.delete(id);
         if (!checkAlive('timeout_context_invalidated')) return undefined;
-        return measureCallback('timeout', callback, callbackArgs);
+        return measureCallback('timeout', callback, callbackArgs, source);
       }
       : callback;
     id = original.setTimeout(wrapped, delay, ...args);
@@ -246,10 +307,11 @@
   }
 
   function trackedSetInterval(callback, delay, ...args) {
+    const source = typeof callback === 'function' ? callbackSource('interval') : 'string-callback';
     const wrapped = typeof callback === 'function'
       ? (...callbackArgs) => {
         if (!checkAlive('interval_context_invalidated')) return undefined;
-        return measureCallback('interval', callback, callbackArgs);
+        return measureCallback('interval', callback, callbackArgs, source);
       }
       : callback;
     const id = original.setInterval(wrapped, delay, ...args);
@@ -265,10 +327,11 @@
   const trackedRequestAnimationFrame = original.requestAnimationFrame
     ? (callback) => {
       let id = null;
+      const source = callbackSource('animationFrame');
       id = original.requestAnimationFrame((timestamp) => {
         animationFrames.delete(id);
         if (!checkAlive('animation_frame_context_invalidated')) return;
-        measureCallback('animationFrame', callback, [timestamp]);
+        measureCallback('animationFrame', callback, [timestamp], source);
       });
       animationFrames.add(id);
       return id;
@@ -284,9 +347,10 @@
 
   class TrackedMutationObserver extends original.MutationObserver {
     constructor(callback) {
+      const source = callbackSource('mutationObserver');
       super((records, observer) => {
         if (!checkAlive('mutation_context_invalidated')) return;
-        measureCallback('mutationObserver', callback, [records, observer]);
+        measureCallback('mutationObserver', callback, [records, observer], source);
       });
       observers.add(this);
     }
@@ -300,9 +364,10 @@
   const TrackedPerformanceObserver = original.PerformanceObserver
     ? class extends original.PerformanceObserver {
       constructor(callback) {
+        const source = callbackSource('performanceObserver');
         super((entries, observer) => {
           if (!checkAlive('performance_observer_context_invalidated')) return;
-          measureCallback('performanceObserver', callback, [entries, observer]);
+          measureCallback('performanceObserver', callback, [entries, observer], source);
         });
         performanceObservers.add(this);
       }
@@ -316,9 +381,10 @@
   const TrackedResizeObserver = original.ResizeObserver
     ? class extends original.ResizeObserver {
       constructor(callback) {
+        const source = callbackSource('resizeObserver');
         super((entries, observer) => {
           if (!checkAlive('resize_observer_context_invalidated')) return;
-          measureCallback('resizeObserver', callback, [entries, observer]);
+          measureCallback('resizeObserver', callback, [entries, observer], source);
         });
         resizeObservers.add(this);
       }
@@ -340,14 +406,15 @@
     ));
     if (existing) return original.addEventListener.call(this, type, existing.wrapped || listener, options);
     let wrapped = listener;
+    const source = callbackSource(`domEvent:${type}`);
     if (typeof listener === 'function') {
       wrapped = function measuredDomEventListener(...args) {
-        return measureCallback('domEvent', listener.bind(this), args);
+        return measureCallback('domEvent', listener.bind(this), args, source);
       };
     } else if (listener && typeof listener.handleEvent === 'function') {
       wrapped = {
         handleEvent(...args) {
-          return measureCallback('domEvent', listener.handleEvent.bind(listener), args);
+          return measureCallback('domEvent', listener.handleEvent.bind(listener), args, source);
         },
       };
     }
@@ -374,8 +441,9 @@
       if (typeof listener !== 'function') return add.call(event, listener);
       const existing = [...chromeEventListeners].find((record) => record.event === event && record.listener === listener);
       if (existing) return add.call(event, existing.wrapped || listener);
+      const source = callbackSource('chromeEvent');
       const wrapped = function measuredChromeEventListener(...args) {
-        return measureCallback('chromeEvent', listener, args);
+        return measureCallback('chromeEvent', listener, args, source);
       };
       chromeEventListeners.add({ event, listener, wrapped, remove });
       return add.call(event, wrapped);
