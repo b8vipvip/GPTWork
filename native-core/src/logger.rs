@@ -106,7 +106,7 @@ impl RuntimeLogger {
         if current == 0 || current.saturating_add(incoming) <= MAX_RUNTIME_FILE_BYTES {
             return Ok(());
         }
-        let stamp = Utc::now().format("%Y%m%d-%H%M%S-%3f");
+        let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f");
         let rotated = self.dir.join(format!("runtime-v{}-{stamp}.jsonl", env!("CARGO_PKG_VERSION")));
         fs::rename(&self.path, rotated).context("rotate GPTWork runtime log")?;
         Ok(())
