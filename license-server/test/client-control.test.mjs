@@ -117,3 +117,10 @@ test('reset account restores registration entitlement baseline and queues accoun
   const remainingDays = (Date.parse(user.free_expires_at) - Date.now()) / 86400000;
   assert.ok(remainingDays > 13.9 && remainingDays <= 14.01);
 });
+
+
+test('runtime log server sync is disabled by default', () => {
+  const { system } = fixture();
+  const settings = system.featureSettings();
+  assert.equal(settings.runtimeLogSyncEnabled, false);
+});
