@@ -103,6 +103,7 @@ export class ChatGptNetworkMonitor {
     this.onStreamData = onStreamData;
     this.getLockConfiguration = getLockConfiguration;
     this.attachedTabs = new Set();
+    this.responseCaptureTabs = new Set();
     this.attachTasks = new Map();
     this.detachTasks = new Map();
     this.requests = new Map();
@@ -150,11 +151,10 @@ export class ChatGptNetworkMonitor {
     }
 
     try {
-      await debuggerCall('sendCommand', target, 'Network.enable', {
-        maxTotalBufferSize: 32 * 1024 * 1024,
-        maxResourceBufferSize: 16 * 1024 * 1024,
-        maxPostDataSize: 2 * 1024 * 1024,
-      });
+      // Normal request locking only needs Fetch interception. Keeping Network enabled
+      // on every ChatGPT tab mirrors every response/WebSocket frame through CDP and
+      // measurably increases browser-wide main-thread pressure. Full Network capture
+      // is enabled only for an explicit verification transaction.
       await debuggerCall('sendCommand', target, 'Fetch.enable', { patterns: FETCH_PATTERNS });
       this.attachedTabs.add(tabId);
       this.onStatus(tabId, { attached: true, error: null });
@@ -187,8 +187,36 @@ export class ChatGptNetworkMonitor {
     return task;
   }
 
+  async enableResponseCapture(tabId) {
+    const attached = this.isAttached(tabId) || await this.attach(tabId);
+    if (!attached) return false;
+    if (this.responseCaptureTabs.has(tabId)) return true;
+    await debuggerCall('sendCommand', this.target(tabId), 'Network.enable', {
+      maxTotalBufferSize: 32 * 1024 * 1024,
+      maxResourceBufferSize: 16 * 1024 * 1024,
+      maxPostDataSize: 2 * 1024 * 1024,
+    });
+    this.responseCaptureTabs.add(tabId);
+    return true;
+  }
+
+  async disableResponseCapture(tabId) {
+    this.responseCaptureTabs.delete(tabId);
+    try { await debuggerCall('sendCommand', this.target(tabId), 'Network.disable', {}); } catch {}
+    this.dropTabRequests(tabId);
+  }
+
+  attachedCount() {
+    return this.attachedTabs.size;
+  }
+
+  responseCaptureCount() {
+    return this.responseCaptureTabs.size;
+  }
+
   async performDetach(tabId) {
     this.attachedTabs.delete(tabId);
+    this.responseCaptureTabs.delete(tabId);
     this.dropTabRequests(tabId);
     try { await debuggerCall('sendCommand', this.target(tabId), 'Fetch.disable', {}); } catch {}
     try { await debuggerCall('detach', this.target(tabId)); } catch {}
@@ -369,6 +397,7 @@ export class ChatGptNetworkMonitor {
   async handleEvent(source, method, params = {}) {
     const tabId = source.tabId;
     if (!tabId || !this.attachedTabs.has(tabId)) return;
+    if (method.startsWith('Network.') && !this.responseCaptureTabs.has(tabId)) return;
     const now = Date.now();
     if (now - this.lastPurgeAt >= 5000) {
       this.lastPurgeAt = now;
