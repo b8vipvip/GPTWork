@@ -193,11 +193,11 @@ jobs:
           if [[ -z "${{ secrets.GPTAUTO_AI_API_KEY }}" ]]; then
             marker="<!-- gptauto-foreground-recovery:$TASK_ID:$HEAD_SHA -->"
             body="$marker
-GPTAuto FOREGROUND RECOVERY REQUIRED for task $TASK_ID.
-
-Autonomous AI Repair is unavailable because GPTAUTO_AI_API_KEY is not configured. This is a recoverable handoff, not terminal BLOCKED and not task completion.
-
-Foreground/host agent MUST resume the existing PR #$PR_NUMBER and current head $HEAD_SHA, inspect failed Actions run $FAILED_RUN_ID, repair the same branch, push the fix, and continue until the Completion Lease reaches terminal DONE. Do not create a replacement PR and do not report completion from this handoff."
+          GPTAuto FOREGROUND RECOVERY REQUIRED for task $TASK_ID.
+          
+          Autonomous AI Repair is unavailable because GPTAUTO_AI_API_KEY is not configured. This is a recoverable handoff, not terminal BLOCKED and not task completion.
+          
+          Foreground/host agent MUST resume the existing PR #$PR_NUMBER and current head $HEAD_SHA, inspect failed Actions run $FAILED_RUN_ID, repair the same branch, push the fix, and continue until the Completion Lease reaches terminal DONE. Do not create a replacement PR and do not report completion from this handoff."
             comments_json="$(gh api "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" 2>/dev/null || echo '[]')"
             comment_id="$(jq -r --arg marker "$marker" '[.[] | select(.body | contains($marker))] | .[0].id // empty' <<<"$comments_json")"
             if [[ -n "$comment_id" ]]; then
