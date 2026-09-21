@@ -18,6 +18,7 @@ const ROTATED_AUDIT_FILE_NAME: &str = "audit.1.jsonl";
 const MAX_AUDIT_BYTES: u64 = 10 * 1024 * 1024;
 
 const RUNTIME_FILE_NAME: &str = "runtime-current.jsonl";
+const RUNTIME_VERSION_FILE_NAME: &str = "runtime-current.version";
 const MAX_RUNTIME_FILE_BYTES: u64 = 1024 * 1024;
 const RUNTIME_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -37,6 +38,7 @@ impl RuntimeLogger {
             write_lock: Arc::new(Mutex::new(())),
         };
         logger.cleanup_expired()?;
+        logger.rotate_for_version_change(env!("CARGO_PKG_VERSION"))?;
         Ok(logger)
     }
 
@@ -65,6 +67,26 @@ impl RuntimeLogger {
             written += 1;
         }
         Ok(written)
+    }
+
+    fn rotate_for_version_change(&self, version: &str) -> Result<()> {
+        let marker = self.dir.join(RUNTIME_VERSION_FILE_NAME);
+        let previous = fs::read_to_string(&marker).unwrap_or_default();
+        let previous = previous.trim();
+        if previous != version {
+            if fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0) > 0 {
+                let stamp = Utc::now().format("%Y%m%d-%H%M%S-%3f");
+                let from = if previous.is_empty() { "unknown" } else { previous };
+                let rotated = self.dir.join(format!(
+                    "runtime-v{}-to-v{}-{stamp}.jsonl",
+                    from.replace(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-', "_"),
+                    version.replace(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-', "_"),
+                ));
+                fs::rename(&self.path, rotated).context("archive GPTWork runtime log on version change")?;
+            }
+            fs::write(&marker, format!("{version}\n")).context("write GPTWork runtime log version marker")?;
+        }
+        Ok(())
     }
 
     fn rotate_if_needed(&self, incoming: u64) -> Result<()> {
@@ -256,6 +278,24 @@ fn set_private_file_permissions(_file: &std::fs::File) -> Result<()> {
 mod runtime_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn runtime_logger_archives_current_log_when_version_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let logger = RuntimeLogger::new(temp.path().to_path_buf()).unwrap();
+        logger.append_records(&[json!({"version": "old"})]).unwrap();
+        fs::write(temp.path().join(RUNTIME_VERSION_FILE_NAME), "0.0.0\n").unwrap();
+
+        let _next = RuntimeLogger::new(temp.path().to_path_buf()).unwrap();
+        assert!(!temp.path().join(RUNTIME_FILE_NAME).exists());
+        assert!(fs::read_dir(temp.path()).unwrap().any(|entry| {
+            entry.unwrap().file_name().to_string_lossy().starts_with("runtime-v0.0.0-to-v")
+        }));
+        assert_eq!(
+            fs::read_to_string(temp.path().join(RUNTIME_VERSION_FILE_NAME)).unwrap().trim(),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
 
     #[test]
     fn runtime_logger_writes_jsonl_and_rotates_near_one_mib() {
