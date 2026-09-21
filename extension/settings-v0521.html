@@ -78,6 +78,7 @@
           <p class="help">每次模型验证完成后记录本轮账户模型、正式请求实际模型和可用的响应元数据。该列表只展示结果，不参与模型选择或验证决策。</p>
         </div>
         <div class="model-verification-history-toolbar">
+          <label class="check-row"><input id="modelVerificationHistoryEnabled" type="checkbox"><span><strong>记录</strong><small>默认关闭 / Off by default</small></span></label>
           <span id="modelVerificationHistoryCount" class="model-verification-history-count">共 0 次</span>
           <button id="modelVerificationHistoryClear" class="secondary" type="button">清空记录</button>
         </div>
@@ -93,8 +94,11 @@
 
     <section class="card request-history-card" aria-labelledby="requestHistoryHeading">
       <div class="request-history-heading">
-        <div><h2 id="requestHistoryHeading">请求记录 <span>Request model history</span></h2><p class="help">列出最近正式聊天请求中发现的模型、实际发送模型和响应最终确认模型。这里是现有锁定/请求/响应证据的只读投影，不参与模型选择、锁定、验证或阻断决策。</p></div>
-        <span id="requestHistoryCount" class="request-history-count">最近 0 / 100</span>
+        <div><h2 id="requestHistoryHeading">请求记录 <span>Request model history</span></h2><p class="help">默认关闭。开启后才从本地运行日志生成最近正式聊天请求的只读投影；关闭时不读取日志、不生成记录 DOM，也不参与模型选择、锁定、验证或阻断决策。</p></div>
+        <div class="model-verification-history-toolbar">
+          <label class="check-row"><input id="requestHistoryEnabled" type="checkbox"><span><strong>记录</strong><small>默认关闭 / Off by default</small></span></label>
+          <span id="requestHistoryCount" class="request-history-count">最近 0 / 100</span>
+        </div>
       </div>
       <div class="request-history-table-wrap"><table class="request-history-table"><thead><tr><th>时间</th><th>发现模型</th><th>请求模型</th><th>最终模型</th><th>状态</th></tr></thead><tbody id="requestHistoryBody"></tbody></table></div>
       <p id="requestHistoryEmpty" class="request-history-empty">暂无正式请求记录 / No formal request records yet.</p>
