@@ -1273,6 +1273,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     results: [],
     discoveryPasses: 0,
     stablePasses: 0,
+    phase: 'discovering',
+    catalogStable: false,
     reasoningLevels: [],
   };
 
@@ -1285,13 +1287,15 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const selectorKey = String(row?.selectorKey || '').trim().slice(0, 200);
       const label = String(row?.label || model || selectorKey || '').trim().slice(0, 160);
       if (!model && !selectorKey && !label) continue;
-      const key = [model || '', rawModel || '', selectorKey, label].join('|').toLowerCase();
+      // Canonical model identity owns dedupe. Raw transport ids and UI labels may change after a turn.
+      const key = model ? `model:${model}` : `ui:${selectorKey || label.toLowerCase()}`;
       if (knownKeys.has(key)) continue;
       knownKeys.add(key);
       queue.push({ model, rawModel, selectorKey, label });
       added += 1;
     }
     progress.total = queue.length;
+    progress.discovered = queue.length;
     progress.reasoningLevels = [...reasoningLevels];
     state.autoVerification.maxAttempts = queue.length;
     logRuntime('info', 'verification', 'account_model_catalog_merged', {
@@ -1323,6 +1327,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     }
 
     const item = queue[index];
+    progress.phase = 'verifying';
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
@@ -1428,6 +1433,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     await broadcastTabState(tabId);
   }
 
+  progress.catalogStable = true;
+  progress.phase = 'finalizing';
   verificationTransactions.delete(Number(tabId));
   progress.currentModel = null;
   progress.currentSelectorKey = null;
