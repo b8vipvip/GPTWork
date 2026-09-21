@@ -2,8 +2,10 @@ import { KNOWN_MODELS } from './policy.js';
 import { buildRequestModelHistory, REQUEST_HISTORY_LIMIT } from './request-history.js';
 
 const RUNTIME_LOG_STORAGE_KEY = 'runtimeLogs';
+const REQUEST_HISTORY_ENABLED_KEY = 'gptworkRequestHistoryEnabled';
 const PAGE_SIZE = 8;
 const elements = {
+  enabled: document.getElementById('requestHistoryEnabled'),
   body: document.getElementById('requestHistoryBody'),
   empty: document.getElementById('requestHistoryEmpty'),
   count: document.getElementById('requestHistoryCount'),
@@ -11,6 +13,7 @@ const elements = {
   prev: document.getElementById('requestHistoryPrev'),
   next: document.getElementById('requestHistoryNext'),
   pageInfo: document.getElementById('requestHistoryPageInfo'),
+  tableWrap: document.querySelector('.request-history-card .request-history-table-wrap'),
 };
 
 const knownLabels = new Map(KNOWN_MODELS.map((item) => [item.id, item.label]));
@@ -18,6 +21,7 @@ let refreshTimer = null;
 let historyDirty = false;
 let currentPage = 1;
 let currentRecords = [];
+let historyEnabled = false;
 
 function modelLabel(model) {
   if (!model) return '未确认 / Unknown';
@@ -134,11 +138,13 @@ function renderHistory(logs) {
 }
 
 async function refreshHistory() {
+  if (!historyEnabled) return;
   const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
   renderHistory(Array.isArray(stored[RUNTIME_LOG_STORAGE_KEY]) ? stored[RUNTIME_LOG_STORAGE_KEY] : []);
 }
 
 function scheduleRefresh() {
+  if (!historyEnabled) return;
   historyDirty = true;
   // Runtime logs are a high-frequency diagnostic stream. Rebuilding a 100-row
   // projection for every storage write made the Settings tab amplify browser jank.
@@ -159,13 +165,48 @@ elements.next?.addEventListener('click', () => {
   renderCurrentPage();
 });
 
+function renderEnabledState() {
+  if (elements.enabled) elements.enabled.checked = historyEnabled;
+  if (elements.tableWrap) elements.tableWrap.hidden = !historyEnabled;
+  if (!historyEnabled) {
+    currentRecords = [];
+    currentPage = 1;
+    elements.body?.replaceChildren();
+    if (elements.count) elements.count.textContent = '已关闭 / Off';
+    if (elements.empty) {
+      elements.empty.hidden = false;
+      elements.empty.textContent = '请求记录默认关闭；开启后才读取本地日志并生成记录。';
+    }
+    if (elements.pagination) elements.pagination.hidden = true;
+  } else if (elements.empty) {
+    elements.empty.textContent = '暂无正式请求记录 / No formal request records yet.';
+  }
+}
+
+async function setHistoryEnabled(enabled) {
+  historyEnabled = enabled === true;
+  await chrome.storage.local.set({ [REQUEST_HISTORY_ENABLED_KEY]: historyEnabled });
+  renderEnabledState();
+  if (historyEnabled) await refreshHistory();
+}
+
+elements.enabled?.addEventListener('change', () => {
+  void setHistoryEnabled(elements.enabled.checked).catch(() => {});
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes[RUNTIME_LOG_STORAGE_KEY]) return;
-  scheduleRefresh();
+  if (areaName !== 'local') return;
+  if (changes[REQUEST_HISTORY_ENABLED_KEY]) {
+    historyEnabled = changes[REQUEST_HISTORY_ENABLED_KEY].newValue === true;
+    renderEnabledState();
+    if (historyEnabled) void refreshHistory().catch(() => {});
+    return;
+  }
+  if (historyEnabled && changes[RUNTIME_LOG_STORAGE_KEY]) scheduleRefresh();
 });
 
 async function refreshIfDirty() {
-  if (!historyDirty) return;
+  if (!historyEnabled || !historyDirty) return;
   historyDirty = false;
   await refreshHistory();
 }
@@ -174,9 +215,12 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) void refreshIfDirty().catch(() => {});
 });
 
-void refreshHistory().catch(() => {
-  if (elements.empty) {
-    elements.empty.hidden = false;
-    elements.empty.textContent = '请求记录读取失败 / Failed to load request history.';
-  }
+void chrome.storage.local.get(REQUEST_HISTORY_ENABLED_KEY).then((stored) => {
+  historyEnabled = stored[REQUEST_HISTORY_ENABLED_KEY] === true;
+  renderEnabledState();
+  if (historyEnabled) return refreshHistory();
+  return null;
+}).catch(() => {
+  historyEnabled = false;
+  renderEnabledState();
 });
