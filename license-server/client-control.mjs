@@ -316,14 +316,21 @@ export function createClientControlSystem({
       const input = await bodyJson(req);
       const stamp = nowIso();
       const current = featureSettings();
+      const responseVerificationEnabled = input.responseVerificationEnabled === undefined
+        ? current.responseVerificationEnabled
+        : input.responseVerificationEnabled !== false;
+      const autoAlignSelection = input.autoAlignSelection === undefined
+        ? current.autoAlignSelection
+        : input.autoAlignSelection !== false;
+      const strictMode = input.strictMode === undefined ? current.strictMode : input.strictMode === true;
       const runtimeLogSyncEnabled = input.runtimeLogSyncEnabled === undefined
         ? current.runtimeLogSyncEnabled
         : input.runtimeLogSyncEnabled === true;
       db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,runtime_log_sync_enabled=?,generation=generation+1,updated_at=? WHERE id=1`)
         .run(
-          input.responseVerificationEnabled !== false ? 1 : 0,
-          input.autoAlignSelection !== false ? 1 : 0,
-          input.strictMode === true ? 1 : 0,
+          responseVerificationEnabled ? 1 : 0,
+          autoAlignSelection ? 1 : 0,
+          strictMode ? 1 : 0,
           runtimeLogSyncEnabled ? 1 : 0,
           stamp,
         );
