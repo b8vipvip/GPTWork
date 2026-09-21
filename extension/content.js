@@ -42,7 +42,12 @@
   function visibleGeneratingControl() {
     return GENERATING_SELECTORS
       .flatMap((selector) => [...document.querySelectorAll(selector)])
-      .find((element) => visible(element)) || null;
+      .find((element) => (
+        visible(element)
+        && !element.disabled
+        && element.getAttribute?.('aria-disabled') !== 'true'
+        && element.getAttribute?.('data-disabled') !== 'true'
+      )) || null;
   }
   const BLOCKING_GUARD_HEARTBEAT_MS = 1500;
   const BLOCKING_GUARD_MAX_AGE_MS = 4500;
@@ -168,6 +173,7 @@
     maxMutationCallbackMs: 0,
     longTaskCount: 0,
     maxLongTaskMs: 0,
+    recentLongTasks: [],
     lastReportedAt: 0,
   };
 
@@ -203,6 +209,7 @@
       eventLoopLagMs: Math.round(lag),
       maxLongTaskMs: Math.round(performanceTelemetry.maxLongTaskMs),
       longTaskCount: performanceTelemetry.longTaskCount,
+      recentLongTasks: performanceTelemetry.recentLongTasks.slice(-8),
       mutationCount: performanceTelemetry.mutationCount,
       mutationCallbacks: performanceTelemetry.mutationCallbacks,
       maxMutationCallbackMs: Math.round(performanceTelemetry.maxMutationCallbackMs * 10) / 10,
@@ -216,14 +223,34 @@
     performanceTelemetry.maxMutationCallbackMs = 0;
     performanceTelemetry.longTaskCount = 0;
     performanceTelemetry.maxLongTaskMs = 0;
+    performanceTelemetry.recentLongTasks = [];
     void sendMessage({ type: 'GPTLOCK_PERFORMANCE_DIAGNOSTIC', details }).catch(() => {});
   }
 
   try {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
+        const duration = Math.max(0, Number(entry.duration) || 0);
         performanceTelemetry.longTaskCount += 1;
-        performanceTelemetry.maxLongTaskMs = Math.max(performanceTelemetry.maxLongTaskMs, entry.duration || 0);
+        performanceTelemetry.maxLongTaskMs = Math.max(performanceTelemetry.maxLongTaskMs, duration);
+        const attribution = Array.isArray(entry.attribution)
+          ? entry.attribution.slice(0, 4).map((item) => ({
+            name: String(item?.name || '').slice(0, 120),
+            entryType: String(item?.entryType || '').slice(0, 80),
+            containerType: String(item?.containerType || '').slice(0, 80),
+            containerName: String(item?.containerName || '').slice(0, 120),
+            containerId: String(item?.containerId || '').slice(0, 120),
+            containerSrc: String(item?.containerSrc || '').slice(0, 240),
+          }))
+          : [];
+        performanceTelemetry.recentLongTasks.push({
+          startedAt: Math.round((Number(entry.startTime) || 0) * 10) / 10,
+          durationMs: Math.round(duration * 10) / 10,
+          attribution,
+        });
+        if (performanceTelemetry.recentLongTasks.length > 16) {
+          performanceTelemetry.recentLongTasks.splice(0, performanceTelemetry.recentLongTasks.length - 16);
+        }
       }
       reportPerformanceTelemetry(0);
     });
@@ -1778,8 +1805,22 @@ document.addEventListener('pointerdown', (event) => {
       const target = mutation.target?.nodeType === Node.ELEMENT_NODE
         ? mutation.target
         : mutation.target?.parentElement;
-      if (target?.closest?.('textarea,[contenteditable="true"]')) return false;
-      return true;
+      if (!target) return false;
+      if (target.closest?.('textarea,[contenteditable="true"]')) return false;
+      // Assistant/user transcript streaming is extremely mutation-heavy but cannot
+      // change the composer-owned model/reasoning identity. v0.5.111 still scheduled
+      // a whole-page observation after these mutations; keep that hot path dormant.
+      if (target.closest?.('[data-message-author-role]')) return false;
+      if (mutation.type === 'attributes') return true;
+      const nodes = [...(mutation.addedNodes || []), ...(mutation.removedNodes || [])];
+      if (!nodes.length) return false;
+      return nodes.some((node) => {
+        const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        if (!element) return false;
+        if (element.closest?.('[data-message-author-role]')) return false;
+        if (element.matches?.('button,[role="button"],[role="menu"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[aria-haspopup],[data-testid*="model"],[data-testid*="reasoning"],[data-testid*="thinking"]')) return true;
+        return Boolean(element.querySelector?.('button,[role="button"],[role="menu"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[aria-haspopup],[data-testid*="model"],[data-testid*="reasoning"],[data-testid*="thinking"]'));
+      });
     });
     if (relevant) scheduleReport();
     recordMutationCost(mutations.length, startedAt);
