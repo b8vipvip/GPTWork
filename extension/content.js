@@ -159,6 +159,71 @@
 
   let passivePickerObserver = null;
   let passivePickerFingerprint = '';
+  const performanceTelemetry = {
+    mutationCount: 0,
+    mutationCallbacks: 0,
+    maxMutationCallbackMs: 0,
+    longTaskCount: 0,
+    maxLongTaskMs: 0,
+    lastReportedAt: 0,
+  };
+
+  function recordMutationCost(count, startedAt) {
+    performanceTelemetry.mutationCount += Math.max(0, Number(count) || 0);
+    performanceTelemetry.mutationCallbacks += 1;
+    performanceTelemetry.maxMutationCallbackMs = Math.max(
+      performanceTelemetry.maxMutationCallbackMs,
+      Math.max(0, performance.now() - startedAt),
+    );
+  }
+
+  function reportPerformanceTelemetry(eventLoopLagMs = 0) {
+    const now = Date.now();
+    const lag = Math.max(0, Number(eventLoopLagMs) || 0);
+    const abnormal = lag >= 120
+      || performanceTelemetry.maxLongTaskMs >= 100
+      || performanceTelemetry.maxMutationCallbackMs >= 40
+      || performanceTelemetry.mutationCount >= 5000;
+    if (!abnormal || now - performanceTelemetry.lastReportedAt < 10000) return;
+    performanceTelemetry.lastReportedAt = now;
+    const details = {
+      eventLoopLagMs: Math.round(lag),
+      maxLongTaskMs: Math.round(performanceTelemetry.maxLongTaskMs),
+      longTaskCount: performanceTelemetry.longTaskCount,
+      mutationCount: performanceTelemetry.mutationCount,
+      mutationCallbacks: performanceTelemetry.mutationCallbacks,
+      maxMutationCallbackMs: Math.round(performanceTelemetry.maxMutationCallbackMs * 10) / 10,
+      verificationRunning: autoVerificationRunning || cachedState?.autoVerification?.running === true,
+      documentVisibility: document.visibilityState,
+    };
+    performanceTelemetry.mutationCount = 0;
+    performanceTelemetry.mutationCallbacks = 0;
+    performanceTelemetry.maxMutationCallbackMs = 0;
+    performanceTelemetry.longTaskCount = 0;
+    performanceTelemetry.maxLongTaskMs = 0;
+    void sendMessage({ type: 'GPTLOCK_PERFORMANCE_DIAGNOSTIC', details }).catch(() => {});
+  }
+
+  try {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        performanceTelemetry.longTaskCount += 1;
+        performanceTelemetry.maxLongTaskMs = Math.max(performanceTelemetry.maxLongTaskMs, entry.duration || 0);
+      }
+      reportPerformanceTelemetry(0);
+    });
+    observer.observe({ type: 'longtask', buffered: false });
+  } catch {
+    // Long Task API is not available in every Chromium execution context.
+  }
+
+  let performanceTickExpected = performance.now() + 2000;
+  window.setInterval(() => {
+    const now = performance.now();
+    const lag = Math.max(0, now - performanceTickExpected);
+    performanceTickExpected = now + 2000;
+    reportPerformanceTelemetry(lag);
+  }, 2000);
 
   function passivePickerSnapshot(reason = 'dom-change') {
     const popups = typeof modelPopupScopes === 'function' ? modelPopupScopes() : [];
@@ -179,12 +244,14 @@
 
   function startPassivePickerObserver() {
     if (passivePickerObserver || !document.documentElement) return;
-    passivePickerObserver = new MutationObserver(() => {
+    passivePickerObserver = new MutationObserver((mutations) => {
+      const startedAt = performance.now();
       // Full popup topology scans are diagnostic work, not ordinary runtime work.
       // Keep the observer dormant until an explicit verification transaction owns the page.
       if (autoVerificationRunning || cachedState?.autoVerification?.running === true) {
         passivePickerSnapshot('mutation');
       }
+      recordMutationCost(mutations.length, startedAt);
     });
     passivePickerObserver.observe(document.documentElement, {
       subtree: true,
@@ -1605,6 +1672,7 @@ document.addEventListener('pointerdown', (event) => {
   });
 
   new MutationObserver((mutations) => {
+    const startedAt = performance.now();
     // DOM observation never performs clicks. All ChatGPT UI mutation is owned by an
     // explicit model-selection transaction. Typing/streaming text is the hottest DOM path in ChatGPT. It cannot change lock
     // identity by itself, so never schedule a whole-page observation for pure text edits.
@@ -1617,6 +1685,7 @@ document.addEventListener('pointerdown', (event) => {
       return true;
     });
     if (relevant) scheduleReport();
+    recordMutationCost(mutations.length, startedAt);
   }).observe(document.documentElement, {
     childList: true,
     subtree: true,
