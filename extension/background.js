@@ -1489,7 +1489,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       });
     } catch (error) {
       progress.failed += 1;
-      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, verified: false, error: errorText(error) });
+      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, pickerMode: item.pickerMode || null, verified: false, error: errorText(error) });
       logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
         tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
       });
