@@ -149,6 +149,10 @@
     }
     resizeObservers.clear();
     removeTrackedListeners();
+    for (const record of chromeEventListeners) {
+      try { record.remove.call(record.event, record.listener); } catch {}
+    }
+    chromeEventListeners.clear();
     restorePatchedGlobals();
 
     try {
@@ -290,6 +294,27 @@
     return original.removeEventListener.call(this, type, listener, options);
   }
 
+  function patchChromeEvent(event) {
+    if (!event || typeof event.addListener !== 'function' || typeof event.removeListener !== 'function') return;
+    const add = event.addListener;
+    const remove = event.removeListener;
+    const trackedAdd = function trackedChromeAddListener(listener) {
+      if (typeof listener === 'function') chromeEventListeners.add({ event, listener, remove });
+      return add.call(event, listener);
+    };
+    const trackedRemove = function trackedChromeRemoveListener(listener) {
+      for (const record of chromeEventListeners) {
+        if (record.event === event && record.listener === listener) chromeEventListeners.delete(record);
+      }
+      return remove.call(event, listener);
+    };
+    try {
+      event.addListener = trackedAdd;
+      event.removeListener = trackedRemove;
+      chromeEventPatches.push({ event, add, remove, trackedAdd, trackedRemove });
+    } catch {}
+  }
+
   function trackedSendMessage(...args) {
     const callbackIndex = typeof args[args.length - 1] === 'function' ? args.length - 1 : -1;
     const callback = callbackIndex >= 0 ? args[callbackIndex] : null;
@@ -362,6 +387,9 @@
   } catch {
     // The health check below is still useful if a browser exposes any API as read-only.
   }
+
+  patchChromeEvent(globalThis.chrome?.runtime?.onMessage);
+  patchChromeEvent(globalThis.chrome?.storage?.onChanged);
 
   // Wrap runtime messaging once for this isolated world. The wrapper turns a terminal
   // invalidation into a one-way shutdown instead of allowing every listener/timer to
