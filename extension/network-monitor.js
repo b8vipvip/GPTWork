@@ -431,7 +431,7 @@ export class ChatGptNetworkMonitor {
       return;
     }
 
-    const configuration = this.configuration(tabId);
+    let configuration = this.configuration(tabId);
     if (configuration.bypassRewrite === true) {
       try {
         const postData = await this.pausedPostData(tabId, params);
@@ -465,6 +465,27 @@ export class ChatGptNetworkMonitor {
     let rewrite = null;
     try {
       const postData = await this.pausedPostData(tabId, params);
+      // A Fetch.requestPaused event can arrive just before the verification
+      // transaction is published, while getRequestPostData is still awaiting CDP.
+      // Re-read authority immediately before mutation. If verification now owns the
+      // tab, fail over to passthrough instead of using the stale lock snapshot.
+      configuration = this.configuration(tabId);
+      if (configuration.bypassRewrite === true) {
+        const observed = extractRequestEvidence(postData);
+        await this.continuePaused(tabId, requestId);
+        this.onRewrite?.(tabId, {
+          endpoint,
+          requestId: params.networkId ? String(params.networkId) : null,
+          changed: false,
+          reason: 'verification_passthrough_late_authority',
+          modelBefore: observed.model,
+          modelAfter: observed.model,
+          reasoningBefore: observed.reasoning,
+          reasoningAfter: observed.reasoning,
+          reasoningFields: [],
+        });
+        return;
+      }
       rewrite = rewriteConversationPostData(postData, configuration);
       await this.continuePaused(tabId, requestId, rewrite.changed ? rewrite.postData : null);
       this.onRewrite?.(tabId, {
