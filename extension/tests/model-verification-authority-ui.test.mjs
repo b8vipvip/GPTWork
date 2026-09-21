@@ -333,3 +333,16 @@ test('v0.5.104 ordinary typing does not trigger full page observation', () => {
   assert.match(content, /textarea,\[contenteditable="true"\]/);
   assert.match(content, /Full popup topology scans are diagnostic work/);
 });
+
+
+test('v0.5.105 verification session owns request passthrough for its full lifecycle', () => {
+  assert.match(background, /const verificationSession = tabStates\.get\(Number\(tabId\)\)\?\.autoVerification\?\.running === true/);
+  assert.match(background, /bypassRewrite: verificationSession/);
+  assert.match(background, /if \(state\.autoVerification\?\.running === true\) await networkMonitor\.attach/);
+});
+
+test('v0.5.105 growing catalog is canonical-deduped and not rendered as a false final denominator', () => {
+  assert.match(background, /model:\$\{model\}/);
+  assert.match(background, /catalogStable: false/);
+  assert.match(content, /已发现 \$\{total\}/);
+});
