@@ -43,6 +43,7 @@ const MODEL_VERIFICATION_HISTORY_ENABLED_KEY = 'gptworkModelVerificationHistoryE
 const MODEL_VERIFICATION_HISTORY_LIMIT = 50;
 const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
+const JANK_ISOLATION_KEY = 'gptworkJankIsolationV1';
 
 let nativePort = null;
 let requestSequence = 0;
@@ -76,6 +77,43 @@ async function masterStorageEnabled() {
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function applyJankIsolationMode(mode = 'normal', { source = 'runtime' } = {}) {
+  const normalized = ['normal', 'cdp_off', 'content_off', 'high_level_off'].includes(mode) ? mode : 'normal';
+  const previous = (await chrome.storage.local.get(JANK_ISOLATION_KEY))[JANK_ISOLATION_KEY] || { mode: 'normal' };
+  const state = {
+    mode: normalized,
+    previousMode: previous.mode || 'normal',
+    changedAt: new Date().toISOString(),
+    source,
+  };
+  await chrome.storage.local.set({ [JANK_ISOLATION_KEY]: state });
+
+  const cdpOff = normalized === 'cdp_off' || normalized === 'high_level_off';
+  const contentOff = normalized === 'content_off' || normalized === 'high_level_off';
+  const cdp = await networkMonitor.setDiagnosticSuspended(cdpOff);
+  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  let contentTabs = 0;
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND',
+        suspended: contentOff,
+      });
+      if (response?.ok) contentTabs += 1;
+    } catch {}
+  }
+  if (!cdpOff) await configureOpenTabs();
+  logRuntime('info', 'diagnostics', 'jank_isolation_changed', {
+    ...state,
+    cdpSuspended: cdp.suspended,
+    detachedTabs: cdp.detachedTabs,
+    contentSuspended: contentOff,
+    contentTabs,
+  });
+  return { ...state, cdp, contentSuspended: contentOff, contentTabs };
 }
 
 let runtimeLogFlushTimer = null;
@@ -2084,6 +2122,19 @@ const UPDATE_MESSAGE_TYPES = new Set([
 ]);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'GPTWORK_SET_JANK_ISOLATION') {
+    void applyJankIsolationMode(message.mode, { source: message.source || 'message' }).then(
+      (result) => sendResponse({ ok: true, result }),
+      (error) => sendResponse({ ok: false, error: errorText(error) }),
+    );
+    return true;
+  }
+  if (message?.type === 'GPTWORK_GET_JANK_ISOLATION') {
+    void chrome.storage.local.get(JANK_ISOLATION_KEY).then((stored) => {
+      sendResponse({ ok: true, result: stored[JANK_ISOLATION_KEY] || { mode: 'normal' } });
+    });
+    return true;
+  }
   if (sender.id !== chrome.runtime.id || !message || typeof message.type !== 'string') return false;
   if (TAB_FEATURE_MESSAGE_TYPES.has(message.type) || UPDATE_MESSAGE_TYPES.has(message.type)) return false;
 
