@@ -104,57 +104,97 @@
     window.setTimeout(() => attempt(3), 40);
   }
 
-  function workConversationMarker() {
-    for (const element of document.querySelectorAll('span,div')) {
-      if (!visible(element) || !outsideConversation(element)) continue;
-      const text = normalize(element.innerText || element.textContent);
-      if (!WORK_TITLE_SUFFIX.test(text)) continue;
-      const spans = element.querySelectorAll?.('span')?.length || 0;
-      if (spans >= 2 || (element.parentElement && WORK_TITLE_SUFFIX.test(normalize(element.parentElement.innerText)))) {
-        return true;
+  function workEvidenceSnapshot() {
+    // Avoid innerText/getBoundingClientRect over the entire ChatGPT document. In
+    // v0.5.112 this scan ran after broad DOM mutations and repeatedly consumed
+    // 50-190ms on the renderer main thread. Scan cheap textContent once, then run
+    // visibility/layout checks only for the handful of exact evidence candidates.
+    let conversationMarker = false;
+    let hasOutput = false;
+    let hasSources = false;
+    let hasCreate = false;
+    let sourceCount = 0;
+    let sourceToggle = false;
+    const sourceHits = new Set();
+    const candidates = document.querySelectorAll('h1,h2,button,span,[data-tpp-source-group-toggle]');
+
+    for (const element of candidates) {
+      if (element.closest?.(TURN_SELECTOR)) continue;
+      if (element.closest?.(`#${NOTICE_ID},#${MODEL_INDICATOR_ID},#gptlock-indicator-host`)) continue;
+      const text = normalize(element.textContent);
+      let matched = false;
+
+      if (!conversationMarker && WORK_TITLE_SUFFIX.test(text)) {
+        conversationMarker = true;
+        matched = true;
+      }
+      if (/^(?:输出内容|output content|outputs?)$/i.test(text)) {
+        hasOutput = true;
+        matched = true;
+      }
+      if (/^(?:来源|sources?)$/i.test(text)) {
+        hasSources = true;
+        matched = true;
+      }
+      if (/^(?:创建文件或网站|create (?:a )?(?:file|website)(?: or (?:a )?(?:file|website))?)$/i.test(text)) {
+        hasCreate = true;
+        matched = true;
+      }
+      for (const [key, pattern] of [
+        ['web', /^(?:网页搜索|web search)$/i],
+        ['file', /^(?:文件搜索|file search)$/i],
+        ['memory', /^(?:记忆|memory)$/i],
+      ]) {
+        if (!sourceHits.has(key) && pattern.test(text)) {
+          sourceHits.add(key);
+          matched = true;
+        }
+      }
+      if (element.hasAttribute?.('data-tpp-source-group-toggle')) {
+        sourceToggle = true;
+        matched = true;
+      }
+
+      // Exact text can also exist in hidden menus. Only matched candidates pay the
+      // layout cost; never force layout for every span/div in the transcript.
+      if (matched && !visible(element)) {
+        if (WORK_TITLE_SUFFIX.test(text)) conversationMarker = false;
+        if (/^(?:输出内容|output content|outputs?)$/i.test(text)) hasOutput = false;
+        if (/^(?:来源|sources?)$/i.test(text)) hasSources = false;
+        if (/^(?:创建文件或网站|create (?:a )?(?:file|website)(?: or (?:a )?(?:file|website))?)$/i.test(text)) hasCreate = false;
+        if (element.hasAttribute?.('data-tpp-source-group-toggle')) sourceToggle = false;
+        for (const [key, pattern] of [
+          ['web', /^(?:网页搜索|web search)$/i],
+          ['file', /^(?:文件搜索|file search)$/i],
+          ['memory', /^(?:记忆|memory)$/i],
+        ]) {
+          if (pattern.test(text)) sourceHits.delete(key);
+        }
       }
     }
-    return false;
-  }
 
-  function exactVisibleText(pattern, selector = 'span,div,button,h2') {
-    return [...document.querySelectorAll(selector)].some((element) => {
-      if (!visible(element) || !outsideConversation(element)) return false;
-      return pattern.test(normalize(element.innerText || element.textContent));
-    });
-  }
-
-  function workPanelEvidence() {
-    const hasOutput = exactVisibleText(/^(?:输出内容|output content|outputs?)$/i, 'h2,h2 span,span,div');
-    const hasSources = exactVisibleText(/^(?:来源|sources?)$/i, 'h2,h2 span,button,span,div');
-    const hasCreate = exactVisibleText(/^(?:创建文件或网站|create (?:a )?(?:file|website)(?: or (?:a )?(?:file|website))?)$/i, 'button,span,div');
-    const sourcePatterns = [
-      /^(?:网页搜索|web search)$/i,
-      /^(?:文件搜索|file search)$/i,
-      /^(?:记忆|memory)$/i,
-    ];
-    const sourceCount = sourcePatterns.filter((pattern) => exactVisibleText(pattern, 'button,span,div')).length;
-    const sourceToggle = [...document.querySelectorAll('[data-tpp-source-group-toggle]')]
-      .some((element) => visible(element) && outsideConversation(element));
+    sourceCount = sourceHits.size;
     return {
-      confirmed: hasOutput && hasSources && (hasCreate || sourceCount > 0 || sourceToggle),
-      hasOutput,
-      hasSources,
-      hasCreate,
-      sourceCount,
-      sourceToggle,
+      conversationMarker,
+      panel: {
+        confirmed: hasOutput && hasSources && (hasCreate || sourceCount > 0 || sourceToggle),
+        hasOutput,
+        hasSources,
+        hasCreate,
+        sourceCount,
+        sourceToggle,
+      },
     };
   }
 
   function detectProcessingMode() {
-    const conversationMarker = workConversationMarker();
-    const panel = workPanelEvidence();
-    const confirmed = conversationMarker && panel.confirmed;
+    const evidence = workEvidenceSnapshot();
+    const confirmed = evidence.conversationMarker && evidence.panel.confirmed;
     return {
       mode: confirmed ? 'work' : 'chat',
       confirmed,
-      conversationMarker,
-      panel,
+      conversationMarker: evidence.conversationMarker,
+      panel: evidence.panel,
       generating: Boolean(document.querySelector(GENERATING_SELECTORS.join(','))),
     };
   }
@@ -235,15 +275,23 @@
 
   new MutationObserver((mutations) => {
     if (!enabled || document.hidden) return;
-    // Streaming characterData is the hottest ChatGPT DOM path and does not by
-    // itself change processing mode. Only structural/control changes schedule the
-    // comparatively expensive Work evidence scan.
-    if (mutations.some((mutation) => mutation.type === 'childList' || mutation.type === 'attributes')) scheduleRefresh();
+    // Do not refresh Work evidence for generic class/state churn. ChatGPT mutates
+    // those attributes continuously during streaming, scrolling and window resize.
+    // Refresh only when newly-added structural content can actually contain Work UI.
+    const relevant = mutations.some((mutation) => {
+      if (mutation.type !== 'childList' || !mutation.addedNodes?.length) return false;
+      return [...mutation.addedNodes].some((node) => {
+        const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+        if (!element || element.closest?.(TURN_SELECTOR)) return false;
+        const text = normalize(element.textContent).slice(0, 1200);
+        return /(?:输出内容|output content|来源|sources?|创建文件或网站|create (?:a )?(?:file|website)|[·•]\s*(?:工作|work))/i.test(text)
+          || Boolean(element.querySelector?.('[data-tpp-source-group-toggle]'));
+      });
+    });
+    if (relevant) scheduleRefresh();
   }).observe(document.documentElement, {
     childList: true,
     subtree: true,
-    attributes: true,
-    attributeFilter: ['aria-selected', 'aria-pressed', 'data-state', 'data-testid', 'class'],
   });
 
   window.addEventListener('popstate', scheduleRefresh);
