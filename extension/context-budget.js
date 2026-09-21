@@ -1,6 +1,6 @@
 (() => {
   const REFRESH_DEBOUNCE_MS = 220;
-  const PERIODIC_REFRESH_MS = 1_500;
+  const PERIODIC_REFRESH_MS = 30_000;
   const SEND_DEDUPE_MS = 750;
   const BYPASS_WINDOW_MS = 8_000;
   const BYPASS_OBSERVATION_TIMEOUT_MS = 3 * 60 * 1000;
@@ -1717,7 +1717,11 @@
       void refreshConversationMetrics(true);
     }
   });
-  window.setInterval(recompute, PERIODIC_REFRESH_MS);
+  // DOM/input/guard events already keep the budget current. The former 1.5s full
+  // recompute forced layout/history work even while the user was only moving the
+  // browser window. Keep only a low-frequency self-heal and schedule it through
+  // the normal debounce path.
+  window.setInterval(scheduleRefresh, PERIODIC_REFRESH_MS);
   void refreshAccountScope(true).then(() => {
     void loadConversationCheckpoint();
     void restorePendingBypass();
