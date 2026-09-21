@@ -3,8 +3,10 @@
   const EVIDENCE_STORAGE_KEY = 'discoveredModelEvidence';
   const DISCOVERY_SCHEMA_KEY = 'modelDiscoverySchemaVersion';
   const DISCOVERY_SCHEMA_VERSION = 3;
+  const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
   const MODEL_ALIASES = Object.freeze({
     'gpt-5.6-sol-wm': 'gpt-5.6-sol',
+    'gpt-5-5-instant': 'gpt-5.5',
     'gpt-5-6': 'gpt-5.6-sol',
     'gpt-6-astra-wm': 'gpt-6-astra',
     'gpt-6-sol-wm': 'gpt-6-sol',
@@ -127,6 +129,30 @@
     container.append(row);
   }
 
+  function appendSharedChoice(item, lockedModels) {
+    const concrete = normalizeConcreteModelId(item?.model);
+    const container = document.getElementById('modelChoices');
+    if (!container || !concrete) return;
+    const existing = container.querySelector(`input[name="model"][value="${CSS.escape(concrete)}"]`);
+    if (existing) return;
+    const row = document.createElement('label');
+    row.className = 'check-row';
+    row.dataset.sharedKnownModel = concrete;
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'model';
+    input.value = concrete;
+    input.checked = lockedModels.includes(concrete);
+    const text = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = String(item?.label || modelLabel(concrete)).slice(0, 120);
+    const small = document.createElement('small');
+    small.textContent = `${concrete} · GPTWork 全局已验证元数据 / Shared verified metadata · 当前账户仍需验证`;
+    text.append(strong, small);
+    row.append(input, text);
+    container.append(row);
+  }
+
   function removeDuplicateDiscoveredRows() {
     const container = document.getElementById('modelChoices');
     if (!container) return;
@@ -144,6 +170,7 @@
       STORAGE_KEY,
       EVIDENCE_STORAGE_KEY,
       DISCOVERY_SCHEMA_KEY,
+      SHARED_KNOWN_MODELS_KEY,
       'policy',
     ]);
     const discoveredRaw = Array.isArray(stored[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];
@@ -185,6 +212,8 @@
     }
 
     for (const model of discovered) appendChoice(model, lockedModels, evidence);
+    const shared = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+    for (const item of shared) appendSharedChoice(item, lockedModels);
     const syncChoiceUi = () => {
       labelChoiceSources(discovered, evidence);
       removeDuplicateDiscoveredRows();
@@ -196,7 +225,7 @@
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'sync' || (!changes[STORAGE_KEY] && !changes.policy)) return;
+    if (areaName !== 'sync' || (!changes[STORAGE_KEY] && !changes[SHARED_KNOWN_MODELS_KEY] && !changes.policy)) return;
     void refresh().catch(() => {});
   });
 

@@ -21,6 +21,7 @@
   ];
   const MODEL_ALIASES = Object.freeze({
     'gpt-5.6-sol-wm': 'gpt-5.6-sol',
+    'gpt-5-5-instant': 'gpt-5.5',
     'gpt-5-6': 'gpt-5.6-sol',
   });
   const RETRY_MS = 1200;
@@ -34,6 +35,7 @@
   let attempts = 0;
   let syncing = false;
   let wakeObserver = null;
+  let lastRequestedKey = '';
 
   function visible(element) {
     if (!element?.getBoundingClientRect) return false;
@@ -118,7 +120,7 @@
     // control owned by the active composer. Sidebar/history controls can never enter
     // this candidate set, even if ChatGPT reuses matching aria/testid semantics.
     const trigger = ownedTrigger(selectors);
-    if (!trigger) return { changed: false, retry: true };
+    if (!trigger) return { changed: false, retry: true, reason: 'trigger_not_ready' };
     trigger.click();
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     const candidate = menuCandidates().find((element) =>
@@ -128,7 +130,10 @@
     );
     if (!candidate) {
       document.body?.click?.();
-      return { changed: false, retry: true };
+      // A locked model can legitimately be unavailable in the current ChatGPT
+      // product/picker. Reopening the picker cannot make it appear and caused an
+      // unsolicited click loop. Stop until configuration or navigation changes.
+      return { changed: false, retry: false, unavailable: true, reason: 'target_not_in_picker' };
     }
     candidate.click();
     await new Promise((resolve) => window.setTimeout(resolve, 350));
@@ -146,22 +151,9 @@
   }
 
   function armWakeObserver() {
-    if (!pending || wakeObserver || !document.documentElement) return;
-    wakeObserver = new MutationObserver(() => {
-      if (!pending) {
-        disarmWakeObserver();
-        return;
-      }
-      disarmWakeObserver();
-      attempts = 0;
-      scheduleRetry(250);
-    });
-    wakeObserver.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['aria-label', 'aria-selected', 'aria-checked', 'data-state', 'data-value', 'data-model', 'data-model-id'],
-    });
+    // v0.5.108: no page-wide wake observer. A missing composer control receives the
+    // bounded active retries above; an unavailable target waits for an explicit
+    // policy/feature/navigation change instead of clicking on every DOM mutation.
   }
 
   function finishSync() {
@@ -218,7 +210,7 @@
       }
       attempts += 1;
       if (retry && attempts < MAX_ACTIVE_ATTEMPTS) scheduleRetry();
-      else if (retry) armWakeObserver();
+      else finishSync();
     } finally {
       syncing = false;
     }
@@ -230,11 +222,22 @@
     timer = window.setTimeout(() => void alignNow(), delay);
   }
 
-  function requestForcedSync({ resetAttempts = true } = {}) {
+  function alignmentKey() {
+    return JSON.stringify({
+      enabled: featureEnabled,
+      model: normalizeModel(policy?.lockedModels?.[0]),
+      reasoning: normalizeReasoning(desiredReasoning()),
+    });
+  }
+
+  function requestForcedSync({ resetAttempts = true, allowRepeat = false } = {}) {
     if (!featureEnabled) {
       finishSync();
       return;
     }
+    const key = alignmentKey();
+    if (!allowRepeat && key === lastRequestedKey) return;
+    lastRequestedKey = key;
     pending = true;
     if (resetAttempts) attempts = 0;
     disarmWakeObserver();
@@ -281,16 +284,20 @@
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'sync') return;
-    if (changes.policy || changes.settings || changes.discoveredModels || changes.gptworkModelLockSelection) {
+    if (changes.policy || changes.settings || changes.gptworkModelLockSelection) {
       refreshTabConfiguration({ forceSync: true });
     }
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) refreshTabConfiguration({ forceSync: pending || featureEnabled });
+    if (!document.hidden) refreshTabConfiguration({ forceSync: pending });
   });
-  window.addEventListener('popstate', () => refreshTabConfiguration({ forceSync: pending || featureEnabled }));
-  window.addEventListener('hashchange', () => refreshTabConfiguration({ forceSync: pending || featureEnabled }));
+  const navigationSync = () => {
+    lastRequestedKey = '';
+    refreshTabConfiguration({ forceSync: featureEnabled });
+  };
+  window.addEventListener('popstate', navigationSync);
+  window.addEventListener('hashchange', navigationSync);
 
   refreshTabConfiguration({ forceSync: false });
 })();

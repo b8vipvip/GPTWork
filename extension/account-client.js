@@ -264,6 +264,22 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     return request('/api/v1/account/security', { auth: true });
   }
 
+  async function sharedModelCatalog() {
+    await initialize();
+    if (!token) return { ok: true, models: [] };
+    return request('/api/v1/account/model-catalog', { auth: true });
+  }
+
+  async function publishSharedModels(models) {
+    await initialize();
+    if (!token) return { ok: true, accepted: 0, models: [] };
+    return request('/api/v1/account/model-catalog', {
+      method: 'POST',
+      body: { models: Array.isArray(models) ? models : [] },
+      auth: true,
+    });
+  }
+
   async function releaseDevice(deviceRecordId) {
     await initialize();
     return request('/api/v1/account/devices/release', { method: 'POST', body: { deviceRecordId }, auth: true });
@@ -316,6 +332,8 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     heartbeat,
     clientControl,
     security,
+    sharedModelCatalog,
+    publishSharedModels,
     releaseDevice,
     revokeSession,
     revokeOtherSessions,

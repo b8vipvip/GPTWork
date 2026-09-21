@@ -40,6 +40,7 @@ const DIAGNOSTIC_SSE_STORAGE_KEY = 'autoVerificationSseCapture';
 const MODEL_VERIFICATION_HISTORY_KEY = 'modelVerificationHistoryV1';
 const MODEL_VERIFICATION_HISTORY_LIMIT = 50;
 const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
+const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
 
 let nativePort = null;
 let requestSequence = 0;
@@ -918,6 +919,7 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
     .map((tab) => `chrome:${tab.windowId}`))];
   try {
     accountState = await accountClient.heartbeat(windowKeys);
+    if (accountState?.authenticated === true) void syncSharedKnownModels();
   } catch (error) {
     accountState = { ...accountClient.snapshot(), lastError: errorText(error) };
   }
@@ -1223,6 +1225,62 @@ async function resolveUnknownCatalogNames(tabId, rows) {
   }
 }
 
+async function syncSharedKnownModels() {
+  try {
+    const result = await accountClient.sharedModelCatalog();
+    const models = (Array.isArray(result?.models) ? result.models : [])
+      .map((item) => ({
+        model: normalizeConcreteModelId(item?.model),
+        label: String(item?.label || '').trim().slice(0, 120),
+        pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
+        lastSeenAt: item?.lastSeenAt || null,
+      }))
+      .filter((item) => item.model);
+    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
+    const previous = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+    if (JSON.stringify(previous) !== JSON.stringify(models)) {
+      await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: models });
+      logRuntime('info', 'verification', 'shared_model_catalog_synced', { count: models.length, changed: true });
+    }
+    return models;
+  } catch (error) {
+    logRuntime('warn', 'verification', 'shared_model_catalog_sync_failed', { error: errorText(error) });
+    return [];
+  }
+}
+
+async function publishVerifiedModels(progress) {
+  const models = (Array.isArray(progress?.results) ? progress.results : [])
+    .filter((item) => item?.requestConfirmed === true && normalizeConcreteModelId(item?.model))
+    .map((item) => ({
+      model: normalizeConcreteModelId(item.model),
+      label: String(item.label || item.model).trim().slice(0, 120),
+      pickerMode: ['A', 'B'].includes(item.pickerMode) ? item.pickerMode : null,
+      requestConfirmed: true,
+      responseConfirmed: item.responseConfirmed === true,
+    }));
+  if (!models.length) return [];
+  try {
+    const result = await accountClient.publishSharedModels(models);
+    const shared = (Array.isArray(result?.models) ? result.models : [])
+      .map((item) => ({
+        model: normalizeConcreteModelId(item?.model),
+        label: String(item?.label || '').trim().slice(0, 120),
+        pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
+        lastSeenAt: item?.lastSeenAt || null,
+      }))
+      .filter((item) => item.model);
+    await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared });
+    logRuntime('info', 'verification', 'shared_model_catalog_published', { submitted: models.length, shared: shared.length });
+    return shared;
+  } catch (error) {
+    logRuntime('warn', 'verification', 'shared_model_catalog_publish_failed', { submitted: models.length, error: errorText(error) });
+    return [];
+  }
+}
+
 async function discoverAccountCatalog(tabId) {
   try {
     const result = await sendTabMessage(tabId, { type: 'GPTLOCK_DISCOVER_ACCOUNT_MODELS' });
@@ -1289,10 +1347,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     discoveryPasses: 0,
     stablePasses: 0,
     reasoningLevels: [],
+    pickerModes: [],
   };
 
   const mergeCatalog = (catalog, phase) => {
     let added = 0;
+    if (['A', 'B'].includes(catalog?.pickerMode) && !progress.pickerModes.includes(catalog.pickerMode)) progress.pickerModes.push(catalog.pickerMode);
     for (const level of (catalog?.reasoningLevels || [])) reasoningLevels.add(level);
     for (const row of (Array.isArray(catalog?.rows) ? catalog.rows : [])) {
       const model = normalizeConcreteModelId(row?.model || row?.rawId);
@@ -1313,7 +1373,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         continue;
       }
       knownKeys.add(key);
-      queue.push({ model, rawModel, selectorKey, label });
+      queue.push({ model, rawModel, selectorKey, label, pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : catalog?.pickerMode || null });
       added += 1;
     }
     progress.total = queue.length;
@@ -1416,8 +1476,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
         requestId, requestModel, responseModel, evidenceModel,
         responseReasoning: responseEvidence?.reasoning ?? null,
-        responseVerdict: state.lastVerification?.verdict ?? null,
-        responseIssue: state.evidenceIssue ?? null,
+        responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
+        responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
+        pickerMode: item.pickerMode || null,
         evidenceSource,
         timedOut: waited.timedOut, observation: selection.observation || null,
       };
@@ -1433,7 +1494,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       });
     } catch (error) {
       progress.failed += 1;
-      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, verified: false, error: errorText(error) });
+      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, pickerMode: item.pickerMode || null, verified: false, error: errorText(error) });
       logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
         tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
       });
@@ -1486,6 +1547,7 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
     verified: Number(catalog.verified || 0),
     failed: Number(catalog.failed || 0),
     pageContext: autoVerification?.pageContext ?? null,
+    pickerModes: Array.isArray(catalog.pickerModes) ? [...catalog.pickerModes] : [],
     results: (Array.isArray(catalog.results) ? catalog.results : []).map((item) => ({
       model: item.model ?? null,
       rawModel: item.rawModel ?? null,
@@ -1502,6 +1564,7 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
       responseVerdict: item.responseVerdict ?? null,
       responseIssue: item.responseIssue ?? null,
       evidenceSource: item.evidenceSource ?? null,
+      pickerMode: item.pickerMode ?? null,
       timedOut: item.timedOut === true,
       error: item.error ?? null,
     })),
@@ -1580,6 +1643,8 @@ async function autoVerify(tabId) {
   state.lastError = page.error;
   await broadcastTabState(tabId);
 
+  const sharedKnownModels = await syncSharedKnownModels();
+  state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
   const accountCatalog = await discoverAccountCatalog(tabId);
   state.autoVerification.maxAttempts = accountCatalog.rows.length;
   await broadcastTabState(tabId);
@@ -1597,6 +1662,7 @@ async function autoVerify(tabId) {
     accountCatalog,
     { restoreModel },
   );
+  await publishVerifiedModels(catalogVerification);
   state.autoVerification.attempts = catalogVerification.results.map((item, index) => ({
     attempt: index + 1,
     sent: Boolean(item.requestId),

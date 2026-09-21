@@ -55,3 +55,10 @@ test('manifest loads Work controller immediately after the model indicator owner
   assert.equal(work, catalog + 1);
   assert.ok(remaining > work);
 });
+
+
+test('v0.5.108 Work evidence scans are suspended when inactive and ignore streaming text churn', () => {
+  assert.match(source, /if \(!enabled \|\| document\.hidden\)/);
+  assert.match(source, /const REFRESH_DELAY_MS = 800/);
+  assert.doesNotMatch(source, /characterData: true/);
+});

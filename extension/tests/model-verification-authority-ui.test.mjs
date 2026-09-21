@@ -7,6 +7,7 @@ const content = await readFile(new URL('../content.js', import.meta.url), 'utf8'
 const policy = await readFile(new URL('../policy.js', import.meta.url), 'utf8');
 const settings = await readFile(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const popup = await readFile(new URL('../popup-v0513.html', import.meta.url), 'utf8');
+const popupJs = await readFile(new URL('../popup.js', import.meta.url), 'utf8');
 const historyUi = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
 
 test('model verification separates request confirmation from backend response verification', () => {
@@ -369,4 +370,28 @@ test('v0.5.107 rechecks verification authority before mutation and scopes full n
   assert.match(monitor, /enableResponseCapture/);
   assert.match(monitor, /disableResponseCapture/);
   assert.match(background, /verification_response_capture/);
+});
+
+
+test('v0.5.108 shares verified model metadata without treating it as account access', async () => {
+  const accountClient = await readFile(new URL('../account-client.js', import.meta.url), 'utf8');
+  const catalogOptions = await readFile(new URL('../model-catalog-options.js', import.meta.url), 'utf8');
+  assert.match(accountClient, /sharedModelCatalog/);
+  assert.match(accountClient, /publishSharedModels/);
+  assert.match(background, /shared_model_catalog_published/);
+  assert.match(background, /requestConfirmed === true/);
+  assert.match(background, /pickerModes/);
+  assert.match(catalogOptions, /当前账户仍需验证/);
+});
+
+test('v0.5.108 canonicalizes GPT-5.5 instant and clears contradictory response issue', () => {
+  assert.match(policy, /'gpt-5-5-instant': 'gpt-5\.5'/);
+  assert.match(background, /responseIssue: responseConfirmed \? null/);
+});
+
+
+test('v0.5.108 popup can persist an empty locked-model list', () => {
+  assert.doesNotMatch(popupJs, /至少保留一个锁定模型/);
+  assert.match(popupJs, /已取消全部模型锁定/);
+  assert.match(popupJs, /lockedModels: selected/);
 });

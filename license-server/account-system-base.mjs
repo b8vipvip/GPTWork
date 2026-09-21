@@ -234,6 +234,14 @@ export function createAccountSystem({
     detail TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS shared_model_catalog (
+    model_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL DEFAULT '',
+    picker_mode TEXT,
+    verified_count INTEGER NOT NULL DEFAULT 0 CHECK(verified_count >= 0),
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL
+  ) STRICT;
   CREATE TABLE IF NOT EXISTS account_daily_checkins (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     day_key TEXT NOT NULL,
@@ -407,6 +415,46 @@ export function createAccountSystem({
   function getSecureSetting(key) {
     const row = db.prepare('SELECT ciphertext FROM secure_settings WHERE key=?').get(key);
     return row ? decryptSetting(row.ciphertext, key) : '';
+  }
+
+  function normalizeSharedModelId(value) {
+    const model = String(value || '').trim().toLowerCase();
+    return /^[a-z0-9._:-]{1,128}$/.test(model) && model !== 'auto' ? model : null;
+  }
+  function sharedModelCatalog() {
+    return db.prepare(`SELECT model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at
+      FROM shared_model_catalog ORDER BY verified_count DESC,last_seen_at DESC,model_id ASC LIMIT 64`).all()
+      .map((row) => ({
+        model: row.model_id,
+        label: row.display_name || row.model_id,
+        pickerMode: row.picker_mode || null,
+        verifiedCount: Number(row.verified_count || 0),
+        firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at,
+      }));
+  }
+  function mergeSharedModelCatalog(inputModels) {
+    const now = nowIso();
+    const rows = Array.isArray(inputModels) ? inputModels.slice(0, 32) : [];
+    const upsert = db.prepare(`INSERT INTO shared_model_catalog
+      (model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at)
+      VALUES(?,?,?,?,?,?)
+      ON CONFLICT(model_id) DO UPDATE SET
+        display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE shared_model_catalog.display_name END,
+        picker_mode=COALESCE(excluded.picker_mode,shared_model_catalog.picker_mode),
+        verified_count=shared_model_catalog.verified_count+1,
+        last_seen_at=excluded.last_seen_at`);
+    let accepted = 0;
+    for (const item of rows) {
+      if (item?.requestConfirmed !== true) continue;
+      const model = normalizeSharedModelId(item?.model);
+      if (!model) continue;
+      const label = String(item?.label || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+      const pickerMode = ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null;
+      upsert.run(model, label, pickerMode, 1, now, now);
+      accepted += 1;
+    }
+    return { accepted, models: sharedModelCatalog() };
   }
 
   function audit(event, userId = null, detail = {}) {
@@ -1098,6 +1146,19 @@ export function createAccountSystem({
         const session = requireSession(req);
         db.prepare('UPDATE user_sessions SET last_seen_at=? WHERE id=?').run(nowIso(), session.id);
         return json(res, 200, { ok: true, account: accountSummary(userById(session.user_id), session) }, cors), true;
+      }
+
+      if (path === '/api/v1/account/model-catalog' && req.method === 'GET') {
+        requireSession(req);
+        return json(res, 200, { ok: true, models: sharedModelCatalog() }, cors), true;
+      }
+
+      if (path === '/api/v1/account/model-catalog' && req.method === 'POST') {
+        const session = requireSession(req);
+        const input = await bodyJson(req);
+        const merged = mergeSharedModelCatalog(input.models);
+        audit('shared_model_catalog_published', session.user_id, { accepted: merged.accepted });
+        return json(res, 200, { ok: true, ...merged }, cors), true;
       }
 
       if (path === '/api/v1/account/rewards' && req.method === 'GET') {

@@ -94,3 +94,11 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /Account-menu DOM is discovery input, not authoritative persistence/);
   assert.doesNotMatch(backgroundSource, /sources: \[\.\.\.new Set\(\[\.\.\.\(Array\.isArray\(prior\.sources\).*account_model_catalog/s);
 });
+
+
+test('v0.5.108 model indicator avoids whole-page button scans and high-frequency polling', () => {
+  assert.doesNotMatch(catalogSource, /querySelectorAll\('button,\[role="button"\]'\)/);
+  assert.match(catalogSource, /const STATE_REFRESH_MS = 10000/);
+  assert.match(catalogSource, /pageModelSelector/);
+  assert.doesNotMatch(catalogSource, /characterData: true/);
+});

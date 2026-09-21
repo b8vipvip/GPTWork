@@ -20,12 +20,12 @@ test('forced alignment retries when page controls are unavailable or generation 
   assert.doesNotMatch(source, /currentModel\s*&&\s*currentModel\s*!==\s*desiredModel/);
 });
 
-test('whole-page MutationObserver is only armed after active retries are exhausted and disconnects before retrying', () => {
-  assert.match(source, /function armWakeObserver\(\)/);
-  assert.match(source, /attempts < MAX_ACTIVE_ATTEMPTS/);
-  assert.match(source, /armWakeObserver\(\)/);
-  assert.match(source, /wakeObserver\?\.disconnect\(\)/);
-  assert.doesNotMatch(source, /new MutationObserver\([\s\S]*?\)\.observe\(document\.documentElement/);
+test('unavailable locked models stop instead of reopening the picker forever', () => {
+  assert.match(source, /target_not_in_picker/);
+  assert.match(source, /return \{ changed: false, retry: false, unavailable: true/);
+  assert.match(source, /function alignmentKey\(\)/);
+  assert.match(source, /key === lastRequestedKey/);
+  assert.doesNotMatch(source, /wakeObserver = new MutationObserver/);
 });
 
 test('forced sync is loaded into every ChatGPT tab after the normal lock runtime', () => {
