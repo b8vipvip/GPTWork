@@ -8,7 +8,7 @@ const adminHtml = new URL('../../license-server/public/admin.html', import.meta.
 const adminClientLogsHtml = new URL('../../license-server/public/admin-client-logs.html', import.meta.url);
 const adminJs = new URL('../../license-server/public/client-runtime-admin.js', import.meta.url);
 
-test('client runtime logs are uploaded in authenticated batches', async () => {
+test('client runtime logs are uploaded only when authenticated server sync is enabled', async () => {
   const source = await readFile(runtimeLog, 'utf8');
   assert.match(source, /RUNTIME_LOG_UPLOAD_BATCH_SIZE\s*=\s*50/);
   assert.match(source, /\/api\/v1\/account\/runtime-logs/);
