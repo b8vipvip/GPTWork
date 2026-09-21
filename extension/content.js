@@ -36,6 +36,7 @@
     'button[aria-label*="Stop" i]',
     'button[aria-label*="停止"]',
   ];
+  const VERIFICATION_WORK_LABEL = /^(?:工作|work)$/i;
   const AUTO_PROBE_TEXT = 'GPTWork 模型验证测试：请只回复“验证完成”。';
 
   function visibleGeneratingControl() {
@@ -112,27 +113,29 @@
       .map((element) => compactElementProbe(element));
   }
 
+  function lightElementProbe(element) {
+    const full = compactElementProbe(element);
+    if (!full) return null;
+    return { tag: full.tag, attrs: full.attrs, text: full.text, rect: full.rect };
+  }
+
   function pickerTopologyProbe(stage, details = {}) {
-    const composer = activeComposerSurface();
     const trigger = composerIntelligenceTrigger();
     const picker = visibleIntelligencePickerContent();
     const popups = typeof modelPopupScopes === 'function' ? modelPopupScopes() : [];
-    const composerControls = composer
-      ? [...composer.querySelectorAll('button,[role="button"],[aria-haspopup]')].filter(visible).slice(0, 30).map(compactElementProbe)
-      : [];
+    // Keep verification topology useful without persisting tens of kilobytes of
+    // repeated ancestor/class data on every picker transition.
     pointerTrace('picker_topology', {
       stage,
       href: location.href,
       contextKind: location.pathname === '/' ? 'new-chat' : (location.pathname.startsWith('/c/') ? 'conversation' : 'other'),
-      trigger: compactElementProbe(trigger),
-      composer: compactElementProbe(composer),
-      composerControls,
-      picker: compactElementProbe(picker),
-      pickerRows: pickerProbeRows(picker),
+      trigger: lightElementProbe(trigger),
+      picker: lightElementProbe(picker),
+      pickerRows: pickerProbeRows(picker).slice(0, 18).map((row) => ({ tag: row.tag, attrs: row.attrs, text: row.text, rect: row.rect })),
       popupCount: popups.length,
-      popups: popups.slice(0, 12).map((scope) => ({
-        scope: compactElementProbe(scope),
-        rows: pickerProbeRows(scope),
+      popups: popups.slice(0, 6).map((scope) => ({
+        scope: lightElementProbe(scope),
+        rows: pickerProbeRows(scope).slice(0, 18).map((row) => row.text || ''),
       })),
       ...details,
     });
@@ -187,7 +190,7 @@
     // Hidden tabs are timer-throttled by Chromium; that delay is not user-visible
     // jank and must not be reported as event-loop lag.
     if (document.visibilityState !== 'visible' && lag > 0) return;
-    if (!abnormal || now - performanceTelemetry.lastReportedAt < 10000) return;
+    if (!abnormal || now - performanceTelemetry.lastReportedAt < 30000) return;
     performanceTelemetry.lastReportedAt = now;
     const details = {
       eventLoopLagMs: Math.round(lag),
@@ -220,13 +223,13 @@
     // Long Task API is not available in every Chromium execution context.
   }
 
-  let performanceTickExpected = performance.now() + 2000;
+  let performanceTickExpected = performance.now() + 5000;
   window.setInterval(() => {
     const now = performance.now();
     const lag = Math.max(0, now - performanceTickExpected);
-    performanceTickExpected = now + 2000;
+    performanceTickExpected = now + 5000;
     reportPerformanceTelemetry(lag);
-  }, 2000);
+  }, 5000);
 
   function passivePickerSnapshot(reason = 'dom-change') {
     const popups = typeof modelPopupScopes === 'function' ? modelPopupScopes() : [];
@@ -1442,11 +1445,65 @@ document.addEventListener('pointerdown', (event) => {
     if (!idle) throw new Error('ChatGPT is still generating / ChatGPT 仍在生成回复');
   }
 
+  function verificationWorkControl() {
+    return [...document.querySelectorAll('button,[role="tab"],[role="button"]')].find((element) => {
+      if (!visible(element)) return false;
+      if (!VERIFICATION_WORK_LABEL.test(String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim())) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.top >= 0 && rect.top < 120 && rect.width > 24 && rect.width < 240;
+    }) || null;
+  }
+
+  async function enterVerificationWorkMode() {
+    await waitForIdle();
+    const control = verificationWorkControl();
+    if (!control) return { attempted: false, reason: 'work_control_not_found' };
+    const selected = control.getAttribute('aria-selected') === 'true'
+      || control.getAttribute('aria-pressed') === 'true'
+      || ['checked', 'selected', 'active'].includes(String(control.getAttribute('data-state') || '').toLowerCase());
+    if (selected) return { attempted: false, alreadySelected: true, reason: 'already_work' };
+    await trustedPointer(control, 'click', 'verification-work-mode');
+    await new Promise((resolve) => window.setTimeout(resolve, 900));
+    return { attempted: true, reason: 'work_control_clicked' };
+  }
+
+  async function waitForProbeTurnSettled(message = {}) {
+    const before = Math.max(0, Number(message.assistantCountBefore || 0));
+    const timeoutMs = Math.min(180000, Math.max(5000, Number(message.timeoutMs || 120000)));
+    const deadline = Date.now() + timeoutMs;
+    let sawActivity = Boolean(visibleGeneratingControl()) || assistantMessages().length > before;
+    let idleSince = 0;
+    let stableFingerprint = '';
+    while (Date.now() < deadline) {
+      const generating = Boolean(visibleGeneratingControl());
+      const messages = assistantMessages();
+      if (generating || messages.length > before) sawActivity = true;
+      if (!sawActivity || generating) {
+        idleSince = 0;
+        stableFingerprint = '';
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+        continue;
+      }
+      const last = messages.at(-1);
+      const text = String(last?.innerText || last?.textContent || '').trim();
+      const fingerprint = `${messages.length}:${text.length}:${text.slice(-120)}`;
+      if (fingerprint !== stableFingerprint) {
+        stableFingerprint = fingerprint;
+        idleSince = Date.now();
+      } else if (idleSince && Date.now() - idleSince >= 1200) {
+        return { settled: true, assistantCount: messages.length, responseTextLength: text.length };
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 200));
+    }
+    return { settled: false, stillGenerating: Boolean(visibleGeneratingControl()), assistantCount: assistantMessages().length };
+  }
+
   async function autoSendProbe(options = {}) {
     if (autoProbeRunning) throw new Error('Automatic verification is already running / 自动验证正在进行');
     autoProbeRunning = true;
     try {
       await waitForIdle();
+      const assistantCountBefore = assistantMessages().length;
       if (options.skipAlignment !== true) {
         await alignSelection({ force: true });
         await new Promise((resolve) => window.setTimeout(resolve, 450));
@@ -1498,6 +1555,7 @@ document.addEventListener('pointerdown', (event) => {
         method: 'visible_composer_click',
         draftPreserved,
         draftRestored,
+        assistantCountBefore,
       };
     } finally {
       autoProbeRunning = false;
@@ -1674,6 +1732,20 @@ document.addEventListener('pointerdown', (event) => {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
         }),
+      );
+      return true;
+    }
+    if (message?.type === 'GPTLOCK_VERIFY_ENTER_WORK_MODE') {
+      void enterVerificationWorkMode().then(
+        (result) => sendResponse({ ok: true, ...result }),
+        (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+      return true;
+    }
+    if (message?.type === 'GPTLOCK_WAIT_FOR_PROBE_SETTLED') {
+      void waitForProbeTurnSettled(message).then(
+        (result) => sendResponse({ ok: true, ...result }),
+        (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
       );
       return true;
     }
