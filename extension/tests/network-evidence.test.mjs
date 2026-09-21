@@ -270,3 +270,29 @@ test('does not trust an unknown page-selected model and falls back to explicit l
   assert.equal(result.modelAfter, 'gpt-5.6-sol');
   assert.equal(result.reason, 'rewritten');
 });
+
+
+test('verification transaction force-locks the exact selected known model', () => {
+  const result = rewriteConversationPostData(JSON.stringify({ model: 'gpt-5.6-sol', thinking_effort: 'high' }), {
+    lockedModels: ['gpt-5.5'],
+    knownModels: ['gpt-5.6-sol', 'gpt-5.5'],
+    forceModel: 'gpt-5.5',
+    allowedReasoningLevels: ['high'],
+    preserveReasoning: true,
+  });
+  assert.equal(result.changed, true);
+  assert.equal(result.modelBefore, 'gpt-5.6-sol');
+  assert.equal(result.modelAfter, 'gpt-5.5');
+  assert.equal(result.reason, 'verification_model_forced');
+});
+
+test('verification forceModel is rejected unless it belongs to the known catalog', () => {
+  const source = JSON.stringify({ model: 'gpt-5.6-sol' });
+  const result = rewriteConversationPostData(source, {
+    lockedModels: ['gpt-5.6-sol'],
+    knownModels: ['gpt-5.6-sol'],
+    forceModel: 'gpt-unknown-preview',
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.modelAfter, 'gpt-5.6-sol');
+});
