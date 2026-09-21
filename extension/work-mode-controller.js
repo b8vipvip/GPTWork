@@ -191,12 +191,13 @@
 
   function detectProcessingMode() {
     const evidence = workEvidenceSnapshot();
-    const confirmed = evidence.conversationMarker && evidence.panel.confirmed;
+    const { conversationMarker, panel } = evidence;
+    const confirmed = conversationMarker && panel.confirmed;
     return {
       mode: confirmed ? 'work' : 'chat',
       confirmed,
-      conversationMarker: evidence.conversationMarker,
-      panel: evidence.panel,
+      conversationMarker,
+      panel,
       generating: Boolean(document.querySelector(GENERATING_SELECTORS.join(','))),
     };
   }
