@@ -372,6 +372,8 @@
     const remove = event.removeListener;
     const trackedAdd = function trackedChromeAddListener(listener) {
       if (typeof listener !== 'function') return add.call(event, listener);
+      const existing = [...chromeEventListeners].find((record) => record.event === event && record.listener === listener);
+      if (existing) return add.call(event, existing.wrapped || listener);
       const wrapped = function measuredChromeEventListener(...args) {
         return measureCallback('chromeEvent', listener, args);
       };
