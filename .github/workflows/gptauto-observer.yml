@@ -37,7 +37,10 @@ concurrency:
   cancel-in-progress: true
 jobs:
   observe:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_run' || github.event_name == 'release' || github.actor != 'github-actions[bot]' || github.event_name == 'pull_request' }}
+    # A cancelled CI/Release run is replacement/no-result evidence: it cannot
+    # satisfy a gate and must not open a repair cycle. Keep the existing
+    # Completion Lease active and wait for the replacement/current-head run.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'cancelled') || github.event_name == 'release' || github.actor != 'github-actions[bot]' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
