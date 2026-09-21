@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -75,9 +75,9 @@ impl RuntimeLogger {
         let previous = previous.trim();
         if previous != version {
             if fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0) > 0 {
-                let stamp = Utc::now().format("%Y%m%d-%H%M%S-%3f");
+                let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f");
                 let from = if previous.is_empty() {
-                    "unknown"
+                    "pre"
                 } else {
                     previous
                 };
@@ -107,7 +107,7 @@ impl RuntimeLogger {
             return Ok(());
         }
         let stamp = Utc::now().format("%Y%m%d-%H%M%S-%3f");
-        let rotated = self.dir.join(format!("runtime-{stamp}.jsonl"));
+        let rotated = self.dir.join(format!("runtime-v{}-{stamp}.jsonl", env!("CARGO_PKG_VERSION")));
         fs::rename(&self.path, rotated).context("rotate GPTWork runtime log")?;
         Ok(())
     }
