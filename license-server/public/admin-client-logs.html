@@ -23,8 +23,10 @@
     <div id="app" hidden>
       <section id="clientLogs" class="card">
         <div class="section-title">
-          <div><h2>客户端运行日志</h2><p class="muted">客户端继续在本机采集脱敏运行日志，并按批次自动上传。服务端默认保留 30 天，可按用户、设备、组件、事件或级别筛选。</p></div>
+          <div><h2>客户端运行日志</h2><p class="muted">客户端继续在本机采集脱敏运行日志；服务端同步默认关闭，仅在下方“同步日志”开启后客户端才上传。服务端默认保留 30 天，可按用户、设备、组件、事件或级别筛选。</p></div>
           <div class="section-actions">
+            <label class="check"><input id="clientLogSyncEnabled" type="checkbox"><span>同步日志</span></label>
+            <button id="saveClientLogSync">保存同步设置</button>
             <input id="clientLogSearch" placeholder="邮箱 / 设备 / 组件 / 事件">
             <select id="clientLogLevel"><option value="">全部级别</option><option value="error">ERROR</option><option value="warn">WARN</option><option value="info">INFO</option><option value="debug">DEBUG</option></select>
             <select id="clientLogLimit"><option value="200">200 条</option><option value="500" selected>500 条</option><option value="1000">1000 条</option><option value="2000">2000 条</option></select>
