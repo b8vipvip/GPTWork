@@ -5,8 +5,8 @@
   const DISCOVERY_SCHEMA_VERSION = 3;
   const TRUSTED_STATUS_STORAGE_KEY = 'gptlock.trusted-model-status.v1';
   const MAX_DISCOVERED_MODELS = 64;
-  const STATE_REFRESH_MS = 1200;
-  const PAGE_REFRESH_DELAY_MS = 120;
+  const STATE_REFRESH_MS = 10000;
+  const PAGE_REFRESH_DELAY_MS = 350;
   const INDICATOR_GAP_PX = 8;
   const VIEWPORT_MARGIN_PX = 12;
   const MODEL_ALIASES = Object.freeze({
@@ -106,13 +106,9 @@
       }
     }
 
-    for (const element of document.querySelectorAll('button,[role="button"]')) {
-      if (!visible(element)) continue;
-      for (const text of elementTexts(element)) {
-        const model = normalizeDisplayedModel(text);
-        if (model) return model;
-      }
-    }
+    // Never fall back to scanning every button on the page. Streaming responses and
+    // Work panels can contain hundreds of buttons; rescanning them on DOM churn was
+    // a visible main-thread cost and could also misidentify unrelated controls.
     return null;
   }
 
@@ -522,24 +518,25 @@
     render(lastState);
   });
 
-  const pageObserver = new MutationObserver(schedulePageRefresh);
+  const pageModelSelector = PAGE_MODEL_SELECTORS.join(',');
+  const pageObserver = new MutationObserver((mutations) => {
+    const relevant = mutations.some((mutation) => {
+      const target = mutation.target?.nodeType === Node.ELEMENT_NODE
+        ? mutation.target
+        : mutation.target?.parentElement;
+      if (target?.matches?.(pageModelSelector) || target?.closest?.(pageModelSelector)) return true;
+      if (mutation.type !== 'childList') return false;
+      return [...mutation.addedNodes].some((node) =>
+        node?.nodeType === Node.ELEMENT_NODE
+        && (node.matches?.(pageModelSelector) || node.querySelector?.(pageModelSelector)));
+    });
+    if (relevant) schedulePageRefresh();
+  });
   pageObserver.observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
     attributes: true,
-    attributeFilter: [
-      'aria-label',
-      'aria-checked',
-      'aria-selected',
-      'data-state',
-      'data-selected',
-      'data-value',
-      'data-model',
-      'data-model-id',
-      'title',
-      'data-testid',
-    ],
+    attributeFilter: ['aria-label', 'aria-selected', 'data-state', 'data-value', 'data-model', 'data-model-id', 'title', 'data-testid'],
   });
 
   window.addEventListener('resize', schedulePosition, { passive: true });
