@@ -1479,13 +1479,49 @@ document.addEventListener('pointerdown', (event) => {
     return null;
   }
 
+  function idleSnapshot() {
+    const generatingControl = visibleGeneratingControl();
+    const composer = findComposer();
+    const sendButton = findSendButton();
+    const assistant = assistantMessages().at(-1) || null;
+    const text = String(assistant?.innerText || assistant?.textContent || '').trim();
+    return {
+      generating: Boolean(generatingControl),
+      generatingLabel: String(generatingControl?.getAttribute?.('aria-label') || generatingControl?.getAttribute?.('title') || generatingControl?.textContent || '').trim().slice(0, 160),
+      composerVisible: Boolean(composer && visible(composer)),
+      sendReady: Boolean(sendButton),
+      assistantCount: assistantMessages().length,
+      assistantFingerprint: `${text.length}:${text.slice(-120)}`,
+    };
+  }
+
   async function waitForIdle() {
-    const idle = await waitUntil(
-      () => !visibleGeneratingControl(),
-      30000,
-      250,
-    );
-    if (!idle) throw new Error('ChatGPT is still generating / ChatGPT 仍在生成回复');
+    const deadline = Date.now() + 30000;
+    let stableSince = 0;
+    let lastFingerprint = '';
+    while (Date.now() < deadline) {
+      const snapshot = idleSnapshot();
+      // Current ChatGPT can leave a stale visible Stop control mounted after the
+      // response has terminally settled. A ready composer + stable assistant turn
+      // for 1.5s is a safe secondary terminal signal; it never treats changing
+      // assistant text as idle.
+      if (!snapshot.generating) return snapshot;
+      const fingerprint = `${snapshot.assistantCount}:${snapshot.assistantFingerprint}`;
+      if (snapshot.composerVisible && snapshot.sendReady) {
+        if (fingerprint !== lastFingerprint) {
+          lastFingerprint = fingerprint;
+          stableSince = Date.now();
+        } else if (stableSince && Date.now() - stableSince >= 1500) {
+          return { ...snapshot, staleGeneratingControlIgnored: true };
+        }
+      } else {
+        stableSince = 0;
+        lastFingerprint = fingerprint;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    const snapshot = idleSnapshot();
+    throw new Error(`ChatGPT is still generating / ChatGPT 仍在生成回复 [${JSON.stringify(snapshot)}]`);
   }
 
   function verificationWorkControl() {
@@ -1736,7 +1772,22 @@ document.addEventListener('pointerdown', (event) => {
     };
   }
 
+  function setDiagnosticContentSuspended(suspended) {
+    const next = suspended === true;
+    globalThis.__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__ = next;
+    const hostIds = ['gptlock-indicator-host', 'gptlock-verification-progress-host'];
+    for (const id of hostIds) {
+      const node = document.getElementById(id);
+      if (node) node.style.display = next ? 'none' : '';
+    }
+    return { suspended: next, timestamp: new Date().toISOString() };
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND') {
+      sendResponse({ ok: true, ...setDiagnosticContentSuspended(message.suspended) });
+      return false;
+    }
     if (message?.type === 'GPTLOCK_AUTO_RESOLVE_MODEL_NAMES') {
       void resolveModelNamesWithChatGpt(message).then(
         (result) => sendResponse({ ok: true, ...result }),
@@ -1796,6 +1847,7 @@ document.addEventListener('pointerdown', (event) => {
   });
 
   new MutationObserver((mutations) => {
+    if (globalThis.__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__ === true) return;
     const startedAt = performance.now();
     // DOM observation never performs clicks. All ChatGPT UI mutation is owned by an
     // explicit model-selection transaction. Typing/streaming text is the hottest DOM path in ChatGPT. It cannot change lock
@@ -1843,6 +1895,7 @@ document.addEventListener('pointerdown', (event) => {
   });
 
   window.setInterval(() => {
+    if (globalThis.__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__ === true) return;
     if (cachedSettings?.enabled === false || cachedState?.guard?.canSend !== false) return;
     if (!runtimeContextAvailable()) {
       failOpenStaleRuntime();
