@@ -130,18 +130,18 @@ test('diagnoses empty and unparseable response bodies without retaining content'
   assert.equal(unparsed.diagnostics.bodyLength, 8);
 });
 
-test('normalizes the observed Sol transport alias but keeps thinking independent', () => {
+test('normalizes observed Sol transport aliases including thinking metadata', () => {
   assert.equal(extractRequestEvidence('{"model":"gpt-5.6-sol-wm"}').model, 'gpt-5.6-sol');
-  assert.equal(extractRequestEvidence('{"model":"gpt-5-6-thinking"}').model, 'gpt-5-6-thinking');
+  assert.equal(extractRequestEvidence('{"model":"gpt-5-6-thinking"}').model, 'gpt-5.6-sol');
 });
 
 test('rewrites a disallowed top-level model to the known Sol transport id', () => {
   const result = rewriteConversationPostData(
-    JSON.stringify({ model: 'gpt-5-6-thinking', messages: [{ content: 'keep me' }] }),
+    JSON.stringify({ model: 'gpt-5.5', messages: [{ content: 'keep me' }] }),
     { lockedModels: ['gpt-5.6-sol'], allowedReasoningLevels: ['high'], preferredReasoning: 'high' },
   );
   assert.equal(result.changed, true);
-  assert.equal(result.modelBefore, 'gpt-5-6-thinking');
+  assert.equal(result.modelBefore, 'gpt-5.5');
   assert.equal(result.modelAfter, 'gpt-5.6-sol');
   assert.equal(result.transportModelAfter, 'gpt-5.6-sol-wm');
   assert.deepEqual(JSON.parse(result.postData).messages, [{ content: 'keep me' }]);
