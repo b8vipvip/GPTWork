@@ -20,6 +20,7 @@ import {
   runtimeLogNativeBatch,
   uploadRuntimeLogBatch,
   RUNTIME_LOG_UPLOAD_ALARM,
+  RUNTIME_LOG_SYNC_KEY,
   sanitizeLogValue,
 } from './runtime-log.js';
 import { createAccountClient } from './account-client.js';
@@ -38,6 +39,7 @@ const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
 const DIAGNOSTIC_SSE_STORAGE_KEY = 'autoVerificationSseCapture';
 const MODEL_VERIFICATION_HISTORY_KEY = 'modelVerificationHistoryV1';
+const MODEL_VERIFICATION_HISTORY_ENABLED_KEY = 'gptworkModelVerificationHistoryEnabled';
 const MODEL_VERIFICATION_HISTORY_LIMIT = 50;
 const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
@@ -84,7 +86,6 @@ function scheduleRuntimeLogDelivery() {
     // Browser storage is the canonical log. Native-file and server copies are delivery
     // sinks only; both consume the same immutable entry ids and acknowledge independently.
     void syncRuntimeLogsToNative().catch(() => {});
-    void uploadRuntimeLogBatch().catch(() => {});
   }, 750);
 }
 
@@ -920,7 +921,10 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
     .map((tab) => `chrome:${tab.windowId}`))];
   try {
     accountState = await accountClient.heartbeat(windowKeys);
-    if (accountState?.authenticated === true) void syncSharedKnownModels();
+    if (accountState?.authenticated === true) {
+      void syncSharedKnownModels();
+      await applyServerFeatureSettings();
+    }
   } catch (error) {
     accountState = { ...accountClient.snapshot(), lastError: errorText(error) };
   }
@@ -942,15 +946,24 @@ async function applyServerFeatureSettings() {
     const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
     const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
     const policyChanged = JSON.stringify(nextPolicy) !== JSON.stringify(currentPolicy);
+    const local = await chrome.storage.local.get(RUNTIME_LOG_SYNC_KEY);
+    const runtimeLogSyncEnabled = remote.runtimeLogSyncEnabled === true;
+    const logSyncChanged = local[RUNTIME_LOG_SYNC_KEY] !== runtimeLogSyncEnabled;
     if (settingsChanged || policyChanged) {
       await chrome.storage.sync.set({ settings: nextSettings, policy: nextPolicy });
       currentSettings = nextSettings;
       currentPolicy = nextPolicy;
+    }
+    if (logSyncChanged) {
+      await chrome.storage.local.set({ [RUNTIME_LOG_SYNC_KEY]: runtimeLogSyncEnabled });
+    }
+    if (settingsChanged || policyChanged || logSyncChanged) {
       logRuntime('info', 'settings', 'server_client_settings_applied', {
         generation: remote.generation ?? null,
         responseVerificationEnabled: nextSettings.networkVerificationEnabled,
         autoAlignSelection: nextSettings.autoAlignSelection,
         strictMode: nextPolicy.strictMode,
+        runtimeLogSyncEnabled,
       });
     }
     return remote;
@@ -1630,8 +1643,12 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
 }
 
 async function persistModelVerificationHistory(tabId, autoVerification) {
+  const stored = await chrome.storage.local.get([
+    MODEL_VERIFICATION_HISTORY_KEY,
+    MODEL_VERIFICATION_HISTORY_ENABLED_KEY,
+  ]);
+  if (stored[MODEL_VERIFICATION_HISTORY_ENABLED_KEY] !== true) return null;
   const record = modelVerificationHistoryRecord(tabId, autoVerification);
-  const stored = await chrome.storage.local.get(MODEL_VERIFICATION_HISTORY_KEY);
   const previous = Array.isArray(stored[MODEL_VERIFICATION_HISTORY_KEY])
     ? stored[MODEL_VERIFICATION_HISTORY_KEY]
     : [];
