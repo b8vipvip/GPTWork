@@ -179,7 +179,13 @@
 
   function startPassivePickerObserver() {
     if (passivePickerObserver || !document.documentElement) return;
-    passivePickerObserver = new MutationObserver(() => passivePickerSnapshot('mutation'));
+    passivePickerObserver = new MutationObserver(() => {
+      // Full popup topology scans are diagnostic work, not ordinary runtime work.
+      // Keep the observer dormant until an explicit verification transaction owns the page.
+      if (autoVerificationRunning || cachedState?.autoVerification?.running === true) {
+        passivePickerSnapshot('mutation');
+      }
+    });
     passivePickerObserver.observe(document.documentElement, {
       subtree: true,
       childList: true,
@@ -1596,14 +1602,22 @@ document.addEventListener('pointerdown', (event) => {
     return false;
   });
 
-  new MutationObserver(() => {
+  new MutationObserver((mutations) => {
     // DOM observation never performs clicks. All ChatGPT UI mutation is owned by an
-    // explicit model-selection transaction.
-    scheduleReport();
+    // explicit model-selection transaction. Typing/streaming text is the hottest DOM path in ChatGPT. It cannot change lock
+    // identity by itself, so never schedule a whole-page observation for pure text edits.
+    const relevant = mutations.some((mutation) => {
+      if (mutation.type === 'characterData') return false;
+      const target = mutation.target?.nodeType === Node.ELEMENT_NODE
+        ? mutation.target
+        : mutation.target?.parentElement;
+      if (target?.closest?.('textarea,[contenteditable="true"]')) return false;
+      return true;
+    });
+    if (relevant) scheduleReport();
   }).observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
     attributes: true,
     attributeFilter: [
       'aria-label',

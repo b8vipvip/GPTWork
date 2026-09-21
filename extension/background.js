@@ -548,9 +548,11 @@ function sendNative(type, payload = {}) {
   });
 }
 
+let nativeLogSyncQueue = Promise.resolve();
 async function syncRuntimeLogsToNative() {
-  if (!masterRuntimeEnabled()) return { written: 0, skipped: 'master_disabled' };
-  let total = 0;
+  nativeLogSyncQueue = nativeLogSyncQueue.catch(() => {}).then(async () => {
+    if (!masterRuntimeEnabled()) return { written: 0, skipped: 'master_disabled' };
+    let total = 0;
   // Drain several small batches without blocking ordinary verification messages for long.
   for (let pass = 0; pass < 40; pass += 1) {
     const records = await runtimeLogNativeBatch(50);
@@ -562,7 +564,9 @@ async function syncRuntimeLogsToNative() {
     total += written;
     if (records.length < 50) break;
   }
-  return { written: total };
+    return { written: total };
+  });
+  return nativeLogSyncQueue;
 }
 
 async function syncPolicy() {
@@ -882,7 +886,10 @@ async function configureTab(tab) {
     return state;
   }
   const enabled = effectiveSettingsForState(state).enabled;
-  if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
+  // Navigation from / to /c/:id is part of a new-chat verification turn. Detaching
+  // CDP while ChatGPT creates that conversation loses the first formal request.
+  if (verificationTransactionForTab(tab.id)) await networkMonitor.attach(tab.id);
+  else if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
   else await networkMonitor.attach(tab.id);
   await broadcastTabState(tab.id);
   return state;

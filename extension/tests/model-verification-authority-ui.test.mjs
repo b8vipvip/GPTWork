@@ -321,3 +321,15 @@ test('v0.5.103 runtime log delivery is event-driven from one canonical browser l
   assert.match(background, /syncRuntimeLogsToNative/);
   assert.match(background, /same immutable entry ids/);
 });
+
+
+test('v0.5.104 verification survives new-chat navigation without CDP detach', () => {
+  assert.match(background, /verificationTransactionForTab\(tab\.id\)\) await networkMonitor\.attach/);
+  assert.match(background, /bypassRewrite: Boolean\(transaction\)/);
+});
+
+test('v0.5.104 ordinary typing does not trigger full page observation', () => {
+  assert.match(content, /mutation\.type === 'characterData'\) return false/);
+  assert.match(content, /textarea,\[contenteditable="true"\]/);
+  assert.match(content, /Full popup topology scans are diagnostic work/);
+});

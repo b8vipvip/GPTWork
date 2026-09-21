@@ -110,6 +110,7 @@ export class ChatGptNetworkMonitor {
     this.webSockets = new Map();
     this.lastFormalRequestByTab = new Map();
     this.webSocketSequence = 0;
+    this.lastPurgeAt = 0;
     chrome.debugger.onEvent.addListener((source, method, params) => {
       void this.handleEvent(source, method, params);
     });
@@ -368,7 +369,11 @@ export class ChatGptNetworkMonitor {
   async handleEvent(source, method, params = {}) {
     const tabId = source.tabId;
     if (!tabId || !this.attachedTabs.has(tabId)) return;
-    this.purgeOldRequests();
+    const now = Date.now();
+    if (now - this.lastPurgeAt >= 5000) {
+      this.lastPurgeAt = now;
+      this.purgeOldRequests();
+    }
 
     if (method === 'Fetch.requestPaused') {
       await this.handlePausedRequest(tabId, params);
