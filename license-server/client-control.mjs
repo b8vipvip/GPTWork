@@ -62,6 +62,10 @@ export function createClientControlSystem({
     VALUES(1,1,0,?)`).run(nowIso());
   db.prepare(`INSERT OR IGNORE INTO client_feature_settings(id,response_verification_enabled,auto_align_selection,strict_mode,generation,updated_at)
     VALUES(1,1,1,1,0,?)`).run(nowIso());
+  const featureColumns = db.prepare('PRAGMA table_info(client_feature_settings)').all();
+  if (!featureColumns.some((column) => column.name === 'runtime_log_sync_enabled')) {
+    db.exec('ALTER TABLE client_feature_settings ADD COLUMN runtime_log_sync_enabled INTEGER NOT NULL DEFAULT 0 CHECK(runtime_log_sync_enabled IN (0,1))');
+  }
 
   const waiters = new Map();
   const onlineTtlSeconds = Math.max(90, Number(windowTtlSeconds || DEFAULT_ONLINE_TTL_SECONDS));
@@ -126,6 +130,7 @@ export function createClientControlSystem({
       responseVerificationEnabled: Boolean(row.response_verification_enabled),
       autoAlignSelection: Boolean(row.auto_align_selection),
       strictMode: Boolean(row.strict_mode),
+      runtimeLogSyncEnabled: Boolean(row.runtime_log_sync_enabled),
       generation: Number(row.generation || 0),
       updatedAt: row.updated_at,
     };
@@ -310,8 +315,18 @@ export function createClientControlSystem({
     if (path === '/admin/api/client-feature-settings' && req.method === 'PUT') {
       const input = await bodyJson(req);
       const stamp = nowIso();
-      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,generation=generation+1,updated_at=? WHERE id=1`)
-        .run(input.responseVerificationEnabled !== false ? 1 : 0, input.autoAlignSelection !== false ? 1 : 0, input.strictMode === true ? 1 : 0, stamp);
+      const current = featureSettings();
+      const runtimeLogSyncEnabled = input.runtimeLogSyncEnabled === undefined
+        ? current.runtimeLogSyncEnabled
+        : input.runtimeLogSyncEnabled === true;
+      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,runtime_log_sync_enabled=?,generation=generation+1,updated_at=? WHERE id=1`)
+        .run(
+          input.responseVerificationEnabled !== false ? 1 : 0,
+          input.autoAlignSelection !== false ? 1 : 0,
+          input.strictMode === true ? 1 : 0,
+          runtimeLogSyncEnabled ? 1 : 0,
+          stamp,
+        );
       audit('admin_client_feature_settings_changed', null, featureSettings());
       notifyAll();
       json(res, 200, { ok: true, settings: featureSettings() });
