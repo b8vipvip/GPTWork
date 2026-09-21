@@ -1696,7 +1696,27 @@ async function autoVerify(tabId) {
 
   const sharedKnownModels = await syncSharedKnownModels();
   state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-  const accountCatalog = await discoverAccountCatalog(tabId);
+  const initialCatalog = await discoverAccountCatalog(tabId);
+  let accountCatalog = initialCatalog;
+  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: null };
+  if (initialCatalog.pickerMode !== 'B') {
+    try {
+      const work = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' });
+      state.autoVerification.workDiscovery = {
+        attempted: work?.attempted === true,
+        entered: work?.attempted === true || work?.alreadySelected === true,
+        reason: work?.reason || null,
+      };
+      logRuntime('info', 'verification', 'verification_work_mode_transition', { tabId, ...state.autoVerification.workDiscovery });
+      if (state.autoVerification.workDiscovery.entered) {
+        const workCatalog = await discoverAccountCatalog(tabId);
+        accountCatalog = mergeAccountCatalogs(initialCatalog, workCatalog);
+      }
+    } catch (error) {
+      state.autoVerification.workDiscovery = { attempted: true, entered: false, reason: errorText(error) };
+      logRuntime('warn', 'verification', 'verification_work_mode_transition_failed', { tabId, error: errorText(error) });
+    }
+  }
   state.autoVerification.maxAttempts = accountCatalog.rows.length;
   await broadcastTabState(tabId);
 
