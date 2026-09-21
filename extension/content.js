@@ -575,6 +575,14 @@ document.addEventListener('pointerdown', (event) => {
   function handlePotentialSend(event) {
     if (event.type === 'submit' && Date.now() - sendConsumedAt < 750) return true;
 
+    // During automatic model verification this fixed probe belongs exclusively to the
+    // verification transaction. Normal Work/model-lock guards have no decision authority.
+    if (cachedState?.autoVerification?.running === true) {
+      sendConsumedAt = Date.now();
+      void sendMessage({ type: 'GPTLOCK_SEND_STARTED' }).catch(() => {});
+      return true;
+    }
+
     // The page-level listener can outlive the extension service worker when a user
     // disables/reloads/uninstalls the extension. A stale listener must never keep
     // ChatGPT blocked after GPTWork itself is no longer reachable.
