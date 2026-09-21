@@ -76,11 +76,7 @@ impl RuntimeLogger {
         if previous != version {
             if fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0) > 0 {
                 let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f");
-                let from = if previous.is_empty() {
-                    "pre"
-                } else {
-                    previous
-                };
+                let from = if previous.is_empty() { "pre" } else { previous };
                 let rotated = self.dir.join(format!(
                     "runtime-v{}-to-v{}-{stamp}.jsonl",
                     from.replace(
@@ -107,7 +103,10 @@ impl RuntimeLogger {
             return Ok(());
         }
         let stamp = Local::now().format("%Y%m%d-%H%M%S-%3f");
-        let rotated = self.dir.join(format!("runtime-v{}-{stamp}.jsonl", env!("CARGO_PKG_VERSION")));
+        let rotated = self.dir.join(format!(
+            "runtime-v{}-{stamp}.jsonl",
+            env!("CARGO_PKG_VERSION")
+        ));
         fs::rename(&self.path, rotated).context("rotate GPTWork runtime log")?;
         Ok(())
     }
