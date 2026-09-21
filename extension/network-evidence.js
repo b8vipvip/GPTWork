@@ -443,13 +443,14 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
 
   result.transportModelBefore = parsed.model;
   result.modelBefore = normalizeModelId(parsed.model);
-  // Multiple checked models are a priority/fallback set, not an unordered allowlist.
-  // Always request the strongest selected model first; lower models remain explicit fallbacks.
-  // Auto verification is the exception: after the page explicitly selects one account model,
-  // preserve the raw transport ID ChatGPT itself emits so future/unknown models are observed
-  // rather than rewritten from a guessed canonical transport mapping.
-  const targetModel = lockedModels[0];
-  const preserveModel = configuration.preserveModel === true;
+  // The page-selected request model is authoritative only when it belongs to the
+  // known-model catalog. This preserves the user's visible ChatGPT selection while
+  // still preventing an unknown/untrusted model id from bypassing the lock policy.
+  // If the page model is unknown, fall back to the strongest explicit locked model.
+  const knownModels = new Set(normalizedUnique(configuration.knownModels, normalizeModelId));
+  const pageSelectedKnown = Boolean(result.modelBefore && knownModels.has(result.modelBefore));
+  const targetModel = pageSelectedKnown ? result.modelBefore : lockedModels[0];
+  const preserveModel = configuration.preserveModel === true || pageSelectedKnown;
   const targetTransport = preserveModel
     ? parsed.model
     : result.modelBefore === targetModel
@@ -495,7 +496,11 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
     : null;
 
   if (result.changed) result.postData = JSON.stringify(parsed);
-  result.reason = preserveModel ? 'verification_model_passthrough' : result.changed ? 'rewritten' : 'already_locked';
+  result.reason = configuration.preserveModel === true
+    ? 'verification_model_passthrough'
+    : pageSelectedKnown
+      ? 'page_selected_known_model_locked'
+      : result.changed ? 'rewritten' : 'already_locked';
   return result;
 }
 
