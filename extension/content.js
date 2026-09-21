@@ -478,13 +478,15 @@ document.addEventListener('pointerdown', (event) => {
       const verified = Math.max(0, Number(catalog?.verified || 0));
       const requestConfirmed = Math.max(0, Number(catalog?.requestConfirmed || 0));
       progress.querySelector('.current span').textContent = label;
-      progress.querySelector('.execution').textContent = total ? `${completed} / ${total}` : '…';
+      // The catalog intentionally grows after real turns. Make that explicit instead
+      // of presenting a changing denominator as if verification restarted.
+      progress.querySelector('.execution').textContent = total ? `${completed} 已执行 · ${total} 已发现` : '正在发现…';
       progress.querySelector('.verified').textContent = total ? `${verified} / ${total}` : '…';
       progress.querySelector('.requested').textContent = total ? `${requestConfirmed} / ${total}` : '…';
       const bar = progress.querySelector('progress');
       bar.max = Math.max(1, total);
       bar.value = completed;
-      button.textContent = `GPTWork · 模型验证 ${auto.attempt || 1}/${auto.maxAttempts || total || 1}`;
+      button.textContent = `GPTWork · 模型验证 · 已执行 ${completed} · 已发现 ${total}`;
       button.dataset.tone = 'wait';
       button.title = '模型验证正在进行；执行进度与验证成功分开统计。响应/流模型元数据优先用于验证，请求模型保留为请求确认。';
       return;
