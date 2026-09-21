@@ -33,3 +33,11 @@ test('request history pagination renders eight records per page with previous an
   assert.match(historyOptionsSource, /currentPage -= 1/);
   assert.match(historyCss, /\.request-history-pagination/);
 });
+
+
+test('v0.5.109 Settings does not rebuild request history for every runtime-log write', () => {
+  assert.match(historyOptionsSource, /historyDirty = true/);
+  assert.match(historyOptionsSource, /refreshIfDirty/);
+  assert.match(historyOptionsSource, /visibilitychange/);
+  assert.doesNotMatch(historyOptionsSource, /setTimeout\(\(\) => void refreshHistory\(\).*80/);
+});
