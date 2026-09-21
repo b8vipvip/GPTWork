@@ -2275,6 +2275,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           eventLoopLagMs: Math.max(0, Math.min(60000, Number(details.eventLoopLagMs) || 0)),
           maxLongTaskMs: Math.max(0, Math.min(60000, Number(details.maxLongTaskMs) || 0)),
           longTaskCount: Math.max(0, Math.min(10000, Number(details.longTaskCount) || 0)),
+          recentLongTasks: sanitizeLogValue(Array.isArray(details.recentLongTasks) ? details.recentLongTasks.slice(-8) : []),
           mutationCount: Math.max(0, Math.min(1000000, Number(details.mutationCount) || 0)),
           mutationCallbacks: Math.max(0, Math.min(100000, Number(details.mutationCallbacks) || 0)),
           maxMutationCallbackMs: Math.max(0, Math.min(60000, Number(details.maxMutationCallbackMs) || 0)),
