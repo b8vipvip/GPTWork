@@ -35,6 +35,8 @@
   const performanceObservers = new Set();
   const resizeObservers = new Set();
   const eventListeners = new Set();
+  const chromeEventListeners = new Set();
+  const chromeEventPatches = [];
   let disposed = false;
   let terminalReason = null;
   let healthTimer = null;
@@ -107,6 +109,11 @@
       if (globalThis.EventTarget?.prototype?.removeEventListener === trackedRemoveEventListener) {
         globalThis.EventTarget.prototype.removeEventListener = original.removeEventListener;
       }
+      for (const patch of chromeEventPatches) {
+        if (patch.event?.addListener === patch.trackedAdd) patch.event.addListener = patch.add;
+        if (patch.event?.removeListener === patch.trackedRemove) patch.event.removeListener = patch.remove;
+      }
+      chromeEventPatches.length = 0;
       if (globalThis.chrome?.runtime?.sendMessage === trackedSendMessage && typeof original.sendMessage === 'function') {
         globalThis.chrome.runtime.sendMessage = original.sendMessage;
       }
