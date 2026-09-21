@@ -359,6 +359,7 @@ function publicTabState(state) {
     evidenceIssue: state.evidenceIssue,
     lastError: state.lastError,
     autoVerification: state.autoVerification,
+    knownModels: [...sharedKnownModelIds],
     updatedAt: state.updatedAt,
     guard: guardFor(state),
   };
