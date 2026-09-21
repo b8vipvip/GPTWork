@@ -333,3 +333,17 @@ test('v0.5.104 ordinary typing does not trigger full page observation', () => {
   assert.match(content, /textarea,\[contenteditable="true"\]/);
   assert.match(content, /Full popup topology scans are diagnostic work/);
 });
+
+
+test('v0.5.105 dynamic catalog converges by stable model identity', () => {
+  assert.match(background, /function|const catalogIdentity/);
+  assert.match(background, /if \(model\) return \`model:\$\{model\}\`/);
+  assert.match(background, /if \(knownKeys\.has\(key\)\)/);
+  assert.match(background, /uniqueModels: knownKeys\.size/);
+  assert.doesNotMatch(background, /\[model \|\| '', rawModel \|\| '', selectorKey, label\]\.join/);
+});
+
+test('v0.5.105 progress UI separates executed work from growing discovery', () => {
+  assert.match(content, /已执行 · \$\{total\} 已发现/);
+  assert.match(content, /模型验证 · 已执行/);
+});

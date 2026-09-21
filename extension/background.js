@@ -1261,6 +1261,17 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   const queue = [];
   const knownKeys = new Set();
   const reasoningLevels = new Set();
+
+  const catalogIdentity = ({ model, rawModel, selectorKey, label }) => {
+    // A concrete backend model is the stable identity. Picker labels/selectors may
+    // change after each real turn (badges, retirement copy, localization), and must
+    // never turn one model into a new verification attempt.
+    if (model) return `model:${model}`;
+    if (rawModel) return `raw:${rawModel}`;
+    const selector = String(selectorKey || '').trim().toLowerCase();
+    if (selector) return `selector:${selector}`;
+    return `label:${String(label || '').trim().toLowerCase()}`;
+  };
   const progress = state.autoVerification.catalogVerification = {
     total: 0,
     completed: 0,
@@ -1285,8 +1296,18 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const selectorKey = String(row?.selectorKey || '').trim().slice(0, 200);
       const label = String(row?.label || model || selectorKey || '').trim().slice(0, 160);
       if (!model && !selectorKey && !label) continue;
-      const key = [model || '', rawModel || '', selectorKey, label].join('|').toLowerCase();
-      if (knownKeys.has(key)) continue;
+      const key = catalogIdentity({ model, rawModel, selectorKey, label });
+      if (knownKeys.has(key)) {
+        // Refresh the not-yet-run row with the newest picker locator without
+        // increasing the terminal workload.
+        const existing = queue.find((item) => catalogIdentity(item) === key);
+        if (existing && !progress.results.some((result) => catalogIdentity(result) === key)) {
+          existing.rawModel = rawModel || existing.rawModel;
+          existing.selectorKey = selectorKey || existing.selectorKey;
+          existing.label = label || existing.label;
+        }
+        continue;
+      }
       knownKeys.add(key);
       queue.push({ model, rawModel, selectorKey, label });
       added += 1;
@@ -1439,7 +1460,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     }
   }
   logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
-    tabId, total: progress.total, requestConfirmed: progress.requestConfirmed,
+    tabId, total: progress.total, uniqueModels: knownKeys.size, requestConfirmed: progress.requestConfirmed,
     verified: progress.verified, failed: progress.failed,
     discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
     reasoningLevels: progress.reasoningLevels, results: progress.results,
