@@ -12,7 +12,7 @@
   const TURN_SELECTOR = '[data-message-author-role],article[data-testid^="conversation-turn-"]';
   const MODE_CONTROL_SELECTOR = 'button,[role="tab"],[role="button"]';
   const GUIDANCE_TEXT = '无需手动选择工作模式，在聊天模式直接发消息或任务后GPT自动以工作模式处理问题';
-  const REFRESH_DELAY_MS = 120;
+  const REFRESH_DELAY_MS = 800;
 
   // Fail inert. Work selection is now owned by this ChatGPT tab, while the background
   // account/master gate remains a separate prerequisite.
@@ -183,6 +183,13 @@
     refreshTimer = null;
     const row = ensureProcessingModeRow();
     if (!row) return;
+    if (!enabled || document.hidden) {
+      row.dataset.status = 'chat';
+      const value = row.querySelector('.model-value');
+      if (value && value.textContent !== '聊天模式') value.textContent = '聊天模式';
+      row.title = enabled ? '页面位于后台，暂停工作模式 DOM 扫描。' : 'GPTWork 工作模式未启用。';
+      return;
+    }
     const evidence = detectProcessingMode();
     row.dataset.status = evidence.confirmed ? 'confirmed' : 'chat';
     const value = row.querySelector('.model-value');
@@ -222,10 +229,15 @@
     return false;
   });
 
-  new MutationObserver(scheduleRefresh).observe(document.documentElement, {
+  new MutationObserver((mutations) => {
+    if (!enabled || document.hidden) return;
+    // Streaming characterData is the hottest ChatGPT DOM path and does not by
+    // itself change processing mode. Only structural/control changes schedule the
+    // comparatively expensive Work evidence scan.
+    if (mutations.some((mutation) => mutation.type === 'childList' || mutation.type === 'attributes')) scheduleRefresh();
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
     attributes: true,
     attributeFilter: ['aria-selected', 'aria-pressed', 'data-state', 'data-testid', 'class'],
   });
