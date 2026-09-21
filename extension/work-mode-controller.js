@@ -22,6 +22,7 @@
   let refreshTimer = null;
   let noticeTimer = null;
   let switchingBack = false;
+  let verificationOwned = false;
 
   function syncEnabled() {
     enabled = Boolean(workModeSelected && backgroundAllowed);
@@ -208,7 +209,9 @@
   }
 
   document.addEventListener('click', (event) => {
-    if (!enabled || !isPristineNewChat()) return;
+    // Verification owns Chat/Work mode while probing account capabilities. The user's
+    // Work toggle must not switch the page back to Chat during that transaction.
+    if (verificationOwned || !enabled || !isPristineNewChat()) return;
     const control = event.target?.closest?.(MODE_CONTROL_SELECTOR);
     if (!isWorkControl(control)) return;
     showGuidance();
@@ -218,6 +221,7 @@
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === 'GPTLOCK_GUARD_STATE') {
       backgroundAllowed = message.settings?.enabled === true;
+      verificationOwned = message.state?.autoVerification?.running === true;
       syncEnabled();
       scheduleRefresh();
     }

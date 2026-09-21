@@ -106,3 +106,16 @@ test('model verification copy is account-based and legacy authorization-code cop
     assert.doesNotMatch(source, /GPTLOCK-LICENSE|GPTLOCK_LICENSE|LICENSE_UI_STALE/);
   }
 });
+
+
+test('v0.5.109 recovery tears down performance and resize observers from the replaced generation', () => {
+  assert.match(lifecycle, /PerformanceObserver/);
+  assert.match(lifecycle, /ResizeObserver/);
+  assert.match(lifecycle, /performanceObservers\.clear\(\)/);
+  assert.match(lifecycle, /resizeObservers\.clear\(\)/);
+  assert.match(lifecycle, /globalThis\.PerformanceObserver = original\.PerformanceObserver/);
+  assert.match(lifecycle, /globalThis\.ResizeObserver = original\.ResizeObserver/);
+  assert.match(lifecycle, /patchChromeEvent\(globalThis\.chrome\?\.runtime\?\.onMessage\)/);
+  assert.match(lifecycle, /patchChromeEvent\(globalThis\.chrome\?\.storage\?\.onChanged\)/);
+  assert.match(lifecycle, /chromeEventListeners\.clear\(\)/);
+});

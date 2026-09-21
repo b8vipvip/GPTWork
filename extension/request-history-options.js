@@ -15,6 +15,7 @@ const elements = {
 
 const knownLabels = new Map(KNOWN_MODELS.map((item) => [item.id, item.label]));
 let refreshTimer = null;
+let historyDirty = false;
 let currentPage = 1;
 let currentRecords = [];
 
@@ -138,8 +139,11 @@ async function refreshHistory() {
 }
 
 function scheduleRefresh() {
-  clearTimeout(refreshTimer);
-  refreshTimer = window.setTimeout(() => void refreshHistory().catch(() => {}), 80);
+  historyDirty = true;
+  // Runtime logs are a high-frequency diagnostic stream. Rebuilding a 100-row
+  // projection for every storage write made the Settings tab amplify browser jank.
+  // Refresh only at an explicit visibility/focus boundary.
+  if (document.visibilityState !== 'visible') return;
 }
 
 elements.prev?.addEventListener('click', () => {
@@ -158,6 +162,16 @@ elements.next?.addEventListener('click', () => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local' || !changes[RUNTIME_LOG_STORAGE_KEY]) return;
   scheduleRefresh();
+});
+
+async function refreshIfDirty() {
+  if (!historyDirty) return;
+  historyDirty = false;
+  await refreshHistory();
+}
+window.addEventListener('focus', () => void refreshIfDirty().catch(() => {}));
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) void refreshIfDirty().catch(() => {});
 });
 
 void refreshHistory().catch(() => {

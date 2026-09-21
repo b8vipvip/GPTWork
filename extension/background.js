@@ -32,7 +32,7 @@ import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
-const AUTO_VERIFY_RESPONSE_TIMEOUT_MS = 45000;
+const AUTO_VERIFY_RESPONSE_TIMEOUT_MS = 120000;
 const AUTO_VERIFY_POLL_MS = 200;
 const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
@@ -57,6 +57,7 @@ const tabStates = new Map();
 const verificationTransactions = new Map();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
+let sharedModelCatalogUnavailableUntil = 0;
 
 function masterRuntimeEnabled() {
   return localEnabledOverride === true && currentSettings.enabled === true;
@@ -1226,6 +1227,10 @@ async function resolveUnknownCatalogNames(tabId, rows) {
 }
 
 async function syncSharedKnownModels() {
+  if (Date.now() < sharedModelCatalogUnavailableUntil) {
+    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
+    return Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+  }
   try {
     const result = await accountClient.sharedModelCatalog();
     const models = (Array.isArray(result?.models) ? result.models : [])
@@ -1245,9 +1250,36 @@ async function syncSharedKnownModels() {
     }
     return models;
   } catch (error) {
-    logRuntime('warn', 'verification', 'shared_model_catalog_sync_failed', { error: errorText(error) });
+    const unsupported = Number(error?.status) === 404 || /not found/i.test(errorText(error));
+    if (unsupported) sharedModelCatalogUnavailableUntil = Date.now() + 5 * 60 * 1000;
+    logRuntime(unsupported ? 'info' : 'warn', 'verification', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
+      error: errorText(error), retryAfterMs: unsupported ? 5 * 60 * 1000 : 0,
+    });
     return [];
   }
+}
+
+function mergeAccountCatalogs(...catalogs) {
+  const rows = [];
+  const seen = new Set();
+  const models = new Set();
+  const reasoningLevels = new Set();
+  let pickerMode = null;
+  for (const catalog of catalogs.filter(Boolean)) {
+    if (['A', 'B'].includes(catalog?.pickerMode)) pickerMode = catalog.pickerMode;
+    for (const level of catalog?.reasoningLevels || []) reasoningLevels.add(level);
+    for (const row of catalog?.rows || []) {
+      const model = normalizeConcreteModelId(row?.model || row?.rawId);
+      const selectorKey = String(row?.selectorKey || '').trim();
+      const label = String(row?.label || '').trim();
+      const key = model ? 'model:' + model : selectorKey ? 'selector:' + selectorKey : 'label:' + label;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (model) models.add(model);
+      rows.push({ ...row, pickerMode: row?.pickerMode || catalog?.pickerMode || null });
+    }
+  }
+  return { rows, models: [...models], reasoningLevels: [...reasoningLevels], pickerMode };
 }
 
 async function publishVerifiedModels(progress) {
@@ -1306,7 +1338,8 @@ async function discoverAccountCatalog(tabId) {
       pickerMode: result?.catalog?.pickerMode ?? null,
       nameMappings,
     });
-    return { models, reasoningLevels, rows, nameMappings, pickerMode: result?.catalog?.pickerMode ?? null };
+    const pickerMode = result?.catalog?.pickerMode ?? null;
+    return { models, reasoningLevels, rows: rows.map((row) => ({ ...row, pickerMode })), nameMappings, pickerMode };
   } catch (error) {
     logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
       tabId,
@@ -1424,6 +1457,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
     });
 
+    let abortForPendingTurn = false;
     try {
       const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
       if (!attached) throw new Error(state.monitor?.error || 'Request lock monitor is not attached');
@@ -1446,7 +1480,18 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       });
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
-      const waited = await waitForAttemptVerification(tabId, attemptStartedMs);
+      const [waited, turnSettled] = await Promise.all([
+        waitForAttemptVerification(tabId, attemptStartedMs),
+        sendTabMessage(tabId, {
+          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+          assistantCountBefore: probe.assistantCountBefore ?? 0,
+          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+        }),
+      ]);
+      if (turnSettled?.settled !== true) {
+        abortForPendingTurn = true;
+        throw new Error('ChatGPT response did not reach a terminal idle state; verification stopped before touching the model picker');
+      }
       // Evidence priority is explicit: correlated response/stream metadata proves the
       // backend model when exposed; the formal request model remains durable request
       // confirmation and is never erased merely because a response frame omits model.
@@ -1480,7 +1525,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
         pickerMode: item.pickerMode || null,
         evidenceSource,
-        timedOut: waited.timedOut, observation: selection.observation || null,
+        timedOut: waited.timedOut, turnSettled: true, observation: selection.observation || null,
       };
       progress.results.push(result);
       if (requestConfirmed) progress.requestConfirmed += 1;
@@ -1504,6 +1549,11 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     index += 1;
     progress.completed = index;
     await broadcastTabState(tabId);
+
+    if (abortForPendingTurn) {
+      logRuntime('warn', 'verification', 'account_model_verification_aborted_pending_response', { tabId, index, total: queue.length });
+      break;
+    }
 
     // A completed real turn may unlock account models/capabilities in a fresh chat.
     const rediscovered = await discoverAccountCatalog(tabId);
@@ -1566,6 +1616,7 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
       evidenceSource: item.evidenceSource ?? null,
       pickerMode: item.pickerMode ?? null,
       timedOut: item.timedOut === true,
+      turnSettled: item.turnSettled === true,
       error: item.error ?? null,
     })),
   };
@@ -1645,7 +1696,27 @@ async function autoVerify(tabId) {
 
   const sharedKnownModels = await syncSharedKnownModels();
   state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-  const accountCatalog = await discoverAccountCatalog(tabId);
+  const initialCatalog = await discoverAccountCatalog(tabId);
+  let accountCatalog = initialCatalog;
+  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: null };
+  if (initialCatalog.pickerMode !== 'B') {
+    try {
+      const work = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' });
+      state.autoVerification.workDiscovery = {
+        attempted: work?.attempted === true,
+        entered: work?.attempted === true || work?.alreadySelected === true,
+        reason: work?.reason || null,
+      };
+      logRuntime('info', 'verification', 'verification_work_mode_transition', { tabId, ...state.autoVerification.workDiscovery });
+      if (state.autoVerification.workDiscovery.entered) {
+        const workCatalog = await discoverAccountCatalog(tabId);
+        accountCatalog = mergeAccountCatalogs(initialCatalog, workCatalog);
+      }
+    } catch (error) {
+      state.autoVerification.workDiscovery = { attempted: true, entered: false, reason: errorText(error) };
+      logRuntime('warn', 'verification', 'verification_work_mode_transition_failed', { tabId, error: errorText(error) });
+    }
+  }
   state.autoVerification.maxAttempts = accountCatalog.rows.length;
   await broadcastTabState(tabId);
 
