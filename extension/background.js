@@ -415,9 +415,14 @@ async function broadcastTabState(tabId) {
 
 async function ensureConfiguration() {
   const [stored, localStored] = await Promise.all([
-    chrome.storage.sync.get(['policy', 'settings']),
+    chrome.storage.sync.get(['policy', 'settings', SHARED_KNOWN_MODELS_KEY]),
     chrome.storage.local.get(LOCAL_ENABLED_KEY),
   ]);
+  sharedKnownModelIds = new Set(
+    (Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [])
+      .map((item) => normalizeConcreteModelId(item?.model))
+      .filter(Boolean),
+  );
   currentPolicy = normalizePolicy(stored.policy ?? DEFAULT_POLICY);
   const syncedSettings = normalizeSettings(stored.settings ?? DEFAULT_SETTINGS);
   localEnabledOverride = typeof localStored?.[LOCAL_ENABLED_KEY] === 'boolean'
