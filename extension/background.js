@@ -2269,7 +2269,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GPTLOCK_PERFORMANCE_DIAGNOSTIC': {
         if (!sender.tab?.id) throw new Error('Performance diagnostic requires a tab');
         const details = message.details && typeof message.details === 'object' ? message.details : {};
-        logRuntime('warn', 'performance', 'page_responsiveness_sample', {
+        logRuntime(details.abnormal === true ? 'warn' : 'info', 'performance', 'page_responsiveness_sample', {
           tabId: sender.tab.id,
           url: sender.tab.url || null,
           eventLoopLagMs: Math.max(0, Math.min(60000, Number(details.eventLoopLagMs) || 0)),
@@ -2280,6 +2280,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           maxMutationCallbackMs: Math.max(0, Math.min(60000, Number(details.maxMutationCallbackMs) || 0)),
           verificationRunning: details.verificationRunning === true,
           documentVisibility: String(details.documentVisibility || '').slice(0, 32),
+          abnormal: details.abnormal === true,
+          runtimeLifecycle: sanitizeLogValue(details.runtimeLifecycle || null),
+          cdp: networkMonitor.diagnosticsSnapshot({ reset: true }),
           debuggerAttachedTabs: networkMonitor.attachedCount(),
           responseCaptureTabs: networkMonitor.responseCaptureCount(),
         });
