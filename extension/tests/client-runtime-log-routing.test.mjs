@@ -8,13 +8,17 @@ const adminHtml = new URL('../../license-server/public/admin.html', import.meta.
 const adminClientLogsHtml = new URL('../../license-server/public/admin-client-logs.html', import.meta.url);
 const adminJs = new URL('../../license-server/public/client-runtime-admin.js', import.meta.url);
 
-test('client runtime logs are uploaded in authenticated batches', async () => {
+test('client runtime logs are uploaded only when authenticated server sync is enabled', async () => {
   const source = await readFile(runtimeLog, 'utf8');
   assert.match(source, /RUNTIME_LOG_UPLOAD_BATCH_SIZE\s*=\s*50/);
   assert.match(source, /\/api\/v1\/account\/runtime-logs/);
   assert.match(source, /authorization:\s*`Bearer \$\{token\}`/);
   assert.match(source, /periodInMinutes:\s*1/);
   assert.match(source, /acknowledgedIds/);
+  assert.match(source, /RUNTIME_LOG_SYNC_KEY\s*=\s*'gptworkRuntimeLogSyncEnabled'/);
+  assert.match(source, /skipped:\s*'sync_disabled'/);
+  assert.match(source, /LOG_WRITE_COALESCE_MS\s*=\s*250/);
+  assert.match(source, /pendingLogEntries\.length\s*>=\s*LOG_WRITE_MAX_BATCH/);
 });
 
 test('server routes client runtime logs and exposes a dedicated admin page', async () => {
@@ -32,6 +36,10 @@ test('server routes client runtime logs and exposes a dedicated admin page', asy
   assert.match(clientLogsHtml, /data-admin-page="client-logs"/);
   assert.match(clientLogsHtml, /id="clientLogs"/);
   assert.match(clientLogsHtml, /src="\/client-runtime-admin\.js"/);
+  assert.match(clientLogsHtml, /id="clientLogSyncEnabled"/);
+  assert.match(clientLogsHtml, /同步日志/);
   assert.match(adminSource, /\/admin\/api\/client-runtime-logs/);
   assert.match(adminSource, /清空当前筛选/);
+  assert.match(adminSource, /runtimeLogSyncEnabled/);
+  assert.match(adminSource, /\/admin\/api\/client-feature-settings/);
 });

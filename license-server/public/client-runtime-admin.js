@@ -19,6 +19,8 @@ async function api(path, options = {}) {
 function setupClientRuntimeAdmin() {
   const elements = {
     app: $('app'),
+    syncEnabled: $('clientLogSyncEnabled'),
+    saveSync: $('saveClientLogSync'),
     search: $('clientLogSearch'),
     level: $('clientLogLevel'),
     limit: $('clientLogLimit'),
@@ -28,7 +30,7 @@ function setupClientRuntimeAdmin() {
     summary: $('clientLogSummary'),
     body: $('clientLogsBody'),
   };
-  if (!elements.app || !elements.search || !elements.level || !elements.limit || !elements.refresh || !elements.export || !elements.clear || !elements.summary || !elements.body) return;
+  if (!elements.app || !elements.syncEnabled || !elements.saveSync || !elements.search || !elements.level || !elements.limit || !elements.refresh || !elements.export || !elements.clear || !elements.summary || !elements.body) return;
 
   let currentRows = [];
   let currentTotal = 0;
@@ -95,6 +97,34 @@ function setupClientRuntimeAdmin() {
     elements.summary.textContent = `匹配 ${currentTotal} 条 · 当前显示 ${currentRows.length} 条 · 服务端保留 ${retentionDays} 天`;
   }
 
+  async function loadSyncSetting() {
+    if (elements.app.hidden) return;
+    try {
+      const data = await api('/admin/api/client-feature-settings');
+      elements.syncEnabled.checked = data?.settings?.runtimeLogSyncEnabled === true;
+    } catch (error) {
+      if (error.status !== 401) elements.summary.textContent = `同步日志设置读取失败：${error.message}`;
+    }
+  }
+
+  async function saveSyncSetting() {
+    elements.saveSync.disabled = true;
+    try {
+      const data = await api('/admin/api/client-feature-settings', {
+        method: 'PUT',
+        body: JSON.stringify({ runtimeLogSyncEnabled: elements.syncEnabled.checked }),
+      });
+      elements.syncEnabled.checked = data?.settings?.runtimeLogSyncEnabled === true;
+      elements.summary.textContent = elements.syncEnabled.checked
+        ? '同步日志已开启；登录客户端会在下一次控制同步后开始上传。'
+        : '同步日志已关闭；客户端保留本地诊断，但停止上传服务端。';
+    } catch (error) {
+      elements.summary.textContent = `同步日志设置保存失败：${error.message}`;
+    } finally {
+      elements.saveSync.disabled = false;
+    }
+  }
+
   async function load() {
     if (elements.app.hidden) return;
     elements.summary.textContent = '正在读取客户端运行日志…';
@@ -151,6 +181,7 @@ function setupClientRuntimeAdmin() {
     }
   }
 
+  elements.saveSync.addEventListener('click', () => void saveSyncSetting());
   elements.refresh.addEventListener('click', () => void load());
   elements.export.addEventListener('click', exportCurrent);
   elements.clear.addEventListener('click', () => void clearFiltered());
@@ -158,9 +189,17 @@ function setupClientRuntimeAdmin() {
   elements.limit.addEventListener('change', () => void load());
   elements.search.addEventListener('keydown', (event) => { if (event.key === 'Enter') void load(); });
 
-  const observer = new MutationObserver(() => { if (!elements.app.hidden) void load(); });
+  const observer = new MutationObserver(() => {
+    if (!elements.app.hidden) {
+      void loadSyncSetting();
+      void load();
+    }
+  });
   observer.observe(elements.app, { attributes: true, attributeFilter: ['hidden'] });
-  if (!elements.app.hidden) void load();
+  if (!elements.app.hidden) {
+    void loadSyncSetting();
+    void load();
+  }
 }
 
 function setupServerRuntimeExport() {

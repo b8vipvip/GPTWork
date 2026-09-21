@@ -1,7 +1,9 @@
 const MODEL_VERIFICATION_HISTORY_KEY = 'modelVerificationHistoryV1';
+const MODEL_VERIFICATION_HISTORY_ENABLED_KEY = 'gptworkModelVerificationHistoryEnabled';
 const PAGE_SIZE = 8;
 
 const elements = {
+  enabled: document.getElementById('modelVerificationHistoryEnabled'),
   list: document.getElementById('modelVerificationHistoryList'),
   empty: document.getElementById('modelVerificationHistoryEmpty'),
   count: document.getElementById('modelVerificationHistoryCount'),
@@ -13,6 +15,7 @@ const elements = {
 };
 let currentPage = 1;
 let currentRecords = [];
+let historyEnabled = false;
 
 function formatTime(value) {
   const date = new Date(value || '');
@@ -82,17 +85,62 @@ function renderHistory(records = []) {
   }
 }
 async function loadHistory() {
+  if (!historyEnabled) return;
   const stored = await chrome.storage.local.get(MODEL_VERIFICATION_HISTORY_KEY);
   renderHistory(stored[MODEL_VERIFICATION_HISTORY_KEY]);
 }
+function renderEnabledState() {
+  if (elements.enabled) elements.enabled.checked = historyEnabled;
+  if (elements.list) elements.list.hidden = !historyEnabled;
+  if (elements.clear) elements.clear.hidden = !historyEnabled;
+  if (!historyEnabled) {
+    currentRecords = [];
+    currentPage = 1;
+    elements.list?.replaceChildren();
+    if (elements.count) elements.count.textContent = '已关闭 / Off';
+    if (elements.empty) {
+      elements.empty.hidden = false;
+      elements.empty.textContent = '模型验证记录默认关闭；验证本身仍正常执行，但不会持久化历史记录。';
+    }
+    if (elements.pagination) elements.pagination.hidden = true;
+  } else if (elements.empty) {
+    elements.empty.textContent = '暂无模型验证记录 / No model verification records yet.';
+  }
+}
+
+async function setHistoryEnabled(enabled) {
+  historyEnabled = enabled === true;
+  await chrome.storage.local.set({ [MODEL_VERIFICATION_HISTORY_ENABLED_KEY]: historyEnabled });
+  renderEnabledState();
+  if (historyEnabled) await loadHistory();
+}
+
+elements.enabled?.addEventListener('change', () => {
+  void setHistoryEnabled(elements.enabled.checked).catch(() => {});
+});
 elements.clear?.addEventListener('click', async () => {
-  if (!window.confirm('确定清空全部模型验证记录？')) return;
+  if (!historyEnabled || !window.confirm('确定清空全部模型验证记录？')) return;
   await chrome.storage.local.remove(MODEL_VERIFICATION_HISTORY_KEY); currentPage = 1; renderHistory([]);
 });
 elements.prev?.addEventListener('click', () => { currentPage -= 1; renderHistory(currentRecords); });
 elements.next?.addEventListener('click', () => { currentPage += 1; renderHistory(currentRecords); });
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes[MODEL_VERIFICATION_HISTORY_KEY]) return;
+  if (areaName !== 'local') return;
+  if (changes[MODEL_VERIFICATION_HISTORY_ENABLED_KEY]) {
+    historyEnabled = changes[MODEL_VERIFICATION_HISTORY_ENABLED_KEY].newValue === true;
+    renderEnabledState();
+    if (historyEnabled) void loadHistory().catch(() => renderHistory([]));
+    return;
+  }
+  if (!historyEnabled || !changes[MODEL_VERIFICATION_HISTORY_KEY]) return;
   currentPage = 1; renderHistory(changes[MODEL_VERIFICATION_HISTORY_KEY].newValue);
 });
-void loadHistory().catch(() => renderHistory([]));
+void chrome.storage.local.get(MODEL_VERIFICATION_HISTORY_ENABLED_KEY).then((stored) => {
+  historyEnabled = stored[MODEL_VERIFICATION_HISTORY_ENABLED_KEY] === true;
+  renderEnabledState();
+  if (historyEnabled) return loadHistory();
+  return null;
+}).catch(() => {
+  historyEnabled = false;
+  renderEnabledState();
+});
