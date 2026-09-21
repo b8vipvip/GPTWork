@@ -449,8 +449,10 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   // If the page model is unknown, fall back to the strongest explicit locked model.
   const knownModels = new Set(normalizedUnique(configuration.knownModels, normalizeModelId));
   const pageSelectedKnown = Boolean(result.modelBefore && knownModels.has(result.modelBefore));
-  const targetModel = pageSelectedKnown ? result.modelBefore : lockedModels[0];
-  const preserveModel = configuration.preserveModel === true || pageSelectedKnown;
+  const forcedModel = normalizeModelId(configuration.forceModel);
+  const forceKnownModel = Boolean(forcedModel && knownModels.has(forcedModel));
+  const targetModel = forceKnownModel ? forcedModel : pageSelectedKnown ? result.modelBefore : lockedModels[0];
+  const preserveModel = configuration.preserveModel === true || (!forceKnownModel && pageSelectedKnown);
   const targetTransport = preserveModel
     ? parsed.model
     : result.modelBefore === targetModel
@@ -496,11 +498,13 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
     : null;
 
   if (result.changed) result.postData = JSON.stringify(parsed);
-  result.reason = configuration.preserveModel === true
-    ? 'verification_model_passthrough'
-    : pageSelectedKnown
-      ? 'page_selected_known_model_locked'
-      : result.changed ? 'rewritten' : 'already_locked';
+  result.reason = forceKnownModel
+    ? (result.changed ? 'verification_model_forced' : 'verification_model_already_exact')
+    : configuration.preserveModel === true
+      ? 'verification_model_passthrough'
+      : pageSelectedKnown
+        ? 'page_selected_known_model_locked'
+        : result.changed ? 'rewritten' : 'already_locked';
   return result;
 }
 
