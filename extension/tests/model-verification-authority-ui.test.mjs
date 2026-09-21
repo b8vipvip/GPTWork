@@ -370,3 +370,20 @@ test('v0.5.107 rechecks verification authority before mutation and scopes full n
   assert.match(monitor, /disableResponseCapture/);
   assert.match(background, /verification_response_capture/);
 });
+
+
+test('v0.5.108 shares verified model metadata without treating it as account access', async () => {
+  const accountClient = await readFile(new URL('../account-client.js', import.meta.url), 'utf8');
+  const catalogOptions = await readFile(new URL('../model-catalog-options.js', import.meta.url), 'utf8');
+  assert.match(accountClient, /sharedModelCatalog/);
+  assert.match(accountClient, /publishSharedModels/);
+  assert.match(background, /shared_model_catalog_published/);
+  assert.match(background, /requestConfirmed === true/);
+  assert.match(background, /pickerModes/);
+  assert.match(catalogOptions, /当前账户仍需验证/);
+});
+
+test('v0.5.108 canonicalizes GPT-5.5 instant and clears contradictory response issue', () => {
+  assert.match(policy, /'gpt-5-5-instant': 'gpt-5\.5'/);
+  assert.match(background, /responseIssue: responseConfirmed \? null/);
+});
