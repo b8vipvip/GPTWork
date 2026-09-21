@@ -51,6 +51,7 @@ function popupModelIds(stored, policy) {
   return [...new Set([
     ...KNOWN_MODELS.map((model) => model.id),
     ...(Array.isArray(stored?.discoveredModels) ? stored.discoveredModels : []),
+    ...(Array.isArray(stored?.gptworkSharedKnownModelsV1) ? stored.gptworkSharedKnownModelsV1.map((item) => item?.model) : []),
     ...policy.lockedModels,
   ].map(normalizeConcreteModelId).filter(Boolean))];
 }
@@ -82,7 +83,7 @@ function renderPopupLockEditor(stored, policy, settings) {
 }
 
 async function renderPopupLockSummary() {
-  const stored = await chrome.storage.sync.get(['policy', 'settings', 'discoveredModels']);
+  const stored = await chrome.storage.sync.get(['policy', 'settings', 'discoveredModels', 'gptworkSharedKnownModelsV1']);
   const policy = normalizePolicy(stored.policy);
   const settings = normalizeSettings(stored.settings);
   if (elements.popupLockedModels) {
@@ -414,7 +415,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 void renderPopupLockSummary().catch(() => {});
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'sync' && (changes.policy || changes.settings || changes.discoveredModels)) {
+  if (areaName === 'sync' && (changes.policy || changes.settings || changes.discoveredModels || changes.gptworkSharedKnownModelsV1)) {
     void renderPopupLockSummary().catch(() => {});
   }
 });
