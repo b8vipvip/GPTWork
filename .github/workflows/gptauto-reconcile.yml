@@ -114,12 +114,16 @@ jobs:
 
           release_conclusion=""
           [[ "$RELEASE_REQUIRED" == "true" ]] && release_conclusion="success"
-          PYTHONPATH=.github python -m gptauto.observer capture             --event "reconcile" --repo "$REPOSITORY" --default-branch "$DEFAULT_BRANCH"             --branch "$DEFAULT_BRANCH" --head-sha "$MERGE_SHA" --pr-number "$PR_NUMBER"             --pr-title "$pr_title" --pr-body "$pr_body" --pr-state "closed" --pr-merged "true"             --merge-sha "$MERGE_SHA" --run-id "$RUN_ID" --actor "$ACTOR"             --pr-ci-conclusion "success" --pr-ci-run-id "$pr_ci_run_id"             --main-ci-conclusion "success" --main-ci-run-id "$MAIN_CI_RUN_ID"             --release-conclusion "$release_conclusion" --release-run-id "$RELEASE_RUN_ID"             --current-pr-head-sha "$pr_head_sha" > terminal-result.json
+          PYTHONPATH=.github python -m gptauto.observer capture             --event "reconcile" --repo "$REPOSITORY" --default-branch "$DEFAULT_BRANCH"             --branch "$DEFAULT_BRANCH" --head-sha "$MERGE_SHA" --pr-number "$PR_NUMBER"             --pr-title "$pr_title" --pr-body "$pr_body" --pr-state "closed" --pr-merged "true"             --merge-sha "$MERGE_SHA" --run-id "$RUN_ID" --actor "$ACTOR"             --pr-ci-conclusion "success" --pr-ci-run-id "$pr_ci_run_id"             --main-ci-conclusion "success" --main-ci-run-id "$MAIN_CI_RUN_ID"             --release-conclusion "$release_conclusion" --release-run-id "$RELEASE_RUN_ID"             --current-pr-head-sha "$pr_head_sha" --release-required-override "$RELEASE_REQUIRED"             --provenance "reconciler" > terminal-result.json
           cat terminal-result.json
           captured_task_id="$(python -c 'import json;print(json.load(open("terminal-result.json"))["task_id"])')"
           captured_state="$(python -c 'import json;print(json.load(open("terminal-result.json"))["state"])')"
+          captured_release_required="$(python -c 'import json;print(str(json.load(open("terminal-result.json"))["release_required"]).lower())')"
+          captured_provenance="$(python -c 'import json;print(json.load(open("terminal-result.json"))["provenance"])')"
           [[ "$captured_task_id" == "$TASK_ID" ]] || { echo "::error::Terminal capture changed TASK_ID"; exit 1; }
           [[ "$captured_state" == "DONE" ]] || { echo "::error::Terminal capture did not reach DONE: $captured_state"; exit 1; }
+          [[ "$captured_release_required" == "$RELEASE_REQUIRED" ]] || { echo "::error::Terminal capture changed release intent"; exit 1; }
+          [[ "$captured_provenance" == "reconciler" ]] || { echo "::error::Terminal capture provenance is not reconciler"; exit 1; }
           echo "task-id=$captured_task_id" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/upload-gptauto-log
         with:
@@ -142,5 +146,7 @@ jobs:
             echo "- Main CI run: $MAIN_CI_RUN_ID"
             echo "- Release required: $RELEASE_REQUIRED"
             echo "- Release run: ${RELEASE_RUN_ID:-not-required}"
+            echo "- Terminal evidence provenance: reconciler"
+            echo "- Terminal release intent is pinned to the Executor/Reconcile lease input, not recomputed from mutable PR text."
             echo "- Terminal evidence was captured and uploaded by Reconcile itself; no follow-up Observer run is required."
           } >> "$GITHUB_STEP_SUMMARY"
