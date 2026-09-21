@@ -871,6 +871,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       capturedAt: new Date().toISOString(),
       endpoint: rewrite.endpoint ?? null,
       requestId: rewrite.requestId ?? null,
+      fetchRequestId: rewrite.fetchRequestId ?? null,
       changed: Boolean(rewrite.changed),
       reason: rewrite.reason ?? null,
       modelBefore: rewrite.modelBefore ?? null,
