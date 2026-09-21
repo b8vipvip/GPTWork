@@ -17,6 +17,8 @@ test('client runtime logs are uploaded in authenticated batches', async () => {
   assert.match(source, /acknowledgedIds/);
   assert.match(source, /RUNTIME_LOG_SYNC_KEY\s*=\s*'gptworkRuntimeLogSyncEnabled'/);
   assert.match(source, /skipped:\s*'sync_disabled'/);
+  assert.match(source, /LOG_WRITE_COALESCE_MS\s*=\s*250/);
+  assert.match(source, /pendingLogEntries\.length\s*>=\s*LOG_WRITE_MAX_BATCH/);
 });
 
 test('server routes client runtime logs and exposes a dedicated admin page', async () => {
