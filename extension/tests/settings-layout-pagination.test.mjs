@@ -69,3 +69,19 @@ test('v0.5.111 diagnostics attribute runtime callback pressure and preserve orde
   assert.match(runtimeLogSource, /component === 'verification'/);
   assert.match(runtimeLogSource, /sequence: runtimeLogSequence/);
 });
+
+
+test('v0.5.112 diagnostics identify concrete slow callback sources and long-task attribution', () => {
+  assert.match(lifecycleSource, /callbackSourceStats/);
+  assert.match(lifecycleSource, /recentSlowCallbacks/);
+  assert.match(lifecycleSource, /SLOW_CALLBACK_MS = 20/);
+  assert.match(contentSource, /recentLongTasks/);
+  assert.match(contentSource, /entry\.attribution/);
+  assert.match(backgroundSource, /recentLongTasks: sanitizeLogValue/);
+});
+
+test('v0.5.112 suppresses transcript-stream mutation churn and ignores disabled stop controls', () => {
+  assert.match(contentSource, /target\.closest\?\.\('\[data-message-author-role\]'\)/);
+  assert.match(contentSource, /element\.getAttribute\?\.\('aria-disabled'\) !== 'true'/);
+  assert.match(contentSource, /transcript streaming is extremely mutation-heavy/);
+});
