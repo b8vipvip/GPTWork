@@ -251,7 +251,8 @@ test('v0.5.98 ignores hidden stale stop controls between verification models', (
   assert.match(content, /function visibleGeneratingControl\(\)/);
   assert.match(content, /querySelectorAll\(selector\)/);
   assert.match(content, /find\(\(element\) => visible\(element\)\)/);
-  assert.match(content, /\(\) => !visibleGeneratingControl\(\)/);
+  assert.match(content, /const snapshot = idleSnapshot\(\)/);
+  assert.match(content, /if \(!snapshot\.generating\) return snapshot/);
   assert.doesNotMatch(content, /!document\.querySelector\(GENERATING_SELECTORS\.join\(','\)\)/);
 });
 
