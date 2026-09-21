@@ -22,7 +22,7 @@ test('new-chat Work clicks are guided back to Chat only when Work handling is en
   assert.match(source, /switchBackToChat/);
   assert.match(source, /WORK_LABEL/);
   assert.match(source, /CHAT_LABEL/);
-  assert.match(source, /if \(!enabled \|\| !isPristineNewChat\(\)\) return/);
+  assert.match(source, /verificationOwned \|\| !enabled \|\| !isPristineNewChat\(\)/);
 });
 
 test('processing mode requires Work conversation marker plus Work output/source panel evidence', () => {
@@ -61,4 +61,11 @@ test('v0.5.108 Work evidence scans are suspended when inactive and ignore stream
   assert.match(source, /if \(!enabled \|\| document\.hidden\)/);
   assert.match(source, /const REFRESH_DELAY_MS = 800/);
   assert.doesNotMatch(source, /characterData: true/);
+});
+
+
+test('v0.5.109 user Work guidance yields authority to automatic verification', () => {
+  assert.match(source, /let verificationOwned = false/);
+  assert.match(source, /message\.state\?\.autoVerification\?\.running === true/);
+  assert.match(source, /if \(verificationOwned \|\| !enabled/);
 });
