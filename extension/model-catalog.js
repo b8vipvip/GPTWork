@@ -537,7 +537,7 @@
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['aria-label', 'aria-selected', 'data-state', 'data-value', 'data-model', 'data-model-id', 'title', 'data-testid'],
+    attributeFilter: ['aria-label', 'aria-checked', 'aria-selected', 'data-state', 'data-selected', 'data-value', 'data-model', 'data-model-id', 'title', 'data-testid'],
   });
 
   window.addEventListener('resize', schedulePosition, { passive: true });
