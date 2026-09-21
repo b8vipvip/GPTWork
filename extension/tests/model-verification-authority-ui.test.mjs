@@ -112,8 +112,8 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
   assert.match(background, /function verificationTransactionForTab/);
   assert.match(background, /verificationTransactions\.set\(Number\(tabId\)/);
   assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
-  assert.match(background, /preserveModel: Boolean\(transaction\)/);
-  assert.match(background, /bypassRewrite: Boolean\(transaction\)/);
+  assert.match(background, /preserveModel: false/);
+  assert.match(background, /forceModel: transaction\?\.model \?\? null/);
   assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
   assert.doesNotMatch(background, /function autoVerificationModelForTab/);
 });
@@ -316,7 +316,7 @@ test('v0.5.103 verification is the sole send authority while its transaction is 
   assert.match(background, /if \(!verification && !guard\.canSend\)/);
   assert.match(background, /networkVerificationEnabled: true/);
   assert.match(background, /autoAlignSelection: false/);
-  assert.match(background, /bypassRewrite: Boolean\(transaction\)/);
+  assert.match(background, /forceModel: transaction\?\.model \?\? null/);
 });
 
 test('v0.5.103 runtime log delivery is event-driven from one canonical browser log', () => {
@@ -329,7 +329,7 @@ test('v0.5.103 runtime log delivery is event-driven from one canonical browser l
 
 test('v0.5.104 verification survives new-chat navigation without CDP detach', () => {
   assert.match(background, /verificationTransactionForTab\(tab\.id\)\) await networkMonitor\.attach/);
-  assert.match(background, /bypassRewrite: Boolean\(transaction\)/);
+  assert.match(background, /forceModel: transaction\?\.model \?\? null/);
 });
 
 test('v0.5.104 ordinary typing does not trigger full page observation', () => {
