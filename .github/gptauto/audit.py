@@ -51,6 +51,8 @@ Give ChatGPT the repository name plus task ID `{task.task_id}`. If repository ac
             "repository": task.repository,
             "state": task.state.value,
             "complete": True,
+            "provenance": task.metadata.get("provenance", "native_host"),
+            "terminal_evidence_run_id": task.metadata.get("run_id", ""),
             "completion_gate": task.metadata.get("completion_gate", ""),
             "release_required": bool(task.metadata.get("release_required")),
             "head_sha": task.metadata.get("head_sha", ""),
