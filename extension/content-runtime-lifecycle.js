@@ -331,6 +331,14 @@
 
   function trackedAddEventListener(type, listener, options) {
     if (typeof original.addEventListener !== 'function') return undefined;
+    const capture = typeof options === 'boolean' ? options : options?.capture === true;
+    const existing = [...eventListeners].find((record) => (
+      record.target === this
+      && record.type === type
+      && record.listener === listener
+      && record.capture === capture
+    ));
+    if (existing) return original.addEventListener.call(this, type, existing.wrapped || listener, options);
     let wrapped = listener;
     if (typeof listener === 'function') {
       wrapped = function measuredDomEventListener(...args) {
@@ -343,7 +351,7 @@
         },
       };
     }
-    eventListeners.add({ target: this, type, listener, wrapped, options });
+    eventListeners.add({ target: this, type, listener, wrapped, options, capture });
     return original.addEventListener.call(this, type, wrapped, options);
   }
 
