@@ -35,6 +35,11 @@
   const performanceObservers = new Set();
   const resizeObservers = new Set();
   const eventListeners = new Set();
+  // Chrome Event objects are not EventTarget instances. Track both listeners and the
+  // add/remove wrappers themselves so a recovered generation can completely release
+  // ownership before the replacement generation installs its listeners.
+  const chromeEventListeners = new Set();
+  const chromeEventPatches = [];
   let disposed = false;
   let terminalReason = null;
   let healthTimer = null;
@@ -78,6 +83,15 @@
       } catch {}
     }
     eventListeners.clear();
+  }
+
+  function restorePatchedChromeEvents() {
+    for (const patch of chromeEventPatches.splice(0)) {
+      try {
+        if (patch.event.addListener === patch.trackedAdd) patch.event.addListener = patch.add;
+        if (patch.event.removeListener === patch.trackedRemove) patch.event.removeListener = patch.remove;
+      } catch {}
+    }
   }
 
   function restorePatchedGlobals() {
@@ -153,6 +167,7 @@
       try { record.remove.call(record.event, record.listener); } catch {}
     }
     chromeEventListeners.clear();
+    restorePatchedChromeEvents();
     restorePatchedGlobals();
 
     try {
@@ -312,7 +327,14 @@
       event.addListener = trackedAdd;
       event.removeListener = trackedRemove;
       chromeEventPatches.push({ event, add, remove, trackedAdd, trackedRemove });
-    } catch {}
+    } catch {
+      // Never leave a half-patched Chrome Event behind. A failed bookkeeping step
+      // must not poison every later addListener call in this content generation.
+      try {
+        if (event.addListener === trackedAdd) event.addListener = add;
+        if (event.removeListener === trackedRemove) event.removeListener = remove;
+      } catch {}
+    }
   }
 
   function trackedSendMessage(...args) {
