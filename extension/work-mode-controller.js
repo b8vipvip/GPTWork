@@ -117,10 +117,12 @@
     let sourceToggle = false;
     const sourceHits = new Set();
     const candidates = document.querySelectorAll('h1,h2,button,span,[data-tpp-source-group-toggle]');
+    // Keep the evidence boundary explicit: Work evidence must live outside a
+    // conversation turn, never inside assistant/user transcript content.
+    const outsideConversationEvidence = outsideConversation;
 
     for (const element of candidates) {
-      if (element.closest?.(TURN_SELECTOR)) continue;
-      if (element.closest?.(`#${NOTICE_ID},#${MODEL_INDICATOR_ID},#gptlock-indicator-host`)) continue;
+      if (!outsideConversationEvidence(element)) continue;
       const text = normalize(element.textContent);
       let matched = false;
 
