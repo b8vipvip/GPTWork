@@ -5,6 +5,8 @@ import test from 'node:test';
 const settingsHtml = await readFile(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const historyOptionsSource = await readFile(new URL('../request-history-options.js', import.meta.url), 'utf8');
 const historyCss = await readFile(new URL('../request-history.css', import.meta.url), 'utf8');
+const verificationHistorySource = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
+const backgroundSource = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
 test('compact lock editor sits directly after feature gates and request history is the last settings card', () => {
   const featureIndex = settingsHtml.indexOf('id="globalHeading"');
@@ -35,9 +37,20 @@ test('request history pagination renders eight records per page with previous an
 });
 
 
-test('v0.5.109 Settings does not rebuild request history for every runtime-log write', () => {
+test('v0.5.110 Settings keeps request history off the runtime-log hot path', () => {
   assert.match(historyOptionsSource, /historyDirty = true/);
   assert.match(historyOptionsSource, /refreshIfDirty/);
   assert.match(historyOptionsSource, /visibilitychange/);
   assert.doesNotMatch(historyOptionsSource, /setTimeout\(\(\) => void refreshHistory\(\).*80/);
+});
+
+
+test('request and model-verification histories are opt-in and default off', () => {
+  assert.match(settingsHtml, /id="requestHistoryEnabled"/);
+  assert.match(settingsHtml, /id="modelVerificationHistoryEnabled"/);
+  assert.match(historyOptionsSource, /gptworkRequestHistoryEnabled/);
+  assert.match(historyOptionsSource, /stored\[REQUEST_HISTORY_ENABLED_KEY\] === true/);
+  assert.match(verificationHistorySource, /gptworkModelVerificationHistoryEnabled/);
+  assert.match(verificationHistorySource, /stored\[MODEL_VERIFICATION_HISTORY_ENABLED_KEY\] === true/);
+  assert.match(backgroundSource, /stored\[MODEL_VERIFICATION_HISTORY_ENABLED_KEY\] !== true\) return null/);
 });
