@@ -280,11 +280,12 @@ test('v0.5.100 correlates response evidence to the active formal request', () =>
 });
 
 
-test('v0.5.101 distinguishes new-chat direct picker from existing-chat layered picker', () => {
-  assert.match(content, /function verificationPageContext\(\)/);
-  assert.match(content, /pageContext === 'new_chat'/);
-  assert.match(content, /new-chat-direct-model-list/);
-  assert.match(content, /existing_chat/);
+test('v0.5.107 distinguishes picker A/B from live topology rather than URL', () => {
+  assert.match(content, /Picker topology is a runtime capability, not a URL property/);
+  assert.match(content, /picker-mode-a-direct-model-list/);
+  assert.match(content, /pickerMode: 'A'/);
+  assert.match(content, /pickerMode: 'B'/);
+  assert.doesNotMatch(content, /pageContext === 'new_chat'/);
 });
 
 test('v0.5.101 verification history supports reports, clear and eight-row pagination', () => {
@@ -358,4 +359,14 @@ test('v0.5.106 normalizes GPT-5.6 thinking transport and records performance evi
   assert.match(content, /PerformanceObserver/);
   assert.match(content, /eventLoopLagMs/);
   assert.match(content, /maxMutationCallbackMs/);
+});
+
+
+test('v0.5.107 rechecks verification authority before mutation and scopes full network capture', async () => {
+  const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
+  assert.match(monitor, /verification_passthrough_late_authority/);
+  assert.match(monitor, /configuration = this\.configuration\(tabId\)/);
+  assert.match(monitor, /enableResponseCapture/);
+  assert.match(monitor, /disableResponseCapture/);
+  assert.match(background, /verification_response_capture/);
 });

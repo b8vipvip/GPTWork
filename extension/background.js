@@ -1245,9 +1245,10 @@ async function discoverAccountCatalog(tabId) {
       candidateCount: Number(result?.catalog?.candidateCount || 0),
       triggerFound: result?.catalog?.triggerFound === true,
       pickerKind: result?.catalog?.pickerKind ?? null,
+      pickerMode: result?.catalog?.pickerMode ?? null,
       nameMappings,
     });
-    return { models, reasoningLevels, rows, nameMappings };
+    return { models, reasoningLevels, rows, nameMappings, pickerMode: result?.catalog?.pickerMode ?? null };
   } catch (error) {
     logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
       tabId,
@@ -1537,6 +1538,15 @@ async function autoVerify(tabId) {
 
   const coreCheck = await refreshNativeCore({ tolerateFailure: true });
   const monitorAttached = await networkMonitor.attach(tabId);
+  const responseCaptureEnabled = monitorAttached
+    ? await networkMonitor.enableResponseCapture(tabId).catch(() => false)
+    : false;
+  logRuntime(responseCaptureEnabled ? 'info' : 'warn', 'network', 'verification_response_capture', {
+    tabId,
+    enabled: responseCaptureEnabled,
+    attachedTabs: networkMonitor.attachedCount(),
+    responseCaptureTabs: networkMonitor.responseCaptureCount(),
+  });
   const page = await collectPageObservation(tabId, state);
   const restoreModel = normalizeConcreteModelId(state.pageObservation?.model);
 
@@ -1648,6 +1658,7 @@ async function autoVerify(tabId) {
   } catch (error) {
     logRuntime('warn', 'verification', 'model_verification_history_write_failed', { tabId, error: errorText(error) });
   }
+  await networkMonitor.disableResponseCapture(tabId);
   await broadcastTabState(tabId);
 
   logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'verification', 'auto_verify_completed', {
@@ -2115,6 +2126,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           maxMutationCallbackMs: Math.max(0, Math.min(60000, Number(details.maxMutationCallbackMs) || 0)),
           verificationRunning: details.verificationRunning === true,
           documentVisibility: String(details.documentVisibility || '').slice(0, 32),
+          debuggerAttachedTabs: networkMonitor.attachedCount(),
+          responseCaptureTabs: networkMonitor.responseCaptureCount(),
         });
         return { recorded: true };
       }

@@ -9,6 +9,7 @@ test('network monitor serializes debugger attach and detach per tab', async () =
   let attachCalls = 0;
   let detachCalls = 0;
   let fetchEnableCalls = 0;
+  let networkEnableCalls = 0;
   const inputEvents = [];
 
   globalThis.chrome = {
@@ -24,6 +25,7 @@ test('network monitor serializes debugger attach and detach per tab', async () =
       },
       sendCommand(_target, command, params, callback) {
         if (command === 'Fetch.enable') fetchEnableCalls += 1;
+        if (command === 'Network.enable') networkEnableCalls += 1;
         if (command === 'Input.dispatchMouseEvent') inputEvents.push(params);
         delayedCallback(callback, 1);
       },
@@ -47,7 +49,10 @@ test('network monitor serializes debugger attach and detach per tab', async () =
   assert.deepEqual(firstPair, [true, true]);
   assert.equal(attachCalls, 1, 'concurrent attach calls must share one debugger.attach');
   assert.equal(fetchEnableCalls, 1, 'Fetch.enable must also run only once for the shared attach');
+  assert.equal(networkEnableCalls, 0, 'ordinary request locking must not enable full Network capture');
   assert.equal(monitor.isAttached(17), true);
+  await monitor.enableResponseCapture(17);
+  assert.equal(networkEnableCalls, 1, 'full Network capture is enabled only on demand');
 
   await Promise.all([monitor.detach(17), monitor.detach(17)]);
   assert.equal(detachCalls, 1, 'concurrent detach calls must share one debugger.detach');

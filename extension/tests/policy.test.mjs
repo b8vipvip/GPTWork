@@ -62,3 +62,8 @@ test('normalizes extension-only verification settings independently', () => {
     },
   );
 });
+
+
+test('explicit empty locked model list disables model locking', () => {
+  assert.deepEqual(normalizePolicy({ lockedModels: [], allowedReasoningLevels: ['high'], strictMode: true }).lockedModels, []);
+});

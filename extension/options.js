@@ -327,10 +327,6 @@ async function load() {
 
 async function persistModelSelection(changedInput) {
   const lockedModels = [...new Set(concreteSelectedModels())];
-  if (!lockedModels.length) {
-    changedInput.checked = true;
-    throw new Error('至少保留一个锁定模型 / Keep at least one locked model.');
-  }
   await patchPolicy({ lockedModels });
 }
 

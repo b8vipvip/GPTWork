@@ -184,6 +184,9 @@
       || performanceTelemetry.maxLongTaskMs >= 100
       || performanceTelemetry.maxMutationCallbackMs >= 40
       || performanceTelemetry.mutationCount >= 5000;
+    // Hidden tabs are timer-throttled by Chromium; that delay is not user-visible
+    // jank and must not be reported as event-loop lag.
+    if (document.visibilityState !== 'visible' && lag > 0) return;
     if (!abnormal || now - performanceTelemetry.lastReportedAt < 10000) return;
     performanceTelemetry.lastReportedAt = now;
     const details = {
@@ -1087,23 +1090,28 @@ document.addEventListener('pointerdown', (event) => {
     }
     if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [], pageContext };
 
-    // New-chat pages currently expose the account model rows directly in the
-    // composer-owned first popup. Existing /c/:id conversations use the layered
-    // intelligence picker (Advanced -> Select model -> catalog). Keep these DOM
-    // contracts explicit so one topology cannot accidentally drive the other.
-    if (pageContext === 'new_chat') {
+    // Picker topology is a runtime capability, not a URL property. ChatGPT can
+    // switch the same / or /c/:id composer between:
+    // A = simple direct list (currently Sol + 5.5, "思考强度")
+    // B = intelligence slider/advanced picker with a nested account model catalog.
+    // Detect the structure that is actually open so a verification turn may migrate
+    // A -> B or B -> A without treating reasoning controls as model rows.
+    const initialOpener = modelSubmenuOpener(picker);
+    const initialAdvanced = advancedPickerToggle(picker);
+    if (!initialOpener && !initialAdvanced) {
       const directRows = distinctModelRows(picker);
       if (directRows.length >= 2) {
-        pickerTopologyProbe('new-chat-direct-model-list', {
+        pickerTopologyProbe('picker-mode-a-direct-model-list', {
           pageContext,
+          pickerMode: 'A',
           ownedPicker: compactElementProbe(picker),
           modelRows: directRows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
         });
-        return { trigger, picker, opener: null, submenu: picker, rows: directRows, pageContext };
+        return { trigger, picker, opener: null, submenu: picker, rows: directRows, pageContext, pickerMode: 'A' };
       }
     }
 
-    if (!modelSubmenuOpener(picker)) {
+    if (!initialOpener) {
       const advanced = advancedPickerToggle(picker);
       if (advanced) {
         await modelPickerPointer(advanced, 'click', 'model-picker-advanced');
@@ -1131,7 +1139,7 @@ document.addEventListener('pointerdown', (event) => {
       submenu: compactElementProbe(submenu),
       modelRows: rows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
     });
-    return { trigger, picker, opener, submenu, rows, pageContext };
+    return { trigger, picker, opener, submenu, rows, pageContext, pickerMode: 'B' };
   }
 
   function rowModelDescriptor(row) {
@@ -1623,6 +1631,7 @@ document.addEventListener('pointerdown', (event) => {
       candidateCount,
       triggerFound,
       pickerKind: modern.picker ? 'unified-intelligence' : 'legacy',
+      pickerMode: modern.pickerMode || null,
     };
   }
 
