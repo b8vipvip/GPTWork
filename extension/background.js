@@ -61,6 +61,7 @@ const verificationTransactions = new Map();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
+let sharedKnownModelIds = new Set();
 
 function masterRuntimeEnabled() {
   return localEnabledOverride === true && currentSettings.enabled === true;
@@ -414,9 +415,14 @@ async function broadcastTabState(tabId) {
 
 async function ensureConfiguration() {
   const [stored, localStored] = await Promise.all([
-    chrome.storage.sync.get(['policy', 'settings']),
+    chrome.storage.sync.get(['policy', 'settings', SHARED_KNOWN_MODELS_KEY]),
     chrome.storage.local.get(LOCAL_ENABLED_KEY),
   ]);
+  sharedKnownModelIds = new Set(
+    (Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [])
+      .map((item) => normalizeConcreteModelId(item?.model))
+      .filter(Boolean),
+  );
   currentPolicy = normalizePolicy(stored.policy ?? DEFAULT_POLICY);
   const syncedSettings = normalizeSettings(stored.settings ?? DEFAULT_SETTINGS);
   localEnabledOverride = typeof localStored?.[LOCAL_ENABLED_KEY] === 'boolean'
@@ -798,6 +804,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       preserveReasoning: Boolean(transaction),
       bypassRewrite: Boolean(transaction),
       responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
+      knownModels: [...sharedKnownModelIds],
     };
   },
   onStatus(tabId, monitor) {
@@ -1295,6 +1302,7 @@ async function syncSharedKnownModels() {
       .filter((item) => item.model);
     const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
     const previous = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+    sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
     if (JSON.stringify(previous) !== JSON.stringify(models)) {
       await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: models });
       logRuntime('info', 'verification', 'shared_model_catalog_synced', { count: models.length, changed: true });
@@ -1306,7 +1314,10 @@ async function syncSharedKnownModels() {
     logRuntime(unsupported ? 'info' : 'warn', 'verification', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
       error: errorText(error), retryAfterMs: unsupported ? 5 * 60 * 1000 : 0,
     });
-    return [];
+    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
+    const cached = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+    sharedKnownModelIds = new Set(cached.map((item) => normalizeConcreteModelId(item?.model)).filter(Boolean));
+    return cached;
   }
 }
 
