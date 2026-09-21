@@ -1245,9 +1245,10 @@ async function discoverAccountCatalog(tabId) {
       candidateCount: Number(result?.catalog?.candidateCount || 0),
       triggerFound: result?.catalog?.triggerFound === true,
       pickerKind: result?.catalog?.pickerKind ?? null,
+      pickerMode: result?.catalog?.pickerMode ?? null,
       nameMappings,
     });
-    return { models, reasoningLevels, rows, nameMappings };
+    return { models, reasoningLevels, rows, nameMappings, pickerMode: result?.catalog?.pickerMode ?? null };
   } catch (error) {
     logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
       tabId,
