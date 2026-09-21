@@ -21,6 +21,8 @@
       ? window.cancelAnimationFrame.bind(window)
       : null,
     MutationObserver: globalThis.MutationObserver,
+    PerformanceObserver: globalThis.PerformanceObserver,
+    ResizeObserver: globalThis.ResizeObserver,
     addEventListener: globalThis.EventTarget?.prototype?.addEventListener,
     removeEventListener: globalThis.EventTarget?.prototype?.removeEventListener,
     sendMessage: globalThis.chrome?.runtime?.sendMessage,
@@ -30,6 +32,8 @@
   const intervals = new Set();
   const animationFrames = new Set();
   const observers = new Set();
+  const performanceObservers = new Set();
+  const resizeObservers = new Set();
   const eventListeners = new Set();
   let disposed = false;
   let terminalReason = null;
@@ -91,6 +95,12 @@
       if (globalThis.MutationObserver === TrackedMutationObserver) {
         globalThis.MutationObserver = original.MutationObserver;
       }
+      if (TrackedPerformanceObserver && globalThis.PerformanceObserver === TrackedPerformanceObserver) {
+        globalThis.PerformanceObserver = original.PerformanceObserver;
+      }
+      if (TrackedResizeObserver && globalThis.ResizeObserver === TrackedResizeObserver) {
+        globalThis.ResizeObserver = original.ResizeObserver;
+      }
       if (globalThis.EventTarget?.prototype?.addEventListener === trackedAddEventListener) {
         globalThis.EventTarget.prototype.addEventListener = original.addEventListener;
       }
@@ -130,6 +140,14 @@
       try { observer.disconnect(); } catch {}
     }
     observers.clear();
+    for (const observer of performanceObservers) {
+      try { observer.disconnect(); } catch {}
+    }
+    performanceObservers.clear();
+    for (const observer of resizeObservers) {
+      try { observer.disconnect(); } catch {}
+    }
+    resizeObservers.clear();
     removeTrackedListeners();
     restorePatchedGlobals();
 
@@ -225,6 +243,38 @@
     }
   }
 
+  const TrackedPerformanceObserver = original.PerformanceObserver
+    ? class extends original.PerformanceObserver {
+      constructor(callback) {
+        super((entries, observer) => {
+          if (!checkAlive('performance_observer_context_invalidated')) return;
+          callback(entries, observer);
+        });
+        performanceObservers.add(this);
+      }
+      disconnect() {
+        performanceObservers.delete(this);
+        return super.disconnect();
+      }
+    }
+    : null;
+
+  const TrackedResizeObserver = original.ResizeObserver
+    ? class extends original.ResizeObserver {
+      constructor(callback) {
+        super((entries, observer) => {
+          if (!checkAlive('resize_observer_context_invalidated')) return;
+          callback(entries, observer);
+        });
+        resizeObservers.add(this);
+      }
+      disconnect() {
+        resizeObservers.delete(this);
+        return super.disconnect();
+      }
+    }
+    : null;
+
   function trackedAddEventListener(type, listener, options) {
     if (typeof original.addEventListener !== 'function') return undefined;
     eventListeners.add({ target: this, type, listener, options });
@@ -303,6 +353,8 @@
     if (trackedRequestAnimationFrame) window.requestAnimationFrame = trackedRequestAnimationFrame;
     if (trackedCancelAnimationFrame) window.cancelAnimationFrame = trackedCancelAnimationFrame;
     if (original.MutationObserver) globalThis.MutationObserver = TrackedMutationObserver;
+    if (TrackedPerformanceObserver) globalThis.PerformanceObserver = TrackedPerformanceObserver;
+    if (TrackedResizeObserver) globalThis.ResizeObserver = TrackedResizeObserver;
     if (globalThis.EventTarget?.prototype && typeof original.addEventListener === 'function') {
       globalThis.EventTarget.prototype.addEventListener = trackedAddEventListener;
       globalThis.EventTarget.prototype.removeEventListener = trackedRemoveEventListener;
