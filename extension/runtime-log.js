@@ -314,8 +314,15 @@ export async function getRuntimeLogs() {
   await flushPendingRuntimeLogs().catch(() => {});
   const stored = await chrome.storage.local.get(RUNTIME_LOG_STORAGE_KEY);
   const raw = boundRuntimeLogs(stored[RUNTIME_LOG_STORAGE_KEY]);
-  const logs = filterRuntimeLogs(raw);
-  if (logs.length !== raw.length) {
+  const logs = filterRuntimeLogs(raw).sort((left, right) => {
+    const timeDelta = Date.parse(left?.timestamp || 0) - Date.parse(right?.timestamp || 0);
+    if (Number.isFinite(timeDelta) && timeDelta !== 0) return timeDelta;
+    if (left?.sessionId && left.sessionId === right?.sessionId) {
+      return Number(left?.sequence || 0) - Number(right?.sequence || 0);
+    }
+    return 0;
+  });
+  if (logs.length !== raw.length || logs.some((entry, index) => entry !== raw[index])) {
     await chrome.storage.local.set({ [RUNTIME_LOG_STORAGE_KEY]: logs });
   }
   return logs;
