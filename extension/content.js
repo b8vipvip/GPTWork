@@ -1603,7 +1603,8 @@ document.addEventListener('pointerdown', (event) => {
   });
 
   new MutationObserver((mutations) => {
-    // Typing/streaming text is the hottest DOM path in ChatGPT. It cannot change lock
+    // DOM observation never performs clicks. All ChatGPT UI mutation is owned by an
+    // explicit model-selection transaction. Typing/streaming text is the hottest DOM path in ChatGPT. It cannot change lock
     // identity by itself, so never schedule a whole-page observation for pure text edits.
     const relevant = mutations.some((mutation) => {
       if (mutation.type === 'characterData') return false;
