@@ -305,3 +305,19 @@ test('v0.5.102 canonicalizes wm transport ids for discovered model families', as
   assert.match(policy, /'gpt-5\.6-luna-wm': 'gpt-5\.6-luna'/);
   assert.match(policy, /'gpt-5\.5-wm': 'gpt-5\.5'/);
 });
+
+
+test('v0.5.103 verification is the sole send authority while its transaction is active', () => {
+  assert.match(content, /cachedState\?\.autoVerification\?\.running === true/);
+  assert.match(background, /if \(!verification && !guard\.canSend\)/);
+  assert.match(background, /networkVerificationEnabled: true/);
+  assert.match(background, /autoAlignSelection: false/);
+  assert.match(background, /bypassRewrite: Boolean\(transaction\)/);
+});
+
+test('v0.5.103 runtime log delivery is event-driven from one canonical browser log', () => {
+  assert.match(background, /scheduleRuntimeLogDelivery/);
+  assert.match(background, /uploadRuntimeLogBatch/);
+  assert.match(background, /syncRuntimeLogsToNative/);
+  assert.match(background, /same immutable entry ids/);
+});
