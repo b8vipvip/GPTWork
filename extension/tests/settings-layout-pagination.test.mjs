@@ -103,3 +103,19 @@ test('v0.5.113 removes high-frequency full-document Work and context polling', (
   assert.match(contextBudgetSource, /const PERIODIC_REFRESH_MS = 30_000;/);
   assert.match(contextBudgetSource, /window\.setInterval\(scheduleRefresh, PERIODIC_REFRESH_MS\)/);
 });
+
+
+test('v0.5.114 exposes hard A/B jank isolation gates', () => {
+  assert.match(backgroundSource, /GPTWORK_SET_JANK_ISOLATION/);
+  assert.match(backgroundSource, /jank_isolation_changed/);
+  assert.match(contentSource, /GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND/);
+  assert.match(contentSource, /__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__/);
+  assert.match(networkMonitorSource, /setDiagnosticSuspended/);
+  assert.match(networkMonitorSource, /diagnostic_cdp_suspended/);
+});
+
+test('v0.5.114 verification can ignore only a stale generating control after terminal UI stability', () => {
+  assert.match(contentSource, /staleGeneratingControlIgnored/);
+  assert.match(contentSource, /snapshot\.composerVisible && snapshot\.sendReady/);
+  assert.match(contentSource, /Date\.now\(\) - stableSince >= 1500/);
+});
