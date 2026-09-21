@@ -40,6 +40,49 @@
   let disposed = false;
   let terminalReason = null;
   let healthTimer = null;
+  const callbackStats = new Map();
+
+  function measureCallback(kind, callback, args) {
+    const startedAt = performance.now();
+    try {
+      return callback(...args);
+    } finally {
+      const elapsed = Math.max(0, performance.now() - startedAt);
+      const current = callbackStats.get(kind) || { count: 0, totalMs: 0, maxMs: 0 };
+      current.count += 1;
+      current.totalMs += elapsed;
+      current.maxMs = Math.max(current.maxMs, elapsed);
+      callbackStats.set(kind, current);
+    }
+  }
+
+  function diagnosticsSnapshot({ resetCallbacks = false } = {}) {
+    const callbacks = {};
+    for (const [kind, value] of callbackStats) {
+      callbacks[kind] = {
+        count: value.count,
+        totalMs: Math.round(value.totalMs * 10) / 10,
+        maxMs: Math.round(value.maxMs * 10) / 10,
+      };
+    }
+    const snapshot = {
+      active: !disposed,
+      terminalReason,
+      live: {
+        timeouts: timeouts.size,
+        intervals: intervals.size,
+        animationFrames: animationFrames.size,
+        mutationObservers: observers.size,
+        performanceObservers: performanceObservers.size,
+        resizeObservers: resizeObservers.size,
+        domEventListeners: eventListeners.size,
+        chromeEventListeners: chromeEventListeners.size,
+      },
+      callbacks,
+    };
+    if (resetCallbacks) callbackStats.clear();
+    return snapshot;
+  }
 
   function runtimeAvailable() {
     if (disposed) return false;
@@ -189,7 +232,7 @@
       ? (...callbackArgs) => {
         timeouts.delete(id);
         if (!checkAlive('timeout_context_invalidated')) return undefined;
-        return callback(...callbackArgs);
+        return measureCallback('timeout', callback, callbackArgs);
       }
       : callback;
     id = original.setTimeout(wrapped, delay, ...args);
@@ -206,7 +249,7 @@
     const wrapped = typeof callback === 'function'
       ? (...callbackArgs) => {
         if (!checkAlive('interval_context_invalidated')) return undefined;
-        return callback(...callbackArgs);
+        return measureCallback('interval', callback, callbackArgs);
       }
       : callback;
     const id = original.setInterval(wrapped, delay, ...args);
@@ -225,7 +268,7 @@
       id = original.requestAnimationFrame((timestamp) => {
         animationFrames.delete(id);
         if (!checkAlive('animation_frame_context_invalidated')) return;
-        callback(timestamp);
+        measureCallback('animationFrame', callback, [timestamp]);
       });
       animationFrames.add(id);
       return id;
@@ -243,7 +286,7 @@
     constructor(callback) {
       super((records, observer) => {
         if (!checkAlive('mutation_context_invalidated')) return;
-        callback(records, observer);
+        measureCallback('mutationObserver', callback, [records, observer]);
       });
       observers.add(this);
     }
@@ -259,7 +302,7 @@
       constructor(callback) {
         super((entries, observer) => {
           if (!checkAlive('performance_observer_context_invalidated')) return;
-          callback(entries, observer);
+          measureCallback('performanceObserver', callback, [entries, observer]);
         });
         performanceObservers.add(this);
       }
@@ -275,7 +318,7 @@
       constructor(callback) {
         super((entries, observer) => {
           if (!checkAlive('resize_observer_context_invalidated')) return;
-          callback(entries, observer);
+          measureCallback('resizeObserver', callback, [entries, observer]);
         });
         resizeObservers.add(this);
       }
@@ -414,6 +457,7 @@
     terminalReason: null,
     isAlive: checkAlive,
     shutdown,
+    diagnosticsSnapshot,
   };
 
   // The background lifecycle authority can quiesce every content generation before an
