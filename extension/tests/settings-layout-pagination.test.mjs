@@ -10,6 +10,13 @@ const backgroundSource = await readFile(new URL('../background.js', import.meta.
 const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
 const lifecycleSource = await readFile(new URL('../content-runtime-lifecycle.js', import.meta.url), 'utf8');
 const runtimeLogSource = await readFile(new URL('../runtime-log.js', import.meta.url), 'utf8');
+function requireSource(relativePath) {
+  return requireSource.cache.get(relativePath);
+}
+requireSource.cache = new Map([
+  ['../work-mode-controller.js', await readFile(new URL('../work-mode-controller.js', import.meta.url), 'utf8')],
+  ['../context-budget.js', await readFile(new URL('../context-budget.js', import.meta.url), 'utf8')],
+]);
 
 test('compact lock editor sits directly after feature gates and request history is the last settings card', () => {
   const featureIndex = settingsHtml.indexOf('id="globalHeading"');
@@ -84,4 +91,15 @@ test('v0.5.112 suppresses transcript-stream mutation churn and ignores disabled 
   assert.match(contentSource, /target\.closest\?\.\('\[data-message-author-role\]'\)/);
   assert.match(contentSource, /element\.getAttribute\?\.\('aria-disabled'\) !== 'true'/);
   assert.match(contentSource, /transcript streaming is extremely mutation-heavy/);
+});
+
+
+test('v0.5.113 removes high-frequency full-document Work and context polling', () => {
+  const workModeSource = requireSource('../work-mode-controller.js');
+  const contextBudgetSource = requireSource('../context-budget.js');
+  assert.doesNotMatch(workModeSource, /querySelectorAll\('span,div'\)/);
+  assert.match(workModeSource, /querySelectorAll\('h1,h2,button,span,\[data-tpp-source-group-toggle\]'\)/);
+  assert.doesNotMatch(workModeSource, /attributeFilter: \['aria-selected'/);
+  assert.match(contextBudgetSource, /const PERIODIC_REFRESH_MS = 30_000;/);
+  assert.match(contextBudgetSource, /window\.setInterval\(scheduleRefresh, PERIODIC_REFRESH_MS\)/);
 });
