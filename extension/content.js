@@ -183,14 +183,20 @@
   function reportPerformanceTelemetry(eventLoopLagMs = 0) {
     const now = Date.now();
     const lag = Math.max(0, Number(eventLoopLagMs) || 0);
+    const lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__?.diagnosticsSnapshot?.({ resetCallbacks: true }) || null;
+    const callbackMaxMs = lifecycle?.callbacks
+      ? Math.max(0, ...Object.values(lifecycle.callbacks).map((item) => Number(item?.maxMs || 0)))
+      : 0;
     const abnormal = lag >= 120
       || performanceTelemetry.maxLongTaskMs >= 100
       || performanceTelemetry.maxMutationCallbackMs >= 40
-      || performanceTelemetry.mutationCount >= 5000;
+      || performanceTelemetry.mutationCount >= 5000
+      || callbackMaxMs >= 40;
     // Hidden tabs are timer-throttled by Chromium; that delay is not user-visible
     // jank and must not be reported as event-loop lag.
     if (document.visibilityState !== 'visible' && lag > 0) return;
-    if (!abnormal || now - performanceTelemetry.lastReportedAt < 30000) return;
+    const periodicDue = now - performanceTelemetry.lastReportedAt >= 30000;
+    if (!periodicDue) return;
     performanceTelemetry.lastReportedAt = now;
     const details = {
       eventLoopLagMs: Math.round(lag),
@@ -201,6 +207,8 @@
       maxMutationCallbackMs: Math.round(performanceTelemetry.maxMutationCallbackMs * 10) / 10,
       verificationRunning: autoVerificationRunning || cachedState?.autoVerification?.running === true,
       documentVisibility: document.visibilityState,
+      abnormal,
+      runtimeLifecycle: lifecycle,
     };
     performanceTelemetry.mutationCount = 0;
     performanceTelemetry.mutationCallbacks = 0;
@@ -224,10 +232,17 @@
   }
 
   let performanceTickExpected = performance.now() + 5000;
+  let performanceTickVisibility = document.visibilityState;
   window.setInterval(() => {
     const now = performance.now();
-    const lag = Math.max(0, now - performanceTickExpected);
+    const visibility = document.visibilityState;
+    // A tab that was hidden during the sampling interval can be timer-throttled by
+    // Chromium. Never convert that hidden interval into a foreground jank sample.
+    const lag = visibility === 'visible' && performanceTickVisibility === 'visible'
+      ? Math.max(0, now - performanceTickExpected)
+      : 0;
     performanceTickExpected = now + 5000;
+    performanceTickVisibility = visibility;
     reportPerformanceTelemetry(lag);
   }, 5000);
 
