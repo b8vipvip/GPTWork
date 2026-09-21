@@ -749,14 +749,15 @@ const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
     const transaction = verificationTransactionForTab(tabId);
+    const verificationSession = tabStates.get(Number(tabId))?.autoVerification?.running === true;
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
-      preserveModel: Boolean(transaction),
-      preserveReasoning: Boolean(transaction),
-      bypassRewrite: Boolean(transaction),
-      responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
+      preferredReasoning: verificationSession ? null : currentSettings.preferredReasoning,
+      preserveModel: verificationSession,
+      preserveReasoning: verificationSession,
+      bypassRewrite: verificationSession,
+      responseVerificationEnabled: verificationSession ? true : currentSettings.networkVerificationEnabled,
     };
   },
   onStatus(tabId, monitor) {
@@ -888,7 +889,7 @@ async function configureTab(tab) {
   const enabled = effectiveSettingsForState(state).enabled;
   // Navigation from / to /c/:id is part of a new-chat verification turn. Detaching
   // CDP while ChatGPT creates that conversation loses the first formal request.
-  if (verificationTransactionForTab(tab.id)) await networkMonitor.attach(tab.id);
+  if (state.autoVerification?.running === true) await networkMonitor.attach(tab.id);
   else if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
   else await networkMonitor.attach(tab.id);
   await broadcastTabState(tab.id);
