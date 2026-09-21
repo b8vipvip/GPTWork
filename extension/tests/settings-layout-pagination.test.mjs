@@ -10,6 +10,7 @@ const backgroundSource = await readFile(new URL('../background.js', import.meta.
 const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
 const lifecycleSource = await readFile(new URL('../content-runtime-lifecycle.js', import.meta.url), 'utf8');
 const runtimeLogSource = await readFile(new URL('../runtime-log.js', import.meta.url), 'utf8');
+const networkMonitorSource = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
 function requireSource(relativePath) {
   return requireSource.cache.get(relativePath);
 }
