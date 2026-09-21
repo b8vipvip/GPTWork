@@ -51,8 +51,15 @@ test('network monitor serializes debugger attach and detach per tab', async () =
   assert.equal(fetchEnableCalls, 1, 'Fetch.enable must also run only once for the shared attach');
   assert.equal(networkEnableCalls, 0, 'ordinary request locking must not enable full Network capture');
   assert.equal(monitor.isAttached(17), true);
+  const beforeCapture = monitor.diagnosticsSnapshot();
+  assert.equal(beforeCapture.attachedTabs, 1);
+  assert.equal(beforeCapture.responseCaptureTabs, 0);
+  assert.equal(beforeCapture.cdpEvents, 0);
   await monitor.enableResponseCapture(17);
   assert.equal(networkEnableCalls, 1, 'full Network capture is enabled only on demand');
+  const duringCapture = monitor.diagnosticsSnapshot({ reset: true });
+  assert.equal(duringCapture.responseCaptureTabs, 1);
+  assert.ok(duringCapture.elapsedMs >= 1);
 
   await Promise.all([monitor.detach(17), monitor.detach(17)]);
   assert.equal(detachCalls, 1, 'concurrent detach calls must share one debugger.detach');
