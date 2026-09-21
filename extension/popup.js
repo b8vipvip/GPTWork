@@ -320,18 +320,13 @@ elements.editModelLock?.addEventListener('click', () => {
 elements.popupModelChoices?.addEventListener('change', async () => {
   const selected = [...elements.popupModelChoices.querySelectorAll('input[name="popup-lock-model"]:checked')]
     .map((input) => normalizeConcreteModelId(input.value)).filter(Boolean);
-  if (!selected.length) {
-    if (elements.popupLockMessage) elements.popupLockMessage.textContent = '至少保留一个锁定模型。';
-    await renderPopupLockSummary();
-    return;
-  }
   const stored = await chrome.storage.sync.get('policy');
   const policy = normalizePolicy(stored.policy);
   await chrome.storage.sync.set({
     policy: normalizePolicy({ ...policy, lockedModels: selected }),
     gptworkModelLockSelection: selected,
   });
-  if (elements.popupLockMessage) elements.popupLockMessage.textContent = '锁定模型已保存。';
+  if (elements.popupLockMessage) elements.popupLockMessage.textContent = selected.length ? '锁定模型已保存。' : '已取消全部模型锁定。';
   await renderPopupLockSummary();
 });
 
