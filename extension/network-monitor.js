@@ -112,6 +112,7 @@ export class ChatGptNetworkMonitor {
     this.lastFormalRequestByTab = new Map();
     this.webSocketSequence = 0;
     this.lastPurgeAt = 0;
+    this.diagnosticSuspended = false;
     this.diagnosticCounters = {
       startedAt: Date.now(),
       cdpEvents: 0,
@@ -132,6 +133,26 @@ export class ChatGptNetworkMonitor {
 
   target(tabId) {
     return { tabId };
+  }
+
+  async setDiagnosticSuspended(suspended) {
+    const next = suspended === true;
+    if (this.diagnosticSuspended === next) return { suspended: next, detachedTabs: 0 };
+    this.diagnosticSuspended = next;
+    let detachedTabs = 0;
+    if (next) {
+      for (const tabId of [...this.attachedTabs]) {
+        try {
+          await this.detach(tabId);
+          detachedTabs += 1;
+        } catch {}
+      }
+    }
+    return { suspended: next, detachedTabs };
+  }
+
+  isDiagnosticSuspended() {
+    return this.diagnosticSuspended === true;
   }
 
   configuration(tabId) {
@@ -176,6 +197,10 @@ export class ChatGptNetworkMonitor {
   }
 
   async attach(tabId) {
+    if (this.diagnosticSuspended) {
+      this.onStatus(tabId, { attached: false, error: 'diagnostic_cdp_suspended' });
+      return false;
+    }
     // A detach requested while an earlier attach is still running wins first. Any new
     // attach waits for that detach, then starts a fresh lifecycle instead of returning
     // the stale in-flight attach Promise.
