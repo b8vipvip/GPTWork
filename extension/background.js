@@ -256,7 +256,7 @@ function accountAllowsState(state) {
 }
 
 function effectiveSettingsForState(state) {
-  const verification = verificationTransactionForTab(state?.tabId);
+  const verification = verificationActiveForTab(state?.tabId);
   if (verification) {
     // Model verification is an isolated measurement transaction. User Work/model-lock
     // switches must not block the fixed probe or alter the model ChatGPT actually sends.
@@ -279,6 +279,12 @@ function effectiveSettingsForState(state) {
 
 function verificationTransactionForTab(tabId) {
   return verificationTransactions.get(Number(tabId)) || null;
+}
+
+function verificationActiveForTab(tabId) {
+  const id = Number(tabId);
+  if (!Number.isInteger(id)) return false;
+  return Boolean(verificationTransactions.get(id) || tabStates.get(id)?.autoVerification?.running === true);
 }
 
 function runtimePolicyForTabSync(tabId) {
@@ -548,9 +554,11 @@ function sendNative(type, payload = {}) {
   });
 }
 
+let nativeLogSyncQueue = Promise.resolve();
 async function syncRuntimeLogsToNative() {
-  if (!masterRuntimeEnabled()) return { written: 0, skipped: 'master_disabled' };
-  let total = 0;
+  nativeLogSyncQueue = nativeLogSyncQueue.catch(() => {}).then(async () => {
+    if (!masterRuntimeEnabled()) return { written: 0, skipped: 'master_disabled' };
+    let total = 0;
   // Drain several small batches without blocking ordinary verification messages for long.
   for (let pass = 0; pass < 40; pass += 1) {
     const records = await runtimeLogNativeBatch(50);
@@ -562,7 +570,9 @@ async function syncRuntimeLogsToNative() {
     total += written;
     if (records.length < 50) break;
   }
-  return { written: total };
+    return { written: total };
+  });
+  return nativeLogSyncQueue;
 }
 
 async function syncPolicy() {
@@ -745,14 +755,15 @@ const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
     const transaction = verificationTransactionForTab(tabId);
+    const verificationActive = verificationActiveForTab(tabId);
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
-      preserveModel: Boolean(transaction),
-      preserveReasoning: Boolean(transaction),
-      bypassRewrite: Boolean(transaction),
-      responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
+      preferredReasoning: verificationActive ? null : currentSettings.preferredReasoning,
+      preserveModel: verificationActive,
+      preserveReasoning: verificationActive,
+      bypassRewrite: verificationActive,
+      responseVerificationEnabled: verificationActive ? true : currentSettings.networkVerificationEnabled,
     };
   },
   onStatus(tabId, monitor) {
@@ -882,7 +893,10 @@ async function configureTab(tab) {
     return state;
   }
   const enabled = effectiveSettingsForState(state).enabled;
-  if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
+  // Navigation from / to /c/:id is part of a new-chat verification turn. Detaching
+  // CDP while ChatGPT creates that conversation loses the first formal request.
+  if (verificationActiveForTab(tab.id)) await networkMonitor.attach(tab.id);
+  else if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
   else await networkMonitor.attach(tab.id);
   await broadcastTabState(tab.id);
   return state;
