@@ -183,7 +183,7 @@
   function reportPerformanceTelemetry(eventLoopLagMs = 0) {
     const now = Date.now();
     const lag = Math.max(0, Number(eventLoopLagMs) || 0);
-    const lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__?.diagnosticsSnapshot?.({ resetCallbacks: true }) || null;
+    let lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__?.diagnosticsSnapshot?.() || null;
     const callbackMaxMs = lifecycle?.callbacks
       ? Math.max(0, ...Object.values(lifecycle.callbacks).map((item) => Number(item?.maxMs || 0)))
       : 0;
@@ -197,6 +197,7 @@
     if (document.visibilityState !== 'visible' && lag > 0) return;
     const periodicDue = now - performanceTelemetry.lastReportedAt >= 30000;
     if (!periodicDue) return;
+    lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__?.diagnosticsSnapshot?.({ resetCallbacks: true }) || lifecycle;
     performanceTelemetry.lastReportedAt = now;
     const details = {
       eventLoopLagMs: Math.round(lag),
