@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 const content = await readFile(new URL('../content.js', import.meta.url), 'utf8');
+const policy = await readFile(new URL('../policy.js', import.meta.url), 'utf8');
 const settings = await readFile(new URL('../settings-v0521.html', import.meta.url), 'utf8');
 const popup = await readFile(new URL('../popup-v0513.html', import.meta.url), 'utf8');
 const historyUi = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
