@@ -150,7 +150,7 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
   const verifyBody = background.slice(verifyStart, verifyStart + 7000);
   const runningAt = verifyBody.indexOf('state.autoVerification = {');
   const broadcastAt = verifyBody.indexOf('await broadcastTabState(tabId)', runningAt);
-  const discoverAt = verifyBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
+  const discoverAt = verifyBody.indexOf('const initialCatalog = await discoverAccountCatalog(tabId)');
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
   assert.match(verifyBody, /state\.autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
@@ -394,4 +394,25 @@ test('v0.5.108 popup can persist an empty locked-model list', () => {
   assert.doesNotMatch(popupJs, /至少保留一个锁定模型/);
   assert.match(popupJs, /已取消全部模型锁定/);
   assert.match(popupJs, /lockedModels: selected/);
+});
+
+
+test('v0.5.109 verification owns Work discovery independently and waits for terminal replies', () => {
+  assert.match(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+  assert.match(background, /verification_work_mode_transition/);
+  assert.match(background, /mergeAccountCatalogs/);
+  assert.match(background, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
+  assert.match(background, /account_model_verification_aborted_pending_response/);
+  assert.match(content, /verificationWorkControl/);
+  assert.match(content, /verification-work-mode/);
+  assert.match(content, /waitForProbeTurnSettled/);
+  assert.match(content, /assistantCountBefore/);
+  assert.match(content, /stillGenerating/);
+});
+
+test('v0.5.109 performance topology diagnostics are compact and sampled less often', () => {
+  assert.match(content, /function lightElementProbe/);
+  assert.match(content, /lastReportedAt < 30000/);
+  assert.match(content, /performance\.now\(\) \+ 5000/);
+  assert.doesNotMatch(content, /composerControls,/);
 });
