@@ -919,6 +919,7 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
     .map((tab) => `chrome:${tab.windowId}`))];
   try {
     accountState = await accountClient.heartbeat(windowKeys);
+    if (accountState?.authenticated === true) void syncSharedKnownModels();
   } catch (error) {
     accountState = { ...accountClient.snapshot(), lastError: errorText(error) };
   }
@@ -1236,8 +1237,12 @@ async function syncSharedKnownModels() {
         lastSeenAt: item?.lastSeenAt || null,
       }))
       .filter((item) => item.model);
-    await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: models });
-    logRuntime('info', 'verification', 'shared_model_catalog_synced', { count: models.length });
+    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
+    const previous = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+    if (JSON.stringify(previous) !== JSON.stringify(models)) {
+      await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: models });
+      logRuntime('info', 'verification', 'shared_model_catalog_synced', { count: models.length, changed: true });
+    }
     return models;
   } catch (error) {
     logRuntime('warn', 'verification', 'shared_model_catalog_sync_failed', { error: errorText(error) });
