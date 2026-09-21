@@ -130,7 +130,12 @@ export function normalizePolicy(input) {
     : DEFAULT_POLICY.lockedModels;
 
   return {
-    lockedModels: lockedModels.length ? lockedModels : [...fallbackModels],
+    // An explicitly empty array means "no model lock". Defaults only apply when
+    // there is no explicit policy at all; otherwise the UI could never disable
+    // the final locked model.
+    lockedModels: hasExplicitPolicy && rawModels.length === 0
+      ? []
+      : lockedModels.length ? lockedModels : [...fallbackModels],
     allowedReasoningLevels: allowedReasoningLevels.length
       ? allowedReasoningLevels
       : [...DEFAULT_POLICY.allowedReasoningLevels],
