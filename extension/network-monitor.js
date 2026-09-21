@@ -532,6 +532,7 @@ export class ChatGptNetworkMonitor {
         this.onRewrite?.(tabId, {
           endpoint,
           requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
           changed: false,
           reason: 'verification_passthrough',
           modelBefore: observed.model,
@@ -545,6 +546,7 @@ export class ChatGptNetworkMonitor {
         this.onRewrite?.(tabId, {
           endpoint,
           requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
           changed: false,
           reason: 'verification_passthrough_failed_open',
           error: detail,
@@ -568,6 +570,7 @@ export class ChatGptNetworkMonitor {
         this.onRewrite?.(tabId, {
           endpoint,
           requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
           changed: false,
           reason: 'verification_passthrough_late_authority',
           modelBefore: observed.model,
@@ -583,6 +586,7 @@ export class ChatGptNetworkMonitor {
       this.onRewrite?.(tabId, {
         endpoint,
         requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
         changed: rewrite.changed,
         reason: rewrite.reason,
         modelBefore: rewrite.modelBefore,
@@ -598,6 +602,7 @@ export class ChatGptNetworkMonitor {
       this.onRewrite?.(tabId, {
         endpoint,
         requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
         changed: false,
         reason: 'rewrite_failed_open',
         modelBefore: rewrite?.modelBefore ?? null,

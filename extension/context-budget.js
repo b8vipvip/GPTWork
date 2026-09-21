@@ -1660,10 +1660,24 @@
     scheduleRefresh();
   });
 
-  new MutationObserver(scheduleRefresh).observe(document.documentElement, {
+  new MutationObserver((mutations) => {
+    // Token streaming mutates text/children inside the active transcript hundreds of
+    // times per turn. Recomputing the full context budget for those mutations can
+    // force expensive conversation/layout work without changing send authority.
+    // Refresh for structural changes outside an existing turn, including insertion
+    // of a new turn; guard/input/navigation events cover the rest.
+    const relevant = mutations.some((mutation) => {
+      if (mutation.type !== 'childList') return false;
+      const target = mutation.target?.nodeType === Node.ELEMENT_NODE
+        ? mutation.target
+        : mutation.target?.parentElement;
+      if (target?.closest?.('[data-message-author-role]')) return false;
+      return true;
+    });
+    if (relevant) scheduleRefresh();
+  }).observe(document.documentElement, {
     childList: true,
     subtree: true,
-    characterData: true,
   });
   function resetConversationScopedState() {
     // Detach only. The old conversation's pending record remains recoverable until its TTL expires.
