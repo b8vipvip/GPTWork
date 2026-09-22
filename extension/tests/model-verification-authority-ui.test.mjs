@@ -241,7 +241,8 @@ test('v0.5.96 waits for stable picker geometry and confirms the selected model b
   assert.match(content, /verification_model_selection_confirmed/);
   assert.match(content, /collectObservation\(\)\.model === desired/);
   const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
-  assert.match(background, /const requestModel = normalizeConcreteModelId\(state\.lastRequest\?\.model\)/);
+  assert.match(background, /const networkObservedRequestModel = normalizeConcreteModelId\(state\.lastRequest\?\.model\)/);
+  assert.match(background, /normalizeConcreteModelId\(state\.lastRewrite\?\.modelAfter\)/);
   assert.doesNotMatch(background, /selected\\n\s+const requestModel/);
 });
 
@@ -261,11 +262,12 @@ test('v0.5.98 ignores hidden stale stop controls between verification models', (
 });
 
 
-test('v0.5.99 bypasses request rewriting during verification and keeps partial response evidence', async () => {
+test('v0.5.99 response evidence remains partial-safe while v0.5.120 owns verification at Fetch', async () => {
   const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
   const options = await readFile(new URL('../options.js', import.meta.url), 'utf8');
-  assert.match(monitor, /configuration\.bypassRewrite === true/);
-  assert.match(monitor, /reason: 'verification_passthrough'/);
+  assert.match(monitor, /effectiveConfiguration\(tabId\)/);
+  assert.match(monitor, /authorityKind: 'verification-transaction'/);
+  assert.match(monitor, /verification_authority_mismatch_blocked/);
   assert.match(monitor, /hasResponseMetadataEvidence/);
   assert.match(background, /lastResponseEvidence/);
   assert.match(background, /responseConfirmed/);
