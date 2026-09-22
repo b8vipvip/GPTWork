@@ -171,5 +171,41 @@ if ($LASTEXITCODE -ne 0) {
 
 Test-NativeMessagingRoundTrip
 
+function Request-ExtensionGenerationReload {
+    param([Parameter(Mandatory = $true)][ValidateSet('Chrome','Edge')][string]$TargetBrowser)
+
+    $processName = if ($TargetBrowser -eq 'Chrome') { 'chrome' } else { 'msedge' }
+    if (-not (Get-Process -Name $processName -ErrorAction SilentlyContinue)) { return }
+
+    $manifestPath = Join-Path $installRoot 'extension\manifest.json'
+    $expectedVersion = ''
+    try { $expectedVersion = (Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).version } catch {}
+    $pf86 = [Environment]::GetFolderPath('ProgramFilesX86')
+    $candidates = if ($TargetBrowser -eq 'Chrome') {
+        @(
+            (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+            (Join-Path $pf86 'Google\Chrome\Application\chrome.exe'),
+            (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
+        )
+    } else {
+        @(
+            (Join-Path $pf86 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
+        )
+    }
+    $browserExe = $candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+    if (-not $browserExe) {
+        Write-Warning "浏览器正在运行但未找到可执行文件，无法请求扩展代际重载 / $TargetBrowser is running but its executable was not found."
+        return
+    }
+
+    $reloadUrl = "chrome-extension://$ExtensionId/generation-reload.html?expected=$([uri]::EscapeDataString([string]$expectedVersion))"
+    Start-Process -FilePath $browserExe -ArgumentList @('--new-tab', $reloadUrl) | Out-Null
+    Start-Sleep -Milliseconds 900
+}
+
+if ($Browser -in @('All', 'Chrome')) { Request-ExtensionGenerationReload -TargetBrowser 'Chrome' }
+if ($Browser -in @('All', 'Edge')) { Request-ExtensionGenerationReload -TargetBrowser 'Edge' }
+
 Write-Host 'GPTWork 浏览器连接及 Native Messaging 往返通信已修复并验证 / browser connection and round trip verified.' -ForegroundColor Green
-Write-Host '请完全退出所有 Chrome/Edge 进程后重新打开 / Fully exit and restart every Chrome/Edge process.'
+Write-Host '若浏览器正在运行，安装器已请求整套扩展代际重载；无需让旧 service worker 与新文件混跑 / running browsers were asked to reload the whole extension generation.'

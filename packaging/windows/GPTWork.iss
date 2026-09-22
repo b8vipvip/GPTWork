@@ -1,6 +1,6 @@
 #define MyAppName "GPTWork"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.121"
+  #define MyAppVersion "0.5.122"
 #endif
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
@@ -62,6 +62,10 @@ Source: "{#PrivateEnginePath}"; DestDir: "{app}\bin"; DestName: "gptwork-engine.
 Source: "..\..\extension\*"; DestDir: "{app}\extension.next"; Excludes: "tests\*,README.md,package.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Update-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
 Source: "Repair-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\..\tools\windows\GPTWork-Jank-Diagnostic.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\..\tools\windows\Analyze-GPTWork-Jank.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\..\tools\windows\Run-GPTWork-Jank-Diagnostic.bat"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\..\tools\windows\Run-GPTWork-Jank-Analyzer.bat"; DestDir: "{app}\tools"; Flags: ignoreversion
 
 [Dirs]
 Name: "{app}\native-messaging"
@@ -75,6 +79,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.co
 Name: "{group}\GPTWork 扩展目录"; Filename: "{sys}\explorer.exe"; Parameters: """{app}\extension"""
 Name: "{group}\检查 GPTWork 更新"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Update-GPTWork.ps1"""; WorkingDir: "{app}\tools"
 Name: "{group}\修复 GPTWork 浏览器连接"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"""; WorkingDir: "{app}\tools"
+Name: "{group}\GPTWork 浏览器卡顿诊断"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\GPTWork-Jank-Diagnostic.ps1"""; WorkingDir: "{app}\tools"
+Name: "{group}\GPTWork 卡顿日志本地分析"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Analyze-GPTWork-Jank.ps1"""; WorkingDir: "{app}\tools"
 Name: "{group}\卸载 GPTWork"; Filename: "{uninstallexe}"
 
 [Run]

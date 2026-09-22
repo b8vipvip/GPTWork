@@ -30,6 +30,7 @@ import {
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
+const RUNTIME_CODE_VERSION = '0.5.122';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -915,6 +916,18 @@ const networkMonitor = new ChatGptNetworkMonitor({
     };
     if (rewrite.error) state.lastError = rewrite.error;
     const verification = verificationTransactionForTab(tabId);
+    if (verification?.model && rewrite.authorityKind !== 'verification-transaction') {
+      state.lastError = 'verification_request_missing_terminal_authority';
+      state.phase = 'error';
+      logRuntime('error', 'verification', 'verification_request_generation_or_authority_mismatch', {
+        tabId,
+        verificationModel: verification.model,
+        rewriteAuthorityKind: rewrite.authorityKind ?? null,
+        rewriteAuthorityModel: rewrite.authorityModel ?? null,
+        modelAfter: rewrite.modelAfter ?? null,
+        fetchRequestId: rewrite.fetchRequestId ?? null,
+      });
+    }
     logRuntime(rewrite.error ? 'warn' : 'info', 'lock', rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked', {
       tabId,
       verificationActive: Boolean(verification),
@@ -1120,8 +1133,24 @@ async function refreshNativeCore({ tolerateFailure = false } = {}) {
 }
 
 async function performInitialize() {
+  const manifestVersion = chrome.runtime.getManifest().version;
+  if (manifestVersion !== RUNTIME_CODE_VERSION) {
+    await chrome.storage.local.set({
+      gptworkGenerationMismatch: {
+        manifestVersion,
+        runtimeCodeVersion: RUNTIME_CODE_VERSION,
+        detectedAt: new Date().toISOString(),
+      },
+    }).catch(() => {});
+    // An unpacked extension can have its directory atomically replaced while the old
+    // service worker is still alive. Never run a mixed generation: reload the whole
+    // extension before attaching CDP or rewriting any request.
+    chrome.runtime.reload();
+    return;
+  }
   logRuntime('info', 'extension', 'initialize_started', {
-    version: chrome.runtime.getManifest().version,
+    version: manifestVersion,
+    runtimeCodeVersion: RUNTIME_CODE_VERSION,
   });
   accountState = await accountClient.initialize();
   await ensureConfiguration();
@@ -1651,16 +1680,26 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const responseEvidence = state.lastResponseEvidence?.requestId === requestId
         ? state.lastResponseEvidence
         : null;
+      // Keep the response observation for mismatch/default diagnostics, but never
+      // promote it directly to completion proof. The strict verifier may intentionally
+      // downgrade this raw candidate.
       const responseObservation = verificationResponseObservation(tabId, responseEvidence);
-      const responseModel = normalizeConcreteModelId(responseObservation.model);
+      const rawResponseModel = normalizeConcreteModelId(responseObservation.model);
+      const expectedVerificationRequestId = requestId ? `cdp-${tabId}-${requestId}` : null;
+      const terminalVerification = state.lastVerification?.verdict === 'verified'
+        && expectedVerificationRequestId
+        && state.lastVerification?.requestId === expectedVerificationRequestId
+        ? state.lastVerification
+        : null;
+      const responseModel = normalizeConcreteModelId(terminalVerification?.model);
       const requestConfirmed = item.model
         ? Boolean(authoritativeRewrite) && (
           requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
         )
         : Boolean(requestModel);
-      const responseConfirmed = item.model
+      const responseConfirmed = Boolean(terminalVerification) && (item.model
         ? responseModel === item.model || Boolean(item.rawModel && responseModel === item.rawModel)
-        : Boolean(responseModel);
+        : Boolean(responseModel));
       const requestMismatch = Boolean(item.model && authoritativeRewrite && requestModel) && !requestConfirmed;
       const verified = Boolean(requestId) && requestConfirmed && responseConfirmed && !requestMismatch;
       const evidenceModel = responseModel || (requestConfirmed ? requestModel : null);
@@ -1673,7 +1712,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         model: item.model || requestModel, rawModel: item.rawModel || requestModel,
         selectorKey: item.selectorKey, label: item.label, verified,
         selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
-        requestId, requestModel, networkObservedRequestModel, responseModel, evidenceModel,
+        requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel,
         responseReasoning: responseEvidence?.reasoning ?? null,
         responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
         responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
@@ -1687,7 +1726,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
         tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
         selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed, responseConfirmed,
-        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, evidenceModel: result.evidenceModel,
+        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel: result.evidenceModel,
         responseVerdict: result.responseVerdict, responseIssue: result.responseIssue,
         evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
       });
