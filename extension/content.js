@@ -1793,20 +1793,62 @@ document.addEventListener('pointerdown', (event) => {
     };
   }
 
+  function diagnosticPerformanceSnapshot({ reset = false } = {}) {
+    const lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__?.diagnosticsSnapshot?.({
+      resetCallbacks: reset,
+      resetDiagnosticLongTasks: reset,
+    }) || null;
+    const callbackMaxMs = lifecycle?.callbacks
+      ? Math.max(0, ...Object.values(lifecycle.callbacks).map((item) => Number(item?.maxMs || 0)))
+      : 0;
+    const snapshot = {
+      capturedAt: new Date().toISOString(),
+      documentVisibility: document.visibilityState,
+      maxLongTaskMs: Math.round(performanceTelemetry.maxLongTaskMs * 10) / 10,
+      longTaskCount: performanceTelemetry.longTaskCount,
+      recentLongTasks: performanceTelemetry.recentLongTasks.slice(-8),
+      mutationCount: performanceTelemetry.mutationCount,
+      mutationCallbacks: performanceTelemetry.mutationCallbacks,
+      maxMutationCallbackMs: Math.round(performanceTelemetry.maxMutationCallbackMs * 10) / 10,
+      maxRuntimeCallbackMs: Math.round(callbackMaxMs * 10) / 10,
+      runtimeLifecycle: lifecycle,
+    };
+    if (reset) {
+      performanceTelemetry.mutationCount = 0;
+      performanceTelemetry.mutationCallbacks = 0;
+      performanceTelemetry.maxMutationCallbackMs = 0;
+      performanceTelemetry.longTaskCount = 0;
+      performanceTelemetry.maxLongTaskMs = 0;
+      performanceTelemetry.recentLongTasks = [];
+    }
+    return snapshot;
+  }
+
   function setDiagnosticContentSuspended(suspended) {
     const next = suspended === true;
+    const lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__;
+    const authority = lifecycle?.setDiagnosticSuspended?.(next, 'background-jank-isolation') || null;
+    // Compatibility mirror only. The lifecycle above is the sole callback/timer/observer
+    // authority for diagnostic suspension; feature scripts must not own separate gates.
     globalThis.__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__ = next;
     const hostIds = ['gptlock-indicator-host', 'gptlock-verification-progress-host'];
     for (const id of hostIds) {
       const node = document.getElementById(id);
       if (node) node.style.display = next ? 'none' : '';
     }
-    return { suspended: next, timestamp: new Date().toISOString() };
+    return { suspended: next, timestamp: new Date().toISOString(), authority };
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND') {
       sendResponse({ ok: true, ...setDiagnosticContentSuspended(message.suspended) });
+      return false;
+    }
+    if (message?.type === 'GPTWORK_DIAGNOSTIC_PERF_SNAPSHOT') {
+      sendResponse({
+        ok: true,
+        details: diagnosticPerformanceSnapshot({ reset: message.reset === true }),
+      });
       return false;
     }
     if (message?.type === 'GPTLOCK_AUTO_RESOLVE_MODEL_NAMES') {
@@ -1868,7 +1910,6 @@ document.addEventListener('pointerdown', (event) => {
   });
 
   new MutationObserver((mutations) => {
-    if (globalThis.__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__ === true) return;
     const startedAt = performance.now();
     // DOM observation never performs clicks. All ChatGPT UI mutation is owned by an
     // explicit model-selection transaction. Typing/streaming text is the hottest DOM path in ChatGPT. It cannot change lock
@@ -1916,7 +1957,6 @@ document.addEventListener('pointerdown', (event) => {
   });
 
   window.setInterval(() => {
-    if (globalThis.__GPTWORK_DIAGNOSTIC_CONTENT_SUSPENDED__ === true) return;
     if (cachedSettings?.enabled === false || cachedState?.guard?.canSend !== false) return;
     if (!runtimeContextAvailable()) {
       failOpenStaleRuntime();
