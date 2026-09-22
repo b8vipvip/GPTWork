@@ -1684,7 +1684,10 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       // verifier intentionally downgraded. The completion summary must never promote
       // that raw candidate back to "responseConfirmed". Terminal verifier output is
       // the sole served-model authority.
+      const expectedVerificationRequestId = requestId ? `cdp-${tabId}-${requestId}` : null;
       const terminalVerification = state.lastVerification?.verdict === 'verified'
+        && expectedVerificationRequestId
+        && state.lastVerification?.requestId === expectedVerificationRequestId
         ? state.lastVerification
         : null;
       const responseModel = normalizeConcreteModelId(terminalVerification?.model);
