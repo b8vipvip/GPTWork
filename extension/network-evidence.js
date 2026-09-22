@@ -87,11 +87,12 @@ function pathScore(path, key, kind, mode = 'response') {
       if (key === 'model' && path.length === 0) return 140;
       return 0;
     }
-    // Response verification has one authority: explicit served/resolved/used
-    // provenance, plus ChatGPT's assistant-message metadata.model_slug contract.
-    // Generic routing/default model fields are diagnostics only and never vote.
+    // Response verification has one terminal authority: fields whose semantics
+    // explicitly say what backend model served/resolved/was used for this turn.
+    // message.metadata.model_slug is page/default/routing metadata in live traffic
+    // and MUST NOT become served-model proof (v0.5.126 field evidence showed it
+    // falsely reporting Sol for an Astra request).
     if (SERVED_MODEL_KEYS.has(key)) return 130;
-    if (key === 'model_slug' && metadata && normalizedPath.some((part) => part === 'message')) return 120;
     return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
