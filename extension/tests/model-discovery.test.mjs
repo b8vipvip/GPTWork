@@ -82,9 +82,10 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /account_model_verification_completed/);
   assert.match(contentSource, /selectModelForVerification/);
   assert.match(contentSource, /selectionAttempted/);
-  assert.match(backgroundSource, /Evidence priority is explicit/);
+  assert.match(backgroundSource, /body forwarded at Fetch\.requestPaused is the sole request-confirmation/);
   assert.match(backgroundSource, /responseConfirmed/);
-  assert.match(backgroundSource, /forceModel: transaction\?\.model \?\? null/);
+  assert.match(backgroundSource, /getVerificationTransaction\(tabId\)/);
+  assert.match(backgroundSource, /fetch_forwarded_request_metadata/);
   assert.doesNotMatch(backgroundSource, /Model selection was not confirmed/);
   assert.match(backgroundSource, /probeMarker: 'GPTWork 模型验证'/);
   assert.match(backgroundSource, /skipAlignment: true/);
