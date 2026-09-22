@@ -242,7 +242,7 @@ $errors|Set-Content -Encoding UTF8 "$root\errors.txt"
 # Keep raw evidence locally, but never force the ETL/raw samples into the default upload archive.
 try{
  $sizeRows=Get-ChildItem $root -File -Recurse|ForEach-Object{
-  $rel=$_.FullName.Substring($root.Length).TrimStart('\\','/')
+  $rel=$_.FullName.Substring($root.Length).TrimStart([char]92,[char]47)
   [pscustomobject]@{File=$rel;Bytes=$_.Length;MB=[math]::Round($_.Length/1MB,3);Extension=$_.Extension}
  }|Sort-Object Bytes -Descending
  $sizeRows|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\source-size-report.csv"
