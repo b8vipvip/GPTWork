@@ -80,11 +80,67 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function applyJankIsolationMode(mode = 'normal', { source = 'runtime' } = {}) {
+async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
+  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  const snapshots = [];
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'GPTWORK_DIAGNOSTIC_PERF_SNAPSHOT',
+        reset,
+      });
+      if (response?.ok) {
+        snapshots.push({
+          tabId: tab.id,
+          windowId: tab.windowId,
+          active: tab.active === true,
+          details: response.details || null,
+        });
+      }
+    } catch {}
+  }
+  return {
+    captureId: phase.captureId || null,
+    label: phase.label || phase.mode || 'unknown',
+    mode: phase.mode || 'normal',
+    startedAt: phase.changedAt || null,
+    endedAt: new Date().toISOString(),
+    tabs: snapshots,
+  };
+}
+
+async function resetJankPhaseTelemetry() {
+  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  for (const tab of tabs) {
+    if (!tab.id) continue;
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'GPTWORK_DIAGNOSTIC_PERF_SNAPSHOT',
+        reset: true,
+      });
+    } catch {}
+  }
+}
+
+async function applyJankIsolationMode(mode = 'normal', {
+  source = 'runtime',
+  label = null,
+  captureId = null,
+} = {}) {
   const normalized = ['normal', 'cdp_off', 'content_off', 'high_level_off'].includes(mode) ? mode : 'normal';
   const previous = (await chrome.storage.local.get(JANK_ISOLATION_KEY))[JANK_ISOLATION_KEY] || { mode: 'normal' };
+  const sameCapture = Boolean(captureId && previous.captureId === captureId);
+  let completedPhase = null;
+  if (sameCapture && previous.label && previous.label !== 'restore_normal') {
+    completedPhase = await collectJankPhaseSnapshot(previous, { reset: true });
+    logRuntime('info', 'diagnostics', 'jank_phase_snapshot', completedPhase);
+  }
+
   const state = {
     mode: normalized,
+    label: String(label || normalized).slice(0, 80),
+    captureId: captureId ? String(captureId).slice(0, 120) : null,
     previousMode: previous.mode || 'normal',
     changedAt: new Date().toISOString(),
     source,
@@ -107,14 +163,23 @@ async function applyJankIsolationMode(mode = 'normal', { source = 'runtime' } = 
     } catch {}
   }
   if (!cdpOff) await configureOpenTabs();
+  if (!sameCapture && state.captureId) await resetJankPhaseTelemetry();
+
   logRuntime('info', 'diagnostics', 'jank_isolation_changed', {
     ...state,
     cdpSuspended: cdp.suspended,
     detachedTabs: cdp.detachedTabs,
     contentSuspended: contentOff,
     contentTabs,
+    completedPhaseLabel: completedPhase?.label || null,
   });
-  return { ...state, cdp, contentSuspended: contentOff, contentTabs };
+  return {
+    ...state,
+    cdp,
+    contentSuspended: contentOff,
+    contentTabs,
+    completedPhase,
+  };
 }
 
 let runtimeLogFlushTimer = null;
@@ -2228,7 +2293,11 @@ const UPDATE_MESSAGE_TYPES = new Set([
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'GPTWORK_SET_JANK_ISOLATION') {
-    void applyJankIsolationMode(message.mode, { source: message.source || 'message' }).then(
+    void applyJankIsolationMode(message.mode, {
+      source: message.source || 'message',
+      label: message.label || null,
+      captureId: message.captureId || null,
+    }).then(
       (result) => sendResponse({ ok: true, result }),
       (error) => sendResponse({ ok: false, error: errorText(error) }),
     );
