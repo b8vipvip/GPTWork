@@ -14,14 +14,41 @@ public static class GPTWorkInputProbe {
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
  [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
  [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
+ [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+ [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenThread(uint access, bool inheritHandle, uint threadId);
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] public static extern int GetThreadDescription(IntPtr hThread, out IntPtr description);
+ [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle);
+ [DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr handle);
  public struct POINT { public int X; public int Y; }
+ [StructLayout(LayoutKind.Sequential)]
+ public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
 }
 '@
+$threadNameCache=@{}
+function Get-ThreadName([int]$ThreadId){
+ $key=[string]$ThreadId
+ if($threadNameCache.ContainsKey($key)){return $threadNameCache[$key]}
+ $name=''
+ $h=[GPTWorkInputProbe]::OpenThread(0x0800,$false,[uint32]$ThreadId)
+ if($h -ne [IntPtr]::Zero){
+  $ptr=[IntPtr]::Zero
+  try{
+   $hr=[GPTWorkInputProbe]::GetThreadDescription($h,[ref]$ptr)
+   if($hr -eq 0 -and $ptr -ne [IntPtr]::Zero){$name=[Runtime.InteropServices.Marshal]::PtrToStringUni($ptr)}
+  }catch{}finally{
+   if($ptr -ne [IntPtr]::Zero){[void][GPTWorkInputProbe]::LocalFree($ptr)}
+   [void][GPTWorkInputProbe]::CloseHandle($h)
+  }
+ }
+ if($null -eq $name){$name=''}
+ $threadNameCache[$key]=[string]$name
+ return [string]$name
+}
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
 $root=Join-Path $env:USERPROFILE "Desktop\GPTWork-Jank-$stamp"
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 $errors=New-Object System.Collections.Generic.List[string]
-"Started=$(Get-Date -Format o)`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, or browser history are collected."|Set-Content -Encoding UTF8 "$root\README.txt"
+"GPTWork Jank Diagnostic v2`nStarted=$(Get-Date -Format o)`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=2000`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read."|Set-Content -Encoding UTF8 "$root\README.txt"
 Get-CimInstance Win32_OperatingSystem|Format-List Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime|Out-String|Set-Content -Encoding UTF8 "$root\system.txt"
 Get-CimInstance Win32_VideoController|Format-List Name,DriverVersion,DriverDate,AdapterRAM,PNPDeviceID|Out-String|Set-Content -Encoding UTF8 "$root\gpu.txt"
 try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t `"$root\dxdiag.txt`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
@@ -35,6 +62,8 @@ function ChromeKind($cmd){
 }
 $chrome=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'"|ForEach-Object{[pscustomobject]@{PID=$_.ProcessId;PPID=$_.ParentProcessId;Kind=(ChromeKind $_.CommandLine);CommandLine=$_.CommandLine}}
 $chrome|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\chrome-process-map.csv"
+$kindByPid=@{}
+foreach($row in $chrome){$kindByPid[[int]$row.PID]=[string]$row.Kind}
 $wprStarted=$false
 try {
  $status=(& wpr.exe -status 2>&1|Out-String)
