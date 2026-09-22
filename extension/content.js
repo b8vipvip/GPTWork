@@ -788,8 +788,19 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   function visible(element) {
+    if (!element?.isConnected) return false;
     const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden';
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = getComputedStyle(element);
+    if (style.visibility === 'hidden' || style.display === 'none') return false;
+    // Radix keeps outgoing picker layers mounted while sliding them above/below the
+    // viewport. A non-zero rect is therefore not sufficient evidence that a control
+    // can receive trusted input. Require real viewport intersection so verification
+    // never reuses an off-screen opener from the previous model turn.
+    return rect.bottom > 0
+      && rect.right > 0
+      && rect.top < window.innerHeight
+      && rect.left < window.innerWidth;
   }
 
   function activeComposerSurface() {
