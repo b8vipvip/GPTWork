@@ -63,8 +63,18 @@ export function installPrivateRequestRoutingHook() {
   if (prototype[PATCH_MARKER]) return false;
   if (typeof prototype.handlePausedRequest !== 'function') return false;
 
+  const terminalVerificationHandler = prototype.handlePausedRequest;
   Object.defineProperty(prototype, PATCH_MARKER, { value: true, configurable: false });
   prototype.handlePausedRequest = async function privateHandlePausedRequest(tabId, params = {}) {
+    // Model verification has exactly one terminal mutation authority: the public
+    // Fetch.requestPaused transaction handler in network-monitor.js. The private
+    // normal-policy hook must never intercept that request first, otherwise it can
+    // rewrite the selected verification model using the ordinary locked-model policy.
+    const verification = this.verificationTransaction?.(tabId);
+    if (verification?.model) {
+      return terminalVerificationHandler.call(this, tabId, params);
+    }
+
     const requestId = String(params.requestId ?? '');
     const request = params.request ?? {};
     const endpoint = safeRequestEndpoint(request.url);
