@@ -1680,10 +1680,11 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const responseEvidence = state.lastResponseEvidence?.requestId === requestId
         ? state.lastResponseEvidence
         : null;
-      // Raw responseEvidence may contain a weak/default model field that the strict
-      // verifier intentionally downgraded. The completion summary must never promote
-      // that raw candidate back to "responseConfirmed". Terminal verifier output is
-      // the sole served-model authority.
+      // Keep the response observation for mismatch/default diagnostics, but never
+      // promote it directly to completion proof. The strict verifier may intentionally
+      // downgrade this raw candidate.
+      const responseObservation = verificationResponseObservation(tabId, responseEvidence);
+      const rawResponseModel = normalizeConcreteModelId(responseObservation.model);
       const expectedVerificationRequestId = requestId ? `cdp-${tabId}-${requestId}` : null;
       const terminalVerification = state.lastVerification?.verdict === 'verified'
         && expectedVerificationRequestId
@@ -1711,7 +1712,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         model: item.model || requestModel, rawModel: item.rawModel || requestModel,
         selectorKey: item.selectorKey, label: item.label, verified,
         selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
-        requestId, requestModel, networkObservedRequestModel, responseModel, evidenceModel,
+        requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel,
         responseReasoning: responseEvidence?.reasoning ?? null,
         responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
         responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
@@ -1725,7 +1726,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
         tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
         selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed, responseConfirmed,
-        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, evidenceModel: result.evidenceModel,
+        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel: result.evidenceModel,
         responseVerdict: result.responseVerdict, responseIssue: result.responseIssue,
         evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
       });
