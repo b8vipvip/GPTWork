@@ -79,20 +79,19 @@ function reasoningFrom(value) {
   return normalizeReasoningLevel(value);
 }
 
-function pathScore(path, key, kind) {
+function pathScore(path, key, kind, mode = 'response') {
   const normalizedPath = path.map(canonicalKey);
   const metadata = normalizedPath.some((part) => /metadata|details|response/.test(part));
   if (kind === 'model') {
+    if (mode === 'request') {
+      if (key === 'model' && path.length === 0) return 140;
+      return 0;
+    }
+    // Response verification has one authority: explicit served/resolved/used
+    // provenance, plus ChatGPT's assistant-message metadata.model_slug contract.
+    // Generic routing/default model fields are diagnostics only and never vote.
     if (SERVED_MODEL_KEYS.has(key)) return 130;
-    // model_slug is served-model evidence only inside an assistant message's metadata.
-    // It is not trusted in generic routing/default envelopes.
     if (key === 'model_slug' && metadata && normalizedPath.some((part) => part === 'message')) return 120;
-    if (FALLBACK_MODEL_KEYS.has(key)) return 20;
-    if (key.includes('slug') && metadata) return 80;
-    if (key.includes('slug')) return 60;
-    // Generic model/model_id fields in downstream websocket envelopes frequently
-    // describe UI/default/routing metadata rather than the backend that served the
-    // assistant turn. Keep them diagnostic-only; they are not served-model proof.
     return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
@@ -112,7 +111,7 @@ function collectCandidates(value, candidates, path = [], depth = 0, mode = 'resp
     const nextPath = [...path, rawKey];
     if (MODEL_KEYS.has(key)) {
       const model = modelFrom(child);
-      const score = mode === 'request' && path.length === 0 && key === 'model' ? 140 : pathScore(path, key, 'model');
+      const score = pathScore(path, key, 'model', mode);
       if (model && score > 0) candidates.model.push({ value: model, score, path: nextPath.join('.') });
     }
     if (REASONING_KEYS.has(key)) {
