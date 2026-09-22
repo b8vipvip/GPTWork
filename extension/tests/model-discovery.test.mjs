@@ -61,6 +61,7 @@ test('trusted network evidence can restore a future model that resembles a legac
 test('auto verification can discover account catalog and use a visible naming fallback for unresolved IDs', async () => {
   const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
   const backgroundSource = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+  const networkSource = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
   assert.match(contentSource, /GPTLOCK_DISCOVER_ACCOUNT_MODELS/);
   assert.match(contentSource, /GPTLOCK_AUTO_RESOLVE_MODEL_NAMES/);
   assert.match(backgroundSource, /account_model_catalog_discovered/);
@@ -91,8 +92,8 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /skipAlignment: true/);
   assert.match(backgroundSource, /runtimePolicyForTabSync/);
   assert.match(backgroundSource, /preserveModel: false/);
-  assert.match(backgroundSource, /preserveReasoning: Boolean\(transaction\)/);
-  assert.match(backgroundSource, /bypassRewrite: false/);
+  assert.match(networkSource, /preserveReasoning: true/);
+  assert.match(networkSource, /bypassRewrite: false/);
   assert.match(backgroundSource, /Account-menu DOM is discovery input, not authoritative persistence/);
   assert.doesNotMatch(backgroundSource, /sources: \[\.\.\.new Set\(\[\.\.\.\(Array\.isArray\(prior\.sources\).*account_model_catalog/s);
 });
