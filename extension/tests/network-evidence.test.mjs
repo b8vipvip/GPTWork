@@ -60,7 +60,35 @@ test('ignores generic model fields buried in unrelated tool data', () => {
   assert.equal(result.reasoning, null);
 });
 
-test('marks conflicting highest-confidence metadata as unusable', () => {
+test('generic downstream model metadata is diagnostic-only, not served-model proof', () => {
+  const result = extractResponseEvidence({
+    body: JSON.stringify({
+      type: 'message',
+      response: {
+        model: 'gpt-5.6-sol',
+        model_id: 'gpt-5.6-sol',
+        default_model_slug: 'gpt-5.6-sol',
+      },
+    }),
+    mimeType: 'application/json',
+  });
+  assert.equal(result.model, null);
+  assert.equal(result.conflicts.model, false);
+  assert.equal(result.diagnostics.modelCandidateCount, 0);
+});
+
+test('explicit served/resolved/used metadata remains authoritative', () => {
+  for (const key of ['served_model_slug', 'resolved_model_slug', 'used_model_slug']) {
+    const result = extractResponseEvidence({
+      body: JSON.stringify({ message: { metadata: { [key]: 'gpt-5.6-terra' } } }),
+      mimeType: 'application/json',
+    });
+    assert.equal(result.model, 'gpt-5.6-terra', key);
+    assert.match(result.fields.model, new RegExp(key));
+  }
+});
+
+test('generic metadata model_slug outside an assistant message has no response authority', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify([
       { metadata: { model_slug: 'gpt-5.6-sol' } },
@@ -68,7 +96,8 @@ test('marks conflicting highest-confidence metadata as unusable', () => {
     ]),
   });
   assert.equal(result.model, null);
-  assert.equal(result.conflicts.model, true);
+  assert.equal(result.conflicts.model, false);
+  assert.equal(result.diagnostics.modelCandidateCount, 0);
 });
 
 test('response headers are whitelisted and normalized', () => {

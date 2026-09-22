@@ -19,6 +19,15 @@ const MODEL_KEYS = new Set([
   'default_model_slug',
   'model',
 ]);
+const SERVED_MODEL_KEYS = new Set([
+  'used_model',
+  'used_model_slug',
+  'resolved_model',
+  'resolved_model_slug',
+  'served_model',
+  'served_model_slug',
+]);
+const FALLBACK_MODEL_KEYS = new Set(['default_model_slug']);
 const REASONING_KEYS = new Set([
   'reasoning_effort',
   'reasoningeffort',
@@ -70,24 +79,29 @@ function reasoningFrom(value) {
   return normalizeReasoningLevel(value);
 }
 
-function pathScore(path, key, kind) {
+function pathScore(path, key, kind, mode = 'response') {
   const normalizedPath = path.map(canonicalKey);
   const metadata = normalizedPath.some((part) => /metadata|details|response/.test(part));
   if (kind === 'model') {
-    if (/served|resolved|used/.test(key)) return 130;
-    if (key.includes('slug') && metadata) return 120;
-    if (key.includes('slug')) return 105;
-    if (metadata) return 100;
-    return path.length <= 2 ? 90 : 0;
+    if (mode === 'request') {
+      if (key === 'model' && path.length === 0) return 140;
+      return 0;
+    }
+    // Response verification has one authority: explicit served/resolved/used
+    // provenance, plus ChatGPT's assistant-message metadata.model_slug contract.
+    // Generic routing/default model fields are diagnostics only and never vote.
+    if (SERVED_MODEL_KEYS.has(key)) return 130;
+    if (key === 'model_slug' && metadata && normalizedPath.some((part) => part === 'message')) return 120;
+    return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
 }
 
-function collectCandidates(value, candidates, path = [], depth = 0) {
+function collectCandidates(value, candidates, path = [], depth = 0, mode = 'response') {
   if (depth > MAX_WALK_DEPTH || value === null || typeof value !== 'object') return;
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      collectCandidates(value[index], candidates, [...path, String(index)], depth + 1);
+      collectCandidates(value[index], candidates, [...path, String(index)], depth + 1, mode);
     }
     return;
   }
@@ -97,7 +111,7 @@ function collectCandidates(value, candidates, path = [], depth = 0) {
     const nextPath = [...path, rawKey];
     if (MODEL_KEYS.has(key)) {
       const model = modelFrom(child);
-      const score = pathScore(path, key, 'model');
+      const score = pathScore(path, key, 'model', mode);
       if (model && score > 0) candidates.model.push({ value: model, score, path: nextPath.join('.') });
     }
     if (REASONING_KEYS.has(key)) {
@@ -106,7 +120,7 @@ function collectCandidates(value, candidates, path = [], depth = 0) {
       if (reasoning && score > 0) candidates.reasoning.push({ value: reasoning, score, path: nextPath.join('.') });
     }
     if (!SKIPPED_CONTENT_KEYS.has(key)) {
-      collectCandidates(child, candidates, nextPath, depth + 1);
+      collectCandidates(child, candidates, nextPath, depth + 1, mode);
     }
   }
 }
@@ -114,16 +128,15 @@ function collectCandidates(value, candidates, path = [], depth = 0) {
 function selectCandidate(candidates) {
   if (!candidates.length) return { value: null, conflict: false, path: null };
   const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
-  const strong = candidates.filter((candidate) => candidate.score >= bestScore - 10);
-  const strongValues = [...new Set(strong.map((candidate) => candidate.value))];
-  if (strongValues.length !== 1) return { value: null, conflict: true, path: null };
   const best = candidates.filter((candidate) => candidate.score === bestScore);
-  return { value: strongValues[0], conflict: false, path: best[best.length - 1].path };
+  const bestValues = [...new Set(best.map((candidate) => candidate.value))];
+  if (bestValues.length !== 1) return { value: null, conflict: true, path: null };
+  return { value: bestValues[0], conflict: false, path: best[best.length - 1].path };
 }
 
-function inspectObjects(values) {
+function inspectObjects(values, mode = 'response') {
   const candidates = { model: [], reasoning: [] };
-  for (const value of values) collectCandidates(value, candidates);
+  for (const value of values) collectCandidates(value, candidates, [], 0, mode);
   const model = selectCandidate(candidates.model);
   const reasoning = selectCandidate(candidates.reasoning);
   return {
@@ -391,7 +404,7 @@ export function extractResponseEvidence({ body = '', headers = {}, mimeType = ''
 
 export function extractRequestEvidence(postData = '') {
   const parsed = typeof postData === 'string' ? parseJson(postData) : null;
-  const evidence = inspectObjects(parsed && typeof parsed === 'object' ? [parsed] : []);
+  const evidence = inspectObjects(parsed && typeof parsed === 'object' ? [parsed] : [], 'request');
   return {
     ...evidence,
     evidenceSource: 'network_request_metadata',
