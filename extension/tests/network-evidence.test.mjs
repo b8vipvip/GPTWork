@@ -88,7 +88,7 @@ test('explicit served/resolved/used metadata remains authoritative', () => {
   }
 });
 
-test('marks conflicting highest-confidence metadata as unusable', () => {
+test('generic metadata model_slug outside an assistant message has no response authority', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify([
       { metadata: { model_slug: 'gpt-5.6-sol' } },
@@ -96,7 +96,8 @@ test('marks conflicting highest-confidence metadata as unusable', () => {
     ]),
   });
   assert.equal(result.model, null);
-  assert.equal(result.conflicts.model, true);
+  assert.equal(result.conflicts.model, false);
+  assert.equal(result.diagnostics.modelCandidateCount, 0);
 });
 
 test('response headers are whitelisted and normalized', () => {
