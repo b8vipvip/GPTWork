@@ -257,6 +257,7 @@ if(Test-Path $analyzer){
   $uploadZip=Get-ChildItem $analysisRoot -Filter '*-UPLOAD.zip' -File -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|Select-Object -First 1 -ExpandProperty FullName
  }catch{$errors.Add("local analyzer: $($_.Exception.Message)")}
 }
+$errors|Set-Content -Encoding UTF8 "$root\errors.txt"
 if(-not $uploadZip){
  $uploadDir="$root-UPLOAD"
  New-Item -ItemType Directory -Force -Path $uploadDir|Out-Null
