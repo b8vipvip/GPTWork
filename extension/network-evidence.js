@@ -95,11 +95,11 @@ function pathScore(path, key, kind) {
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
 }
 
-function collectCandidates(value, candidates, path = [], depth = 0) {
+function collectCandidates(value, candidates, path = [], depth = 0, mode = 'response') {
   if (depth > MAX_WALK_DEPTH || value === null || typeof value !== 'object') return;
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      collectCandidates(value[index], candidates, [...path, String(index)], depth + 1);
+      collectCandidates(value[index], candidates, [...path, String(index)], depth + 1, mode);
     }
     return;
   }
@@ -109,7 +109,7 @@ function collectCandidates(value, candidates, path = [], depth = 0) {
     const nextPath = [...path, rawKey];
     if (MODEL_KEYS.has(key)) {
       const model = modelFrom(child);
-      const score = pathScore(path, key, 'model');
+      const score = mode === 'request' && path.length === 0 && key === 'model' ? 140 : pathScore(path, key, 'model');
       if (model && score > 0) candidates.model.push({ value: model, score, path: nextPath.join('.') });
     }
     if (REASONING_KEYS.has(key)) {
@@ -118,7 +118,7 @@ function collectCandidates(value, candidates, path = [], depth = 0) {
       if (reasoning && score > 0) candidates.reasoning.push({ value: reasoning, score, path: nextPath.join('.') });
     }
     if (!SKIPPED_CONTENT_KEYS.has(key)) {
-      collectCandidates(child, candidates, nextPath, depth + 1);
+      collectCandidates(child, candidates, nextPath, depth + 1, mode);
     }
   }
 }
@@ -133,9 +133,9 @@ function selectCandidate(candidates) {
   return { value: strongValues[0], conflict: false, path: best[best.length - 1].path };
 }
 
-function inspectObjects(values) {
+function inspectObjects(values, mode = 'response') {
   const candidates = { model: [], reasoning: [] };
-  for (const value of values) collectCandidates(value, candidates);
+  for (const value of values) collectCandidates(value, candidates, [], 0, mode);
   const model = selectCandidate(candidates.model);
   const reasoning = selectCandidate(candidates.reasoning);
   return {
@@ -403,7 +403,7 @@ export function extractResponseEvidence({ body = '', headers = {}, mimeType = ''
 
 export function extractRequestEvidence(postData = '') {
   const parsed = typeof postData === 'string' ? parseJson(postData) : null;
-  const evidence = inspectObjects(parsed && typeof parsed === 'object' ? [parsed] : []);
+  const evidence = inspectObjects(parsed && typeof parsed === 'object' ? [parsed] : [], 'request');
   return {
     ...evidence,
     evidenceSource: 'network_request_metadata',
