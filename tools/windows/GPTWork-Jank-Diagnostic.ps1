@@ -1,4 +1,4 @@
-param([int]$DurationSeconds=45,[int]$SampleMs=250)
+param([int]$DurationSeconds=60,[int]$SampleMs=250)
 $ErrorActionPreference='Continue'
 $ExtensionId='bhchcpeodphgjfjoookncemnamdbfcof'
 function Is-Admin { $p=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
@@ -113,6 +113,8 @@ $lii=New-Object GPTWorkInputProbe+LASTINPUTINFO
 $lii.cbSize=[Runtime.InteropServices.Marshal]::SizeOf([type][GPTWorkInputProbe+LASTINPUTINFO])
 [void][GPTWorkInputProbe]::GetLastInputInfo([ref]$lii)
 $lastInputTick=$lii.dwTime
+Set-GPTWorkIsolation 'baseline_normal' 'normal'
+Start-Sleep -Milliseconds 750
 $clock=[Diagnostics.Stopwatch]::StartNew()
 $endMs=$DurationSeconds*1000.0
 $phaseMs=$endMs/5.0
@@ -123,7 +125,7 @@ $phasePlan=@(
  [pscustomobject]@{Label='content_off';Mode='content_off'},
  [pscustomobject]@{Label='high_level_off';Mode='high_level_off'}
 )
-$activePhaseIndex=-1
+$activePhaseIndex=0
 $activePhase=$phasePlan[0]
 $nextDue=0.0
 while($clock.Elapsed.TotalMilliseconds-lt$endMs){
@@ -171,7 +173,7 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
    if($sampleThreads){
     foreach($t in $p.Threads){try{
       $key="$($p.Id):$($t.Id)";$tcpu=$t.TotalProcessorTime.TotalMilliseconds;$prev=if($lastCpu.ContainsKey($key)){$lastCpu[$key]}else{$tcpu};$delta=[math]::Max(0,$tcpu-$prev);$lastCpu[$key]=$tcpu
-      if($delta-ge 1){$threadName=Get-ThreadName ([int]$t.Id);$thr.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Name=$p.ProcessName;Kind=$kind;PID=$p.Id;TID=$t.Id;ThreadName=$threadName;CpuDeltaMs=[math]::Round($delta,1);State=$t.ThreadState;WaitReason=$(if($t.ThreadState-eq'Wait'){$t.WaitReason}else{''})})}
+      if($delta-ge 1){$threadName=Get-ThreadName ([int]$t.Id);$thr.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;Name=$p.ProcessName;Kind=$kind;PID=$p.Id;TID=$t.Id;ThreadName=$threadName;CpuDeltaMs=[math]::Round($delta,1);State=$t.ThreadState;WaitReason=$(if($t.ThreadState-eq'Wait'){$t.WaitReason}else{''})})}
     }catch{}}
    }
   }catch{}
@@ -187,6 +189,7 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
 }
 $clock.Stop()
 Set-GPTWorkIsolation 'restore_normal' 'normal'
+Start-Sleep -Milliseconds 750
 $phaseMarkers|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-markers.csv"
 $proc|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\process-samples.csv"
 $thr|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\thread-samples.csv"
@@ -195,6 +198,7 @@ $ui|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\ui-activity.csv"
 $timing|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\capture-timing.csv"
 $proc|Group-Object Phase,Mode,Kind,PID|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1);MaxOneCorePct=[math]::Round((($_.Group|Measure-Object CpuOneCorePct -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-cpu-summary.csv"
 $proc|Group-Object Kind,PID|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1);MaxOneCorePct=[math]::Round((($_.Group|Measure-Object CpuOneCorePct -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\top-processes.csv"
+$thr|Group-Object Phase,Mode,Kind,PID,TID,ThreadName|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-thread-summary.csv"
 $thr|Group-Object Kind,PID,TID,ThreadName|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\top-threads.csv"
 $intervals=@($timing|Where-Object IntervalMs -gt 0|Select-Object -ExpandProperty IntervalMs|Sort-Object)
 $works=@($timing|Select-Object -ExpandProperty WorkMs|Sort-Object)
@@ -224,7 +228,7 @@ try{
  $topP=Import-Csv "$root\top-processes.csv" -ErrorAction SilentlyContinue|Select-Object -First 12
  $topT=Import-Csv "$root\top-threads.csv" -ErrorAction SilentlyContinue|Select-Object -First 20
  $summary=New-Object System.Collections.Generic.List[string]
- $summary.Add('GPTWork Jank Diagnostic v2 summary')
+ $summary.Add('GPTWork Jank Diagnostic v3 causal A/B summary')
  foreach($line in $health){$summary.Add($line)}
  $summary.Add('Top processes:')
  foreach($row in $topP){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs) maxOneCorePct=$($row.MaxOneCorePct)")}
