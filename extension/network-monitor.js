@@ -52,9 +52,21 @@ function isChatGptHttps(value) {
   }
 }
 
+function isConversationMetadataEndpoint(value) {
+  try {
+    const url = new URL(value);
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+    return path === '/backend-api/conversations'
+      || /^\/backend-api\/conversation\/[^/]+$/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
 function looksLikeStreamEndpoint(value) {
   try {
     const url = new URL(value);
+    if (isConversationMetadataEndpoint(value)) return false;
     return /(?:conversation|stream|events|sse|topic|turn)/i.test(`${url.pathname}${url.search}`);
   } catch {
     return false;
@@ -735,10 +747,14 @@ export class ChatGptNetworkMonitor {
       return;
     }
 
-    if (!isChatGptHttps(request.url) || !this.activeHandoffs(tabId).length) {
+    // History/list/detail reads can contain the active conversation id and therefore
+    // match a live handoff by content, but they are not transport evidence for the
+    // current generation and must never participate in served-model verification.
+    if (!isChatGptHttps(request.url) || isConversationMetadataEndpoint(request.url)) return;
+    if (!this.activeHandoffs(tabId).length) {
       const recent = this.lastFormalRequestByTab.get(tabId);
       if (!recent || Date.now() - recent.startedAt > PROVISIONAL_STREAM_WINDOW_MS) return;
-      if (!isChatGptHttps(request.url) || !looksLikeStreamEndpoint(request.url)) return;
+      if (!looksLikeStreamEndpoint(request.url)) return;
     }
 
     const postData = await this.requestPostData(tabId, requestId, request);
