@@ -3,7 +3,7 @@ $ErrorActionPreference='Continue'
 $ExtensionId='bhchcpeodphgjfjoookncemnamdbfcof'
 function Is-Admin { $p=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 if(-not (Is-Admin)){
-  $args="-NoProfile -ExecutionPolicy Bypass -File \`"$PSCommandPath\`" -DurationSeconds $DurationSeconds -SampleMs $SampleMs"
+  $args="-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -DurationSeconds $DurationSeconds -SampleMs $SampleMs"
   Start-Process powershell.exe -Verb RunAs -ArgumentList $args
   exit
 }
@@ -48,7 +48,7 @@ Privacy=No typed text, key values, form values, page text, cookies, passwords, o
 "@|Set-Content -Encoding UTF8 "$root\README.txt"
 Get-CimInstance Win32_OperatingSystem|Format-List Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime|Out-String|Set-Content -Encoding UTF8 "$root\system.txt"
 Get-CimInstance Win32_VideoController|Format-List Name,DriverVersion,DriverDate,AdapterRAM,PNPDeviceID|Out-String|Set-Content -Encoding UTF8 "$root\gpu.txt"
-try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t \`"$root\dxdiag.txt\`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
+try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t `"$root\dxdiag.txt`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
 function ChromeKind($cmd){
  if($cmd -match '--type=gpu-process'){'gpu-process'}
  elseif($cmd -match '--type=renderer' -and $cmd -match '--extension-process'){'extension-renderer'}
