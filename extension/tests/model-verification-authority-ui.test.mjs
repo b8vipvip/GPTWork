@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+const networkMonitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
 const content = await readFile(new URL('../content.js', import.meta.url), 'utf8');
 const policy = await readFile(new URL('../policy.js', import.meta.url), 'utf8');
 const settings = await readFile(new URL('../settings-v0521.html', import.meta.url), 'utf8');
@@ -12,7 +13,7 @@ const historyUi = await readFile(new URL('../model-verification-history-options.
 
 test('model verification separates request confirmation from backend response verification', () => {
   assert.match(content, /selectionAttempted/);
-  assert.match(background, /Evidence priority is explicit/);
+  assert.match(background, /body forwarded at Fetch\.requestPaused is the sole request-confirmation/);
   assert.match(background, /requestModel === item\.model/);
   assert.match(background, /responseModel === item\.model/);
   assert.match(background, /responseConfirmed/);
@@ -112,8 +113,10 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
   assert.match(background, /function verificationTransactionForTab/);
   assert.match(background, /verificationTransactions\.set\(Number\(tabId\)/);
   assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
-  assert.match(background, /preserveModel: false/);
-  assert.match(background, /forceModel: transaction\?\.model \?\? null/);
+  assert.match(background, /getVerificationTransaction\(tabId\)/);
+  assert.match(networkMonitor, /effectiveConfiguration\(tabId\)/);
+  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
+  assert.match(networkMonitor, /forceModel: model/);
   assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
   assert.doesNotMatch(background, /function autoVerificationModelForTab/);
 });
@@ -317,7 +320,7 @@ test('v0.5.103 verification is the sole send authority while its transaction is 
   assert.match(background, /if \(!verification && !guard\.canSend\)/);
   assert.match(background, /networkVerificationEnabled: true/);
   assert.match(background, /autoAlignSelection: false/);
-  assert.match(background, /forceModel: transaction\?\.model \?\? null/);
+  assert.match(networkMonitor, /forceModel: model/);
 });
 
 test('v0.5.103 runtime log delivery is event-driven from one canonical browser log', () => {
@@ -330,7 +333,7 @@ test('v0.5.103 runtime log delivery is event-driven from one canonical browser l
 
 test('v0.5.104 verification survives new-chat navigation without CDP detach', () => {
   assert.match(background, /verificationTransactionForTab\(tab\.id\)\) await networkMonitor\.attach/);
-  assert.match(background, /forceModel: transaction\?\.model \?\? null/);
+  assert.match(networkMonitor, /forceModel: model/);
 });
 
 test('v0.5.104 ordinary typing does not trigger full page observation', () => {
@@ -418,4 +421,17 @@ test('v0.5.111 performance diagnostics stay compact and sample every 30 seconds'
   assert.match(content, /performanceTickVisibility/);
   assert.match(content, /performance\.now\(\) \+ 5000/);
   assert.doesNotMatch(content, /composerControls,/);
+});
+
+
+test('v0.5.120 resolves verification authority at the Fetch sink and fails closed on mismatch', () => {
+  assert.match(networkMonitor, /Resolve authority only after postData acquisition/);
+  assert.match(networkMonitor, /configuration = this\.effectiveConfiguration\(tabId\)/);
+  assert.match(networkMonitor, /verification_authority_mismatch_blocked/);
+  assert.match(networkMonitor, /await this\.failPaused\(tabId, requestId\)/);
+  assert.match(networkMonitor, /verification_rewrite_failed_closed/);
+  assert.match(background, /state\.lastRewrite\?\.authorityKind === 'verification-transaction'/);
+  assert.match(background, /networkObservedRequestModel/);
+  assert.match(background, /fetch_forwarded_request_metadata/);
+  assert.match(background, /const verified = Boolean\(requestId\) && requestConfirmed && responseConfirmed/);
 });
