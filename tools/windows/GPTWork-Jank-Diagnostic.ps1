@@ -64,6 +64,12 @@ $chrome=Get-CimInstance Win32_Process -Filter "Name='chrome.exe'"|ForEach-Object
 $chrome|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\chrome-process-map.csv"
 $kindByPid=@{}
 foreach($row in $chrome){$kindByPid[[int]$row.PID]=[string]$row.Kind}
+$toolLines=@()
+foreach($tool in @('wpr.exe','xperf.exe','wpaexporter.exe','tracerpt.exe')){
+ $cmd=Get-Command $tool -ErrorAction SilentlyContinue
+ $toolLines+="$tool=$([string]$(if($cmd){$cmd.Source}else{'NOT_FOUND'}))"
+}
+$toolLines|Set-Content -Encoding UTF8 "$root\tooling.txt"
 $wprStarted=$false
 try {
  $status=(& wpr.exe -status 2>&1|Out-String)
@@ -168,6 +174,23 @@ $lateCount=@($intervals|Where-Object{$_-gt($SampleMs*1.5)}).Count
  "Interpretation=If median/p95 interval is far above RequestedSampleMs, the collector itself is too expensive and that run must not be used for fine-grained causality."
 )|Set-Content -Encoding UTF8 "$root\capture-health.txt"
 if($wprStarted){try{& wpr.exe -stop "$root\browser-jank.etl" 2>&1|Set-Content -Encoding UTF8 "$root\wpr-stop.txt"}catch{$errors.Add("WPR stop: $($_.Exception.Message)")}}
+try{
+ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'"|ForEach-Object{[pscustomobject]@{PID=$_.ProcessId;PPID=$_.ParentProcessId;Kind=(ChromeKind $_.CommandLine);CommandLine=$_.CommandLine}}|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\chrome-process-map-end.csv"
+}catch{}
+try{
+ $health=Get-Content "$root\capture-health.txt" -ErrorAction SilentlyContinue
+ $topP=Import-Csv "$root\top-processes.csv" -ErrorAction SilentlyContinue|Select-Object -First 12
+ $topT=Import-Csv "$root\top-threads.csv" -ErrorAction SilentlyContinue|Select-Object -First 20
+ $summary=New-Object System.Collections.Generic.List[string]
+ $summary.Add('GPTWork Jank Diagnostic v2 summary')
+ foreach($line in $health){$summary.Add($line)}
+ $summary.Add('Top processes:')
+ foreach($row in $topP){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs) maxOneCorePct=$($row.MaxOneCorePct)")}
+ $summary.Add('Top named threads:')
+ foreach($row in $topT){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs)")}
+ $summary.Add('browser-jank.etl is retained for stack-level ETW proof; tooling.txt records local WPA/xperf availability.')
+ $summary|Set-Content -Encoding UTF8 "$root\analysis-summary.txt"
+}catch{$errors.Add("summary: $($_.Exception.Message)")}
 $errors|Set-Content -Encoding UTF8 "$root\errors.txt"
 Compress-Archive -Path "$root\*" -DestinationPath "$root.zip" -Force
 Write-Host "Done: $root.zip"
