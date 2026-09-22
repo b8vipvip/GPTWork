@@ -50,7 +50,7 @@ test('explicit resolved served-model authority wins over weaker model_slug/defau
   assert.equal(evidence.conflicts.model, false);
   assert.deepEqual(
     new Set(evidence.diagnostics.modelCandidateValues),
-    new Set(['gpt-5-6-auto-thinking', 'gpt-5.6-sol']),
+    new Set(['gpt-5-6-auto-thinking', 'gpt-5-6']),
   );
   assert.equal(hasCompleteResponseEvidence(evidence), true);
 });
