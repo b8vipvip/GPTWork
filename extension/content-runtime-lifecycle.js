@@ -42,6 +42,7 @@
   let healthTimer = null;
   let diagnosticSuspended = false;
   let diagnosticSuspendedAt = null;
+  let diagnosticCaptureActive = false;
   let diagnosticLongTaskObserver = null;
   const diagnosticLongTasks = [];
   const callbackStats = new Map();
@@ -140,6 +141,10 @@
 
   function measureCallback(kind, callback, args, source = kind) {
     if (diagnosticSuspended) return undefined;
+    // Normal browsing must not pay the diagnostic timing/attribution tax. The wrappers
+    // remain the single lifecycle authority, but expensive measurement is armed only
+    // for an explicit causal capture and stays constant across all A/B phases.
+    if (!diagnosticCaptureActive) return callback(...args);
     const startedAt = performance.now();
     try {
       return callback(...args);
@@ -186,6 +191,28 @@
       changedAt: new Date().toISOString(),
       reason: String(reason || 'diagnostic'),
     };
+  }
+
+  function setDiagnosticCaptureActive(active) {
+    const next = active === true;
+    if (next === diagnosticCaptureActive) return { active: diagnosticCaptureActive, changed: false };
+    diagnosticCaptureActive = next;
+    if (next) {
+      callbackStats.clear();
+      callbackSourceStats.clear();
+      recentSlowCallbacks.length = 0;
+      recentUserInteractions.length = 0;
+      diagnosticLongTasks.length = 0;
+      installInteractionDiagnostics();
+      installDiagnosticLongTaskObserver();
+    } else {
+      removeInteractionDiagnostics();
+      if (diagnosticLongTaskObserver) {
+        try { diagnosticLongTaskObserver.disconnect(); } catch {}
+        diagnosticLongTaskObserver = null;
+      }
+    }
+    return { active: diagnosticCaptureActive, changed: true, changedAt: new Date().toISOString() };
   }
 
   function installDiagnosticLongTaskObserver() {
@@ -248,6 +275,7 @@
       recentUserInteractions: recentUserInteractions.slice(-40),
       diagnosticSuspended,
       diagnosticSuspendedAt,
+      diagnosticCaptureActive,
       diagnosticLongTaskCount: diagnosticLongTasks.length,
       diagnosticMaxLongTaskMs: diagnosticLongTasks.length
         ? Math.max(...diagnosticLongTasks.map((item) => Number(item.durationMs) || 0))
@@ -549,14 +577,16 @@
   }
 
   function trackedRemoveEventListener(type, listener, options) {
-    let wrapped = listener;
-    for (const record of eventListeners) {
-      if (record.target === this && record.type === type && record.listener === listener) {
-        wrapped = record.wrapped || listener;
-        eventListeners.delete(record);
-      }
-    }
-    return original.removeEventListener.call(this, type, wrapped, options);
+    const capture = typeof options === 'boolean' ? options : options?.capture === true;
+    const record = [...eventListeners].find((item) => (
+      item.target === this
+      && item.type === type
+      && item.listener === listener
+      && item.capture === capture
+    ));
+    if (!record) return original.removeEventListener.call(this, type, listener, options);
+    eventListeners.delete(record);
+    return original.removeEventListener.call(this, type, record.wrapped || listener, options);
   }
 
   function patchChromeEvent(event) {
@@ -669,8 +699,8 @@
     // The health check below is still useful if a browser exposes any API as read-only.
   }
 
-  installInteractionDiagnostics();
-  installDiagnosticLongTaskObserver();
+  // Heavy diagnostic observers/listeners are armed only by an explicit capture.
+  // This avoids turning the jank probe itself into a permanent source of browser work.
 
   patchChromeEvent(globalThis.chrome?.runtime?.onMessage);
   patchChromeEvent(globalThis.chrome?.storage?.onChanged);
@@ -693,7 +723,9 @@
     shutdown,
     diagnosticsSnapshot,
     setDiagnosticSuspended,
+    setDiagnosticCaptureActive,
     isDiagnosticSuspended: () => diagnosticSuspended,
+    isDiagnosticCaptureActive: () => diagnosticCaptureActive,
   };
 
   // The background lifecycle authority can quiesce every content generation before an

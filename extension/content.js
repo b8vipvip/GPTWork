@@ -1824,9 +1824,12 @@ document.addEventListener('pointerdown', (event) => {
     return snapshot;
   }
 
-  function setDiagnosticContentSuspended(suspended) {
+  function setDiagnosticContentSuspended(suspended, captureActive = null) {
     const next = suspended === true;
     const lifecycle = globalThis.__GPTWORK_CONTENT_RUNTIME_LIFECYCLE_V1__;
+    const captureAuthority = typeof captureActive === 'boolean'
+      ? lifecycle?.setDiagnosticCaptureActive?.(captureActive)
+      : null;
     const authority = lifecycle?.setDiagnosticSuspended?.(next, 'background-jank-isolation') || null;
     // Compatibility mirror only. The lifecycle above is the sole callback/timer/observer
     // authority for diagnostic suspension; feature scripts must not own separate gates.
@@ -1836,12 +1839,12 @@ document.addEventListener('pointerdown', (event) => {
       const node = document.getElementById(id);
       if (node) node.style.display = next ? 'none' : '';
     }
-    return { suspended: next, timestamp: new Date().toISOString(), authority };
+    return { suspended: next, timestamp: new Date().toISOString(), authority, captureAuthority };
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND') {
-      sendResponse({ ok: true, ...setDiagnosticContentSuspended(message.suspended) });
+      sendResponse({ ok: true, ...setDiagnosticContentSuspended(message.suspended, message.captureActive) });
       return false;
     }
     if (message?.type === 'GPTWORK_DIAGNOSTIC_PERF_SNAPSHOT') {

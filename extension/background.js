@@ -30,7 +30,7 @@ import {
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.123';
+const RUNTIME_CODE_VERSION = '0.5.124';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -150,6 +150,7 @@ async function applyJankIsolationMode(mode = 'normal', {
 
   const cdpOff = normalized === 'cdp_off' || normalized === 'high_level_off';
   const contentOff = normalized === 'content_off' || normalized === 'high_level_off';
+  const captureActive = Boolean(state.captureId && state.label !== 'restore_normal');
   const cdp = await networkMonitor.setDiagnosticSuspended(cdpOff);
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
   let contentTabs = 0;
@@ -159,6 +160,7 @@ async function applyJankIsolationMode(mode = 'normal', {
       const response = await chrome.tabs.sendMessage(tab.id, {
         type: 'GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND',
         suspended: contentOff,
+        captureActive,
       });
       if (response?.ok) contentTabs += 1;
     } catch {}
@@ -172,6 +174,7 @@ async function applyJankIsolationMode(mode = 'normal', {
     detachedTabs: cdp.detachedTabs,
     contentSuspended: contentOff,
     contentTabs,
+    captureActive,
     completedPhaseLabel: completedPhase?.label || null,
   });
   return {
@@ -179,6 +182,7 @@ async function applyJankIsolationMode(mode = 'normal', {
     cdp,
     contentSuspended: contentOff,
     contentTabs,
+    captureActive,
     completedPhase,
   };
 }
