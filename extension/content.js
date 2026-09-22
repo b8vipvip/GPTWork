@@ -1774,7 +1774,11 @@ document.addEventListener('pointerdown', (event) => {
     }
 
     const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
-    if (current?.model && !models.some((item) => item.model === current.model)) {
+    // Picker mode B exposes the concrete account catalog in the advanced model rows.
+    // The composer trigger can combine model + reasoning text (for example
+    // "GPT-5.6 Luna 高"); normalizing that trigger can manufacture a fake "gpt-5.6"
+    // entry. Never promote that combined trigger into the mode-B model catalog.
+    if (modern.pickerMode !== 'B' && current?.model && !models.some((item) => item.model === current.model)) {
       models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
     }
     if (current?.reasoning) reasoning.add(current.reasoning);
