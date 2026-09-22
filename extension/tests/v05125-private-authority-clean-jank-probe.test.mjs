@@ -6,6 +6,7 @@ const privateHook = fs.readFileSync(new URL('../private-request-hook.js', import
 const monitor = fs.readFileSync(new URL('../network-monitor.js', import.meta.url), 'utf8');
 const collector = fs.readFileSync(new URL('../../tools/windows/GPTWork-Jank-Diagnostic.ps1', import.meta.url), 'utf8');
 const control = fs.readFileSync(new URL('../jank-control.js', import.meta.url), 'utf8');
+const content = fs.readFileSync(new URL('../content.js', import.meta.url), 'utf8');
 
 test('v0.5.125 verification bypasses private normal-policy interception at Fetch boundary', () => {
   assert.match(privateHook, /const terminalVerificationHandler = prototype\.handlePausedRequest/);
@@ -31,4 +32,12 @@ test('v0.5.125 phase evidence uses downloads API and restores ChatGPT focus', ()
   assert.match(control, /restoreChatFocus/);
   assert.match(control, /lastAccessed/);
   assert.match(control, /chrome\.tabs\.update\(target\.id, \{ active: true \}\)/);
+});
+
+
+test('v0.5.125 model verification rejects stale offscreen Radix picker layers', () => {
+  assert.match(content, /rect\.bottom > 0/);
+  assert.match(content, /rect\.top < window\.innerHeight/);
+  assert.match(content, /rect\.left < window\.innerWidth/);
+  assert.match(content, /off-screen opener from the previous model turn/);
 });
