@@ -1774,7 +1774,11 @@ document.addEventListener('pointerdown', (event) => {
     }
 
     const current = currentBeforeOpen?.model ? currentBeforeOpen : collectObservation();
-    if (current?.model && !models.some((item) => item.model === current.model)) {
+    // In picker mode B the composer trigger can combine model + reasoning text
+    // (for example "GPT-5.6 Luna 高"). That trigger is not a model-catalog row and
+    // normalizing it can manufacture a fake sixth model such as "gpt-5.6".
+    // The advanced picker rows are the only UI catalog authority in mode B.
+    if (modern.pickerMode !== 'B' && current?.model && !models.some((item) => item.model === current.model)) {
       models.push({ rawId: current.model, model: current.model, label: current.modelLabel || current.model });
     }
     if (current?.reasoning) reasoning.add(current.reasoning);
