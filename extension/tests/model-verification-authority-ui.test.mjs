@@ -180,7 +180,8 @@ test('v0.5.90 observer remains page-wide read-only while executor stays transact
   assert.match(content, /passive_picker_snapshot/);
   assert.match(content, /DOM observation never performs clicks/);
   assert.match(content, /async function modelPickerPointer/);
-  assert.match(content, /return trustedPointer\(element, action, source\)/);
+  assert.match(content, /trustedPointer\(element, action/);
+  assert.match(content, /if \(!element\?\.isConnected \|\| !visible\(element\)\) return false/);
   assert.doesNotMatch(content, /pickerKind: 'quarantined-passive'/);
 });
 

@@ -910,7 +910,16 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   async function modelPickerPointer(element, action = 'click', source = 'model-picker') {
-    return trustedPointer(element, action, source);
+    // chrome.debugger's infobar, picker animations, and compositor movement can make
+    // an otherwise correct owned row briefly fail the center-point hit test. Retry
+    // the SAME DOM element only; never fall back to a global/coordinate candidate.
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const dispatched = await trustedPointer(element, action, `${source}:attempt-${attempt}`);
+      if (dispatched) return true;
+      if (!element?.isConnected || !visible(element)) return false;
+      await new Promise((resolve) => window.setTimeout(resolve, 160 * attempt));
+    }
+    return false;
   }
 
   async function trustedPointer(element, action = 'click', source = 'unspecified') {

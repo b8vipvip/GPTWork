@@ -43,7 +43,75 @@
   const callbackStats = new Map();
   const callbackSourceStats = new Map();
   const recentSlowCallbacks = [];
+  const recentUserInteractions = [];
+  const diagnosticInteractionListeners = [];
   const SLOW_CALLBACK_MS = 20;
+  const INTERACTION_TYPES = ['pointerdown', 'pointerup', 'click', 'dblclick', 'keydown', 'input', 'change', 'wheel', 'scroll', 'focusin', 'focusout'];
+
+  function interactionTarget(target) {
+    const element = target?.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
+    if (!element) return null;
+    return {
+      tag: String(element.tagName || '').toLowerCase() || null,
+      role: element.getAttribute?.('role') || null,
+      testId: String(element.getAttribute?.('data-testid') || '').slice(0, 100) || null,
+      contentEditable: element.getAttribute?.('contenteditable') === 'true',
+      inputType: element.tagName === 'INPUT' ? String(element.getAttribute?.('type') || 'text').slice(0, 40) : null,
+    };
+  }
+
+  function recordUserInteraction(event) {
+    // Never record typed text, key values, form values, or page text. We only need
+    // timing + event class + coarse target identity to correlate jank with user input.
+    const item = {
+      type: event.type,
+      atEpochMs: Date.now(),
+      atPerformanceMs: Math.round(performance.now() * 10) / 10,
+      target: interactionTarget(event.target),
+    };
+    if (/^pointer|click|dblclick$/.test(event.type)) {
+      item.pointerType = String(event.pointerType || 'mouse').slice(0, 20);
+      item.button = Number.isFinite(event.button) ? event.button : null;
+    } else if (event.type === 'keydown') {
+      item.keyClass = event.key?.length === 1 ? 'printable' : 'control';
+      item.repeat = event.repeat === true;
+    } else if (event.type === 'wheel') {
+      item.deltaX = Math.round(Number(event.deltaX) || 0);
+      item.deltaY = Math.round(Number(event.deltaY) || 0);
+    }
+    recentUserInteractions.push(item);
+    if (recentUserInteractions.length > 80) recentUserInteractions.splice(0, recentUserInteractions.length - 80);
+  }
+
+  function installInteractionDiagnostics() {
+    if (typeof original.addEventListener !== 'function') return;
+    for (const type of INTERACTION_TYPES) {
+      const options = type === 'scroll' || type === 'wheel' ? { capture: true, passive: true } : { capture: true, passive: true };
+      try {
+        original.addEventListener.call(document, type, recordUserInteraction, options);
+        diagnosticInteractionListeners.push({ target: document, type, options });
+      } catch {}
+    }
+    for (const type of ['resize', 'focus', 'blur']) {
+      const options = { capture: true, passive: true };
+      try {
+        original.addEventListener.call(window, type, recordUserInteraction, options);
+        diagnosticInteractionListeners.push({ target: window, type, options });
+      } catch {}
+    }
+    try {
+      original.addEventListener.call(document, 'visibilitychange', recordUserInteraction, { capture: true, passive: true });
+      diagnosticInteractionListeners.push({ target: document, type: 'visibilitychange', options: { capture: true, passive: true } });
+    } catch {}
+  }
+
+  function removeInteractionDiagnostics() {
+    if (typeof original.removeEventListener !== 'function') return;
+    for (const record of diagnosticInteractionListeners) {
+      try { original.removeEventListener.call(record.target, record.type, recordUserInteraction, record.options); } catch {}
+    }
+    diagnosticInteractionListeners.length = 0;
+  }
 
   function callbackSource(kind) {
     try {
@@ -135,11 +203,13 @@
       callbacks,
       callbackSources,
       recentSlowCallbacks: recentSlowCallbacks.slice(-12),
+      recentUserInteractions: recentUserInteractions.slice(-40),
     };
     if (resetCallbacks) {
       callbackStats.clear();
       callbackSourceStats.clear();
       recentSlowCallbacks.length = 0;
+      recentUserInteractions.length = 0;
     }
     return snapshot;
   }
@@ -258,6 +328,7 @@
       try { observer.disconnect(); } catch {}
     }
     resizeObservers.clear();
+    removeInteractionDiagnostics();
     removeTrackedListeners();
     for (const record of chromeEventListeners) {
       try { record.remove.call(record.event, record.wrapped || record.listener); } catch {}
@@ -537,6 +608,8 @@
   } catch {
     // The health check below is still useful if a browser exposes any API as read-only.
   }
+
+  installInteractionDiagnostics();
 
   patchChromeEvent(globalThis.chrome?.runtime?.onMessage);
   patchChromeEvent(globalThis.chrome?.storage?.onChanged);
