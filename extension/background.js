@@ -838,17 +838,24 @@ async function applyNetworkEvidence(tabId, evidence) {
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
-    const transaction = verificationTransactionForTab(tabId);
     return {
-      lockedModels: transaction?.model ? [transaction.model] : policy.lockedModels,
+      lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: transaction ? null : currentSettings.preferredReasoning,
+      preferredReasoning: currentSettings.preferredReasoning,
       preserveModel: false,
-      preserveReasoning: Boolean(transaction),
+      preserveReasoning: false,
       bypassRewrite: false,
-      forceModel: transaction?.model ?? null,
-      responseVerificationEnabled: transaction ? true : currentSettings.networkVerificationEnabled,
-      knownModels: [...new Set([...sharedKnownModelIds, ...(transaction?.model ? [transaction.model] : [])])],
+      forceModel: null,
+      responseVerificationEnabled: currentSettings.networkVerificationEnabled,
+      knownModels: [...sharedKnownModelIds],
+    };
+  },
+  getVerificationTransaction(tabId) {
+    const transaction = verificationTransactionForTab(tabId);
+    if (!transaction?.model) return null;
+    return {
+      model: transaction.model,
+      startedAt: transaction.startedAt ?? null,
     };
   },
   onStatus(tabId, monitor) {
@@ -881,6 +888,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
       reasoningBefore: rewrite.reasoningBefore ?? null,
       reasoningAfter: rewrite.reasoningAfter ?? null,
       reasoningFields: rewrite.reasoningFields ?? [],
+      authorityKind: rewrite.authorityKind ?? null,
+      authorityModel: rewrite.authorityModel ?? null,
+      authorityStartedAt: rewrite.authorityStartedAt ?? null,
       error: rewrite.error ?? null,
     };
     if (rewrite.error) state.lastError = rewrite.error;
@@ -1552,11 +1562,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
     state.autoVerification.attempt = index + 1;
+    const transactionStartedAtMs = Date.now();
     verificationTransactions.set(Number(tabId), {
       model: item.model || null,
       selectorKey: item.selectorKey || '',
       label: item.label || '',
-      startedAt: Date.now(),
+      startedAt: transactionStartedAtMs,
     });
     resetVerificationAttempt(state);
     await broadcastTabState(tabId);
@@ -1599,35 +1610,50 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         abortForPendingTurn = true;
         throw new Error('ChatGPT response did not reach a terminal idle state; verification stopped before touching the model picker');
       }
-      // Evidence priority is explicit: correlated response/stream metadata proves the
-      // backend model when exposed; the formal request model remains durable request
-      // confirmation and is never erased merely because a response frame omits model.
+      // The body forwarded at Fetch.requestPaused is the sole request-confirmation
+      // authority. Network.requestWillBeSent may expose the page's pre-interception
+      // body, so keep it only as diagnostic evidence. Response/stream metadata remains
+      // the independent backend-served-model authority.
       const requestId = state.lastRequest?.requestId ?? null;
-      const requestModel = normalizeConcreteModelId(state.lastRequest?.model);
+      const networkObservedRequestModel = normalizeConcreteModelId(state.lastRequest?.model);
+      const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
+      const authoritativeRewrite = Boolean(
+        item.model
+        && state.lastRewrite?.authorityKind === 'verification-transaction'
+        && state.lastRewrite?.authorityModel === item.model
+        && Number.isFinite(rewriteCapturedAtMs)
+        && rewriteCapturedAtMs >= transactionStartedAtMs - 250
+        && !state.lastRewrite?.error
+      );
+      const requestModel = item.model
+        ? (authoritativeRewrite ? normalizeConcreteModelId(state.lastRewrite?.modelAfter) : null)
+        : networkObservedRequestModel;
       const responseEvidence = state.lastResponseEvidence?.requestId === requestId
         ? state.lastResponseEvidence
         : null;
       const responseObservation = verificationResponseObservation(tabId, responseEvidence);
       const responseModel = normalizeConcreteModelId(responseObservation.model);
       const requestConfirmed = item.model
-        ? requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
+        ? Boolean(authoritativeRewrite) && (
+          requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
+        )
         : Boolean(requestModel);
       const responseConfirmed = item.model
         ? responseModel === item.model || Boolean(item.rawModel && responseModel === item.rawModel)
         : Boolean(responseModel);
-      const requestMismatch = Boolean(requestModel) && !requestConfirmed;
-      const verified = Boolean(state.lastRequest?.requestId) && responseConfirmed && !requestMismatch;
+      const requestMismatch = Boolean(item.model && authoritativeRewrite && requestModel) && !requestConfirmed;
+      const verified = Boolean(requestId) && requestConfirmed && responseConfirmed && !requestMismatch;
       const evidenceModel = responseModel || (requestConfirmed ? requestModel : null);
       const evidenceSource = responseModel
         ? 'network_response_metadata'
         : requestConfirmed
-          ? 'network_request_metadata'
+          ? (item.model ? 'fetch_forwarded_request_metadata' : 'network_request_metadata')
           : null;
       const result = {
         model: item.model || requestModel, rawModel: item.rawModel || requestModel,
         selectorKey: item.selectorKey, label: item.label, verified,
         selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
-        requestId, requestModel, responseModel, evidenceModel,
+        requestId, requestModel, networkObservedRequestModel, responseModel, evidenceModel,
         responseReasoning: responseEvidence?.reasoning ?? null,
         responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
         responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
@@ -1641,7 +1667,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
         tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
         selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed, responseConfirmed,
-        requestId: result.requestId, requestModel, responseModel, evidenceModel: result.evidenceModel,
+        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, evidenceModel: result.evidenceModel,
         responseVerdict: result.responseVerdict, responseIssue: result.responseIssue,
         evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
       });
@@ -1716,6 +1742,7 @@ function modelVerificationHistoryRecord(tabId, autoVerification) {
       responseConfirmed: item.responseConfirmed === true,
       requestId: item.requestId ?? null,
       requestModel: item.requestModel ?? null,
+      networkObservedRequestModel: item.networkObservedRequestModel ?? null,
       responseModel: item.responseModel ?? null,
       evidenceModel: item.evidenceModel ?? null,
       responseReasoning: item.responseReasoning ?? null,
@@ -1924,6 +1951,7 @@ async function autoVerify(tabId) {
       requestConfirmed: item.requestConfirmed === true,
       responseConfirmed: item.responseConfirmed === true,
       requestModel: item.requestModel ?? null,
+      networkObservedRequestModel: item.networkObservedRequestModel ?? null,
       responseModel: item.responseModel ?? null,
       evidenceModel: item.evidenceModel ?? null,
       evidenceSource: item.evidenceSource ?? null,

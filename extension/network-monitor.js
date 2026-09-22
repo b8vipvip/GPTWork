@@ -94,7 +94,7 @@ export function webSocketFrameMatchesHandoff(payload, handoff) {
 }
 
 export class ChatGptNetworkMonitor {
-  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, getLockConfiguration }) {
+  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, getLockConfiguration, getVerificationTransaction }) {
     this.onStatus = onStatus;
     this.onRequest = onRequest;
     this.onEvidence = onEvidence;
@@ -102,6 +102,7 @@ export class ChatGptNetworkMonitor {
     this.onRewrite = onRewrite;
     this.onStreamData = onStreamData;
     this.getLockConfiguration = getLockConfiguration;
+    this.getVerificationTransaction = getVerificationTransaction;
     this.attachedTabs = new Set();
     this.responseCaptureTabs = new Set();
     this.attachTasks = new Map();
@@ -161,6 +162,48 @@ export class ChatGptNetworkMonitor {
     } catch {
       return {};
     }
+  }
+
+  verificationTransaction(tabId) {
+    try {
+      return this.getVerificationTransaction?.(tabId) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  effectiveConfiguration(tabId) {
+    const base = this.configuration(tabId);
+    const transaction = this.verificationTransaction(tabId);
+    const model = String(transaction?.model || '').trim();
+    if (!model) {
+      return {
+        ...base,
+        authorityKind: 'normal-policy',
+        authorityModel: null,
+        authorityStartedAt: null,
+      };
+    }
+    // Fetch.requestPaused is the terminal request-mutation boundary. Verification
+    // authority is resolved here, once, immediately before the body is forwarded.
+    // Page state and normal lock policy cannot partially own this request.
+    return {
+      ...base,
+      lockedModels: [model],
+      preferredReasoning: null,
+      preserveModel: false,
+      preserveReasoning: true,
+      bypassRewrite: false,
+      forceModel: model,
+      responseVerificationEnabled: true,
+      knownModels: [...new Set([
+        ...(Array.isArray(base.knownModels) ? base.knownModels : []),
+        model,
+      ])],
+      authorityKind: 'verification-transaction',
+      authorityModel: model,
+      authorityStartedAt: Number(transaction?.startedAt) || null,
+    };
   }
 
   async performAttach(tabId) {
@@ -494,6 +537,13 @@ export class ChatGptNetworkMonitor {
     await debuggerCall('sendCommand', this.target(tabId), 'Fetch.continueRequest', parameters);
   }
 
+  async failPaused(tabId, requestId, errorReason = 'BlockedByClient') {
+    await debuggerCall('sendCommand', this.target(tabId), 'Fetch.failRequest', {
+      requestId,
+      errorReason,
+    });
+  }
+
   async pausedPostData(tabId, params) {
     if (typeof params.request?.postData === 'string') return params.request.postData;
     if (!params.networkId) return '';
@@ -523,47 +573,13 @@ export class ChatGptNetworkMonitor {
       return;
     }
 
-    let configuration = this.configuration(tabId);
-    if (configuration.bypassRewrite === true) {
-      try {
-        const postData = await this.pausedPostData(tabId, params);
-        const observed = extractRequestEvidence(postData);
-        await this.continuePaused(tabId, requestId);
-        this.onRewrite?.(tabId, {
-          endpoint,
-          requestId: params.networkId ? String(params.networkId) : null,
-          fetchRequestId: requestId,
-          changed: false,
-          reason: 'verification_passthrough',
-          modelBefore: observed.model,
-          modelAfter: observed.model,
-          reasoningBefore: observed.reasoning,
-          reasoningAfter: observed.reasoning,
-          reasoningFields: [],
-        });
-      } catch (error) {
-        const detail = safeError(error);
-        this.onRewrite?.(tabId, {
-          endpoint,
-          requestId: params.networkId ? String(params.networkId) : null,
-          fetchRequestId: requestId,
-          changed: false,
-          reason: 'verification_passthrough_failed_open',
-          error: detail,
-        });
-        try { await this.continuePaused(tabId, requestId); } catch {}
-      }
-      return;
-    }
-
+    let configuration = null;
     let rewrite = null;
     try {
       const postData = await this.pausedPostData(tabId, params);
-      // A Fetch.requestPaused event can arrive just before the verification
-      // transaction is published, while getRequestPostData is still awaiting CDP.
-      // Re-read authority immediately before mutation. If verification now owns the
-      // tab, fail over to passthrough instead of using the stale lock snapshot.
-      configuration = this.configuration(tabId);
+      // Resolve authority only after postData acquisition. This closes the race where
+      // a normal-policy snapshot was taken before verification became active.
+      configuration = this.effectiveConfiguration(tabId);
       if (configuration.bypassRewrite === true) {
         const observed = extractRequestEvidence(postData);
         await this.continuePaused(tabId, requestId);
@@ -578,10 +594,39 @@ export class ChatGptNetworkMonitor {
           reasoningBefore: observed.reasoning,
           reasoningAfter: observed.reasoning,
           reasoningFields: [],
+          authorityKind: configuration.authorityKind,
+          authorityModel: configuration.authorityModel,
+          authorityStartedAt: configuration.authorityStartedAt,
         });
         return;
       }
       rewrite = rewriteConversationPostData(postData, configuration);
+      if (
+        configuration.authorityKind === 'verification-transaction'
+        && rewrite.modelAfter !== configuration.authorityModel
+      ) {
+        const detail = `verification_request_authority_mismatch:${rewrite.modelAfter || 'none'}!=${configuration.authorityModel}`;
+        this.onRewrite?.(tabId, {
+          endpoint,
+          requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
+          changed: rewrite.changed,
+          reason: 'verification_authority_mismatch_blocked',
+          modelBefore: rewrite.modelBefore,
+          modelAfter: rewrite.modelAfter,
+          transportModelBefore: rewrite.transportModelBefore,
+          transportModelAfter: rewrite.transportModelAfter,
+          reasoningBefore: rewrite.reasoningBefore,
+          reasoningAfter: rewrite.reasoningAfter,
+          reasoningFields: rewrite.reasoningFields,
+          authorityKind: configuration.authorityKind,
+          authorityModel: configuration.authorityModel,
+          authorityStartedAt: configuration.authorityStartedAt,
+          error: detail,
+        });
+        await this.failPaused(tabId, requestId);
+        return;
+      }
       await this.continuePaused(tabId, requestId, rewrite.changed ? rewrite.postData : null);
       this.onRewrite?.(tabId, {
         endpoint,
@@ -596,9 +641,29 @@ export class ChatGptNetworkMonitor {
         reasoningBefore: rewrite.reasoningBefore,
         reasoningAfter: rewrite.reasoningAfter,
         reasoningFields: rewrite.reasoningFields,
+        authorityKind: configuration.authorityKind,
+        authorityModel: configuration.authorityModel,
+        authorityStartedAt: configuration.authorityStartedAt,
       });
     } catch (error) {
       const detail = safeError(error);
+      if (configuration?.authorityKind === 'verification-transaction') {
+        this.onRewrite?.(tabId, {
+          endpoint,
+          requestId: params.networkId ? String(params.networkId) : null,
+          fetchRequestId: requestId,
+          changed: false,
+          reason: 'verification_rewrite_failed_closed',
+          modelBefore: rewrite?.modelBefore ?? null,
+          modelAfter: rewrite?.modelAfter ?? null,
+          authorityKind: configuration.authorityKind,
+          authorityModel: configuration.authorityModel,
+          authorityStartedAt: configuration.authorityStartedAt,
+          error: detail,
+        });
+        try { await this.failPaused(tabId, requestId); } catch {}
+        return;
+      }
       this.onRewrite?.(tabId, {
         endpoint,
         requestId: params.networkId ? String(params.networkId) : null,
