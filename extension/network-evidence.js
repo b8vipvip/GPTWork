@@ -84,6 +84,9 @@ function pathScore(path, key, kind) {
   const metadata = normalizedPath.some((part) => /metadata|details|response/.test(part));
   if (kind === 'model') {
     if (SERVED_MODEL_KEYS.has(key)) return 130;
+    // model_slug is served-model evidence only inside an assistant message's metadata.
+    // It is not trusted in generic routing/default envelopes.
+    if (key === 'model_slug' && metadata && normalizedPath.some((part) => part === 'message')) return 120;
     if (FALLBACK_MODEL_KEYS.has(key)) return 20;
     if (key.includes('slug') && metadata) return 80;
     if (key.includes('slug')) return 60;
