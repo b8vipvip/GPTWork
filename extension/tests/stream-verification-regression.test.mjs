@@ -34,7 +34,7 @@ function embeddedFrame(metadata) {
   }]);
 }
 
-test('resolved routing metadata cannot override conflicting locked-model metadata', () => {
+test('explicit resolved served-model authority wins over weaker model_slug/default metadata', () => {
   const evidence = extractResponseEvidence({
     body: embeddedFrame({
       resolved_model_slug: 'gpt-5-6-auto-thinking',
@@ -45,14 +45,14 @@ test('resolved routing metadata cannot override conflicting locked-model metadat
     mimeType: 'application/json',
   });
 
-  assert.equal(evidence.model, null);
+  assert.equal(evidence.model, 'gpt-5-6-auto-thinking');
   assert.equal(evidence.reasoning, 'high');
-  assert.equal(evidence.conflicts.model, true);
+  assert.equal(evidence.conflicts.model, false);
   assert.deepEqual(
     new Set(evidence.diagnostics.modelCandidateValues),
     new Set(['gpt-5-6-auto-thinking', 'gpt-5.6-sol']),
   );
-  assert.equal(hasCompleteResponseEvidence(evidence), false);
+  assert.equal(hasCompleteResponseEvidence(evidence), true);
 });
 
 test('consistent disallowed backend model remains complete evidence', () => {
