@@ -128,11 +128,10 @@ function collectCandidates(value, candidates, path = [], depth = 0, mode = 'resp
 function selectCandidate(candidates) {
   if (!candidates.length) return { value: null, conflict: false, path: null };
   const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
-  const strong = candidates.filter((candidate) => candidate.score >= bestScore - 10);
-  const strongValues = [...new Set(strong.map((candidate) => candidate.value))];
-  if (strongValues.length !== 1) return { value: null, conflict: true, path: null };
   const best = candidates.filter((candidate) => candidate.score === bestScore);
-  return { value: strongValues[0], conflict: false, path: best[best.length - 1].path };
+  const bestValues = [...new Set(best.map((candidate) => candidate.value))];
+  if (bestValues.length !== 1) return { value: null, conflict: true, path: null };
+  return { value: bestValues[0], conflict: false, path: best[best.length - 1].path };
 }
 
 function inspectObjects(values, mode = 'response') {
