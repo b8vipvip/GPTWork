@@ -3,7 +3,8 @@ $ErrorActionPreference='Continue'
 $ExtensionId='bhchcpeodphgjfjoookncemnamdbfcof'
 function Is-Admin { $p=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 if(-not (Is-Admin)){
-  $args="-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -DurationSeconds $DurationSeconds -SampleMs $SampleMs"
+  $rawArg=if($IncludeRawArchive){' -IncludeRawArchive'}else{''}
+  $args="-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -DurationSeconds $DurationSeconds -SampleMs $SampleMs$rawArg"
   Start-Process powershell.exe -Verb RunAs -ArgumentList $args
   exit
 }
@@ -46,10 +47,11 @@ function Get-ThreadName([int]$ThreadId){
  return [string]$name
 }
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
+$captureId="$stamp-$PID"
 $root=Join-Path $env:USERPROFILE "Desktop\GPTWork-Jank-$stamp"
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 $errors=New-Object System.Collections.Generic.List[string]
-"GPTWork Jank Diagnostic v3 causal A/B`nStarted=$(Get-Date -Format o)`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=2000`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read."|Set-Content -Encoding UTF8 "$root\README.txt"
+"GPTWork Jank Diagnostic v4 causal A/B + phase page evidence`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=2000`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read."|Set-Content -Encoding UTF8 "$root\README.txt"
 Get-CimInstance Win32_OperatingSystem|Format-List Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime|Out-String|Set-Content -Encoding UTF8 "$root\system.txt"
 Get-CimInstance Win32_VideoController|Format-List Name,DriverVersion,DriverDate,AdapterRAM,PNPDeviceID|Out-String|Set-Content -Encoding UTF8 "$root\gpu.txt"
 try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t `"$root\dxdiag.txt`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
@@ -76,12 +78,12 @@ function Set-GPTWorkIsolation([string]$label,[string]$mode){
  $launched=$false
  if($chromeExe){
   try{
-   $url="chrome-extension://$ExtensionId/jank-control.html?mode=$mode&stamp=$([uri]::EscapeDataString($requestedAt.ToString('o')))"
+   $url="chrome-extension://$ExtensionId/jank-control.html?mode=$mode&label=$([uri]::EscapeDataString($label))&captureId=$([uri]::EscapeDataString($captureId))&stamp=$([uri]::EscapeDataString($requestedAt.ToString('o')))"
    Start-Process -FilePath $chromeExe -ArgumentList @('--new-tab',$url)|Out-Null
    $launched=$true
   }catch{$errors.Add("Isolation $label/$mode launch: $($_.Exception.Message)")}
  }
- $phaseMarkers.Add([pscustomobject]@{Label=$label;Mode=$mode;RequestedAt=$requestedAt.ToString('o');ControlLaunched=$launched})
+ $phaseMarkers.Add([pscustomobject]@{CaptureId=$captureId;Label=$label;Mode=$mode;RequestedAt=$requestedAt.ToString('o');ControlLaunched=$launched})
 }
 $kindByPid=@{}
 foreach($row in $chrome){$kindByPid[[int]$row.PID]=[string]$row.Kind}
@@ -189,7 +191,15 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
 }
 $clock.Stop()
 Set-GPTWorkIsolation 'restore_normal' 'normal'
-Start-Sleep -Milliseconds 750
+# The restore transition closes the final high_level_off phase and triggers its compact
+# page snapshot download. Give Chrome enough time to finish the tiny JSON downloads.
+Start-Sleep -Milliseconds 1500
+try{
+ $downloads=Join-Path $env:USERPROFILE 'Downloads'
+ $phaseFiles=@(Get-ChildItem $downloads -Filter "GPTWork-Jank-Phase-$captureId-*.json" -File -ErrorAction SilentlyContinue)
+ foreach($file in $phaseFiles){Copy-Item $file.FullName -Destination $root -Force -ErrorAction SilentlyContinue}
+ "CaptureId=$captureId`nPhaseSnapshotFiles=$($phaseFiles.Count)"|Set-Content -Encoding UTF8 "$root\phase-page-snapshots.txt"
+}catch{$errors.Add("phase snapshot collection: $($_.Exception.Message)")}
 $phaseMarkers|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-markers.csv"
 $proc|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\process-samples.csv"
 $thr|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\thread-samples.csv"
@@ -228,7 +238,7 @@ try{
  $topP=Import-Csv "$root\top-processes.csv" -ErrorAction SilentlyContinue|Select-Object -First 12
  $topT=Import-Csv "$root\top-threads.csv" -ErrorAction SilentlyContinue|Select-Object -First 20
  $summary=New-Object System.Collections.Generic.List[string]
- $summary.Add('GPTWork Jank Diagnostic v3 causal A/B summary')
+ $summary.Add('GPTWork Jank Diagnostic v4 causal A/B + phase page evidence summary')
  foreach($line in $health){$summary.Add($line)}
  $summary.Add('Top processes:')
  foreach($row in $topP){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs) maxOneCorePct=$($row.MaxOneCorePct)")}
@@ -260,9 +270,12 @@ if(Test-Path $analyzer){
 if(-not $uploadZip){
  $uploadDir="$root-UPLOAD"
  New-Item -ItemType Directory -Force -Path $uploadDir|Out-Null
- foreach($name in @('README.txt','system.txt','gpu.txt','tooling.txt','errors.txt','wpr-start.txt','wpr-stop.txt','capture-health.txt','analysis-summary.txt','phase-markers.csv','phase-cpu-summary.csv','phase-thread-summary.csv','top-processes.csv','top-threads.csv','source-size-report.csv','chrome-process-map.csv','chrome-process-map-end.csv')){
+ foreach($name in @('README.txt','system.txt','gpu.txt','tooling.txt','errors.txt','wpr-start.txt','wpr-stop.txt','capture-health.txt','analysis-summary.txt','phase-markers.csv','phase-cpu-summary.csv','phase-thread-summary.csv','phase-page-snapshots.txt','top-processes.csv','top-threads.csv','source-size-report.csv','chrome-process-map.csv','chrome-process-map-end.csv')){
   $src=Join-Path $root $name
   if(Test-Path $src){Copy-Item $src -Destination $uploadDir -Force -ErrorAction SilentlyContinue}
+ }
+ Get-ChildItem $root -Filter 'GPTWork-Jank-Phase-*.json' -File -ErrorAction SilentlyContinue|ForEach-Object{
+  Copy-Item $_.FullName -Destination $uploadDir -Force -ErrorAction SilentlyContinue
  }
  $uploadZip="$root-UPLOAD.zip"
  Compress-Archive -Path "$uploadDir\*" -DestinationPath $uploadZip -Force
