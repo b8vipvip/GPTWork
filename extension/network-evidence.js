@@ -19,6 +19,15 @@ const MODEL_KEYS = new Set([
   'default_model_slug',
   'model',
 ]);
+const SERVED_MODEL_KEYS = new Set([
+  'used_model',
+  'used_model_slug',
+  'resolved_model',
+  'resolved_model_slug',
+  'served_model',
+  'served_model_slug',
+]);
+const FALLBACK_MODEL_KEYS = new Set(['default_model_slug']);
 const REASONING_KEYS = new Set([
   'reasoning_effort',
   'reasoningeffort',
@@ -74,11 +83,14 @@ function pathScore(path, key, kind) {
   const normalizedPath = path.map(canonicalKey);
   const metadata = normalizedPath.some((part) => /metadata|details|response/.test(part));
   if (kind === 'model') {
-    if (/served|resolved|used/.test(key)) return 130;
-    if (key.includes('slug') && metadata) return 120;
-    if (key.includes('slug')) return 105;
-    if (metadata) return 100;
-    return path.length <= 2 ? 90 : 0;
+    if (SERVED_MODEL_KEYS.has(key)) return 130;
+    if (FALLBACK_MODEL_KEYS.has(key)) return 20;
+    if (key.includes('slug') && metadata) return 80;
+    if (key.includes('slug')) return 60;
+    // Generic model/model_id fields in downstream websocket envelopes frequently
+    // describe UI/default/routing metadata rather than the backend that served the
+    // assistant turn. Keep them diagnostic-only; they are not served-model proof.
+    return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
 }
