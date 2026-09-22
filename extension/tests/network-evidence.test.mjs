@@ -60,6 +60,34 @@ test('ignores generic model fields buried in unrelated tool data', () => {
   assert.equal(result.reasoning, null);
 });
 
+test('generic downstream model metadata is diagnostic-only, not served-model proof', () => {
+  const result = extractResponseEvidence({
+    body: JSON.stringify({
+      type: 'message',
+      response: {
+        model: 'gpt-5.6-sol',
+        model_id: 'gpt-5.6-sol',
+        default_model_slug: 'gpt-5.6-sol',
+      },
+    }),
+    mimeType: 'application/json',
+  });
+  assert.equal(result.model, null);
+  assert.equal(result.conflicts.model, false);
+  assert.equal(result.diagnostics.modelCandidateCount, 1);
+});
+
+test('explicit served/resolved/used metadata remains authoritative', () => {
+  for (const key of ['served_model_slug', 'resolved_model_slug', 'used_model_slug']) {
+    const result = extractResponseEvidence({
+      body: JSON.stringify({ message: { metadata: { [key]: 'gpt-5.6-terra' } } }),
+      mimeType: 'application/json',
+    });
+    assert.equal(result.model, 'gpt-5.6-terra', key);
+    assert.match(result.fields.model, new RegExp(key));
+  }
+});
+
 test('marks conflicting highest-confidence metadata as unusable', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify([
