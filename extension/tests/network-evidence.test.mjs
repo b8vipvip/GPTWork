@@ -13,17 +13,17 @@ import {
   streamPayloadMatches,
 } from '../network-evidence.js';
 
-test('extracts strong metadata from a JSON response', () => {
+test('assistant message model_slug is diagnostic-only, not served-model proof', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify({ message: { metadata: { model_slug: 'gpt-5.6-sol', reasoning_effort: 'high' } } }),
     mimeType: 'application/json',
   });
-  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.equal(result.model, null);
   assert.equal(result.reasoning, 'high');
   assert.equal(result.evidenceSource, 'network_response_metadata');
   assert.equal(result.diagnostics.bodyFormat, 'json');
   assert.equal(result.diagnostics.parsedObjectCount, 1);
-  assert.equal(result.diagnostics.modelCandidateCount, 1);
+  assert.equal(result.diagnostics.modelCandidateCount, 0);
 });
 
 test('extracts metadata from SSE without treating DONE as JSON', () => {
@@ -36,7 +36,7 @@ test('extracts metadata from SSE without treating DONE as JSON', () => {
   ].join('\n');
   assert.equal(parseSseObjects(body).length, 1);
   const result = extractResponseEvidence({ body, mimeType: 'text/event-stream' });
-  assert.deepEqual([result.model, result.reasoning], ['gpt-5.6-sol', 'extra-high']);
+  assert.deepEqual([result.model, result.reasoning], [null, 'extra-high']);
 });
 
 test('never parses model-looking JSON inside message content', () => {
