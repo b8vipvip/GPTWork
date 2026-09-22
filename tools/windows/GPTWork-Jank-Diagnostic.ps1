@@ -26,9 +26,10 @@ $phaseMarkers=New-Object System.Collections.Generic.List[object]
 $chromeExe=$null
 try {$chromeExe=(Get-Command chrome.exe -ErrorAction Stop).Source}catch{}
 if(-not $chromeExe){
+  $pf86=[Environment]::GetFolderPath('ProgramFilesX86')
   foreach($candidate in @(
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
-    "\${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    "$pf86\Google\Chrome\Application\chrome.exe",
     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
   )){if(Test-Path $candidate){$chromeExe=$candidate;break}}
 }
