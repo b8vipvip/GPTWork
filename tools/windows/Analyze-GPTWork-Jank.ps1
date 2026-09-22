@@ -190,12 +190,77 @@ if($gpu.Count){
   }|Sort-Object MaxUtilization -Descending|Select-Object -First 30|Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $uploadDir 'gpu-summary-compact.csv')
 }
 
-# 9) Copy small context files only. ETL and raw sample CSVs stay local.
-foreach($name in @('README.txt','system.txt','gpu.txt','tooling.txt','errors.txt','wpr-start.txt','wpr-stop.txt','capture-health.txt','analysis-summary.txt','phase-markers.csv','top-processes.csv','top-threads.csv','chrome-process-map.csv','chrome-process-map-end.csv')){
+# 9) Compact per-phase page evidence exported by the extension control plane.
+$phasePageRows=New-Object System.Collections.Generic.List[object]
+$phaseFiles=@(Get-ChildItem $sourceRoot -Filter 'GPTWork-Jank-Phase-*.json' -File -ErrorAction SilentlyContinue)
+foreach($file in $phaseFiles){
+  try{
+    $phase=Get-Content $file.FullName -Raw -ErrorAction Stop|ConvertFrom-Json
+    foreach($tab in @($phase.tabs)){
+      $life=$tab.details.runtimeLifecycle
+      $callbackTotal=0.0
+      $callbackMax=0.0
+      if($life -and $life.callbacks){
+        foreach($prop in $life.callbacks.PSObject.Properties){
+          $callbackTotal += Safe-Double $prop.Value.totalMs
+          $callbackMax=[math]::Max($callbackMax,(Safe-Double $prop.Value.maxMs))
+        }
+      }
+      $sourceMax=0.0
+      if($life -and $life.callbackSources){
+        foreach($item in @($life.callbackSources)){$sourceMax=[math]::Max($sourceMax,(Safe-Double $item.maxMs))}
+      }
+      $phasePageRows.Add([pscustomobject]@{
+        CaptureId=[string]$phase.captureId
+        Label=[string]$phase.label
+        Mode=[string]$phase.mode
+        StartedAt=[string]$phase.startedAt
+        EndedAt=[string]$phase.endedAt
+        TabId=[string]$tab.tabId
+        Active=[bool]$tab.active
+        RuntimeSuspended=[bool]$life.diagnosticSuspended
+        LongTaskCount=[int](Safe-Double $life.diagnosticLongTaskCount)
+        MaxLongTaskMs=[math]::Round((Safe-Double $life.diagnosticMaxLongTaskMs),1)
+        RuntimeCallbackTotalMs=[math]::Round($callbackTotal,1)
+        RuntimeCallbackMaxMs=[math]::Round([math]::Max($callbackMax,$sourceMax),1)
+        MutationCount=[int](Safe-Double $tab.details.mutationCount)
+        MaxMutationCallbackMs=[math]::Round((Safe-Double $tab.details.maxMutationCallbackMs),1)
+        InteractionCount=$(if($life -and $life.recentUserInteractions){@($life.recentUserInteractions).Count}else{0})
+      })
+    }
+    Copy-Item $file.FullName -Destination $uploadDir -Force -ErrorAction SilentlyContinue
+  }catch{$errors.Add("phase snapshot $($file.Name): $($_.Exception.Message)")}
+}
+if($phasePageRows.Count){
+  $phasePageRows|Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $uploadDir 'phase-page-jank-summary.csv')
+  $phasePageRows|Group-Object Label,Mode|ForEach-Object{
+    [pscustomobject]@{
+      Phase=$_.Name
+      Tabs=$_.Count
+      LongTaskCount=(($_.Group|Measure-Object LongTaskCount -Sum).Sum)
+      MaxLongTaskMs=[math]::Round((Safe-Double (($_.Group|Measure-Object MaxLongTaskMs -Maximum).Maximum)),1)
+      RuntimeCallbackTotalMs=[math]::Round((Safe-Double (($_.Group|Measure-Object RuntimeCallbackTotalMs -Sum).Sum)),1)
+      RuntimeCallbackMaxMs=[math]::Round((Safe-Double (($_.Group|Measure-Object RuntimeCallbackMaxMs -Maximum).Maximum)),1)
+      MutationCount=(($_.Group|Measure-Object MutationCount -Sum).Sum)
+      RuntimeSuspendedTabs=@($_.Group|Where-Object {$_.RuntimeSuspended}).Count
+    }
+  }|Export-Csv -NoTypeInformation -Encoding UTF8 (Join-Path $uploadDir 'phase-causality-matrix.csv')
+  @(
+    'Interpretation guide (do not infer without reproduced long tasks in comparable phases):'
+    '1. baseline_normal + normal_recheck jank, but cdp_off materially lower => CDP/network-monitor path is implicated.'
+    '2. normal phases jank, cdp_off similar, but content_off materially lower => GPTWork content runtime is implicated.'
+    '3. only high_level_off materially lower => CDP/content interaction or another combined GPTWork path is implicated.'
+    '4. high_level_off still shows comparable long tasks => this run does not support GPTWork high-level runtime as the cause.'
+    'Use phase-page-jank-summary.csv together with phase-cpu-summary.csv and phase-thread-summary.csv; do not decide from one metric alone.'
+  )|Set-Content -Encoding UTF8 (Join-Path $uploadDir 'phase-evidence-guide.txt')
+}
+
+# 10) Copy small context files only. ETL and raw sample CSVs stay local.
+foreach($name in @('README.txt','system.txt','gpu.txt','tooling.txt','errors.txt','wpr-start.txt','wpr-stop.txt','capture-health.txt','analysis-summary.txt','phase-markers.csv','phase-page-snapshots.txt','top-processes.csv','top-threads.csv','chrome-process-map.csv','chrome-process-map-end.csv')){
   Copy-IfExists (Join-Path $sourceRoot $name) $uploadDir
 }
 
-# 10) Human-readable report.
+# 11) Human-readable report.
 $summary=New-Object System.Collections.Generic.List[string]
 $summary.Add('GPTWork Jank Local Analysis - compact upload report')
 $summary.Add("AnalyzedAt=$(Get-Date -Format o)")
@@ -218,6 +283,13 @@ foreach($r in ($topP|Select-Object -First 10)){$summary.Add("  $($r.Key) cpuMs=$
 $summary.Add('Top thread CPU:')
 foreach($r in ($topT|Select-Object -First 12)){$summary.Add("  $($r.Key) cpuMs=$($r.CpuDeltaMs) maxSampleMs=$($r.MaxSampleMs)")}
 $summary.Add("UIActivityRows=$($ui.Count)")
+$summary.Add("PhasePageSnapshotFiles=$($phaseFiles.Count)")
+if($phasePageRows.Count){
+  $summary.Add('Per-phase page evidence:')
+  foreach($row in ($phasePageRows|Sort-Object Label,TabId)){
+    $summary.Add("  $($row.Label)/$($row.Mode) tab=$($row.TabId) suspended=$($row.RuntimeSuspended) longTasks=$($row.LongTaskCount) maxLongTaskMs=$($row.MaxLongTaskMs) callbackTotalMs=$($row.RuntimeCallbackTotalMs) callbackMaxMs=$($row.RuntimeCallbackMaxMs)")
+  }
+}
 $summary.Add('Important: browser-jank.etl is intentionally NOT copied into the upload bundle. Keep it locally as second-stage evidence.')
 $summary.Add('Upload the generated *-UPLOAD.zip to ChatGPT. Only provide the ETL separately if the compact evidence is insufficient.')
 $summary|Set-Content -Encoding UTF8 (Join-Path $uploadDir 'ANALYSIS-RESULT.txt')
