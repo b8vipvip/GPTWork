@@ -10,18 +10,37 @@ function safePart(value) {
   return String(value || 'unknown').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 120) || 'unknown';
 }
 
-function downloadSnapshot(snapshot) {
-  if (!snapshot?.captureId || !snapshot?.label) return;
+async function downloadSnapshot(snapshot) {
+  if (!snapshot?.captureId || !snapshot?.label) return false;
+  let href = null;
   try {
     const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
-    const href = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = href;
-    anchor.download = `GPTWork-Jank-Phase-${safePart(snapshot.captureId)}-${safePart(snapshot.label)}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(href), 1500);
+    href = URL.createObjectURL(blob);
+    await chrome.downloads.download({
+      url: href,
+      filename: `GPTWork-Jank-Phase-${safePart(snapshot.captureId)}-${safePart(snapshot.label)}.json`,
+      conflictAction: 'overwrite',
+      saveAs: false,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (href) setTimeout(() => URL.revokeObjectURL(href), 5000);
+  }
+}
+
+async function restoreChatFocus() {
+  try {
+    const controlTab = await chrome.tabs.getCurrent();
+    const tabs = await chrome.tabs.query({
+      windowId: controlTab?.windowId,
+      url: 'https://chatgpt.com/*',
+    });
+    const target = tabs
+      .filter((tab) => tab.id && tab.id !== controlTab?.id)
+      .sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+    if (target?.id) await chrome.tabs.update(target.id, { active: true });
   } catch {}
 }
 
@@ -36,7 +55,7 @@ function downloadSnapshot(snapshot) {
       source: 'windows-jank-ab',
     });
     if (!response?.ok) throw new Error(response?.error || 'isolation_change_failed');
-    if (response.result?.completedPhase) downloadSnapshot(response.result.completedPhase);
+    if (response.result?.completedPhase) await downloadSnapshot(response.result.completedPhase);
     status.textContent = `Applied: ${label} / ${mode}`;
     document.title = `GPTWork Jank A/B: ${label}`;
     await chrome.storage.local.set({
@@ -47,9 +66,10 @@ function downloadSnapshot(snapshot) {
         result: response.result || null,
       },
     });
+    await restoreChatFocus();
     setTimeout(() => chrome.tabs.getCurrent((tab) => {
       if (tab?.id) chrome.tabs.remove(tab.id).catch?.(() => {});
-    }), 500);
+    }), 50);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     status.textContent = `Failed: ${mode}: ${message}`;

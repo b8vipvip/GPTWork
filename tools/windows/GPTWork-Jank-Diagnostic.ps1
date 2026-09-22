@@ -1,10 +1,11 @@
-param([int]$DurationSeconds=60,[int]$SampleMs=250,[switch]$IncludeRawArchive)
+param([int]$DurationSeconds=75,[int]$SampleMs=250,[switch]$IncludeRawArchive,[switch]$IncludeEtw)
 $ErrorActionPreference='Continue'
 $ExtensionId='bhchcpeodphgjfjoookncemnamdbfcof'
 function Is-Admin { $p=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
 if(-not (Is-Admin)){
   $rawArg=if($IncludeRawArchive){' -IncludeRawArchive'}else{''}
-  $args="-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -DurationSeconds $DurationSeconds -SampleMs $SampleMs$rawArg"
+  $etwArg=if($IncludeEtw){' -IncludeEtw'}else{''}
+  $args="-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -DurationSeconds $DurationSeconds -SampleMs $SampleMs$rawArg$etwArg"
   Start-Process powershell.exe -Verb RunAs -ArgumentList $args
   exit
 }
@@ -51,7 +52,7 @@ $captureId="$stamp-$PID"
 $root=Join-Path $env:USERPROFILE "Desktop\GPTWork-Jank-$stamp"
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 $errors=New-Object System.Collections.Generic.List[string]
-"GPTWork Jank Diagnostic v4 causal A/B + phase page evidence`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=2000`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read."|Set-Content -Encoding UTF8 "$root\README.txt"
+"GPTWork Jank Diagnostic v4 causal A/B + phase page evidence`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=disabled-in-causal-loop`nETW=$([bool]$IncludeEtw)`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read."|Set-Content -Encoding UTF8 "$root\README.txt"
 Get-CimInstance Win32_OperatingSystem|Format-List Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime|Out-String|Set-Content -Encoding UTF8 "$root\system.txt"
 Get-CimInstance Win32_VideoController|Format-List Name,DriverVersion,DriverDate,AdapterRAM,PNPDeviceID|Out-String|Set-Content -Encoding UTF8 "$root\gpu.txt"
 try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t `"$root\dxdiag.txt`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
@@ -94,13 +95,15 @@ foreach($tool in @('wpr.exe','xperf.exe','wpaexporter.exe','tracerpt.exe')){
 }
 $toolLines|Set-Content -Encoding UTF8 "$root\tooling.txt"
 $wprStarted=$false
-try {
- $status=(& wpr.exe -status 2>&1|Out-String)
- if($status -notmatch 'recording is in progress'){
-   & wpr.exe -start GeneralProfile -filemode 2>&1|Set-Content -Encoding UTF8 "$root\wpr-start.txt"
-   $wprStarted=($LASTEXITCODE -eq 0)
- } else {$errors.Add('Existing WPR recording detected; did not disturb it.')}
-} catch {$errors.Add("WPR start: $($_.Exception.Message)")}
+if($IncludeEtw){
+ try {
+  $status=(& wpr.exe -status 2>&1|Out-String)
+  if($status -notmatch 'recording is in progress'){
+    & wpr.exe -start GeneralProfile -filemode 2>&1|Set-Content -Encoding UTF8 "$root\wpr-start.txt"
+    $wprStarted=($LASTEXITCODE -eq 0)
+  } else {$errors.Add('Existing WPR recording detected; did not disturb it.')}
+ } catch {$errors.Add("WPR start: $($_.Exception.Message)")}
+}
 Write-Host 'Capture starts in 5 seconds. Repeat the SAME browser actions during all five A/B phases: move/resize, type, click, scroll, switch tabs, open menus, send messages.'
 5..1|ForEach-Object{Write-Host "$_...";Start-Sleep 1}
 $proc=New-Object System.Collections.Generic.List[object]
@@ -110,7 +113,7 @@ $ui=New-Object System.Collections.Generic.List[object]
 $timing=New-Object System.Collections.Generic.List[object]
 $phaseMarkers=New-Object System.Collections.Generic.List[object]
 $lastCpu=@{};$lastProcCpu=@{};$lastProcAt=@{};$lastCursor=$null;$lastButtons=''
-$lastThreadSampleAt=-100000;$lastGpuSampleAt=-100000;$lastSampleAt=$null
+$lastThreadSampleAt=-100000;$lastSampleAt=$null;$phaseStartedAt=0.0
 $lii=New-Object GPTWorkInputProbe+LASTINPUTINFO
 $lii.cbSize=[Runtime.InteropServices.Marshal]::SizeOf([type][GPTWorkInputProbe+LASTINPUTINFO])
 [void][GPTWorkInputProbe]::GetLastInputInfo([ref]$lii)
@@ -138,14 +141,13 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
   $activePhase=$phasePlan[$phaseIndex]
   Write-Host "=== A/B phase $($activePhase.Label) / $($activePhase.Mode) ==="
   Set-GPTWorkIsolation $activePhase.Label $activePhase.Mode
+  $phaseStartedAt=$loopStart
  }
  $now=Get-Date
  $interval=if($null-eq$lastSampleAt){0}else{$loopStart-$lastSampleAt}
  $lastSampleAt=$loopStart
  $sampleThreads=($loopStart-$lastThreadSampleAt-ge1000)
- $sampleGpu=($loopStart-$lastGpuSampleAt-ge2000)
  if($sampleThreads){$lastThreadSampleAt=$loopStart}
- if($sampleGpu){$lastGpuSampleAt=$loopStart}
 
  $fg=[GPTWorkInputProbe]::GetForegroundWindow();[uint32]$fgPid=0;[void][GPTWorkInputProbe]::GetWindowThreadProcessId($fg,[ref]$fgPid)
  $pt=New-Object GPTWorkInputProbe+POINT;[void][GPTWorkInputProbe]::GetCursorPos([ref]$pt)
@@ -160,6 +162,7 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
  }
  $lastCursor=$cursor;$lastButtons=$buttonText
 
+ $phaseAgeMs=[math]::Max(0,$loopStart-$phaseStartedAt)
  $processes=@(Get-Process chrome,dwm -ErrorAction SilentlyContinue)
  foreach($p in $processes){
   try{
@@ -171,19 +174,23 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
    $prevAt=if($lastProcAt.ContainsKey($pkey)){[double]$lastProcAt[$pkey]}else{$loopStart}
    $cpuDelta=[math]::Max(0,$cpu-$prevCpu);$cpuWindow=[math]::Max(1,$loopStart-$prevAt)
    $lastProcCpu[$pkey]=$cpu;$lastProcAt[$pkey]=$loopStart
-   $proc.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;Name=$p.ProcessName;Kind=$kind;PID=$pidValue;CpuDeltaMs=[math]::Round($cpuDelta,1);SampleWindowMs=[math]::Round($cpuWindow,1);CpuOneCorePct=[math]::Round(($cpuDelta/$cpuWindow)*100,1);CPUSeconds=[math]::Round($cpu/1000,3);WorkingSetMB=[math]::Round($p.WorkingSet64/1MB,1);PrivateMB=[math]::Round($p.PrivateMemorySize64/1MB,1);Threads=$p.Threads.Count})
+   $proc.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;PhaseAgeMs=[math]::Round($phaseAgeMs,1);Name=$p.ProcessName;Kind=$kind;PID=$pidValue;CpuDeltaMs=[math]::Round($cpuDelta,1);SampleWindowMs=[math]::Round($cpuWindow,1);CpuOneCorePct=[math]::Round(($cpuDelta/$cpuWindow)*100,1);CPUSeconds=[math]::Round($cpu/1000,3);WorkingSetMB=[math]::Round($p.WorkingSet64/1MB,1);PrivateMB=[math]::Round($p.PrivateMemorySize64/1MB,1);Threads=$p.Threads.Count})
    if($sampleThreads){
     foreach($t in $p.Threads){try{
       $key="$($p.Id):$($t.Id)";$tcpu=$t.TotalProcessorTime.TotalMilliseconds;$prev=if($lastCpu.ContainsKey($key)){$lastCpu[$key]}else{$tcpu};$delta=[math]::Max(0,$tcpu-$prev);$lastCpu[$key]=$tcpu
-      if($delta-ge 1){$threadName=Get-ThreadName ([int]$t.Id);$thr.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;Name=$p.ProcessName;Kind=$kind;PID=$p.Id;TID=$t.Id;ThreadName=$threadName;CpuDeltaMs=[math]::Round($delta,1);State=$t.ThreadState;WaitReason=$(if($t.ThreadState-eq'Wait'){$t.WaitReason}else{''})})}
+      if($delta-ge 1){$threadName=Get-ThreadName ([int]$t.Id);$thr.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;PhaseAgeMs=[math]::Round($phaseAgeMs,1);Name=$p.ProcessName;Kind=$kind;PID=$p.Id;TID=$t.Id;ThreadName=$threadName;CpuDeltaMs=[math]::Round($delta,1);State=$t.ThreadState;WaitReason=$(if($t.ThreadState-eq'Wait'){$t.WaitReason}else{''})})}
     }catch{}}
    }
   }catch{}
  }
- if($sampleGpu){try{(Get-Counter '\GPU Engine(*)\Utilization Percentage').CounterSamples|Where-Object CookedValue -gt .5|Sort-Object CookedValue -Descending|Select-Object -First 30|ForEach-Object{$gpu.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;Instance=$_.InstanceName;Utilization=[math]::Round($_.CookedValue,2)})}}catch{}}
+ # Do not call Get-Counter in the causal loop. On Windows it blocks for roughly one
+ # second while deriving a cooked GPU utilization sample, which previously created
+ # artificial ~1.2 s collector stalls every few seconds. GPU identity is captured
+ # before the run; GPU-process CPU remains in process-samples.csv. Fine GPU ETW is an
+ # explicit second-stage capture (-IncludeEtw), never part of the default A/B probe.
 
  $workMs=$clock.Elapsed.TotalMilliseconds-$loopStart
- $timing.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;IntervalMs=[math]::Round($interval,1);WorkMs=[math]::Round($workMs,1);RequestedSampleMs=$SampleMs})
+ $timing.Add([pscustomobject]@{Time=$now.ToString('o');ElapsedMs=[math]::Round($loopStart,1);Phase=$activePhase.Label;Mode=$activePhase.Mode;PhaseAgeMs=[math]::Round($phaseAgeMs,1);IntervalMs=[math]::Round($interval,1);WorkMs=[math]::Round($workMs,1);RequestedSampleMs=$SampleMs})
  $nextDue+=$SampleMs
  $sleepMs=$nextDue-$clock.Elapsed.TotalMilliseconds
  if($sleepMs-gt 1){Start-Sleep -Milliseconds ([int][math]::Floor($sleepMs))}
@@ -206,9 +213,11 @@ $thr|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\thread-samples.csv"
 $gpu|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\gpu-engine-samples.csv"
 $ui|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\ui-activity.csv"
 $timing|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\capture-timing.csv"
-$proc|Group-Object Phase,Mode,Kind,PID|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1);MaxOneCorePct=[math]::Round((($_.Group|Measure-Object CpuOneCorePct -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-cpu-summary.csv"
+$stableProc=@($proc|Where-Object{[double]$_.PhaseAgeMs -ge 1500})
+$stableThr=@($thr|Where-Object{[double]$_.PhaseAgeMs -ge 1500})
+$stableProc|Group-Object Phase,Mode,Kind,PID|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1);MaxOneCorePct=[math]::Round((($_.Group|Measure-Object CpuOneCorePct -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-cpu-summary.csv"
 $proc|Group-Object Kind,PID|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1);MaxOneCorePct=[math]::Round((($_.Group|Measure-Object CpuOneCorePct -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\top-processes.csv"
-$thr|Group-Object Phase,Mode,Kind,PID,TID,ThreadName|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-thread-summary.csv"
+$stableThr|Group-Object Phase,Mode,Kind,PID,TID,ThreadName|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\phase-thread-summary.csv"
 $thr|Group-Object Kind,PID,TID,ThreadName|ForEach-Object{[pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Sum).Sum),1);MaxSampleMs=[math]::Round((($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum),1)}}|Sort-Object CpuDeltaMs -Descending|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\top-threads.csv"
 $intervals=@($timing|Where-Object IntervalMs -gt 0|Select-Object -ExpandProperty IntervalMs|Sort-Object)
 $works=@($timing|Select-Object -ExpandProperty WorkMs|Sort-Object)
@@ -244,7 +253,7 @@ try{
  foreach($row in $topP){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs) maxOneCorePct=$($row.MaxOneCorePct)")}
  $summary.Add('Top named threads:')
  foreach($row in $topT){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs)")}
- $summary.Add('browser-jank.etl is retained for stack-level ETW proof; tooling.txt records local WPA/xperf availability.')
+ $summary.Add('Default A/B capture is low-overhead and does not run WPR/Get-Counter. Use -IncludeEtw only as a second-stage stack capture if compact evidence requires it.')
  $summary|Set-Content -Encoding UTF8 "$root\analysis-summary.txt"
 }catch{$errors.Add("summary: $($_.Exception.Message)")}
 $errors|Set-Content -Encoding UTF8 "$root\errors.txt"

@@ -13,7 +13,11 @@ test('v0.5.120 jank probe avoids the old high-cost key scan and names hot thread
 
 test('v0.5.120 jank probe measures its own cadence and slows expensive samplers', () => {
   assert.match(script, /sampleThreads=.*1000/);
-  assert.match(script, /sampleGpu=.*2000/);
+  // v0.5.125 removed synchronous GPU Get-Counter from the 250ms causal loop after
+  // field evidence showed it blocked the collector for ~1.2s. ETW is now explicit.
+  assert.doesNotMatch(script, /sampleGpu=.*2000/);
+  assert.match(script, /IncludeEtw/);
+  assert.match(script, /Do not call Get-Counter in the causal loop/);
   assert.match(script, /capture-timing\.csv/);
   assert.match(script, /capture-health\.txt/);
   assert.match(script, /IntervalsOver150Percent/);
