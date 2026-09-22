@@ -40,6 +40,10 @@
   let disposed = false;
   let terminalReason = null;
   let healthTimer = null;
+  let diagnosticSuspended = false;
+  let diagnosticSuspendedAt = null;
+  let diagnosticLongTaskObserver = null;
+  const diagnosticLongTasks = [];
   const callbackStats = new Map();
   const callbackSourceStats = new Map();
   const recentSlowCallbacks = [];
@@ -47,6 +51,11 @@
   const diagnosticInteractionListeners = [];
   const SLOW_CALLBACK_MS = 20;
   const INTERACTION_TYPES = ['pointerdown', 'pointerup', 'click', 'dblclick', 'keydown', 'input', 'change', 'wheel', 'scroll', 'focusin', 'focusout'];
+  const DIAGNOSTIC_CONTROL_MESSAGES = new Set([
+    'GPTWORK_DIAGNOSTIC_CONTENT_SUSPEND',
+    'GPTWORK_DIAGNOSTIC_PERF_SNAPSHOT',
+    'GPTWORK_CONTENT_PREPARE_RELOAD',
+  ]);
 
   function interactionTarget(target) {
     const element = target?.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
@@ -130,6 +139,7 @@
   }
 
   function measureCallback(kind, callback, args, source = kind) {
+    if (diagnosticSuspended) return undefined;
     const startedAt = performance.now();
     try {
       return callback(...args);
@@ -168,7 +178,39 @@
     }
   }
 
-  function diagnosticsSnapshot({ resetCallbacks = false } = {}) {
+  function setDiagnosticSuspended(suspended, reason = 'diagnostic') {
+    diagnosticSuspended = suspended === true;
+    diagnosticSuspendedAt = diagnosticSuspended ? new Date().toISOString() : null;
+    return {
+      suspended: diagnosticSuspended,
+      changedAt: new Date().toISOString(),
+      reason: String(reason || 'diagnostic'),
+    };
+  }
+
+  function installDiagnosticLongTaskObserver() {
+    if (!original.PerformanceObserver) return;
+    try {
+      diagnosticLongTaskObserver = new original.PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const duration = Math.max(0, Number(entry.duration) || 0);
+          diagnosticLongTasks.push({
+            atEpochMs: Date.now(),
+            startedAt: Math.round((Number(entry.startTime) || 0) * 10) / 10,
+            durationMs: Math.round(duration * 10) / 10,
+          });
+        }
+        if (diagnosticLongTasks.length > 48) {
+          diagnosticLongTasks.splice(0, diagnosticLongTasks.length - 48);
+        }
+      });
+      diagnosticLongTaskObserver.observe({ type: 'longtask', buffered: false });
+    } catch {
+      diagnosticLongTaskObserver = null;
+    }
+  }
+
+  function diagnosticsSnapshot({ resetCallbacks = false, resetDiagnosticLongTasks = false } = {}) {
     const callbacks = {};
     for (const [kind, value] of callbackStats) {
       callbacks[kind] = {
@@ -204,6 +246,13 @@
       callbackSources,
       recentSlowCallbacks: recentSlowCallbacks.slice(-12),
       recentUserInteractions: recentUserInteractions.slice(-40),
+      diagnosticSuspended,
+      diagnosticSuspendedAt,
+      diagnosticLongTaskCount: diagnosticLongTasks.length,
+      diagnosticMaxLongTaskMs: diagnosticLongTasks.length
+        ? Math.max(...diagnosticLongTasks.map((item) => Number(item.durationMs) || 0))
+        : 0,
+      diagnosticLongTasks: diagnosticLongTasks.slice(-24),
     };
     if (resetCallbacks) {
       callbackStats.clear();
@@ -211,6 +260,7 @@
       recentSlowCallbacks.length = 0;
       recentUserInteractions.length = 0;
     }
+    if (resetDiagnosticLongTasks) diagnosticLongTasks.length = 0;
     return snapshot;
   }
 
@@ -328,6 +378,11 @@
       try { observer.disconnect(); } catch {}
     }
     resizeObservers.clear();
+    if (diagnosticLongTaskObserver) {
+      try { diagnosticLongTaskObserver.disconnect(); } catch {}
+      diagnosticLongTaskObserver = null;
+    }
+    diagnosticLongTasks.length = 0;
     removeInteractionDiagnostics();
     removeTrackedListeners();
     for (const record of chromeEventListeners) {
@@ -513,7 +568,12 @@
       const existing = [...chromeEventListeners].find((record) => record.event === event && record.listener === listener);
       if (existing) return add.call(event, existing.wrapped || listener);
       const source = callbackSource('chromeEvent');
+      const isRuntimeMessage = event === globalThis.chrome?.runtime?.onMessage;
       const wrapped = function measuredChromeEventListener(...args) {
+        const messageType = isRuntimeMessage ? String(args?.[0]?.type || '') : '';
+        if (diagnosticSuspended && isRuntimeMessage && DIAGNOSTIC_CONTROL_MESSAGES.has(messageType)) {
+          return listener(...args);
+        }
         return measureCallback('chromeEvent', listener, args, source);
       };
       chromeEventListeners.add({ event, listener, wrapped, remove });
@@ -610,6 +670,7 @@
   }
 
   installInteractionDiagnostics();
+  installDiagnosticLongTaskObserver();
 
   patchChromeEvent(globalThis.chrome?.runtime?.onMessage);
   patchChromeEvent(globalThis.chrome?.storage?.onChanged);
@@ -631,6 +692,8 @@
     isAlive: checkAlive,
     shutdown,
     diagnosticsSnapshot,
+    setDiagnosticSuspended,
+    isDiagnosticSuspended: () => diagnosticSuspended,
   };
 
   // The background lifecycle authority can quiesce every content generation before an
