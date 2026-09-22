@@ -127,7 +127,7 @@ if($procNorm.Count){
 
 $topT=@()
 if($thr.Count){
-  $groupProps=if($thr[0].PSObject.Properties.Name -contains 'ThreadName'){'Kind,PID,TID,ThreadName'}else{'Kind,PID,TID'}
+  $groupProps=if($thr[0].PSObject.Properties.Name -contains 'ThreadName'){@('Kind','PID','TID','ThreadName')}else{@('Kind','PID','TID')}
   $topT=@($thr | Group-Object $groupProps | ForEach-Object {
     $sum=($_.Group|Measure-Object CpuDeltaMs -Sum).Sum;$mx=($_.Group|Measure-Object CpuDeltaMs -Maximum).Maximum
     [pscustomobject]@{Key=$_.Name;Samples=$_.Count;CpuDeltaMs=[math]::Round((Safe-Double $sum),1);MaxSampleMs=[math]::Round((Safe-Double $mx),1)}
