@@ -778,6 +778,27 @@ async function applyNetworkEvidence(tabId, evidence) {
   const responseEvidence = mergeResponseEvidence(state, evidence);
   state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
   if (!masterRuntimeEnabled()) return;
+
+  // A single generation can emit many downstream WebSocket/HTTP packets. Once the
+  // exact request has already been verified, packets that add no contradictory model
+  // or reasoning evidence must not repeatedly re-run verification or overwrite the
+  // evidence diagnostics with an unrelated metadata-free packet.
+  const verificationRequestId = responseEvidence.requestId
+    ? `cdp-${tabId}-${responseEvidence.requestId}`
+    : null;
+  const directModel = normalizeConcreteModelId(evidence?.model);
+  const directReasoning = normalizeReasoningLevel(evidence?.reasoning);
+  const priorVerified = state.lastVerification?.verdict === 'verified'
+    && verificationRequestId
+    && state.lastVerification?.requestId === verificationRequestId;
+  const addsContradiction = Boolean(
+    evidence?.conflicts?.model
+      || evidence?.conflicts?.reasoning
+      || (directModel && normalizeConcreteModelId(state.lastVerification?.model) !== directModel)
+      || (directReasoning && normalizeReasoningLevel(state.lastVerification?.reasoning) !== directReasoning)
+  );
+  if (priorVerified && !addsContradiction) return;
+
   try {
     const modelObservation = verificationResponseObservation(tabId, responseEvidence);
     if (modelObservation.downgraded) {
