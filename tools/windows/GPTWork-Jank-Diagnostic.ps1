@@ -1,4 +1,4 @@
-param([int]$DurationSeconds=60,[int]$SampleMs=250)
+param([int]$DurationSeconds=60,[int]$SampleMs=250,[switch]$IncludeRawArchive)
 $ErrorActionPreference='Continue'
 $ExtensionId='bhchcpeodphgjfjoookncemnamdbfcof'
 function Is-Admin { $p=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
@@ -238,6 +238,42 @@ try{
  $summary|Set-Content -Encoding UTF8 "$root\analysis-summary.txt"
 }catch{$errors.Add("summary: $($_.Exception.Message)")}
 $errors|Set-Content -Encoding UTF8 "$root\errors.txt"
-Compress-Archive -Path "$root\*" -DestinationPath "$root.zip" -Force
-Write-Host "Done: $root.zip"
+
+# Keep raw evidence locally, but never force the ETL/raw samples into the default upload archive.
+try{
+ $sizeRows=Get-ChildItem $root -File -Recurse|ForEach-Object{
+  $rel=$_.FullName.Substring($root.Length).TrimStart([char]92,[char]47)
+  [pscustomobject]@{File=$rel;Bytes=$_.Length;MB=[math]::Round($_.Length/1MB,3);Extension=$_.Extension}
+ }|Sort-Object Bytes -Descending
+ $sizeRows|Export-Csv -NoTypeInformation -Encoding UTF8 "$root\source-size-report.csv"
+}catch{$errors.Add("size-report: $($_.Exception.Message)")}
+
+$analysisRoot="$root-Analysis"
+$analyzer=Join-Path $PSScriptRoot 'Analyze-GPTWork-Jank.ps1'
+$uploadZip=$null
+if(Test-Path $analyzer){
+ try{
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $analyzer -InputPath $root -OutputBase $analysisRoot
+  $uploadZip=Get-ChildItem $analysisRoot -Filter '*-UPLOAD.zip' -File -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|Select-Object -First 1 -ExpandProperty FullName
+ }catch{$errors.Add("local analyzer: $($_.Exception.Message)")}
+}
+if(-not $uploadZip){
+ $uploadDir="$root-UPLOAD"
+ New-Item -ItemType Directory -Force -Path $uploadDir|Out-Null
+ foreach($name in @('README.txt','system.txt','gpu.txt','tooling.txt','errors.txt','wpr-start.txt','wpr-stop.txt','capture-health.txt','analysis-summary.txt','phase-markers.csv','phase-cpu-summary.csv','phase-thread-summary.csv','top-processes.csv','top-threads.csv','source-size-report.csv','chrome-process-map.csv','chrome-process-map-end.csv')){
+  $src=Join-Path $root $name
+  if(Test-Path $src){Copy-Item $src -Destination $uploadDir -Force -ErrorAction SilentlyContinue}
+ }
+ $uploadZip="$root-UPLOAD.zip"
+ Compress-Archive -Path "$uploadDir\*" -DestinationPath $uploadZip -Force
+}
+if($IncludeRawArchive){
+ $rawZip="$root-RAW.zip"
+ Compress-Archive -Path "$root\*" -DestinationPath $rawZip -Force
+ Write-Host "Optional RAW archive: $rawZip"
+}
+Write-Host ''
+Write-Host "Small upload bundle: $uploadZip" -ForegroundColor Cyan
+Write-Host "Raw evidence folder (keep locally): $root"
+Write-Host 'browser-jank.etl and high-volume raw CSVs are intentionally excluded from the default upload bundle.'
 Read-Host 'Press Enter to close'
