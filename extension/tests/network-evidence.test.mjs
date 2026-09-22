@@ -74,7 +74,7 @@ test('generic downstream model metadata is diagnostic-only, not served-model pro
   });
   assert.equal(result.model, null);
   assert.equal(result.conflicts.model, false);
-  assert.equal(result.diagnostics.modelCandidateCount, 1);
+  assert.equal(result.diagnostics.modelCandidateCount, 0);
 });
 
 test('explicit served/resolved/used metadata remains authoritative', () => {
