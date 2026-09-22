@@ -3,7 +3,8 @@ param(
   [int]$TopProcesses=20,
   [int]$TopThreads=30,
   [int]$TopSpikes=80,
-  [switch]$KeepExtracted
+  [switch]$KeepExtracted,
+  [string]$OutputBase=''
 )
 $ErrorActionPreference='Continue'
 
@@ -51,7 +52,7 @@ if((Get-Item $resolved).PSIsContainer){
   if($dirs.Count -eq 1 -and $files.Count -eq 0){$sourceRoot=$dirs[0].FullName}else{$sourceRoot=$workRoot}
 }
 
-$outBase=Join-Path ([Environment]::GetFolderPath('Desktop')) "GPTWork-Jank-Analysis-$stamp"
+$outBase=if($OutputBase){[IO.Path]::GetFullPath($OutputBase)}else{Join-Path ([Environment]::GetFolderPath('Desktop')) "GPTWork-Jank-Analysis-$stamp"}
 New-Item -ItemType Directory -Force -Path $outBase|Out-Null
 $uploadDir=Join-Path $outBase 'UPLOAD'
 New-Item -ItemType Directory -Force -Path $uploadDir|Out-Null
