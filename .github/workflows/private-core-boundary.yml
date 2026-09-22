@@ -42,7 +42,7 @@ jobs:
           override=false
           if jq -e '.[] | select(. == "public-core-maintenance" or . == "legacy-core-maintenance")' <<<"${LABELS_JSON:-[]}" >/dev/null; then
             override=true
-          elif grep -Eq '\[(public|legacy)-core-maintenance\]' <<<"${PR_BODY:-}"; then
+          elif grep -Eqi '\[(public|legacy)-core-maintenance\]' <<<"${PR_BODY:-}"; then
             override=true
           fi
           frozen_regex='^(extension/(background|content|context-budget|context-remaining-indicator|guard|model-auto-lock|model-catalog|network-evidence|network-monitor|page-model-evidence|policy)\.js|native-core/src/(bridge|config|lib|verifier)\.rs)$'
