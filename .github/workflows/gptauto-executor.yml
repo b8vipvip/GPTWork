@@ -1,23 +1,21 @@
 name: GPTAuto Executor
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: [GPTAuto Observer]
-    types: [completed]
+  repository_dispatch:
+    types: [gptauto_observation]
 permissions:
   contents: write
   actions: write
   pull-requests: write
   issues: write
 concurrency:
-  group: gptauto-executor-${{ github.event.workflow_run.id }}
+  group: gptauto-executor-${{ github.event.client_payload.observer_run_id || github.run_id }}
   cancel-in-progress: true
 jobs:
   execute:
-    # Executor normally wakes after CI/Release observations. A merged pull_request
-    # observation is also authoritative: it must be allowed to adopt the Completion
-    # Lease when somebody other than Executor performed the merge.
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.event == 'workflow_run' || github.event.workflow_run.event == 'workflow_dispatch' || github.event.workflow_run.event == 'pull_request')) }}
+    # Observer explicitly schedules Executor only after actionable evidence was
+    # captured. Executor no longer subscribes to Observer workflow completion,
+    # eliminating GitHub-created skipped Executor runs.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -30,7 +28,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          OBSERVER_RUN_ID: ${{ github.event.workflow_run.id || '' }}
+          OBSERVER_RUN_ID: ${{ github.event.client_payload.observer_run_id || '' }}
         shell: bash
         run: |
           set -Eeuo pipefail
