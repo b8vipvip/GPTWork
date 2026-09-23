@@ -196,9 +196,9 @@ export class ChatGptNetworkMonitor {
         authorityStartedAt: null,
       };
     }
-    // Fetch.requestPaused is the terminal request-mutation boundary. Verification
-    // authority is resolved here, once, immediately before the body is forwarded.
-    // Page state and normal lock policy cannot partially own this request.
+    // Fetch.requestPaused is the terminal request-mutation boundary. The selected
+    // catalog model owns the forwarded request; there is no parallel "observe native
+    // transport" authority and no alias path that can disagree with this decision.
     return {
       ...base,
       lockedModels: [model],

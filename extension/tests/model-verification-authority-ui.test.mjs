@@ -71,12 +71,12 @@ test('v0.5.134 uses a different deterministic answer for every verification turn
   assert.doesNotMatch(background, /a\+b\+c=18/);
 });
 
-test('v0.5.134 verifies GPT-5.5 before taking temporary Work-mode ownership', () => {
+test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
   const verifyEnd = background.indexOf('async function autoVerify', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
   const completed = verifyBody.indexOf("if (item.model === 'gpt-5.5')");
-  const work = verifyBody.indexOf("GPTLOCK_VERIFY_ENTER_WORK_MODE", completed);
+  const work = verifyBody.indexOf('enableWorkModeForVerification(tabId)', completed);
   const rediscover = verifyBody.indexOf('let rediscovered = await discoverAccountCatalog(tabId)', completed);
   assert(completed >= 0 && work > completed && rediscover > work);
 
@@ -84,7 +84,7 @@ test('v0.5.134 verifies GPT-5.5 before taking temporary Work-mode ownership', ()
   const autoBody = background.slice(autoStart);
   const initialDiscovery = autoBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
   const verification = autoBody.indexOf('verifyAccountCatalogModels', initialDiscovery);
-  const prematureWork = autoBody.indexOf('GPTLOCK_VERIFY_ENTER_WORK_MODE', initialDiscovery);
+  const prematureWork = autoBody.indexOf('enableWorkModeForVerification(tabId)', initialDiscovery);
   assert(initialDiscovery >= 0 && verification > initialDiscovery);
   assert(prematureWork < 0 || prematureWork > verification);
   assert.match(autoBody, /deferred_until_after_gpt_5_5/);
@@ -433,14 +433,14 @@ test('v0.5.108 popup can persist an empty locked-model list', () => {
 });
 
 
-test('v0.5.109 verification owns Work discovery independently and waits for terminal replies', () => {
-  assert.match(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+test('v0.5.135 verification enables GPTWork Work state independently and waits for terminal replies', () => {
+  assert.match(background, /enableWorkModeForVerification/);
   assert.match(background, /verification_work_mode_transition/);
-  assert.match(background, /mergeAccountCatalogs/);
+  assert.match(background, /discoverAccountCatalog\(tabId\)/);
   assert.match(background, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
   assert.match(background, /account_model_verification_aborted_pending_response/);
-  assert.match(content, /verificationWorkControl/);
-  assert.match(content, /verification-work-mode/);
+  assert.match(background, /source: 'verification_runtime_default'/);
+  assert.match(background, /featureState\?\.workModeEnabled === true/);
   assert.match(content, /waitForProbeTurnSettled/);
   assert.match(content, /assistantCountBefore/);
   assert.match(content, /stillGenerating/);
@@ -465,4 +465,26 @@ test('v0.5.120 resolves verification authority at the Fetch sink and fails close
   assert.match(background, /networkObservedRequestModel/);
   assert.match(background, /fetch_forwarded_request_metadata/);
   assert.match(background, /const verified = Boolean\(requestId\) && requestConfirmed && responseConfirmed/);
+});
+
+
+test('v0.5.135 has one strict verification transaction authority with no native-transport alias layer', () => {
+  assert.match(networkMonitor, /preserveModel: false/);
+  assert.match(networkMonitor, /forceModel: model/);
+  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
+  assert.doesNotMatch(networkMonitor, /verification-observation/);
+  assert.doesNotMatch(background, /verificationModelEquivalent/);
+  assert.doesNotMatch(background, /stripTransportSuffix/);
+  assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
+  assert.doesNotMatch(background, /probeText: '1'/);
+});
+
+test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without clicking its UI', async () => {
+  const tabFeatureRuntime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
+  assert.match(background, /enableWorkModeForVerification\(tabId\)/);
+  assert.match(background, /source: 'verification_runtime_default'/);
+  assert.match(tabFeatureRuntime, /export async function enableWorkModeForVerification/);
+  assert.match(tabFeatureRuntime, /setTabFeatureState\(tabId, \{ workModeEnabled: true \}\)/);
+  assert.doesNotMatch(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+  assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
 });

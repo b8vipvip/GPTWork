@@ -26,11 +26,12 @@ import {
 import { createAccountClient } from './account-client.js';
 import {
   effectivePolicyForTabSync,
+  enableWorkModeForVerification,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.134';
+const RUNTIME_CODE_VERSION = '0.5.135';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1908,26 +1909,30 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       break;
     }
 
-    // Current ChatGPT exposes the expanded multi-model picker only after GPTWork
-    // enters Work mode. GPT-5.5 must be verified first while it is still directly
-    // available; then verification takes temporary ownership of the Work toggle
-    // before discovering/selecting every later model.
+    // GPT-5.5 is verified before Work is enabled because picker A exposes it
+    // directly. From this point on, enable GPTWork's tab-scoped Work feature in the
+    // verification runtime itself. Do not click GPTWork UI and do not send a fake
+    // bootstrap chat turn: subsequent discovery must run under the same Work feature
+    // state that the user would enable from GPTWork.
     if (item.model === 'gpt-5.5') {
-      const workMode = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
-        attempted: false,
-        error: errorText(error),
-      }));
-      const entered = workMode?.attempted === true || workMode?.alreadySelected === true;
-      logRuntime(entered ? 'info' : 'warn', 'verification', 'verification_work_mode_transition', {
-        tabId, phase: 'post_gpt_5_5',
-        entered,
-        attempted: workMode?.attempted === true,
-        alreadySelected: workMode?.alreadySelected === true,
-        reason: workMode?.reason ?? null,
-        error: workMode?.error ?? null,
-      });
-      // Give ChatGPT time to materialize picker B before the next discovery pass.
-      await new Promise((resolve) => setTimeout(resolve, entered ? 1400 : 700));
+      try {
+        const featureState = await enableWorkModeForVerification(tabId);
+        logRuntime('info', 'verification', 'verification_work_mode_transition', {
+          tabId,
+          phase: 'post_gpt_5_5',
+          entered: featureState?.workModeEnabled === true,
+          source: 'verification_runtime_default',
+        });
+      } catch (error) {
+        logRuntime('warn', 'verification', 'verification_work_mode_transition', {
+          tabId,
+          phase: 'post_gpt_5_5',
+          entered: false,
+          source: 'verification_runtime_default',
+          error: errorText(error),
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 900));
     }
 
     // A completed real turn / Work transition may unlock account models/capabilities.
