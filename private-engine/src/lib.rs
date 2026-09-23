@@ -549,8 +549,7 @@ fn parse_sse_objects(body: &str) -> Vec<Value> {
         if data_lines.is_empty() {
             return;
         }
-        let data = data_lines.join("
-");
+        let data = data_lines.join("\n");
         data_lines.clear();
         let trimmed = data.trim();
         if trimmed.is_empty() || trimmed == "[DONE]" {
