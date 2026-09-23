@@ -24,7 +24,7 @@ function row(tag, id, bytes) {
     published_at: '2026-09-09T00:00:00Z',
     assets: [{
       id,
-      name: `gptwork-${tag.slice(1)}.zip`,
+      name: 'GPTWorkSetup-x64.exe',
       url: `https://api.github.com/repos/b8vipvip/GPTWork/releases/assets/${id}`,
       size: bytes.length,
       digest: digest(bytes),
