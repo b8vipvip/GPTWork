@@ -1574,6 +1574,14 @@ document.addEventListener('pointerdown', (event) => {
     return { attempted: true, reason: 'work_control_clicked' };
   }
 
+  async function stopStaleGeneration() {
+    const control = visibleGeneratingControl();
+    if (!control) return { stopped: false, alreadyIdle: true };
+    await trustedPointer(control, 'click', 'verification-stale-generation-stop');
+    const idle = await waitUntil(() => !visibleGeneratingControl(), 5000, 100);
+    return { stopped: true, idle: Boolean(idle) };
+  }
+
   async function waitForProbeTurnSettled(message = {}) {
     const before = Math.max(0, Number(message.assistantCountBefore || 0));
     const timeoutMs = Math.min(180000, Math.max(5000, Number(message.timeoutMs || 120000)));
@@ -1908,6 +1916,13 @@ document.addEventListener('pointerdown', (event) => {
     }
     if (message?.type === 'GPTLOCK_VERIFY_ENTER_WORK_MODE') {
       void enterVerificationWorkMode().then(
+        (result) => sendResponse({ ok: true, ...result }),
+        (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+      return true;
+    }
+    if (message?.type === 'GPTLOCK_STOP_STALE_GENERATION') {
+      void stopStaleGeneration().then(
         (result) => sendResponse({ ok: true, ...result }),
         (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
       );
