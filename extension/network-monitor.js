@@ -196,7 +196,7 @@ export class ChatGptNetworkMonitor {
         authorityStartedAt: null,
       };
     }
-    // Fetch.requestPaused is the one verification decision boundary. The selected
+    // Fetch.requestPaused is the terminal request-mutation boundary. The selected
     // catalog model owns the forwarded request; there is no parallel "observe native
     // transport" authority and no alias path that can disagree with this decision.
     return {
