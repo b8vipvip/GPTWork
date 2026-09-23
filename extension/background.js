@@ -1595,6 +1595,44 @@ async function discoverAccountCatalog(tabId) {
   }
 }
 
+async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    logRuntime('warn', 'verification', 'verification_stale_generation_reload', { tabId, attempt, maxAttempts: 3 });
+    await chrome.tabs.reload(tabId);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    const settled = await sendTabMessage(tabId, {
+      type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+      assistantCountBefore,
+      timeoutMs: 3500,
+    }).catch(() => null);
+    if (settled?.settled === true || settled?.stillGenerating === false) {
+      logRuntime('info', 'verification', 'verification_stale_generation_recovered', { tabId, attempt, method: 'reload' });
+      return { settled: true, method: 'reload', attempt };
+    }
+  }
+  const stopped = await sendTabMessage(tabId, { type: 'GPTLOCK_STOP_STALE_GENERATION' }).catch(() => null);
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const settled = await sendTabMessage(tabId, {
+    type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+    assistantCountBefore,
+    timeoutMs: 3500,
+  }).catch(() => null);
+  const ok = stopped?.stopped === true && (settled?.settled === true || settled?.stillGenerating === false);
+  logRuntime(ok ? 'info' : 'warn', 'verification', 'verification_stale_generation_recovered', {
+    tabId, method: 'stop-button', stopped: stopped?.stopped === true, settled: Boolean(ok),
+  });
+  return { settled: Boolean(ok), method: 'stop-button', stopped: stopped?.stopped === true };
+}
+
+async function sendVerificationReasoningProbe(tabId, marker, ordinal, total) {
+  return sendTabMessage(tabId, {
+    type: 'GPTLOCK_AUTO_SEND_PROBE',
+    skipAlignment: true,
+    probeMarker: marker,
+    probeText: `${marker} ${ordinal}/${total}：请严格完成以下推理任务并只输出最终答案。设整数 a,b,c 满足 a+b+c=18、a<b<c、ab+bc+ca=95。求 a²+b²+c²，并检查条件是否自洽；若无整数解则输出“无整数解”并给出导致矛盾的关键等式。`,
+  });
+}
+
 async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
   // v0.5.95: ChatGPT can expose only a starter catalog in a fresh chat and unlock
   // additional models/reasoning after real turns. Treat discovery as a growing set,
@@ -1744,12 +1782,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 
       const reattached = await networkMonitor.attach(tabId);
       if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
-      const probe = await sendTabMessage(tabId, {
-        type: 'GPTLOCK_AUTO_SEND_PROBE',
-        skipAlignment: true,
-        probeText: `GPTWork 模型验证 ${index + 1}/${queue.length}：请只回复“验证完成”。`,
-        probeMarker: 'GPTWork 模型验证',
-      });
+      const probe = await sendVerificationReasoningProbe(tabId, 'GPTWork 模型验证', index + 1, queue.length);
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
       const [waited, turnSettled] = await Promise.all([
@@ -1760,9 +1793,13 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
           timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
         }),
       ]);
-      if (turnSettled?.settled !== true) {
+      let effectiveTurnSettled = turnSettled;
+      if (effectiveTurnSettled?.settled !== true) {
+        effectiveTurnSettled = await recoverStaleVerificationTurn(tabId, probe.assistantCountBefore ?? 0);
+      }
+      if (effectiveTurnSettled?.settled !== true) {
         abortForPendingTurn = true;
-        throw new Error('ChatGPT response did not reach a terminal idle state; verification stopped before touching the model picker');
+        throw new Error('ChatGPT response remained non-terminal after 3 reload recoveries and stop-button recovery');
       }
       // The body forwarded at Fetch.requestPaused is the sole request-confirmation
       // authority. Network.requestWillBeSent may expose the page's pre-interception
@@ -1854,8 +1891,31 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     }
 
     // A completed real turn may unlock account models/capabilities in a fresh chat.
-    const rediscovered = await discoverAccountCatalog(tabId);
+    let rediscovered = await discoverAccountCatalog(tabId);
     progress.discoveryPasses += 1;
+    // GPT-5.6 Sol can be the capability-unlock turn for picker B. If the normal
+    // verification turn did not expose B, run one additional reasoning-heavy Sol
+    // turn, wait for a terminal response with the same recovery contract, then
+    // rediscover before moving to the next model.
+    if (item.model === 'gpt-5.6-sol' && rediscovered?.pickerMode !== 'B') {
+      logRuntime('info', 'verification', 'verification_sol_picker_b_unlock_started', { tabId, pickerMode: rediscovered?.pickerMode ?? null });
+      const unlockProbe = await sendVerificationReasoningProbe(tabId, 'GPTWork GPT-5.6 Sol 能力解锁验证', index, queue.length);
+      if (unlockProbe?.sent) {
+        let unlockSettled = await sendTabMessage(tabId, {
+          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+          assistantCountBefore: unlockProbe.assistantCountBefore ?? 0,
+          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+        });
+        if (unlockSettled?.settled !== true) {
+          unlockSettled = await recoverStaleVerificationTurn(tabId, unlockProbe.assistantCountBefore ?? 0);
+        }
+        if (unlockSettled?.settled === true) {
+          rediscovered = await discoverAccountCatalog(tabId);
+          progress.discoveryPasses += 1;
+          logRuntime('info', 'verification', 'verification_sol_picker_b_unlock_completed', { tabId, pickerMode: rediscovered?.pickerMode ?? null });
+        }
+      }
+    }
     const added = mergeCatalog(rediscovered, 'post-turn');
     stablePasses = added ? 0 : stablePasses + 1;
     progress.stablePasses = stablePasses;
