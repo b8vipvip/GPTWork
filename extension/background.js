@@ -84,15 +84,18 @@ function errorText(error) {
 async function collectJankProcessAttribution() {
   if (!chrome.processes?.getProcessInfo) return [];
   try {
-    const processes = await chrome.processes.getProcessInfo([], true);
-    return (Array.isArray(processes) ? processes : []).map((process) => ({
+    // getProcessInfo returns an object keyed by Chrome process id. TaskInfo carries
+    // tabId, which lets the Windows collector's OS PID samples be joined back to
+    // the exact ChatGPT renderer without recording tab titles or page text.
+    const processMap = await chrome.processes.getProcessInfo([], true);
+    return Object.values(processMap || {}).map((process) => ({
       processId: Number(process?.id || 0) || null,
       osProcessId: Number(process?.osProcessId || 0) || null,
       type: process?.type || null,
-      tabs: Array.isArray(process?.tabs) ? process.tabs.map((tabId) => Number(tabId)).filter(Number.isFinite) : [],
-      cpu: Number.isFinite(process?.cpu) ? process.cpu : null,
+      tabs: [...new Set((Array.isArray(process?.tasks) ? process.tasks : [])
+        .map((task) => Number(task?.tabId))
+        .filter(Number.isFinite))],
       privateMemory: Number.isFinite(process?.privateMemory) ? process.privateMemory : null,
-      jsMemoryUsed: Number.isFinite(process?.jsMemoryUsed) ? process.jsMemoryUsed : null,
     })).filter((process) => process.osProcessId || process.tabs.length);
   } catch (error) {
     logRuntime('warn', 'diagnostics', 'jank_process_attribution_failed', { error: errorText(error) });
