@@ -88,7 +88,7 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /getVerificationTransaction\(tabId\)/);
   assert.match(backgroundSource, /fetch_forwarded_request_metadata/);
   assert.doesNotMatch(backgroundSource, /Model selection was not confirmed/);
-  assert.match(backgroundSource, /probeMarker: 'GPTWork 模型验证'/);
+  assert.match(backgroundSource, /sendVerificationReasoningProbe\(tabId, 'GPTWork 模型验证'/);
   assert.match(backgroundSource, /skipAlignment: true/);
   assert.match(backgroundSource, /runtimePolicyForTabSync/);
   assert.match(backgroundSource, /preserveModel: false/);
