@@ -634,8 +634,7 @@ fn inspect_body(body: &str, mime_type: &str) -> BodyInspection {
         formats.push("json");
     }
     if mime_type.to_ascii_lowercase().contains("event-stream")
-        || trimmed.contains("
-data:")
+        || trimmed.contains("\ndata:")
         || trimmed.starts_with("data:")
     {
         let objects = parse_sse_objects(trimmed);
@@ -644,8 +643,7 @@ data:")
             formats.push("sse");
         }
     }
-    if values.is_empty() && trimmed.contains('
-') {
+    if values.is_empty() && trimmed.contains('\n') {
         let mut ndjson = Vec::new();
         for line in trimmed.lines() {
             if let Some(parsed) = parse_json(line.trim()) {
