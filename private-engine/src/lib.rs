@@ -434,7 +434,7 @@ fn path_score(path: &[String], key: &str, kind: &str) -> i32 {
             0
         };
     }
-    if metadata { 115 } else if path.len() <= 3 { 95 } else { 0 }
+    if metadata {\n        115\n    } else if path.len() <= 3 {\n        95\n    } else {\n        0\n    }
 }
 fn walk_value(value: &Value, candidates: &mut CandidateSet, path: &mut Vec<String>, depth: usize) {
     if depth > MAX_WALK_DEPTH {
@@ -505,7 +505,7 @@ fn select_candidate(candidates: &[Candidate]) -> Selection {
         .map(|candidate| candidate.value.as_str())
         .collect();
     if values.len() != 1 {
-        return Selection { value: None, conflict: true, path: None };
+        return Selection {\n            value: None,\n            conflict: true,\n            path: None,\n        };
     }
     Selection {
         value: values.iter().next().map(|value| (*value).to_string()),
