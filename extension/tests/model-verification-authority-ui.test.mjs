@@ -178,13 +178,14 @@ test('v0.5.87 menu cleanup is idempotent and cannot toggle a closed model trigge
 
 test('v0.5.87 progress starts before catalog discovery so discovery failure remains visible', () => {
   const verifyStart = background.indexOf('async function autoVerify');
-  const verifyBody = background.slice(verifyStart, verifyStart + 7000);
+  const verifyBody = background.slice(verifyStart, verifyStart + 9000);
   const runningAt = verifyBody.indexOf('state.autoVerification = {');
   const broadcastAt = verifyBody.indexOf('await broadcastTabState(tabId)', runningAt);
-  const discoverAt = verifyBody.indexOf('const initialCatalog = await discoverAccountCatalog(tabId)');
+  const discoverAt = verifyBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
   assert.match(verifyBody, /state\.autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
+  assert.match(verifyBody, /deferred_until_after_gpt_5_5/);
 });
 
 
