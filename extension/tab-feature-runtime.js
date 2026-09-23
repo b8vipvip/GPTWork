@@ -235,6 +235,17 @@ export async function getTabFeatureState(tabId) {
   return tabFeatureStateSync(tabId);
 }
 
+// Model verification uses the same tab-scoped Work feature state as the product UI.
+// This is a direct runtime state transition; it does not click GPTWork UI controls or
+// synthesize a ChatGPT message. Once GPT-5.5 is finished, verification enables Work
+// here so the subsequent catalog discovery runs under the real Work feature contract.
+export async function enableWorkModeForVerification(tabId) {
+  const featureState = await setTabFeatureState(tabId, { workModeEnabled: true });
+  await pushFeatureState(Number(tabId), featureState);
+  log('verification_work_mode_enabled', { tabId: Number(tabId), workModeEnabled: true });
+  return featureState;
+}
+
 export function tabFeatureEnabledSync(tabId) {
   if (!masterEnabled) return false;
   const state = tabFeatureStateSync(tabId);
