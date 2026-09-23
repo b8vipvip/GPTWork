@@ -26,6 +26,7 @@ import {
 import { createAccountClient } from './account-client.js';
 import {
   effectivePolicyForTabSync,
+  enableWorkModeForVerification,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
@@ -1651,44 +1652,6 @@ async function sendVerificationReasoningProbe(tabId, marker, ordinal, total) {
   });
 }
 
-function verificationModelEquivalent(selectedModel, observedModel) {
-  const selected = normalizeConcreteModelId(selectedModel);
-  const observed = normalizeConcreteModelId(observedModel);
-  if (!selected || !observed) return false;
-  if (selected === observed) return true;
-  // ChatGPT may expose a friendly picker id while its own request uses a Work-mode
-  // transport suffix. This is an observed UI->transport alias, not a rewrite target.
-  const stripTransportSuffix = (value) => value.replace(/-(?:wm|work)$/i, '');
-  return stripTransportSuffix(selected) === stripTransportSuffix(observed);
-}
-
-async function bootstrapVerificationWorkMode(tabId) {
-  // There is no reliable clickable "Work" control on the current conversation UI.
-  // Field evidence shows that one ordinary user turn materializes Work mode and the
-  // expanded picker B. Reproduce that exact user-visible transition instead of
-  // searching for a nonexistent top-bar button.
-  const probe = await sendTabMessage(tabId, {
-    type: 'GPTLOCK_AUTO_SEND_PROBE',
-    skipAlignment: true,
-    probeMarker: '1',
-    probeText: '1',
-  });
-  if (!probe?.sent) return { attempted: false, entered: false, reason: 'bootstrap_not_sent' };
-  let settled = await sendTabMessage(tabId, {
-    type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
-    assistantCountBefore: probe.assistantCountBefore ?? 0,
-    timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
-  });
-  if (settled?.settled !== true) {
-    settled = await recoverStaleVerificationTurn(tabId, probe.assistantCountBefore ?? 0);
-  }
-  return {
-    attempted: true,
-    entered: settled?.settled === true,
-    reason: settled?.settled === true ? 'ordinary_turn_settled' : 'ordinary_turn_not_settled',
-  };
-}
-
 async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
   // v0.5.95: ChatGPT can expose only a starter catalog in a fresh chat and unlock
   // additional models/reasoning after real turns. Treat discovery as a growing set,
@@ -1866,7 +1829,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
       const authoritativeRewrite = Boolean(
         item.model
-        && state.lastRewrite?.authorityKind === 'verification-observation'
+        && state.lastRewrite?.authorityKind === 'verification-transaction'
         && state.lastRewrite?.authorityModel === item.model
         && Number.isFinite(rewriteCapturedAtMs)
         && rewriteCapturedAtMs >= transactionStartedAtMs - 250
@@ -1892,14 +1855,11 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const responseModel = normalizeConcreteModelId(terminalVerification?.model);
       const requestConfirmed = item.model
         ? Boolean(authoritativeRewrite) && (
-          verificationModelEquivalent(item.model, requestModel)
-          || Boolean(item.rawModel && verificationModelEquivalent(item.rawModel, requestModel))
+          requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
         )
         : Boolean(requestModel);
       const responseConfirmed = Boolean(terminalVerification) && (item.model
-        ? verificationModelEquivalent(requestModel || item.model, responseModel)
-          || verificationModelEquivalent(item.model, responseModel)
-          || Boolean(item.rawModel && verificationModelEquivalent(item.rawModel, responseModel))
+        ? responseModel === item.model || Boolean(item.rawModel && responseModel === item.rawModel)
         : Boolean(responseModel));
       const requestMismatch = Boolean(item.model && authoritativeRewrite && requestModel) && !requestConfirmed;
       const verified = Boolean(requestId) && requestConfirmed && responseConfirmed && !requestMismatch;
@@ -1949,27 +1909,30 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       break;
     }
 
-    // Current ChatGPT exposes the expanded multi-model picker only after GPTWork
-    // enters Work mode. GPT-5.5 must be verified first while it is still directly
-    // available; then verification takes temporary ownership of the Work toggle
-    // before discovering/selecting every later model.
+    // GPT-5.5 is verified before Work is enabled because picker A exposes it
+    // directly. From this point on, enable GPTWork's tab-scoped Work feature in the
+    // verification runtime itself. Do not click GPTWork UI and do not send a fake
+    // bootstrap chat turn: subsequent discovery must run under the same Work feature
+    // state that the user would enable from GPTWork.
     if (item.model === 'gpt-5.5') {
-      const workMode = await bootstrapVerificationWorkMode(tabId).catch((error) => ({
-        attempted: false,
-        entered: false,
-        error: errorText(error),
-      }));
-      const entered = workMode?.entered === true;
-      logRuntime(entered ? 'info' : 'warn', 'verification', 'verification_work_mode_transition', {
-        tabId, phase: 'post_gpt_5_5',
-        entered,
-        attempted: workMode?.attempted === true,
-        alreadySelected: false,
-        reason: workMode?.reason ?? null,
-        error: workMode?.error ?? null,
-      });
-      // Give ChatGPT time to materialize picker B after the ordinary bootstrap turn.
-      await new Promise((resolve) => setTimeout(resolve, entered ? 1400 : 700));
+      try {
+        const featureState = await enableWorkModeForVerification(tabId);
+        logRuntime('info', 'verification', 'verification_work_mode_transition', {
+          tabId,
+          phase: 'post_gpt_5_5',
+          entered: featureState?.workModeEnabled === true,
+          source: 'verification_runtime_default',
+        });
+      } catch (error) {
+        logRuntime('warn', 'verification', 'verification_work_mode_transition', {
+          tabId,
+          phase: 'post_gpt_5_5',
+          entered: false,
+          source: 'verification_runtime_default',
+          error: errorText(error),
+        });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 900));
     }
 
     // A completed real turn / Work transition may unlock account models/capabilities.
