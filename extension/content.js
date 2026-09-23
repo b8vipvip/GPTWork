@@ -1182,6 +1182,23 @@ document.addEventListener('pointerdown', (event) => {
       }
     }
 
+    // Discovery may leave ChatGPT's advanced picker view visibly mounted while
+    // Escape is still animating/closing the outer Radix menu. Reusing that owned,
+    // already-visible model list is safer than clicking the second-layer opener again:
+    // the latter can move under the pointer during the view transition and fail the
+    // stable hit-test before verification ever reaches the actual model row.
+    const alreadyVisibleAdvanced = advancedPickerView(picker);
+    const alreadyVisibleRows = alreadyVisibleAdvanced ? distinctModelRows(alreadyVisibleAdvanced) : [];
+    if (alreadyVisibleRows.length) {
+      pickerTopologyProbe('third-layer-reused', {
+        pageContext,
+        opener: compactElementProbe(initialOpener),
+        submenu: compactElementProbe(alreadyVisibleAdvanced),
+        modelRows: alreadyVisibleRows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
+      });
+      return { trigger, picker, opener: initialOpener, submenu: alreadyVisibleAdvanced, rows: alreadyVisibleRows, pageContext, pickerMode: 'B' };
+    }
+
     if (!initialOpener) {
       const advanced = advancedPickerToggle(picker);
       if (advanced) {
