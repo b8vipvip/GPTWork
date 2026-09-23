@@ -2109,27 +2109,12 @@ async function autoVerify(tabId) {
 
   const sharedKnownModels = await syncSharedKnownModels();
   state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-  const initialCatalog = await discoverAccountCatalog(tabId);
-  let accountCatalog = initialCatalog;
-  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: null };
-  if (initialCatalog.pickerMode !== 'B') {
-    try {
-      const work = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' });
-      state.autoVerification.workDiscovery = {
-        attempted: work?.attempted === true,
-        entered: work?.attempted === true || work?.alreadySelected === true,
-        reason: work?.reason || null,
-      };
-      logRuntime('info', 'verification', 'verification_work_mode_transition', { tabId, ...state.autoVerification.workDiscovery });
-      if (state.autoVerification.workDiscovery.entered) {
-        const workCatalog = await discoverAccountCatalog(tabId);
-        accountCatalog = mergeAccountCatalogs(initialCatalog, workCatalog);
-      }
-    } catch (error) {
-      state.autoVerification.workDiscovery = { attempted: true, entered: false, reason: errorText(error) };
-      logRuntime('warn', 'verification', 'verification_work_mode_transition_failed', { tabId, error: errorText(error) });
-    }
-  }
+  // Do not enter Work before GPT-5.5. Current ChatGPT changes the model-picker
+  // topology when Work is enabled; field evidence shows GPT-5.5 must be verified
+  // first in Chat mode, then Work is enabled inside verifyAccountCatalogModels()
+  // before rediscovering picker B and continuing with later models.
+  const accountCatalog = await discoverAccountCatalog(tabId);
+  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: 'deferred_until_after_gpt_5_5' };
   state.autoVerification.maxAttempts = accountCatalog.rows.length;
   await broadcastTabState(tabId);
 
