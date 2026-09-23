@@ -834,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_astra_model_slug_beats_default_model_metadata() {
+    fn generic_model_slug_and_default_metadata_are_not_served_model_proof() {
         let response = ResponseEnvelope {
             body: json!({
                 "metadata": {
@@ -849,7 +849,8 @@ mod tests {
         };
         let evidence = evaluate_response(&response);
         assert!(!evidence.conflicts.model);
-        assert_eq!(evidence.model.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(evidence.model, None);
+        assert_eq!(evidence.diagnostics.model_candidate_count, 0);
     }
 
     #[test]
