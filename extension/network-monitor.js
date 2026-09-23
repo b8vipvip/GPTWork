@@ -196,26 +196,23 @@ export class ChatGptNetworkMonitor {
         authorityStartedAt: null,
       };
     }
-    // Verification must observe ChatGPT's native transport model, not manufacture
-    // one from the visible picker label. Some UI rows map to backend transport ids
-    // such as gpt-6-luna-wm. Forcing the visible id (gpt-6-luna) made the backend
-    // legitimately fall back to another model and created the mismatch we were
-    // trying to measure. Keep the transaction boundary for correlation/response
-    // capture, but preserve the request model selected by ChatGPT itself.
+    // Fetch.requestPaused is the one verification decision boundary. The selected
+    // catalog model owns the forwarded request; there is no parallel "observe native
+    // transport" authority and no alias path that can disagree with this decision.
     return {
       ...base,
       lockedModels: [model],
       preferredReasoning: null,
-      preserveModel: true,
+      preserveModel: false,
       preserveReasoning: true,
       bypassRewrite: false,
-      forceModel: null,
+      forceModel: model,
       responseVerificationEnabled: true,
       knownModels: [...new Set([
         ...(Array.isArray(base.knownModels) ? base.knownModels : []),
         model,
       ])],
-      authorityKind: 'verification-observation',
+      authorityKind: 'verification-transaction',
       authorityModel: model,
       authorityStartedAt: Number(transaction?.startedAt) || null,
     };
