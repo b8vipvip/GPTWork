@@ -15,6 +15,10 @@ on:
         description: Whether Release must succeed
         required: true
         default: 'false'
+      allow_historical_merge:
+        description: Recovery-only: validate an older merged SHA after main advanced
+        required: false
+        default: 'false'
 permissions:
   contents: read
   actions: write
@@ -42,6 +46,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           MERGE_SHA: ${{ inputs.merge_sha }}
           RELEASE_REQUIRED: ${{ inputs.release_required }}
+          ALLOW_HISTORICAL_MERGE: ${{ inputs.allow_historical_merge }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -63,10 +68,17 @@ jobs:
           [[ -n "$primary" ]] || { echo "::error::Unable to resolve product validation workflow name for $primary_path"; exit 1; }
 
           current_main="$(gh api "repos/$REPOSITORY/commits/$DEFAULT_BRANCH" --jq '.sha')"
-          [[ "$current_main" == "$MERGE_SHA" ]] || {
+          if [[ "$current_main" != "$MERGE_SHA" && "$ALLOW_HISTORICAL_MERGE" != "true" ]]; then
             echo "::error::Default branch moved to $current_main before post-merge validation for $MERGE_SHA; refusing to validate a different commit"
             exit 1
-          }
+          fi
+          if [[ "$current_main" != "$MERGE_SHA" ]]; then
+            git merge-base --is-ancestor "$MERGE_SHA" "$current_main" || {
+              echo "::error::Historical recovery SHA $MERGE_SHA is not an ancestor of current main $current_main"
+              exit 1
+            }
+            echo "Recovery mode: validating historical merged SHA $MERGE_SHA while main is $current_main."
+          fi
 
           printf '%s\n' "$primary" > /tmp/gptauto-required-workflows.txt
           echo "required-workflows=$primary" >> "$GITHUB_OUTPUT"
@@ -88,8 +100,10 @@ jobs:
               echo "::error::Canonical post-merge workflow $primary_path has no workflow_dispatch trigger. Add workflow_dispatch or configure GPTAUTO_POST_MERGE_WORKFLOW to a dispatchable product workflow."
               exit 1
             }
-            gh workflow run "$primary_path" --repo "$REPOSITORY" --ref "$DEFAULT_BRANCH"
-            echo "Dispatched canonical post-merge validation for merge $MERGE_SHA."
+            dispatch_ref="$DEFAULT_BRANCH"
+            [[ "$ALLOW_HISTORICAL_MERGE" == "true" ]] && dispatch_ref="$MERGE_SHA"
+            gh workflow run "$primary_path" --repo "$REPOSITORY" --ref "$dispatch_ref"
+            echo "Dispatched canonical post-merge validation for merge $MERGE_SHA on ref $dispatch_ref."
 
             registration_deadline=$((SECONDS + 90))
             validation_run_id=""
