@@ -2035,3 +2035,4 @@ document.addEventListener('pointerdown', (event) => {
     .catch(() => failOpenStaleRuntime());
   scheduleReport();
 })();
+
