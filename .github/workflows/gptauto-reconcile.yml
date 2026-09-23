@@ -47,10 +47,10 @@ jobs:
           set -Eeuo pipefail
           printf '%s\n' "CI" > /tmp/gptauto-required-workflows.txt
           catalog="$(gh workflow list --repo "$REPOSITORY" --all --json name,path,state)"
-          release_path="$(jq -r '[.[] | select(.name == "Release" and .state == "active")][0].path // empty' <<<"$catalog")"
+          release_path="$(jq -r '[.[] | select(.name == "Release" and ((.state // "") | ascii_downcase | startswith("disabled") | not))][0].path // empty' <<<"$catalog")"
 
           if [[ "$RELEASE_REQUIRED" == "true" ]]; then
-            [[ -n "$release_path" ]] || { echo "::error::Release is required but no active Release workflow exists"; exit 1; }
+            [[ -n "$release_path" ]] || { echo "::error::Release is required but no enabled Release workflow exists"; exit 1; }
             gh workflow view "$release_path" --repo "$REPOSITORY" --yaml > /tmp/gptauto-release-workflow.yml
             python - <<'PY' >> /tmp/gptauto-required-workflows.txt
           from pathlib import Path
