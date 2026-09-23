@@ -16,7 +16,7 @@ on:
         required: true
         default: 'false'
       allow_historical_merge:
-        description: Recovery-only: validate an older merged SHA after main advanced
+        description: 'Recovery-only: validate an older merged SHA after main advanced'
         required: false
         default: 'false'
 permissions:
