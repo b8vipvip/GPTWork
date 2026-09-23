@@ -52,7 +52,7 @@ $captureId="$stamp-$PID"
 $root=Join-Path $env:USERPROFILE "Desktop\GPTWork-Jank-$stamp"
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 $errors=New-Object System.Collections.Generic.List[string]
-"GPTWork Jank Diagnostic v4 causal A/B + phase page evidence`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=disabled-in-causal-loop`nETW=$([bool]$IncludeEtw)`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read."|Set-Content -Encoding UTF8 "$root\README.txt"
+"GPTWork Jank Diagnostic v4 causal A/B + phase page evidence`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=disabled-in-causal-loop`nETW=$([bool]$IncludeEtw)`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read.`nSyntheticWorkload=True; each A/B phase automatically replays the same scroll/composer/picker workload on the active ChatGPT tab."|Set-Content -Encoding UTF8 "$root\README.txt"
 Get-CimInstance Win32_OperatingSystem|Format-List Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime|Out-String|Set-Content -Encoding UTF8 "$root\system.txt"
 Get-CimInstance Win32_VideoController|Format-List Name,DriverVersion,DriverDate,AdapterRAM,PNPDeviceID|Out-String|Set-Content -Encoding UTF8 "$root\gpu.txt"
 try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t `"$root\dxdiag.txt`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
@@ -104,7 +104,7 @@ if($IncludeEtw){
   } else {$errors.Add('Existing WPR recording detected; did not disturb it.')}
  } catch {$errors.Add("WPR start: $($_.Exception.Message)")}
 }
-Write-Host 'Capture starts in 5 seconds. Repeat the SAME browser actions during all five A/B phases: move/resize, type, click, scroll, switch tabs, open menus, send messages.'
+Write-Host 'Capture starts in 5 seconds. GPTWork will automatically replay the SAME deterministic browser workload in every A/B phase. Do not manually reproduce actions during the capture.'
 5..1|ForEach-Object{Write-Host "$_...";Start-Sleep 1}
 $proc=New-Object System.Collections.Generic.List[object]
 $thr=New-Object System.Collections.Generic.List[object]
