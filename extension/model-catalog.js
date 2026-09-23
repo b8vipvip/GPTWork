@@ -90,7 +90,13 @@
 
   function visible(element) {
     const rect = element?.getBoundingClientRect?.();
-    return Boolean(rect && rect.width > 0 && rect.height > 0 && getComputedStyle(element).visibility !== 'hidden');
+    if (!element?.isConnected || !rect || rect.width <= 0 || rect.height <= 0) return false;
+    const style = getComputedStyle(element);
+    if (style.visibility === 'hidden' || style.display === 'none') return false;
+    return rect.right > 0
+      && rect.bottom > 0
+      && rect.left < window.innerWidth
+      && rect.top < window.innerHeight;
   }
 
   function detectPageModel() {
