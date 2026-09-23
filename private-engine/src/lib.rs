@@ -434,7 +434,13 @@ fn path_score(path: &[String], key: &str, kind: &str) -> i32 {
             0
         };
     }
-    if metadata {\n        115\n    } else if path.len() <= 3 {\n        95\n    } else {\n        0\n    }
+    if metadata {
+        115
+    } else if path.len() <= 3 {
+        95
+    } else {
+        0
+    }
 }
 fn walk_value(value: &Value, candidates: &mut CandidateSet, path: &mut Vec<String>, depth: usize) {
     if depth > MAX_WALK_DEPTH {
@@ -505,7 +511,11 @@ fn select_candidate(candidates: &[Candidate]) -> Selection {
         .map(|candidate| candidate.value.as_str())
         .collect();
     if values.len() != 1 {
-        return Selection {\n            value: None,\n            conflict: true,\n            path: None,\n        };
+        return Selection {
+            value: None,
+            conflict: true,
+            path: None,
+        };
     }
     Selection {
         value: values.iter().next().map(|value| (*value).to_string()),
@@ -539,7 +549,8 @@ fn parse_sse_objects(body: &str) -> Vec<Value> {
         if data_lines.is_empty() {
             return;
         }
-        let data = data_lines.join("\n");
+        let data = data_lines.join("
+");
         data_lines.clear();
         let trimmed = data.trim();
         if trimmed.is_empty() || trimmed == "[DONE]" {
@@ -623,7 +634,8 @@ fn inspect_body(body: &str, mime_type: &str) -> BodyInspection {
         formats.push("json");
     }
     if mime_type.to_ascii_lowercase().contains("event-stream")
-        || trimmed.contains("\ndata:")
+        || trimmed.contains("
+data:")
         || trimmed.starts_with("data:")
     {
         let objects = parse_sse_objects(trimmed);
@@ -632,7 +644,8 @@ fn inspect_body(body: &str, mime_type: &str) -> BodyInspection {
             formats.push("sse");
         }
     }
-    if values.is_empty() && trimmed.contains('\n') {
+    if values.is_empty() && trimmed.contains('
+') {
         let mut ndjson = Vec::new();
         for line in trimmed.lines() {
             if let Some(parsed) = parse_json(line.trim()) {
