@@ -46,8 +46,10 @@ jobs:
         run: |
           set -Eeuo pipefail
           printf '%s\n' "CI" > /tmp/gptauto-required-workflows.txt
-          catalog="$(gh workflow list --repo "$REPOSITORY" --all --json name,path,state)"
-          release_path="$(jq -r '[.[] | select(.name == "Release" and ((.state // "") | ascii_downcase | startswith("disabled") | not))][0].path // empty' <<<"$catalog")"
+          # Use the complete Actions REST catalog as the single workflow-discovery authority.
+          # --paginate avoids silently dropping Release when a repository has >100 workflows.
+          catalog="$(gh api --paginate --slurp "repos/$REPOSITORY/actions/workflows?per_page=100" | jq -c '[.[].workflows[]]')"
+          release_path="$(jq -r '[.[] | select(.name == "Release" and .state != "disabled_manually")][0].path // empty' <<<"$catalog")"
 
           if [[ "$RELEASE_REQUIRED" == "true" ]]; then
             [[ -n "$release_path" ]] || { echo "::error::Release is required but no enabled Release workflow exists"; exit 1; }
