@@ -926,7 +926,13 @@ document.addEventListener('pointerdown', (event) => {
     // the SAME DOM element only; never fall back to a global/coordinate candidate.
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const dispatched = await trustedPointer(element, action, `${source}:attempt-${attempt}`);
-      if (dispatched) return true;
+      if (dispatched) {
+        // ChatGPT's picker is animated and this browser can be under sustained UI load.
+        // Treat every picker click as a transition boundary: give the page a full two
+        // seconds to settle before reading/reusing any downstream picker element.
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        return true;
+      }
       if (!element?.isConnected || !visible(element)) return false;
       await new Promise((resolve) => window.setTimeout(resolve, 160 * attempt));
     }
@@ -1188,7 +1194,9 @@ document.addEventListener('pointerdown', (event) => {
     // the latter can move under the pointer during the view transition and fail the
     // stable hit-test before verification ever reaches the actual model row.
     const alreadyVisibleAdvanced = advancedPickerView(picker);
-    const alreadyVisibleRows = alreadyVisibleAdvanced ? distinctModelRows(alreadyVisibleAdvanced) : [];
+    const pickerIsOpen = picker?.getAttribute?.('data-state') !== 'closed'
+      && picker?.closest?.('[data-state="closed"][role="menu"]') == null;
+    const alreadyVisibleRows = pickerIsOpen && alreadyVisibleAdvanced ? distinctModelRows(alreadyVisibleAdvanced) : [];
     if (alreadyVisibleRows.length) {
       pickerTopologyProbe('third-layer-reused', {
         pageContext,
@@ -1333,6 +1341,10 @@ document.addEventListener('pointerdown', (event) => {
       }
       const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
       if (!attempted) return { attempted: false, observation: collectObservation() };
+      // Never keep using the pre-click row as a liveness authority. Radix replaces or
+      // collapses picker nodes during the transition; after the mandatory settle delay,
+      // re-open/reacquire on any later verification step instead of timing out on a stale
+      // zero-sized element.
       // A dispatched click is not a completed model selection. Wait until ChatGPT's
       // Composer reflects the requested model before allowing the probe transaction.
       const confirmed = desired
@@ -2023,3 +2035,4 @@ document.addEventListener('pointerdown', (event) => {
     .catch(() => failOpenStaleRuntime());
   scheduleReport();
 })();
+
