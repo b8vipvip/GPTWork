@@ -196,23 +196,26 @@ export class ChatGptNetworkMonitor {
         authorityStartedAt: null,
       };
     }
-    // Fetch.requestPaused is the terminal request-mutation boundary. Verification
-    // authority is resolved here, once, immediately before the body is forwarded.
-    // Page state and normal lock policy cannot partially own this request.
+    // Verification must observe ChatGPT's native transport model, not manufacture
+    // one from the visible picker label. Some UI rows map to backend transport ids
+    // such as gpt-6-luna-wm. Forcing the visible id (gpt-6-luna) made the backend
+    // legitimately fall back to another model and created the mismatch we were
+    // trying to measure. Keep the transaction boundary for correlation/response
+    // capture, but preserve the request model selected by ChatGPT itself.
     return {
       ...base,
       lockedModels: [model],
       preferredReasoning: null,
-      preserveModel: false,
+      preserveModel: true,
       preserveReasoning: true,
       bypassRewrite: false,
-      forceModel: model,
+      forceModel: null,
       responseVerificationEnabled: true,
       knownModels: [...new Set([
         ...(Array.isArray(base.knownModels) ? base.knownModels : []),
         model,
       ])],
-      authorityKind: 'verification-transaction',
+      authorityKind: 'verification-observation',
       authorityModel: model,
       authorityStartedAt: Number(transaction?.startedAt) || null,
     };
