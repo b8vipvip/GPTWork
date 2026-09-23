@@ -201,8 +201,10 @@ jobs:
           proof="$(find_release_for_merge || true)"
           release_run_id=""
           if [[ -z "$proof" ]]; then
-            catalog="$(gh workflow list --repo "$REPOSITORY" --all --json name,path,state)"
-            release_path="$(jq -r '[.[] | select(.name == "Release" and ((.state // "") | ascii_downcase | startswith("disabled") | not))][0].path // empty' <<<"$catalog")"
+            # Use the same complete Actions REST catalog for release proof/dispatch.
+          # Reconcile must have one workflow-discovery authority in every phase.
+          catalog="$(gh api --paginate --slurp "repos/$REPOSITORY/actions/workflows?per_page=100" | jq -c '[.[].workflows[]]')"
+            release_path="$(jq -r '[.[] | select(.name == "Release" and .state != "disabled_manually")][0].path // empty' <<<"$catalog")"
             [[ -n "$release_path" ]] || { echo "::error::Release is required but no enabled Release workflow exists"; exit 1; }
 
             runs_before="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$MERGE_SHA&per_page=100")"
