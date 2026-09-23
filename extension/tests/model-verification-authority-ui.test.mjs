@@ -18,7 +18,7 @@ test('model verification separates request confirmation from backend response ve
   assert.match(background, /responseModel === item\.model/);
   assert.match(background, /responseConfirmed/);
   assert.match(background, /evidenceModel = responseModel \|\| \(requestConfirmed \? requestModel : null\)/);
-  assert.match(background, /probeMarker: 'GPTWork 模型验证'/);
+  assert.match(background, /sendVerificationReasoningProbe\(tabId, 'GPTWork 模型验证'/);
   assert.doesNotMatch(background, /Model selection was not confirmed/);
 });
 
