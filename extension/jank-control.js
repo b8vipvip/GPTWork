@@ -1,6 +1,6 @@
 const params = new URLSearchParams(location.search);
 const requested = String(params.get('mode') || 'normal').toLowerCase();
-const allowed = new Set(['normal', 'cdp_off', 'content_off', 'high_level_off']);
+const allowed = new Set(['normal', 'cdp_off', 'content_off', 'high_level_off', 'runtime_off']);
 const mode = allowed.has(requested) ? requested : 'normal';
 const status = document.getElementById('status');
 const label = String(params.get('label') || mode).slice(0, 80);

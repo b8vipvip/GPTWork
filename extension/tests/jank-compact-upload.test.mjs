@@ -28,3 +28,18 @@ test('collector invokes the analyzer with a deterministic output folder when bun
   assert.match(collector, /-OutputBase \$analysisRoot/);
   assert.match(analyzer, /\[string\]\$OutputBase/);
 });
+
+test('v0.5.134 collector includes a full-runtime-off causal phase without new production permissions', () => {
+  const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
+  const control = fs.readFileSync(new URL('../jank-control.js', import.meta.url), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert(!manifest.permissions.includes('processes'));
+  assert.match(control, /'runtime_off'/);
+  assert.match(collector, /Label='runtime_off';Mode='runtime_off'/);
+  assert.match(collector, /\$phaseMs=\$endMs\/\[double\]\$phasePlan\.Count/);
+  assert.match(background, /let diagnosticRuntimeSuspended = false/);
+  assert.match(background, /!diagnosticRuntimeSuspended/);
+  assert.match(background, /stopBackgroundRuntime\('diagnostic_runtime_off'\)/);
+  assert.match(background, /await initializeAfterCurrentTask\(\)/);
+  assert.match(background, /runtimeSuspended: runtimeOff/);
+});

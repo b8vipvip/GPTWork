@@ -30,7 +30,7 @@ import {
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.133';
+const RUNTIME_CODE_VERSION = '0.5.134';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -63,9 +63,10 @@ const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
 let sharedKnownModelIds = new Set();
+let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
-  return localEnabledOverride === true && currentSettings.enabled === true;
+  return localEnabledOverride === true && currentSettings.enabled === true && !diagnosticRuntimeSuspended;
 }
 
 async function masterStorageEnabled() {
@@ -129,8 +130,9 @@ async function applyJankIsolationMode(mode = 'normal', {
   label = null,
   captureId = null,
 } = {}) {
-  const normalized = ['normal', 'cdp_off', 'content_off', 'high_level_off'].includes(mode) ? mode : 'normal';
+  const normalized = ['normal', 'cdp_off', 'content_off', 'high_level_off', 'runtime_off'].includes(mode) ? mode : 'normal';
   const previous = (await chrome.storage.local.get(JANK_ISOLATION_KEY))[JANK_ISOLATION_KEY] || { mode: 'normal' };
+  const wasRuntimeOff = diagnosticRuntimeSuspended;
   const sameCapture = Boolean(captureId && previous.captureId === captureId);
   let completedPhase = null;
   if (sameCapture && previous.label && previous.label !== 'restore_normal') {
@@ -148,9 +150,12 @@ async function applyJankIsolationMode(mode = 'normal', {
   };
   await chrome.storage.local.set({ [JANK_ISOLATION_KEY]: state });
 
-  const cdpOff = normalized === 'cdp_off' || normalized === 'high_level_off';
-  const contentOff = normalized === 'content_off' || normalized === 'high_level_off';
+  const runtimeOff = normalized === 'runtime_off';
+  diagnosticRuntimeSuspended = runtimeOff;
+  const cdpOff = normalized === 'cdp_off' || normalized === 'high_level_off' || runtimeOff;
+  const contentOff = normalized === 'content_off' || normalized === 'high_level_off' || runtimeOff;
   const captureActive = Boolean(state.captureId && state.label !== 'restore_normal');
+  if (runtimeOff && !wasRuntimeOff) await stopBackgroundRuntime('diagnostic_runtime_off');
   const cdp = await networkMonitor.setDiagnosticSuspended(cdpOff);
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
   let contentTabs = 0;
@@ -165,11 +170,16 @@ async function applyJankIsolationMode(mode = 'normal', {
       if (response?.ok) contentTabs += 1;
     } catch {}
   }
-  if (!cdpOff) await configureOpenTabs();
+  if (!runtimeOff && wasRuntimeOff) {
+    await initializeAfterCurrentTask();
+  } else if (!cdpOff) {
+    await configureOpenTabs();
+  }
   if (!sameCapture && state.captureId) await resetJankPhaseTelemetry();
 
   logRuntime('info', 'diagnostics', 'jank_isolation_changed', {
     ...state,
+    runtimeSuspended: runtimeOff,
     cdpSuspended: cdp.suspended,
     detachedTabs: cdp.detachedTabs,
     contentSuspended: contentOff,
@@ -179,6 +189,7 @@ async function applyJankIsolationMode(mode = 'normal', {
   });
   return {
     ...state,
+    runtimeSuspended: runtimeOff,
     cdp,
     contentSuspended: contentOff,
     contentTabs,
@@ -1625,11 +1636,18 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
 }
 
 async function sendVerificationReasoningProbe(tabId, marker, ordinal, total) {
+  // Every model gets a different deterministic arithmetic turn. Reusing the same
+  // puzzle made all answers identical, which obscured whether the UI had actually
+  // advanced to a new model/turn. The result is strictly increasing with ordinal.
+  const n = Math.max(1, Number(ordinal) || 1);
+  const left = 120 + (n * 7);
+  const right = 31 + (n * 5);
+  const offset = (n * n) + 17;
   return sendTabMessage(tabId, {
     type: 'GPTLOCK_AUTO_SEND_PROBE',
     skipAlignment: true,
     probeMarker: marker,
-    probeText: `${marker} ${ordinal}/${total}：请严格完成以下推理任务并只输出最终答案。设整数 a,b,c 满足 a+b+c=18、a<b<c、ab+bc+ca=95。求 a²+b²+c²，并检查条件是否自洽；若无整数解则输出“无整数解”并给出导致矛盾的关键等式。`,
+    probeText: `${marker} ${ordinal}/${total}：计算 (${left}×${right})+${offset}，只输出“校验值=<整数>”，不要解释、不要复述题目。`,
   });
 }
 
@@ -1890,7 +1908,29 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       break;
     }
 
-    // A completed real turn may unlock account models/capabilities in a fresh chat.
+    // Current ChatGPT exposes the expanded multi-model picker only after GPTWork
+    // enters Work mode. GPT-5.5 must be verified first while it is still directly
+    // available; then verification takes temporary ownership of the Work toggle
+    // before discovering/selecting every later model.
+    if (item.model === 'gpt-5.5') {
+      const workMode = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
+        attempted: false,
+        error: errorText(error),
+      }));
+      const entered = workMode?.attempted === true || workMode?.alreadySelected === true;
+      logRuntime(entered ? 'info' : 'warn', 'verification', 'verification_work_mode_transition', {
+        tabId, phase: 'post_gpt_5_5',
+        entered,
+        attempted: workMode?.attempted === true,
+        alreadySelected: workMode?.alreadySelected === true,
+        reason: workMode?.reason ?? null,
+        error: workMode?.error ?? null,
+      });
+      // Give ChatGPT time to materialize picker B before the next discovery pass.
+      await new Promise((resolve) => setTimeout(resolve, entered ? 1400 : 700));
+    }
+
+    // A completed real turn / Work transition may unlock account models/capabilities.
     let rediscovered = await discoverAccountCatalog(tabId);
     progress.discoveryPasses += 1;
     // GPT-5.6 Sol can be the capability-unlock turn for picker B. If the normal
@@ -2059,27 +2099,12 @@ async function autoVerify(tabId) {
 
   const sharedKnownModels = await syncSharedKnownModels();
   state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-  const initialCatalog = await discoverAccountCatalog(tabId);
-  let accountCatalog = initialCatalog;
-  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: null };
-  if (initialCatalog.pickerMode !== 'B') {
-    try {
-      const work = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' });
-      state.autoVerification.workDiscovery = {
-        attempted: work?.attempted === true,
-        entered: work?.attempted === true || work?.alreadySelected === true,
-        reason: work?.reason || null,
-      };
-      logRuntime('info', 'verification', 'verification_work_mode_transition', { tabId, ...state.autoVerification.workDiscovery });
-      if (state.autoVerification.workDiscovery.entered) {
-        const workCatalog = await discoverAccountCatalog(tabId);
-        accountCatalog = mergeAccountCatalogs(initialCatalog, workCatalog);
-      }
-    } catch (error) {
-      state.autoVerification.workDiscovery = { attempted: true, entered: false, reason: errorText(error) };
-      logRuntime('warn', 'verification', 'verification_work_mode_transition_failed', { tabId, error: errorText(error) });
-    }
-  }
+  // Do not enter Work before GPT-5.5. Current ChatGPT changes the model-picker
+  // topology when Work is enabled; field evidence shows GPT-5.5 must be verified
+  // first in Chat mode, then Work is enabled inside verifyAccountCatalogModels()
+  // before rediscovering picker B and continuing with later models.
+  const accountCatalog = await discoverAccountCatalog(tabId);
+  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: 'deferred_until_after_gpt_5_5' };
   state.autoVerification.maxAttempts = accountCatalog.rows.length;
   await broadcastTabState(tabId);
 
