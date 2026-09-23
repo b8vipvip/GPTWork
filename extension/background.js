@@ -81,6 +81,25 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function collectJankProcessAttribution() {
+  if (!chrome.processes?.getProcessInfo) return [];
+  try {
+    const processes = await chrome.processes.getProcessInfo([], true);
+    return (Array.isArray(processes) ? processes : []).map((process) => ({
+      processId: Number(process?.id || 0) || null,
+      osProcessId: Number(process?.osProcessId || 0) || null,
+      type: process?.type || null,
+      tabs: Array.isArray(process?.tabs) ? process.tabs.map((tabId) => Number(tabId)).filter(Number.isFinite) : [],
+      cpu: Number.isFinite(process?.cpu) ? process.cpu : null,
+      privateMemory: Number.isFinite(process?.privateMemory) ? process.privateMemory : null,
+      jsMemoryUsed: Number.isFinite(process?.jsMemoryUsed) ? process.jsMemoryUsed : null,
+    })).filter((process) => process.osProcessId || process.tabs.length);
+  } catch (error) {
+    logRuntime('warn', 'diagnostics', 'jank_process_attribution_failed', { error: errorText(error) });
+    return [];
+  }
+}
+
 async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
   const snapshots = [];
@@ -101,6 +120,7 @@ async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
       }
     } catch {}
   }
+  const processes = await collectJankProcessAttribution();
   return {
     captureId: phase.captureId || null,
     label: phase.label || phase.mode || 'unknown',
@@ -108,6 +128,7 @@ async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
     startedAt: phase.changedAt || null,
     endedAt: new Date().toISOString(),
     tabs: snapshots,
+    processes,
   };
 }
 
