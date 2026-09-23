@@ -1,5 +1,8 @@
 name: GPTAuto Reconcile
 on:
+  push:
+    branches:
+      - recover-v05133-reconcile
   workflow_dispatch:
     inputs:
       task_id:
@@ -44,9 +47,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GPTAUTO_EXECUTOR_TOKEN || github.token }}
           REPOSITORY: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          MERGE_SHA: ${{ inputs.merge_sha }}
-          RELEASE_REQUIRED: ${{ inputs.release_required }}
-          ALLOW_HISTORICAL_MERGE: ${{ inputs.allow_historical_merge }}
+          MERGE_SHA: ${{ inputs.merge_sha || '2695d0e58aa6730daf8e022905c4975a7ff35ada' }}
+          RELEASE_REQUIRED: ${{ inputs.release_required || 'true' }}
+          ALLOW_HISTORICAL_MERGE: ${{ inputs.allow_historical_merge || 'true' }}
         shell: bash
         run: |
           set -Eeuo pipefail
