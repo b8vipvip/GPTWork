@@ -415,38 +415,27 @@ fn path_score(path: &[String], key: &str, kind: &str) -> i32 {
         part.contains("metadata") || part.contains("details") || part.contains("response")
     });
     if kind == "model" {
-        if key.contains("served") || key.contains("resolved") || key.contains("used") {
-            return 140;
-        }
-        if key.contains("default") || key.contains("fallback") {
-            return 60;
-        }
-        if matches!(
+        // Terminal response authority must match the public verifier: only fields
+        // whose semantics explicitly identify the model served/resolved/used by
+        // the backend may vote. Generic model_slug/model_id/backend_model fields
+        // are routing/page metadata and caused false GPT-5.6 Sol mismatches in
+        // v0.5.131 downstream WebSocket evidence.
+        return if matches!(
             key,
-            "model_slug" | "model_id" | "modelid" | "model_name" | "modelname"
+            "used_model"
+                | "used_model_slug"
+                | "resolved_model"
+                | "resolved_model_slug"
+                | "served_model"
+                | "served_model_slug"
         ) {
-            return if metadata { 130 } else { 120 };
-        }
-        if key.contains("slug") && metadata {
-            return 115;
-        }
-        if key.contains("slug") {
-            return 105;
-        }
-        if metadata {
-            return 100;
-        }
-        return if path.len() <= 2 { 90 } else { 0 };
+            140
+        } else {
+            0
+        };
     }
-    if metadata {
-        115
-    } else if path.len() <= 3 {
-        95
-    } else {
-        0
-    }
+    if metadata { 115 } else if path.len() <= 3 { 95 } else { 0 }
 }
-
 fn walk_value(value: &Value, candidates: &mut CandidateSet, path: &mut Vec<String>, depth: usize) {
     if depth > MAX_WALK_DEPTH {
         return;
@@ -507,31 +496,23 @@ fn select_candidate(candidates: &[Candidate]) -> Selection {
         .map(|candidate| candidate.score)
         .max()
         .unwrap_or_default();
-    let strong: Vec<&Candidate> = candidates
+    let best: Vec<&Candidate> = candidates
         .iter()
-        .filter(|candidate| candidate.score >= best_score - 10)
+        .filter(|candidate| candidate.score == best_score)
         .collect();
-    let values: BTreeSet<&str> = strong
+    let values: BTreeSet<&str> = best
         .iter()
         .map(|candidate| candidate.value.as_str())
         .collect();
     if values.len() != 1 {
-        return Selection {
-            value: None,
-            conflict: true,
-            path: None,
-        };
+        return Selection { value: None, conflict: true, path: None };
     }
-    let best = candidates
-        .iter()
-        .rfind(|candidate| candidate.score == best_score);
     Selection {
         value: values.iter().next().map(|value| (*value).to_string()),
         conflict: false,
-        path: best.map(|candidate| candidate.path.clone()),
+        path: best.last().map(|candidate| candidate.path.clone()),
     }
 }
-
 fn inspect_objects(values: &[Value]) -> (Selection, Selection, usize, usize) {
     let mut candidates = CandidateSet::default();
     for value in values {
