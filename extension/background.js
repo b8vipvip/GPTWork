@@ -30,7 +30,7 @@ import {
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.131';
+const RUNTIME_CODE_VERSION = '0.5.132';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -732,7 +732,7 @@ function mergeResponseEvidence(state, evidence) {
   // A response observation is authoritative only for the evidence carried by that
   // observation. Never inherit a previously observed model into a later packet
   // that contains zero model candidates: that manufactured stale Sol mismatches
-  // in v0.5.131 after the actual request had moved to GPT-6 Sol.
+  // in v0.5.132 after the actual request had moved to GPT-6 Sol.
   const currentHasModelAuthority = Boolean(
     evidence?.model
       || evidence?.conflicts?.model
