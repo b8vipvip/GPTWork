@@ -70,7 +70,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p .gptauto/host-control
-          jq -e '.schema == "gptauto.host-control/v1" and .allow_foreground_exit == false and .terminal_done == false' <<<"$HOST_CONTROL" > ".gptauto/host-control/$TASK_ID.json"
+          jq -e '.schema == "gptauto.host-control/v2" and .task_alive == true' <<<"$HOST_CONTROL" > ".gptauto/host-control/$TASK_ID.json"
           echo "::notice::GPTAUTO_HOST_CONTROL task=$TASK_ID disposition=$(jq -r '.foreground_disposition' <<<"$HOST_CONTROL") next=$(jq -r '.next_host_action' <<<"$HOST_CONTROL")"
       - name: Upload canonical host control
         if: ${{ steps.state.outputs.lease-active == 'true' && hashFiles(format('.gptauto/host-control/{0}.json', steps.state.outputs.task-id)) != '' }}
@@ -232,7 +232,7 @@ jobs:
             mkdir -p .gptauto/foreground-guards
             guard=".gptauto/foreground-guards/$TASK_ID.json"
             jq -n --arg task "$TASK_ID" --arg pr "$PR_NUMBER" --arg head "$HEAD_SHA" --arg run "$FAILED_RUN_ID" \
-              '{schema:"gptauto.foreground-exit-guard/v1",task_id:$task,pr_number:$pr,head_sha:$head,failed_run_id:$run,completion_lease:"ACTIVE",repair_owner:"foreground",foreground_disposition:"CONTINUE_REQUIRED",allow_foreground_exit:false,terminal_done:false}' > "$guard"
+              '{schema:"gptauto.foreground-exit-guard/v1",task_id:$task,pr_number:$pr,head_sha:$head,failed_run_id:$run,completion_lease:"ACTIVE",repair_owner:"foreground",foreground_disposition:"TURN_MAY_END_TASK_REMAINS_ALIVE",allow_foreground_exit:true,terminal_done:false,continuation_required:true}' > "$guard"
             {
               echo "## GPTAuto foreground repair handoff"
               echo "- Task: $TASK_ID"
@@ -314,12 +314,11 @@ jobs:
             echo "- The current foreground ChatGPT session is no longer required for task continuity."
             echo "- State is checkpointed in the Observer artifact; subsequent GitHub events reattach to the same TASK_ID."
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Enforce foreground exit guard
+      - name: Publish continuation request
         if: ${{ always() && steps.repair-dispatch.outputs.foreground-exit-denied == 'true' }}
         shell: bash
         run: |
-          echo "::error::FOREGROUND_EXIT_DENIED: repair ownership is foreground and Completion Lease remains ACTIVE. Resume the same PR; do not end the engineering task."
-          exit 1
+          echo "::notice::CONTINUATION_REQUIRED: durable task remains alive; Continuation Host should resume ChatGPT on the same task/PR."
       - name: Executor summary
         if: always()
         env:
