@@ -63,9 +63,10 @@ const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
 let sharedKnownModelIds = new Set();
+let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
-  return localEnabledOverride === true && currentSettings.enabled === true;
+  return localEnabledOverride === true && currentSettings.enabled === true && !diagnosticRuntimeSuspended;
 }
 
 async function masterStorageEnabled() {
@@ -79,28 +80,6 @@ async function masterStorageEnabled() {
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-async function collectJankProcessAttribution() {
-  if (!chrome.processes?.getProcessInfo) return [];
-  try {
-    // getProcessInfo returns an object keyed by Chrome process id. TaskInfo carries
-    // tabId, which lets the Windows collector's OS PID samples be joined back to
-    // the exact ChatGPT renderer without recording tab titles or page text.
-    const processMap = await chrome.processes.getProcessInfo([], true);
-    return Object.values(processMap || {}).map((process) => ({
-      processId: Number(process?.id || 0) || null,
-      osProcessId: Number(process?.osProcessId || 0) || null,
-      type: process?.type || null,
-      tabs: [...new Set((Array.isArray(process?.tasks) ? process.tasks : [])
-        .map((task) => Number(task?.tabId))
-        .filter(Number.isFinite))],
-      privateMemory: Number.isFinite(process?.privateMemory) ? process.privateMemory : null,
-    })).filter((process) => process.osProcessId || process.tabs.length);
-  } catch (error) {
-    logRuntime('warn', 'diagnostics', 'jank_process_attribution_failed', { error: errorText(error) });
-    return [];
-  }
 }
 
 async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
@@ -123,7 +102,6 @@ async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
       }
     } catch {}
   }
-  const processes = await collectJankProcessAttribution();
   return {
     captureId: phase.captureId || null,
     label: phase.label || phase.mode || 'unknown',
@@ -131,7 +109,6 @@ async function collectJankPhaseSnapshot(phase, { reset = true } = {}) {
     startedAt: phase.changedAt || null,
     endedAt: new Date().toISOString(),
     tabs: snapshots,
-    processes,
   };
 }
 
@@ -153,8 +130,9 @@ async function applyJankIsolationMode(mode = 'normal', {
   label = null,
   captureId = null,
 } = {}) {
-  const normalized = ['normal', 'cdp_off', 'content_off', 'high_level_off'].includes(mode) ? mode : 'normal';
+  const normalized = ['normal', 'cdp_off', 'content_off', 'high_level_off', 'runtime_off'].includes(mode) ? mode : 'normal';
   const previous = (await chrome.storage.local.get(JANK_ISOLATION_KEY))[JANK_ISOLATION_KEY] || { mode: 'normal' };
+  const wasRuntimeOff = diagnosticRuntimeSuspended;
   const sameCapture = Boolean(captureId && previous.captureId === captureId);
   let completedPhase = null;
   if (sameCapture && previous.label && previous.label !== 'restore_normal') {
@@ -172,9 +150,12 @@ async function applyJankIsolationMode(mode = 'normal', {
   };
   await chrome.storage.local.set({ [JANK_ISOLATION_KEY]: state });
 
-  const cdpOff = normalized === 'cdp_off' || normalized === 'high_level_off';
-  const contentOff = normalized === 'content_off' || normalized === 'high_level_off';
+  const runtimeOff = normalized === 'runtime_off';
+  diagnosticRuntimeSuspended = runtimeOff;
+  const cdpOff = normalized === 'cdp_off' || normalized === 'high_level_off' || runtimeOff;
+  const contentOff = normalized === 'content_off' || normalized === 'high_level_off' || runtimeOff;
   const captureActive = Boolean(state.captureId && state.label !== 'restore_normal');
+  if (runtimeOff && !wasRuntimeOff) await stopBackgroundRuntime('diagnostic_runtime_off');
   const cdp = await networkMonitor.setDiagnosticSuspended(cdpOff);
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
   let contentTabs = 0;
@@ -189,11 +170,16 @@ async function applyJankIsolationMode(mode = 'normal', {
       if (response?.ok) contentTabs += 1;
     } catch {}
   }
-  if (!cdpOff) await configureOpenTabs();
+  if (!runtimeOff && wasRuntimeOff) {
+    await initializeAfterCurrentTask();
+  } else if (!cdpOff) {
+    await configureOpenTabs();
+  }
   if (!sameCapture && state.captureId) await resetJankPhaseTelemetry();
 
   logRuntime('info', 'diagnostics', 'jank_isolation_changed', {
     ...state,
+    runtimeSuspended: runtimeOff,
     cdpSuspended: cdp.suspended,
     detachedTabs: cdp.detachedTabs,
     contentSuspended: contentOff,
@@ -203,6 +189,7 @@ async function applyJankIsolationMode(mode = 'normal', {
   });
   return {
     ...state,
+    runtimeSuspended: runtimeOff,
     cdp,
     contentSuspended: contentOff,
     contentTabs,
