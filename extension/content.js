@@ -920,6 +920,29 @@ document.addEventListener('pointerdown', (event) => {
     return Boolean(hit && (hit === element || element.contains?.(hit)));
   }
 
+  function pointerOwnedVisiblePoint(element) {
+    if (!element?.isConnected || !visible(element)) return null;
+    const rect = element.getBoundingClientRect();
+    const left = Math.max(0, rect.left);
+    const right = Math.min(window.innerWidth, rect.right);
+    const top = Math.max(0, rect.top);
+    const bottom = Math.min(window.innerHeight, rect.bottom);
+    if (right - left < 2 || bottom - top < 2) return null;
+    // A picker row can extend underneath ChatGPT's fixed Composer at the viewport
+    // bottom. Its geometric center is then occluded even though the visible upper
+    // portion remains a valid click target. Sample only inside the viewport-visible
+    // intersection and keep the exact DOM row as the sole ownership authority.
+    const xs = [(left + right) / 2, left + (right - left) * 0.35, left + (right - left) * 0.65];
+    const ys = [(top + bottom) / 2, top + Math.min(8, (bottom - top) * 0.25), bottom - Math.min(8, (bottom - top) * 0.25)];
+    for (const y of ys) {
+      for (const x of xs) {
+        const point = { x, y };
+        if (pointerStillOwnsPoint(element, point)) return point;
+      }
+    }
+    return null;
+  }
+
   async function modelPickerPointer(element, action = 'click', source = 'model-picker') {
     // chrome.debugger's infobar, picker animations, and compositor movement can make
     // an otherwise correct owned row briefly fail the center-point hit test. Retry
@@ -964,19 +987,23 @@ document.addEventListener('pointerdown', (event) => {
       let stableFrames = 0;
       const ready = await waitUntil(() => {
         if (!element.isConnected || !visible(element)) return null;
-        const nextPoint = elementCenter(element);
-        const ownsPoint = pointerStillOwnsPoint(element, nextPoint);
+        const nextPoint = pointerOwnedVisiblePoint(element);
+        if (!nextPoint) {
+          previousPoint = null;
+          stableFrames = 0;
+          return null;
+        }
         const stable = previousPoint
           && Math.abs(nextPoint.x - previousPoint.x) < 1
           && Math.abs(nextPoint.y - previousPoint.y) < 1;
         previousPoint = nextPoint;
-        stableFrames = stable && ownsPoint ? stableFrames + 1 : 0;
+        stableFrames = stable ? stableFrames + 1 : 0;
         if (stableFrames < 2) return null;
         point = nextPoint;
         return nextPoint;
       }, 1800, 80);
       if (!ready || !point) {
-        const fallbackPoint = element.isConnected && visible(element) ? elementCenter(element) : null;
+        const fallbackPoint = element.isConnected && visible(element) ? pointerOwnedVisiblePoint(element) : null;
         pointerTrace('rejected_unstable_hit_test', {
           traceId, action, source, point: fallbackPoint,
           target: compactElementProbe(element),
@@ -992,8 +1019,8 @@ document.addEventListener('pointerdown', (event) => {
       // Synthetic fallback keeps the same DOM element as the sole action authority.
       // It never falls back to coordinates, global menus, or another candidate.
       if (!element.isConnected || !visible(element)) return false;
-      const point = elementCenter(element);
-      if (!pointerStillOwnsPoint(element, point)) {
+      const point = pointerOwnedVisiblePoint(element);
+      if (!point || !pointerStillOwnsPoint(element, point)) {
         pointerTrace('fallback_rejected_hit_test', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(document.elementFromPoint(point?.x || 0, point?.y || 0)) });
         return false;
       }
