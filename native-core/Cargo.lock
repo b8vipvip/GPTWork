@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "gptwork-core"
-version = "0.5.128"
+version = "0.5.129"
 dependencies = [
  "anyhow",
  "axum",
