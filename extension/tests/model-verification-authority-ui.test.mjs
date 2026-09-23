@@ -14,8 +14,8 @@ const historyUi = await readFile(new URL('../model-verification-history-options.
 test('model verification separates request confirmation from backend response verification', () => {
   assert.match(content, /selectionAttempted/);
   assert.match(background, /body forwarded at Fetch\.requestPaused is the sole request-confirmation/);
-  assert.match(background, /verificationModelEquivalent\(item\.model, requestModel\)/);
-  assert.match(background, /verificationModelEquivalent\(requestModel \|\| item\.model, responseModel\)/);
+  assert.match(background, /requestModel === item\.model/);
+  assert.match(background, /responseModel === item\.model/);
   assert.match(background, /responseConfirmed/);
   assert.match(background, /evidenceModel = responseModel \|\| \(requestConfirmed \? requestModel : null\)/);
   assert.match(background, /sendVerificationReasoningProbe\(tabId, 'GPTWork 模型验证'/);
@@ -71,12 +71,12 @@ test('v0.5.134 uses a different deterministic answer for every verification turn
   assert.doesNotMatch(background, /a\+b\+c=18/);
 });
 
-test('v0.5.135 verifies GPT-5.5 before bootstrapping Work with an ordinary turn', () => {
+test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
   const verifyEnd = background.indexOf('async function autoVerify', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
   const completed = verifyBody.indexOf("if (item.model === 'gpt-5.5')");
-  const work = verifyBody.indexOf('bootstrapVerificationWorkMode(tabId)', completed);
+  const work = verifyBody.indexOf('enableWorkModeForVerification(tabId)', completed);
   const rediscover = verifyBody.indexOf('let rediscovered = await discoverAccountCatalog(tabId)', completed);
   assert(completed >= 0 && work > completed && rediscover > work);
 
@@ -84,7 +84,7 @@ test('v0.5.135 verifies GPT-5.5 before bootstrapping Work with an ordinary turn'
   const autoBody = background.slice(autoStart);
   const initialDiscovery = autoBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
   const verification = autoBody.indexOf('verifyAccountCatalogModels', initialDiscovery);
-  const prematureWork = autoBody.indexOf('bootstrapVerificationWorkMode(tabId)', initialDiscovery);
+  const prematureWork = autoBody.indexOf('enableWorkModeForVerification(tabId)', initialDiscovery);
   assert(initialDiscovery >= 0 && verification > initialDiscovery);
   assert(prematureWork < 0 || prematureWork > verification);
   assert.match(autoBody, /deferred_until_after_gpt_5_5/);
@@ -143,8 +143,8 @@ test('verification request-lock mode is owned by an explicit transaction, not mi
   assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
   assert.match(background, /getVerificationTransaction\(tabId\)/);
   assert.match(networkMonitor, /effectiveConfiguration\(tabId\)/);
-  assert.match(networkMonitor, /authorityKind: 'verification-observation'/);
-  assert.match(networkMonitor, /preserveModel: true/);
+  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
+  assert.match(networkMonitor, /forceModel: model/);
   assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
   assert.doesNotMatch(background, /function autoVerificationModelForTab/);
 });
@@ -433,14 +433,14 @@ test('v0.5.108 popup can persist an empty locked-model list', () => {
 });
 
 
-test('v0.5.135 verification bootstraps Work discovery independently and waits for terminal replies', () => {
-  assert.match(background, /bootstrapVerificationWorkMode/);
+test('v0.5.135 verification enables GPTWork Work state independently and waits for terminal replies', () => {
+  assert.match(background, /enableWorkModeForVerification/);
   assert.match(background, /verification_work_mode_transition/);
   assert.match(background, /discoverAccountCatalog\(tabId\)/);
   assert.match(background, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
   assert.match(background, /account_model_verification_aborted_pending_response/);
-  assert.match(background, /probeText: '1'/);
-  assert.match(background, /ordinary_turn_settled/);
+  assert.match(background, /source: 'verification_runtime_default'/);
+  assert.match(background, /featureState\?\.workModeEnabled === true/);
   assert.match(content, /waitForProbeTurnSettled/);
   assert.match(content, /assistantCountBefore/);
   assert.match(content, /stillGenerating/);
@@ -461,28 +461,30 @@ test('v0.5.120 resolves verification authority at the Fetch sink and fails close
   assert.match(networkMonitor, /verification_authority_mismatch_blocked/);
   assert.match(networkMonitor, /await this\.failPaused\(tabId, requestId\)/);
   assert.match(networkMonitor, /verification_rewrite_failed_closed/);
-  assert.match(background, /state\.lastRewrite\?\.authorityKind === 'verification-observation'/);
+  assert.match(background, /state\.lastRewrite\?\.authorityKind === 'verification-transaction'/);
   assert.match(background, /networkObservedRequestModel/);
   assert.match(background, /fetch_forwarded_request_metadata/);
   assert.match(background, /const verified = Boolean\(requestId\) && requestConfirmed && responseConfirmed/);
 });
 
-test('v0.5.135 never forces a friendly picker id over ChatGPT native transport model', () => {
-  assert.match(networkMonitor, /preserveModel: true/);
-  assert.match(networkMonitor, /forceModel: null/);
-  assert.match(networkMonitor, /authorityKind: 'verification-observation'/);
-  assert.match(background, /function verificationModelEquivalent/);
-  assert.match(background, /replace\(\/-\(\?:wm\|work\)\$\/i, ''\)/);
-  assert.match(background, /verificationModelEquivalent\(item\.model, requestModel\)/);
-  assert.doesNotMatch(networkMonitor, /authorityKind: 'verification-transaction'[\s\S]{0,500}forceModel: model/);
+
+test('v0.5.135 has one strict verification transaction authority with no native-transport alias layer', () => {
+  assert.match(networkMonitor, /preserveModel: false/);
+  assert.match(networkMonitor, /forceModel: model/);
+  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
+  assert.doesNotMatch(networkMonitor, /verification-observation/);
+  assert.doesNotMatch(background, /verificationModelEquivalent/);
+  assert.doesNotMatch(background, /stripTransportSuffix/);
+  assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
+  assert.doesNotMatch(background, /probeText: '1'/);
 });
 
-test('v0.5.135 reproduces the observed manual one-turn Work bootstrap after GPT-5.5', () => {
-  const start = background.indexOf('async function bootstrapVerificationWorkMode');
-  const end = background.indexOf('async function verifyAccountCatalogModels', start);
-  const body = background.slice(start, end);
-  assert.match(body, /probeMarker: '1'/);
-  assert.match(body, /probeText: '1'/);
-  assert.match(body, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
-  assert.match(background, /if \(item\.model === 'gpt-5\.5'\)[\s\S]{0,500}bootstrapVerificationWorkMode\(tabId\)/);
+test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without clicking its UI', async () => {
+  const tabFeatureRuntime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
+  assert.match(background, /enableWorkModeForVerification\(tabId\)/);
+  assert.match(background, /source: 'verification_runtime_default'/);
+  assert.match(tabFeatureRuntime, /export async function enableWorkModeForVerification/);
+  assert.match(tabFeatureRuntime, /setTabFeatureState\(tabId, \{ workModeEnabled: true \}\)/);
+  assert.doesNotMatch(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+  assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
 });
