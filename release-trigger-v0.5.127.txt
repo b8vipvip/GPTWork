@@ -1,0 +1,2 @@
+GPTWork v0.5.127 formal release trigger.
+This no-op marker exists only to create a governed main push after the v0.5.127 code and Reconcile fixes landed.
