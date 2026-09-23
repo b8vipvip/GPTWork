@@ -49,7 +49,7 @@ jobs:
           # Use the REST workflow catalog as the source of truth. The gh workflow
           # list JSON shape/state has varied across CLI generations and previously
           # made an existing Release workflow disappear from Reconcile.
-          catalog="$(gh api "repos/$REPOSITORY/actions/workflows?per_page=100" --jq '.workflows')"
+          catalog="$(gh api --paginate --slurp "repos/$REPOSITORY/actions/workflows?per_page=100" | jq -c '[.[].workflows[]]')"
           release_path="$(jq -r '[.[] | select(.name == "Release" and .state != "disabled_manually")][0].path // empty' <<<"$catalog")"
 
           if [[ "$RELEASE_REQUIRED" == "true" ]]; then
