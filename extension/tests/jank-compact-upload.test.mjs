@@ -28,3 +28,16 @@ test('collector invokes the analyzer with a deterministic output folder when bun
   assert.match(collector, /-OutputBase \$analysisRoot/);
   assert.match(analyzer, /\[string\]\$OutputBase/);
 });
+
+test('v0.5.134 phase evidence maps Chrome OS processes to tab ids without collecting titles', async () => {
+  const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  assert(manifest.permissions.includes('processes'));
+  assert.match(background, /chrome\.processes\.getProcessInfo\(\[\], true\)/);
+  assert.match(background, /Object\.values\(processMap \|\| \{\}\)/);
+  assert.match(background, /process\?\.tasks/);
+  assert.match(background, /osProcessId/);
+  assert.match(background, /tabs: \[\.\.\.new Set/);
+  assert.doesNotMatch(background, /task\?\.title/);
+  assert.match(background, /processes,/);
+});
