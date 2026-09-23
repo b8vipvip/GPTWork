@@ -52,7 +52,7 @@ $captureId="$stamp-$PID"
 $root=Join-Path $env:USERPROFILE "Desktop\GPTWork-Jank-$stamp"
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 $errors=New-Object System.Collections.Generic.List[string]
-"GPTWork Jank Diagnostic v4 causal A/B + phase page evidence`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=disabled-in-causal-loop`nETW=$([bool]$IncludeEtw)`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read.`nSyntheticWorkload=True; each A/B phase automatically replays the same scroll/composer/picker workload on the active ChatGPT tab."|Set-Content -Encoding UTF8 "$root\README.txt"
+"GPTWork Jank Diagnostic v5 causal A/B + full-runtime isolation`nStarted=$(Get-Date -Format o)`nCaptureId=$captureId`nDurationSeconds=$DurationSeconds`nSampleMs=$SampleMs`nThreadSampleMs=1000`nGpuSampleMs=disabled-in-causal-loop`nETW=$([bool]$IncludeEtw)`nAdmin=True`nPrivacy=No typed text, key values, form values, page text, cookies, passwords, browser history, or window titles are collected.`nInputProbe=GetLastInputInfo + cursor/button state only; key values are never read.`nSyntheticWorkload=True; each A/B phase automatically replays the same scroll/composer/picker workload on the active ChatGPT tab."|Set-Content -Encoding UTF8 "$root\README.txt"
 Get-CimInstance Win32_OperatingSystem|Format-List Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime|Out-String|Set-Content -Encoding UTF8 "$root\system.txt"
 Get-CimInstance Win32_VideoController|Format-List Name,DriverVersion,DriverDate,AdapterRAM,PNPDeviceID|Out-String|Set-Content -Encoding UTF8 "$root\gpu.txt"
 try { Start-Process dxdiag.exe -ArgumentList "/dontskip /t `"$root\dxdiag.txt`"" -Wait -WindowStyle Hidden } catch {$errors.Add("dxdiag: $($_.Exception.Message)")}
@@ -122,20 +122,21 @@ Set-GPTWorkIsolation 'baseline_normal' 'normal'
 Start-Sleep -Milliseconds 750
 $clock=[Diagnostics.Stopwatch]::StartNew()
 $endMs=$DurationSeconds*1000.0
-$phaseMs=$endMs/5.0
 $phasePlan=@(
  [pscustomobject]@{Label='baseline_normal';Mode='normal'},
  [pscustomobject]@{Label='cdp_off';Mode='cdp_off'},
  [pscustomobject]@{Label='normal_recheck';Mode='normal'},
  [pscustomobject]@{Label='content_off';Mode='content_off'},
- [pscustomobject]@{Label='high_level_off';Mode='high_level_off'}
+ [pscustomobject]@{Label='high_level_off';Mode='high_level_off'},
+ [pscustomobject]@{Label='runtime_off';Mode='runtime_off'}
 )
+$phaseMs=$endMs/[double]$phasePlan.Count
 $activePhaseIndex=0
 $activePhase=$phasePlan[0]
 $nextDue=0.0
 while($clock.Elapsed.TotalMilliseconds-lt$endMs){
  $loopStart=$clock.Elapsed.TotalMilliseconds
- $phaseIndex=[math]::Min(4,[math]::Floor($loopStart/$phaseMs))
+ $phaseIndex=[math]::Min($phasePlan.Count-1,[math]::Floor($loopStart/$phaseMs))
  if($phaseIndex-ne$activePhaseIndex){
   $activePhaseIndex=$phaseIndex
   $activePhase=$phasePlan[$phaseIndex]
@@ -198,7 +199,7 @@ while($clock.Elapsed.TotalMilliseconds-lt$endMs){
 }
 $clock.Stop()
 Set-GPTWorkIsolation 'restore_normal' 'normal'
-# The restore transition closes the final high_level_off phase and triggers its compact
+# The restore transition closes the final runtime_off phase and triggers its compact
 # page snapshot download. Give Chrome enough time to finish the tiny JSON downloads.
 Start-Sleep -Milliseconds 1500
 try{
@@ -247,7 +248,7 @@ try{
  $topP=Import-Csv "$root\top-processes.csv" -ErrorAction SilentlyContinue|Select-Object -First 12
  $topT=Import-Csv "$root\top-threads.csv" -ErrorAction SilentlyContinue|Select-Object -First 20
  $summary=New-Object System.Collections.Generic.List[string]
- $summary.Add('GPTWork Jank Diagnostic v4 causal A/B + phase page evidence summary')
+ $summary.Add('GPTWork Jank Diagnostic v5 causal A/B + full-runtime isolation summary')
  foreach($line in $health){$summary.Add($line)}
  $summary.Add('Top processes:')
  foreach($row in $topP){$summary.Add("  $($row.Key) cpuMs=$($row.CpuDeltaMs) maxSampleMs=$($row.MaxSampleMs) maxOneCorePct=$($row.MaxOneCorePct)")}
