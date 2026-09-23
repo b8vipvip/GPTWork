@@ -383,6 +383,13 @@ export function createSiteReleaseFeed({
     return next;
   }
 
+  function verifiedWindowsInstaller(release) {
+    const installer = Array.isArray(release?.assets)
+      ? release.assets.find((asset) => asset?.name === 'GPTWorkSetup-x64.exe')
+      : null;
+    return installer && digestValue(installer.digest) ? installer : null;
+  }
+
   function releaseAssetsAvailable(release) {
     if (!release || !SAFE_TAG.test(String(release.tag || '')) || !isPublicReleaseTag(release.tag) || !Array.isArray(release.assets)) return false;
     return release.assets.every((asset) => {
@@ -552,6 +559,14 @@ export function createSiteReleaseFeed({
     const reusablePrevious = previous.releases.filter((release) => rowTags.has(release.tag) && releaseAssetsAvailable(release));
 
     const latest = await mirrorRelease(rows[0], 'downloading_latest');
+    // GitHub can expose a newly-created Release before its Windows asset upload has
+    // completed. Never publish that partial release into the public mirror index: the
+    // client intentionally requires a server-mirrored SHA-256 verified installer.
+    // Keeping the previous atomic index avoids alternating valid/invalid latest views
+    // while Release assets are still converging.
+    if (!verifiedWindowsInstaller(latest)) {
+      throw new Error(`Latest release ${latest.tag} is not publishable until GPTWorkSetup-x64.exe is mirrored with SHA-256`);
+    }
     updateProgress('publishing_latest', {
       releaseTag: latest.tag,
       activeAssets: [],
