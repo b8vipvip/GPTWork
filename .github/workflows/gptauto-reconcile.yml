@@ -45,14 +45,21 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$MERGE_SHA&per_page=100")"
           configured="$(gh variable get GPTAUTO_POST_MERGE_WORKFLOW --repo "$REPOSITORY" 2>/dev/null || true)"
-          if [[ -n "$configured" ]]; then
-            primary="$configured"
-          else
+          primary=""
+          discovery_deadline=$((SECONDS + 300))
+          while (( SECONDS < discovery_deadline )); do
+            runs="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$MERGE_SHA&per_page=100")"
+            if [[ -n "$configured" ]]; then
+              primary="$configured"
+              break
+            fi
             primary="$(jq -r '[.workflow_runs[] | select(.event == "push") | select((.name | startswith("GPTAuto ")) | not) | select(.name != "Release") | select((.name | startswith("Release ")) | not) | select(.name != "Repository housekeeping") | select(.name != "Actions Policy Check") | select(.name != "Release Asset Cleanup")] | (map(select(.name == "CI"))[0].name // map(select(.name == "Build and Test"))[0].name // .[0].name // empty)' <<<"$runs")"
-          fi
-          [[ -n "$primary" ]] || { echo "::error::No product post-merge validation workflow observed for $MERGE_SHA. Set GPTAUTO_POST_MERGE_WORKFLOW for a nonstandard trigger."; exit 1; }
+            [[ -n "$primary" ]] && break
+            echo "Product post-merge workflow for $MERGE_SHA is not registered yet; WAITING and polling again."
+            sleep 5
+          done
+          [[ -n "$primary" ]] || { echo "::error::Timed out waiting for product post-merge workflow registration for $MERGE_SHA. Set GPTAUTO_POST_MERGE_WORKFLOW for a nonstandard trigger."; exit 1; }
           printf '%s\n' "$primary" > /tmp/gptauto-required-workflows.txt
           echo "required-workflows=$primary" >> "$GITHUB_OUTPUT"
           echo "Canonical post-merge validation workflow: $primary"
@@ -200,7 +207,7 @@ jobs:
         if: ${{ failure() }}
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GPTAUTO_EXECUTOR_TOKEN || github.token }}
           REPOSITORY: ${{ github.repository }}
           TASK_ID: ${{ inputs.task_id }}
           PR_NUMBER: ${{ inputs.pr_number }}
