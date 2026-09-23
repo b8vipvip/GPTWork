@@ -62,6 +62,34 @@ test('model verification probe uses trusted send and monitor reattach', () => {
   assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
 
+test('v0.5.134 uses a different deterministic answer for every verification turn', () => {
+  assert.match(background, /const n = Math\.max\(1, Number\(ordinal\) \|\| 1\)/);
+  assert.match(background, /const left = 120 \+ \(n \* 7\)/);
+  assert.match(background, /const right = 31 \+ \(n \* 5\)/);
+  assert.match(background, /const offset = \(n \* n\) \+ 17/);
+  assert.match(background, /校验值=<整数>/);
+  assert.doesNotMatch(background, /a\+b\+c=18/);
+});
+
+test('v0.5.134 verifies GPT-5.5 before taking temporary Work-mode ownership', () => {
+  const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
+  const verifyEnd = background.indexOf('async function autoVerify', verifyStart);
+  const verifyBody = background.slice(verifyStart, verifyEnd);
+  const completed = verifyBody.indexOf("if (item.model === 'gpt-5.5')");
+  const work = verifyBody.indexOf("GPTLOCK_VERIFY_ENTER_WORK_MODE", completed);
+  const rediscover = verifyBody.indexOf('let rediscovered = await discoverAccountCatalog(tabId)', completed);
+  assert(completed >= 0 && work > completed && rediscover > work);
+
+  const autoStart = background.indexOf('async function autoVerify');
+  const autoBody = background.slice(autoStart);
+  const initialDiscovery = autoBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
+  const verification = autoBody.indexOf('verifyAccountCatalogModels', initialDiscovery);
+  const prematureWork = autoBody.indexOf('GPTLOCK_VERIFY_ENTER_WORK_MODE', initialDiscovery);
+  assert(initialDiscovery >= 0 && verification > initialDiscovery);
+  assert(prematureWork < 0 || prematureWork > verification);
+  assert.match(autoBody, /deferred_until_after_gpt_5_5/);
+});
+
 test('v0.5.81 model automation has one composer-scoped authority', () => {
   assert.match(content, /Single authority: first bind execution to the active composer/);
   assert.doesNotMatch(content, /const scored = candidates\.map/);
