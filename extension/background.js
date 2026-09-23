@@ -1918,8 +1918,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         error: errorText(error),
       }));
       const entered = workMode?.attempted === true || workMode?.alreadySelected === true;
-      logRuntime(entered ? 'info' : 'warn', 'verification', 'verification_post_gpt55_work_mode', {
-        tabId,
+      logRuntime(entered ? 'info' : 'warn', 'verification', 'verification_work_mode_transition', {
+        tabId, phase: 'post_gpt_5_5',
         entered,
         attempted: workMode?.attempted === true,
         alreadySelected: workMode?.alreadySelected === true,
