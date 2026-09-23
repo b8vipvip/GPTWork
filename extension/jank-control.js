@@ -33,12 +33,20 @@ async function downloadSnapshot(snapshot) {
 async function runDeterministicBrowserWorkload() {
   try {
     const controlTab = await chrome.tabs.getCurrent();
-    const tabs = await chrome.tabs.query({ windowId: controlTab?.windowId, url: 'https://chatgpt.com/*' });
-    const target = tabs
+    const tabs = (await chrome.tabs.query({ windowId: controlTab?.windowId, url: 'https://chatgpt.com/*' }))
       .filter((tab) => tab.id && tab.id !== controlTab?.id)
-      .sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0))[0];
+      .sort((left, right) => Number(right.lastAccessed || 0) - Number(left.lastAccessed || 0));
+    const target = tabs[0];
     if (!target?.id) return { ok: false, reason: 'chatgpt_tab_missing' };
+    const actions = [];
+    // Exercise Chrome-level tab activation as a separate workload dimension.
+    if (tabs[1]?.id) {
+      await chrome.tabs.update(tabs[1].id, { active: true });
+      await new Promise((resolve) => setTimeout(resolve, 180));
+      actions.push('tab-switch-away');
+    }
     await chrome.tabs.update(target.id, { active: true });
+    actions.push('tab-switch-target');
     const [{ result } = {}] = await chrome.scripting.executeScript({
       target: { tabId: target.id },
       world: 'ISOLATED',
@@ -51,42 +59,60 @@ async function runDeterministicBrowserWorkload() {
           return style.visibility !== 'hidden' && style.display !== 'none'
             && rect.right > 0 && rect.bottom > 0 && rect.left < innerWidth && rect.top < innerHeight;
         };
-        const actions = [];
+        const trace = [];
         const startY = scrollY;
-        for (let cycle = 0; cycle < 3; cycle += 1) {
-          window.scrollBy({ top: 420, behavior: 'instant' });
-          actions.push('scroll-down');
-          await sleep(180);
-          window.scrollBy({ top: -260, behavior: 'instant' });
-          actions.push('scroll-up');
-          await sleep(180);
-          const composer = [...document.querySelectorAll('textarea,[contenteditable="true"]')].find(visible);
-          if (composer) {
-            composer.focus({ preventScroll: true });
-            composer.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 8, clientY: 8 }));
-            actions.push('composer-focus-pointer');
+        const maxY = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+        // Multiple scroll positions, not one repeated coordinate.
+        for (const ratio of [0.15, 0.72, 0.38, 0.9, 0.05]) {
+          window.scrollTo({ top: Math.round(maxY * ratio), behavior: 'instant' });
+          trace.push(`scroll:${ratio}`);
+          await sleep(140);
+        }
+        // Pointer/mouse workload across several visible controls and coordinates.
+        const controls = [...document.querySelectorAll('button,[role="button"],textarea,[contenteditable="true"],a')]
+          .filter(visible).slice(0, 8);
+        for (const [index, element] of controls.entries()) {
+          const rect = element.getBoundingClientRect();
+          for (const [fx, fy] of [[0.25, 0.25], [0.75, 0.5], [0.5, 0.8]]) {
+            element.dispatchEvent(new MouseEvent('mousemove', {
+              bubbles: true,
+              clientX: rect.left + rect.width * fx,
+              clientY: rect.top + rect.height * fy,
+            }));
           }
-          const trigger = [...document.querySelectorAll(
-            '[data-testid*="model"],button[aria-haspopup="menu"],button[aria-haspopup="dialog"]'
-          )].find((element) => visible(element) && /gpt|model|模型|thinking|思考/i.test(
-            [element.textContent, element.getAttribute('aria-label'), element.getAttribute('title')].filter(Boolean).join(' ')
-          ));
-          if (trigger) {
+          trace.push(`pointer-control:${index}`);
+          await sleep(55);
+        }
+        const composer = [...document.querySelectorAll('textarea,[contenteditable="true"]')].find(visible);
+        if (composer) {
+          composer.focus({ preventScroll: true });
+          composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true }));
+          composer.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true }));
+          composer.blur();
+          trace.push('composer-focus-key-blur');
+        }
+        const trigger = [...document.querySelectorAll(
+          '[data-testid*="model"],button[aria-haspopup="menu"],button[aria-haspopup="dialog"]'
+        )].find((element) => visible(element) && /gpt|model|模型|thinking|思考/i.test(
+          [element.textContent, element.getAttribute('aria-label'), element.getAttribute('title')].filter(Boolean).join(' ')
+        ));
+        if (trigger) {
+          for (let cycle = 0; cycle < 2; cycle += 1) {
             trigger.click();
-            actions.push('picker-open');
-            await sleep(220);
+            trace.push(`picker-open:${cycle}`);
+            await sleep(180);
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
             document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', bubbles: true }));
-            actions.push('picker-close');
+            trace.push(`picker-close:${cycle}`);
+            await sleep(140);
           }
-          await sleep(220);
         }
         window.scrollTo({ top: startY, behavior: 'instant' });
-        actions.push('scroll-restore');
-        return { ok: true, actions };
+        trace.push('scroll-restore');
+        return { ok: true, actions: trace };
       },
     });
-    return result || { ok: true };
+    return { ...(result || { ok: true }), chromeActions: actions };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
