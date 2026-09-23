@@ -729,13 +729,24 @@ function mergeResponseEvidence(state, evidence) {
   const requestId = responseEvidenceRequestId(evidence)
     || state.lastRequest?.requestId
     || null;
+  // A response observation is authoritative only for the evidence carried by that
+  // observation. Never inherit a previously observed model into a later packet
+  // that contains zero model candidates: that manufactured stale Sol mismatches
+  // in v0.5.130 after the actual request had moved to GPT-6 Sol.
+  const currentHasModelAuthority = Boolean(
+    evidence?.model
+      || evidence?.conflicts?.model
+      || Number(evidence?.diagnostics?.modelCandidateCount || 0) > 0
+  );
   const previous = state.lastResponseEvidence?.requestId === requestId
     ? state.lastResponseEvidence
     : null;
+  const previousModel = currentHasModelAuthority ? previous?.model : null;
+  const previousModelConflict = currentHasModelAuthority ? previous?.conflicts?.model : false;
   const modelConflict = Boolean(
     evidence?.conflicts?.model
-      || previous?.conflicts?.model
-      || (previous?.model && evidence?.model && previous.model !== evidence.model),
+      || previousModelConflict
+      || (previousModel && evidence?.model && previousModel !== evidence.model),
   );
   const reasoningConflict = Boolean(
     evidence?.conflicts?.reasoning
@@ -745,11 +756,11 @@ function mergeResponseEvidence(state, evidence) {
   const merged = {
     requestId,
     capturedAt: evidence?.capturedAt ?? previous?.capturedAt ?? new Date().toISOString(),
-    model: modelConflict ? null : evidence?.model || previous?.model || null,
+    model: modelConflict ? null : evidence?.model || previousModel || null,
     reasoning: reasoningConflict ? null : evidence?.reasoning || previous?.reasoning || null,
     conflicts: { model: modelConflict, reasoning: reasoningConflict },
     fields: {
-      model: evidence?.fields?.model || previous?.fields?.model || null,
+      model: evidence?.fields?.model || (currentHasModelAuthority ? previous?.fields?.model : null) || null,
       reasoning: evidence?.fields?.reasoning || previous?.fields?.reasoning || null,
     },
     bodyError: evidence?.bodyError || previous?.bodyError || null,
