@@ -1629,6 +1629,30 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     pickerModes: [],
   };
 
+  const verificationChronology = (item) => {
+    const model = normalizeConcreteModelId(item?.model || item?.rawModel);
+    // GPT-5.5 is destructive to picker-B availability in current ChatGPT: verify
+    // it first while it is still discoverable. All remaining GPT generations are
+    // ordered oldest -> newest by their public version lineage; variant name is
+    // only a deterministic tie-breaker inside the same generation.
+    if (model === 'gpt-5.5') return [-1, 5, 5, ''];
+    const match = /^gpt-(\d+)(?:\.(\d+))?(?:-(.*))?$/.exec(model || '');
+    if (!match) return [1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, model || item?.label || ''];
+    return [0, Number(match[1]), Number(match[2] || 0), String(match[3] || '')];
+  };
+  const sortVerificationQueue = () => {
+    const completed = new Set(progress.results.map((result) => catalogIdentity(result)));
+    const pending = queue.filter((item) => !completed.has(catalogIdentity(item)));
+    const done = queue.filter((item) => completed.has(catalogIdentity(item)));
+    pending.sort((left, right) => {
+      const a = verificationChronology(left);
+      const b = verificationChronology(right);
+      for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
+      return String(a[3]).localeCompare(String(b[3]));
+    });
+    queue.splice(0, queue.length, ...done, ...pending);
+  };
+
   const mergeCatalog = (catalog, phase) => {
     let added = 0;
     if (['A', 'B'].includes(catalog?.pickerMode) && !progress.pickerModes.includes(catalog.pickerMode)) progress.pickerModes.push(catalog.pickerMode);
@@ -1655,6 +1679,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       queue.push({ model, rawModel, selectorKey, label, pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : catalog?.pickerMode || null });
       added += 1;
     }
+    sortVerificationQueue();
     progress.total = queue.length;
     progress.reasoningLevels = [...reasoningLevels];
     state.autoVerification.maxAttempts = queue.length;
