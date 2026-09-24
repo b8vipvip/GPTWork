@@ -84,7 +84,8 @@ test('master storage transition is the single fan-out and OFF pushes an immediat
 test('background derives debugger configuration from the target tab policy directly', () => {
   assert.match(background, /getLockConfiguration\(tabId\)/);
   assert.match(background, /runtimePolicyForTabSync\(tabId\)/);
-  assert.match(background, /const policy = effectivePolicyForTabSync\(tabId\)/);
+  assert.match(background, /const pageModel = normalizeConcreteModelId\(state\?\.pageObservation\?\.model\)/);
+  assert.match(background, /const policy = requestPolicyForTabSync\(tabId, pageModel\)/);
   assert.match(background, /verificationTransactionForTab\(tabId\)/);
   assert.match(background, /tab\.status === 'loading'/);
   assert.match(monitor, /getLockConfiguration\?\.\(tabId\)/);
@@ -109,4 +110,14 @@ test('quota denial remains window-based even though feature state is tab-based',
   assert.match(runtime, /WINDOW_QUOTA_MESSAGE = '当前账户并发窗口超限'/);
   assert.match(runtime, /accountAllowsWindow/);
   assert.match(runtime, /WINDOW_QUOTA_EXCEEDED/);
+});
+
+
+test('v0.5.143 request locking follows the current page model instead of model-list priority', () => {
+  assert.match(runtime, /export function requestPolicyForTabSync\(tabId, pageModel\)/);
+  assert.match(runtime, /selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
+  assert.match(runtime, /isAtLeastSol\(selected\) \? selected : 'gpt-5\.6-sol'/);
+  const resolver = runtime.slice(runtime.indexOf('export function requestPolicyForTabSync'), runtime.indexOf('export function effectivePolicyForTabSync'));
+  assert.ok(resolver.indexOf('feature.modelLockEnabled') < resolver.indexOf('feature.workModeEnabled'));
+  assert.match(resolver, /lockedModels = selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
 });
