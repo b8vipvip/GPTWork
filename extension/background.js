@@ -27,12 +27,13 @@ import {
 import { createAccountClient } from './account-client.js';
 import {
   effectivePolicyForTabSync,
+  requestPolicyForTabSync,
   enableWorkModeForVerification,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.142';
+const RUNTIME_CODE_VERSION = '0.5.143';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -409,7 +410,9 @@ function verificationTransactionForTab(tabId) {
 }
 
 function runtimePolicyForTabSync(tabId) {
-  const policy = effectivePolicyForTabSync(tabId);
+  const state = tabStates.get(Number(tabId));
+  const pageModel = normalizeConcreteModelId(state?.pageObservation?.model);
+  const policy = requestPolicyForTabSync(tabId, pageModel);
   const transaction = verificationTransactionForTab(tabId);
   return transaction?.model
     ? normalizePolicy({ ...policy, lockedModels: [transaction.model] })
