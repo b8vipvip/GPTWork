@@ -62,13 +62,11 @@ test('model verification probe uses trusted send and monitor reattach', () => {
   assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
 
-test('v0.5.134 uses a different deterministic answer for every verification turn', () => {
-  assert.match(background, /const n = Math\.max\(1, Number\(ordinal\) \|\| 1\)/);
-  assert.match(background, /const left = 120 \+ \(n \* 7\)/);
-  assert.match(background, /const right = 31 \+ \(n \* 5\)/);
-  assert.match(background, /const offset = \(n \* n\) \+ 17/);
-  assert.match(background, /校验值=<整数>/);
-  assert.doesNotMatch(background, /a\+b\+c=18/);
+test('verification probe policy is delegated to imported ModelPro', () => {
+  assert.match(background, /buildVerificationProbe\(marker, ordinal, total\)/);
+  assert.match(background, /createVerificationCatalog/);
+  assert.match(background, /summarizeVerificationOutcome/);
+  assert.match(background, /createModelVerificationHistoryRecord/);
 });
 
 test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () => {
