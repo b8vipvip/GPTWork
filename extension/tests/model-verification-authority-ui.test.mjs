@@ -104,7 +104,7 @@ test('v0.5.82 follows the causal three-stage ChatGPT model picker', () => {
   assert.match(content, /function distinctModelRows/);
   assert.match(content, /function isModelListScope/);
   assert.match(content, /const beforeScopes = new Set\(modelPopupScopes\(\)\)/);
-  assert.match(content, /await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
+  assert.match(content, /await modelPickerPointer\(activeOpener, 'click', 'model-picker-submenu'\)/);
   assert.match(content, /Single ownership chain: the final model list/);
   assert.doesNotMatch(content, /await trustedPointer\(opener, 'move'\)/);
   assert.match(content, /rows\.length < 2/);
@@ -248,7 +248,7 @@ test('v0.5.94 accepts only the composer-owned in-place advanced catalog after Se
   assert.match(content, /const inPlaceCatalog = advancedPickerView\(picker\)/);
   assert.match(content, /visible\(inPlaceCatalog\) && distinctModelRows\(inPlaceCatalog\)\.length >= 2/);
   assert.match(content, /return inPlaceCatalog/);
-  assert.match(content, /const opened = await modelPickerPointer\(opener, 'click', 'model-picker-submenu'\)/);
+  assert.match(content, /let opened = await modelPickerPointer\(activeOpener, 'click', 'model-picker-submenu'\)/);
 });
 
 
