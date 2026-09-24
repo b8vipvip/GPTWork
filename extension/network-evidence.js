@@ -93,7 +93,10 @@ function pathScore(path, key, kind, mode = 'response') {
     // and MUST NOT become served-model proof (v0.5.126 field evidence showed it
     // falsely reporting Sol for an Astra request).
     if (SERVED_MODEL_KEYS.has(key)) return 150;
-    if (key === 'default_model_slug') return 110;
+    // default_model_slug is only Work-profile identity when it lives on the
+    // assistant message metadata contract observed by ModelPro v0.1.38.
+    // Generic downstream defaults remain diagnostic-only.
+    if (key === 'default_model_slug' && normalizedPath.includes('message') && normalizedPath.includes('metadata')) return 110;
     return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
