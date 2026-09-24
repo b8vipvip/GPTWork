@@ -62,13 +62,10 @@ test('model verification probe uses trusted send and monitor reattach', () => {
   assert.match(background, /Request lock monitor did not reattach after model selection/);
 });
 
-test('v0.5.134 uses a different deterministic answer for every verification turn', () => {
-  assert.match(background, /const n = Math\.max\(1, Number\(ordinal\) \|\| 1\)/);
-  assert.match(background, /const left = 120 \+ \(n \* 7\)/);
-  assert.match(background, /const right = 31 \+ \(n \* 5\)/);
-  assert.match(background, /const offset = \(n \* n\) \+ 17/);
-  assert.match(background, /校验值=<整数>/);
-  assert.doesNotMatch(background, /a\+b\+c=18/);
+test('v0.5.142 uses the validated ModelPro prompt-bank probe path', () => {
+  assert.match(background, /randomVerificationPrompt\(\)/);
+  assert.match(background, /sendVerificationReasoningProbe/);
+  assert.match(background, /probeText: prompt/);
 });
 
 test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () => {
@@ -77,7 +74,7 @@ test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () 
   const verifyBody = background.slice(verifyStart, verifyEnd);
   const completed = verifyBody.indexOf("if (item.model === 'gpt-5.5')");
   const work = verifyBody.indexOf('enableWorkModeForVerification(tabId)', completed);
-  const rediscover = verifyBody.indexOf('let rediscovered = await discoverAccountCatalog(tabId)', completed);
+  const rediscover = verifyBody.indexOf('const rediscovered = await discoverAccountCatalog(tabId)', completed);
   assert(completed >= 0 && work > completed && rediscover > work);
 
   const autoStart = background.indexOf('async function autoVerify');
@@ -439,7 +436,7 @@ test('v0.5.135 verification enables GPTWork Work state independently and waits f
   assert.match(background, /discoverAccountCatalog\(tabId\)/);
   assert.match(background, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
   assert.match(background, /account_model_verification_aborted_pending_response/);
-  assert.match(background, /source: 'verification_runtime_default'/);
+  assert.match(background, /source: 'normal_work_policy_request'/);
   assert.match(background, /featureState\?\.workModeEnabled === true/);
   assert.match(content, /waitForProbeTurnSettled/);
   assert.match(content, /assistantCountBefore/);
@@ -482,9 +479,22 @@ test('v0.5.135 has one strict verification transaction authority with no native-
 test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without clicking its UI', async () => {
   const tabFeatureRuntime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
   assert.match(background, /enableWorkModeForVerification\(tabId\)/);
-  assert.match(background, /source: 'verification_runtime_default'/);
+  assert.match(background, /source: 'normal_work_policy_request'/);
   assert.match(tabFeatureRuntime, /export async function enableWorkModeForVerification/);
   assert.match(tabFeatureRuntime, /setTabFeatureState\(tabId, \{ workModeEnabled: true \}\)/);
   assert.doesNotMatch(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
   assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
+});
+
+
+test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle', () => {
+  assert.match(background, /const workBootstrapTabs = new Set\(\)/);
+  assert.match(background, /workBootstrapTabs\.has\(Number\(tabId\)\)/);
+  assert.match(background, /function reacquirePickerBForModel|async function reacquirePickerBForModel/);
+  assert.match(background, /verification_work_activation_turn_started/);
+  assert.match(background, /normal_work_turn_picker_b_observed/);
+  assert.match(background, /picker_b_selection_settled_before_probe/);
+  assert.match(background, /enableResponseCapture\(tabId\)/);
+  assert.match(background, /state\.lastForwardedRequest/);
+  assert.doesNotMatch(background, /verification_sol_picker_b_unlock_started/);
 });
