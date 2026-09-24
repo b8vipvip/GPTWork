@@ -135,15 +135,15 @@ test('v0.5.116 rejects reasoning-decorated pseudo model rows', () => {
   assert.match(contentSource, /explicitModelId/);
 });
 
-test('v0.5.116 response evidence regression is superseded by strict v0.5.117 semantics', () => {
-  assert.match(backgroundSource, /default_model_not_served_model/);
+test('v0.5.140 Work-profile identity supersedes the old default-model rejection', () => {
+  assert.match(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
   assert.match(backgroundSource, /served_model_mismatch/);
 });
 
 
 test('v0.5.117 treats served/resolved model mismatch as strict response evidence', () => {
   assert.match(backgroundSource, /served_model_mismatch/);
-  assert.match(backgroundSource, /default_model_not_served_model/);
+  assert.match(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
   assert.match(backgroundSource, /const responseObservation = verificationResponseObservation\(tabId, responseEvidence\)/);
   assert.doesNotMatch(backgroundSource, /backend_resolution_not_selected_model/);
 });
