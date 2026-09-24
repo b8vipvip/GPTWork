@@ -32,7 +32,7 @@ import {
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.141';
+const RUNTIME_CODE_VERSION = '0.5.142';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -61,6 +61,8 @@ const tabStates = new Map();
 // temporarily change request-lock behavior while a catalog model is being probed.
 // It is intentionally independent of URL/context state migration.
 const verificationTransactions = new Map();
+// One-shot Work bootstrap follows normal Work policy outside verification authority.
+const workBootstrapTabs = new Set();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
@@ -1643,19 +1645,39 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
 }
 
 async function sendVerificationReasoningProbe(tabId, marker, ordinal, total) {
-  // Every model gets a different deterministic arithmetic turn. Reusing the same
-  // puzzle made all answers identical, which obscured whether the UI had actually
-  // advanced to a new model/turn. The result is strictly increasing with ordinal.
-  const n = Math.max(1, Number(ordinal) || 1);
-  const left = 120 + (n * 7);
-  const right = 31 + (n * 5);
-  const offset = (n * n) + 17;
+  const prompt = await randomVerificationPrompt();
   return sendTabMessage(tabId, {
     type: 'GPTLOCK_AUTO_SEND_PROBE',
     skipAlignment: true,
     probeMarker: marker,
-    probeText: `${marker} ${ordinal}/${total}：计算 (${left}×${right})+${offset}，只输出“校验值=<整数>”，不要解释、不要复述题目。`,
+    probeText: prompt,
   });
+}
+
+async function reacquirePickerBForModel(tabId, desiredModel, progress) {
+  let catalog = await discoverAccountCatalog(tabId);
+  progress.discoveryPasses += 1;
+  const hasDesired = () => (catalog?.rows || []).some((row) => normalizeConcreteModelId(row?.model || row?.rawId) === desiredModel);
+  if (catalog?.pickerMode === 'B' && hasDesired()) return catalog;
+  logRuntime('info', 'verification', 'picker_b_reacquire_started', { tabId, desiredModel, observedPickerMode: catalog?.pickerMode ?? null });
+  workBootstrapTabs.add(Number(tabId));
+  try {
+    const probe = await sendVerificationReasoningProbe(tabId, 'work-mode-b-reacquire', progress.completed + 1, progress.total);
+    if (!probe?.sent) return catalog;
+    const settled = await sendTabMessage(tabId, { type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED', assistantCountBefore: probe.assistantCountBefore ?? 0, timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS });
+    if (settled?.settled !== true) return catalog;
+  } finally {
+    workBootstrapTabs.delete(Number(tabId));
+  }
+  const deadline = Date.now() + 10000;
+  do {
+    catalog = await discoverAccountCatalog(tabId);
+    progress.discoveryPasses += 1;
+    if (catalog?.pickerMode === 'B' && hasDesired()) break;
+    await sleep(500);
+  } while (Date.now() < deadline);
+  logRuntime(hasDesired() ? 'info' : 'warn', 'verification', 'picker_b_reacquire_completed', { tabId, desiredModel, pickerMode: catalog?.pickerMode ?? null, available: hasDesired() });
+  return catalog;
 }
 
 async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
@@ -1690,7 +1712,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     stablePasses: 0,
     reasoningLevels: [],
     pickerModes: [],
+    workDiscovery: { attempted: false, entered: false, reason: 'pending_after_gpt_5_5' },
   };
+  let workActivationPending = false;
 
   const verificationChronology = (item) => {
     const model = normalizeConcreteModelId(item?.model || item?.rawModel);
@@ -1796,17 +1820,49 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     try {
       const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
       if (!attached) throw new Error(state.monitor?.error || 'Request lock monitor is not attached');
-      const selectionResponse = await sendTabMessage(tabId, {
-        type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
-        model: item.model,
-        selectorKey: item.selectorKey,
-        label: item.label,
-      });
-      const selection = selectionResponse?.result || {};
+      if (item.pickerMode === 'B' && item.model) {
+        const freshB = await reacquirePickerBForModel(tabId, item.model, progress);
+        const freshRow = (freshB?.rows || []).find((row) => normalizeConcreteModelId(row?.model || row?.rawId) === item.model);
+        if (freshRow) {
+          item.selectorKey = String(freshRow.selectorKey || item.selectorKey || '');
+          item.label = String(freshRow.label || item.label || '');
+        }
+      }
+      let selectionResponse = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, selectorKey: item.selectorKey, label: item.label });
+      let selection = selectionResponse?.result || {};
+      if (selection.selectionAttempted !== true && item.pickerMode === 'B' && item.model) {
+        const freshB = await reacquirePickerBForModel(tabId, item.model, progress);
+        const freshRow = (freshB?.rows || []).find((row) => normalizeConcreteModelId(row?.model || row?.rawId) === item.model);
+        if (freshRow) {
+          item.selectorKey = String(freshRow.selectorKey || item.selectorKey || '');
+          item.label = String(freshRow.label || item.label || '');
+          selectionResponse = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, selectorKey: item.selectorKey, label: item.label });
+          selection = selectionResponse?.result || {};
+        }
+      }
       if (selection.selectionAttempted !== true) throw new Error('Model selection control was not activated');
+
+      // Picker B updates ChatGPT's Work model state asynchronously. v0.1.34 proved
+      // that sending in the same task can leave the native conversation body on the
+      // previous GPT-5.6 Sol model even though the B row is already checked. Give the
+      // page state a bounded settle window before arming/sending the verification turn.
+      if (item.pickerMode === 'B') {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        logRuntime('info', 'verification', 'picker_b_selection_settled_before_probe', {
+          tabId,
+          model: item.model,
+          settleMs: 1200,
+        });
+      }
 
       const reattached = await networkMonitor.attach(tabId);
       if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
+      // A Work bootstrap/navigation can detach CDP and clears responseCaptureTabs.
+      // Fetch-only reattach is insufficient: verification needs the same Network
+      // lifecycle for the requestId and its terminal response. Re-enable it for
+      // every model immediately before the probe.
+      const responseCaptureReady = await networkMonitor.enableResponseCapture(tabId);
+      if (!responseCaptureReady) throw new Error('Response capture did not re-enable before verification probe');
       const probe = await sendVerificationReasoningProbe(tabId, 'GPTWork 模型验证', index + 1, queue.length);
       if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
       const attemptStartedMs = Date.now() - 1500;
@@ -1830,7 +1886,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       // authority. Network.requestWillBeSent may expose the page's pre-interception
       // body, so keep it only as diagnostic evidence. Response/stream metadata remains
       // the independent backend-served-model authority.
-      const requestId = state.lastRequest?.requestId ?? null;
+      const forwardedRequestId = state.lastForwardedRequest?.requestId ?? null;
+      const requestId = state.lastRequest?.requestId ?? forwardedRequestId;
       const networkObservedRequestModel = normalizeConcreteModelId(state.lastRequest?.model);
       const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
       const authoritativeRewrite = Boolean(
@@ -1915,58 +1972,124 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       break;
     }
 
-    // GPT-5.5 is verified before Work is enabled because picker A exposes it
-    // directly. From this point on, enable GPTWork's tab-scoped Work feature in the
-    // verification runtime itself. Do not click GPTWork UI and do not send a fake
-    // bootstrap chat turn: subsequent discovery must run under the same Work feature
-    // state that the user would enable from GPTWork.
+    // GPT-5.5 must finish before Work activation. The real GPTWork behavior is not
+    // a top-page "Work" button click: once the tab-scoped Work policy is enabled, an
+    // ordinary visible turn (outside a model-verification transaction) is rewritten
+    // by the normal Work policy to its Work transport. That real turn makes ChatGPT
+    // rebuild the composer and expose the Work/B catalog.
     if (item.model === 'gpt-5.5') {
       try {
         const featureState = await enableWorkModeForVerification(tabId);
-        logRuntime('info', 'verification', 'verification_work_mode_transition', {
-          tabId,
-          phase: 'post_gpt_5_5',
-          entered: featureState?.workModeEnabled === true,
-          source: 'verification_runtime_default',
+        workActivationPending = featureState?.workModeEnabled === true;
+        progress.workDiscovery = {
+          attempted: false,
+          entered: false,
+          reason: workActivationPending ? 'waiting_for_sol_then_work_turn' : 'work_runtime_not_enabled',
+        };
+        logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
+          tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
+          source: 'normal_work_policy_request',
         });
       } catch (error) {
-        logRuntime('warn', 'verification', 'verification_work_mode_transition', {
-          tabId,
-          phase: 'post_gpt_5_5',
-          entered: false,
-          source: 'verification_runtime_default',
-          error: errorText(error),
+        progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
+        logRuntime('warn', 'verification', 'verification_work_mode_armed', {
+          tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
         });
       }
-      await new Promise((resolve) => setTimeout(resolve, 900));
     }
 
-    // A completed real turn / Work transition may unlock account models/capabilities.
-    let rediscovered = await discoverAccountCatalog(tabId);
-    progress.discoveryPasses += 1;
-    // GPT-5.6 Sol can be the capability-unlock turn for picker B. If the normal
-    // verification turn did not expose B, run one additional reasoning-heavy Sol
-    // turn, wait for a terminal response with the same recovery contract, then
-    // rediscover before moving to the next model.
-    if (item.model === 'gpt-5.6-sol' && rediscovered?.pickerMode !== 'B') {
-      logRuntime('info', 'verification', 'verification_sol_picker_b_unlock_started', { tabId, pickerMode: rediscovered?.pickerMode ?? null });
-      const unlockProbe = await sendVerificationReasoningProbe(tabId, 'GPTWork GPT-5.6 Sol 能力解锁验证', index, queue.length);
-      if (unlockProbe?.sent) {
-        let unlockSettled = await sendTabMessage(tabId, {
-          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
-          assistantCountBefore: unlockProbe.assistantCountBefore ?? 0,
-          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+    // Picker B is unlocked by the same product path used during normal GPTWork use:
+    // after A has verified Sol and the tab-scoped Work policy is armed, send ONE
+    // ordinary natural turn outside verificationTransactions. That request therefore
+    // belongs exclusively to normal-policy (not the verification authority). Only the
+    // real B catalog is allowed to confirm the A -> Work/B transition.
+    if (item.model === 'gpt-5.6-sol' && workActivationPending) {
+      const completedSol = progress.results.at(-1);
+      if (completedSol?.verified === true) {
+        progress.workDiscovery = {
+          attempted: true,
+          entered: false,
+          reason: 'waiting_for_normal_work_turn_and_picker_b',
+          runtimeEnabled: true,
+          source: 'normal_work_policy_request',
+        };
+        logRuntime('info', 'verification', 'verification_work_activation_turn_started', {
+          tabId, phase: 'post_gpt_5_6_sol', source: 'normal_work_policy_request',
         });
-        if (unlockSettled?.settled !== true) {
-          unlockSettled = await recoverStaleVerificationTurn(tabId, unlockProbe.assistantCountBefore ?? 0);
+
+        let activationProbe = null;
+        let activationSettled = null;
+        workBootstrapTabs.add(Number(tabId));
+        try {
+          activationProbe = await sendVerificationReasoningProbe(tabId, 'work-mode-bootstrap', index, queue.length);
+          if (activationProbe?.sent) {
+            activationSettled = await sendTabMessage(tabId, {
+              type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+              assistantCountBefore: activationProbe.assistantCountBefore ?? 0,
+              timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+            });
+          }
+        } finally {
+          workBootstrapTabs.delete(Number(tabId));
         }
-        if (unlockSettled?.settled === true) {
-          rediscovered = await discoverAccountCatalog(tabId);
-          progress.discoveryPasses += 1;
-          logRuntime('info', 'verification', 'verification_sol_picker_b_unlock_completed', { tabId, pickerMode: rediscovered?.pickerMode ?? null });
+
+        // Do not reload/stop/recover this bootstrap turn. A failed product Work request
+        // is evidence that the transition did not happen; recovery must not become a
+        // second authority that mutates the page.
+        let workCatalog = null;
+        if (activationSettled?.settled === true) {
+          const deadline = Date.now() + 10000;
+          do {
+            workCatalog = await discoverAccountCatalog(tabId);
+            progress.discoveryPasses += 1;
+            if (workCatalog?.pickerMode === 'B') break;
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          } while (Date.now() < deadline);
         }
+
+        const entered = activationSettled?.settled === true && workCatalog?.pickerMode === 'B';
+        const addedFromB = entered ? mergeCatalog(workCatalog, 'work-picker-b') : 0;
+        progress.workDiscovery = {
+          attempted: true,
+          entered,
+          reason: entered ? 'normal_work_turn_picker_b_observed'
+            : activationSettled?.interrupted === true ? 'normal_work_turn_interrupted'
+              : activationSettled?.settled === true ? 'picker_b_not_observed'
+                : 'normal_work_turn_not_settled',
+          runtimeEnabled: true,
+          source: 'normal_work_policy_request',
+          pickerMode: workCatalog?.pickerMode ?? null,
+          added: addedFromB,
+        };
+        logRuntime(entered ? 'info' : 'warn', 'verification', 'verification_work_mode_transition', {
+          tabId, phase: 'post_gpt_5_6_sol', entered,
+          source: 'normal_work_policy_request',
+          reason: progress.workDiscovery.reason,
+          pickerMode: workCatalog?.pickerMode ?? null,
+          added: addedFromB,
+        });
+        workActivationPending = false;
+        if (addedFromB) stablePasses = 0;
+        await broadcastTabState(tabId);
+      } else {
+        progress.workDiscovery = {
+          attempted: false,
+          entered: false,
+          reason: 'deferred_until_sol_verified',
+          runtimeEnabled: true,
+          source: 'normal_work_policy_request',
+        };
       }
     }
+
+    // A completed verified turn is already sufficient to rediscover the catalog.
+    // Never send an extra "unlock" turn after Sol. v0.1.16 showed that this extra
+    // turn runs outside verificationTransactions, so the copied GPTWork normal
+    // policy rewrites an exact Sol request into gpt-6-astra-wm. The recovery path
+    // then reloads the page while that turn is generating, which is the direct
+    // source of ChatGPT's "连接已中断。正在等待完整回复" state.
+    const rediscovered = await discoverAccountCatalog(tabId);
+    progress.discoveryPasses += 1;
     const added = mergeCatalog(rediscovered, 'post-turn');
     stablePasses = added ? 0 : stablePasses + 1;
     progress.stablePasses = stablePasses;
