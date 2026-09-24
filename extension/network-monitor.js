@@ -95,6 +95,7 @@ export function hasCompleteResponseEvidence(evidence) {
 export function hasResponseMetadataEvidence(evidence) {
   return Boolean(
     evidence?.model
+      || evidence?.defaultModel
       || evidence?.reasoning
       || evidence?.conflicts?.model
       || evidence?.conflicts?.reasoning,

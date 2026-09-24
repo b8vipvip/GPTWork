@@ -85,6 +85,9 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(contentSource, /selectionAttempted/);
   assert.match(backgroundSource, /body forwarded at Fetch\.requestPaused is the sole request-confirmation/);
   assert.match(backgroundSource, /responseConfirmed/);
+  assert.match(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
+  assert.match(backgroundSource, /defaultModel: evidence\?\.defaultModel/);
+  assert.match(networkSource, /evidence\?\.defaultModel/);
   assert.match(backgroundSource, /getVerificationTransaction\(tabId\)/);
   assert.match(backgroundSource, /fetch_forwarded_request_metadata/);
   assert.doesNotMatch(backgroundSource, /Model selection was not confirmed/);

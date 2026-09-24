@@ -92,7 +92,11 @@ function pathScore(path, key, kind, mode = 'response') {
     // message.metadata.model_slug is page/default/routing metadata in live traffic
     // and MUST NOT become served-model proof (v0.5.126 field evidence showed it
     // falsely reporting Sol for an Astra request).
-    if (SERVED_MODEL_KEYS.has(key)) return 130;
+    if (SERVED_MODEL_KEYS.has(key)) return 150;
+    // default_model_slug is only Work-profile identity when it lives on the
+    // assistant message metadata contract observed by ModelPro v0.1.38.
+    // Generic downstream defaults remain diagnostic-only.
+    if (key === 'default_model_slug' && normalizedPath.includes('message') && normalizedPath.includes('metadata')) return 110;
     return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
@@ -140,23 +144,25 @@ function inspectObjects(values, mode = 'response') {
   for (const value of values) collectCandidates(value, candidates, [], 0, mode);
   const model = selectCandidate(candidates.model);
   const reasoning = selectCandidate(candidates.reasoning);
+  const defaultModel = selectCandidate(candidates.model.filter((candidate) => canonicalKey(candidate.path.split('.').at(-1) || '') === 'default_model_slug'));
   return {
     model: model.value,
+    defaultModel: defaultModel.value,
+    defaultModelField: defaultModel.path,
     reasoning: reasoning.value,
-    conflicts: {
-      model: model.conflict,
-      reasoning: reasoning.conflict,
-    },
-    fields: {
-      model: model.path,
-      reasoning: reasoning.path,
-    },
+    conflicts: { model: model.conflict, reasoning: reasoning.conflict },
+    fields: { model: model.path, reasoning: reasoning.path },
     diagnostics: {
       modelCandidateCount: candidates.model.length,
       reasoningCandidateCount: candidates.reasoning.length,
       modelCandidatePaths: [...new Set(candidates.model.map((candidate) => candidate.path))].slice(-12),
       reasoningCandidatePaths: [...new Set(candidates.reasoning.map((candidate) => candidate.path))].slice(-12),
-      modelCandidateValues: [...new Set(candidates.model.map((candidate) => candidate.value))].slice(-12),
+      // Keep diagnostics aligned with the selected served-model authority. We retain
+      // defaultModel separately for Work-profile identity, so weaker default metadata
+      // must not pollute the served-model candidate value set.
+      modelCandidateValues: [...new Set(candidates.model
+        .filter((candidate) => candidate.score === Math.max(...candidates.model.map((item) => item.score)))
+        .map((candidate) => candidate.value))].slice(-12),
       reasoningCandidateValues: [...new Set(candidates.reasoning.map((candidate) => candidate.value))].slice(-12),
     },
   };
@@ -378,6 +384,8 @@ function mergeEvidence(headerEvidence, bodyEvidence) {
   ) || headerEvidence.conflicts.reasoning || bodyEvidence.conflicts.reasoning;
   return {
     model: modelConflict ? null : headerEvidence.model || bodyEvidence.model,
+    defaultModel: bodyEvidence.defaultModel || null,
+    defaultModelField: bodyEvidence.defaultModelField || null,
     reasoning: reasoningConflict ? null : headerEvidence.reasoning || bodyEvidence.reasoning,
     conflicts: { model: modelConflict, reasoning: reasoningConflict },
     fields: {
