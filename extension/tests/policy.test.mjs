@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   DEFAULT_POLICY,
   DEFAULT_SETTINGS,
+  modelTransportId,
+  normalizeModelId,
   normalizePolicy,
   normalizeReasoningLevel,
   normalizeSettings,
@@ -66,4 +68,20 @@ test('normalizes extension-only verification settings independently', () => {
 
 test('explicit empty locked model list disables model locking', () => {
   assert.deepEqual(normalizePolicy({ lockedModels: [], allowedReasoningLevels: ['high'], strictMode: true }).lockedModels, []);
+});
+
+
+test('ModelPro v0.1.38 Work transports cover all Picker-B profiles', () => {
+  const pairs = {
+    'gpt-5.6-sol': 'gpt-5.6-sol-wm',
+    'gpt-5.6-terra': 'gpt-5.6-terra-wm',
+    'gpt-5.6-luna': 'gpt-5.6-luna-wm',
+    'gpt-6-astra': 'gpt-6-astra-wm',
+    'gpt-6-sol': 'gpt-6-sol-wm',
+    'gpt-6-luna': 'gpt-6-luna-wm',
+  };
+  for (const [model, transport] of Object.entries(pairs)) {
+    assert.equal(modelTransportId(model), transport);
+    assert.equal(normalizeModelId(transport), model);
+  }
 });
