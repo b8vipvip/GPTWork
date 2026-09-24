@@ -956,9 +956,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: currentSettings.preferredReasoning,
+      preferredReasoning: workBootstrapTabs.has(Number(tabId)) ? null : currentSettings.preferredReasoning,
       preserveModel: false,
-      preserveReasoning: false,
+      preserveReasoning: workBootstrapTabs.has(Number(tabId)),
       bypassRewrite: false,
       forceModel: null,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
@@ -995,8 +995,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
   },
   onRewrite(tabId, rewrite) {
     const state = ensureTabState(tabId);
+    const capturedAt = new Date().toISOString();
     state.lastRewrite = {
-      capturedAt: new Date().toISOString(),
+      capturedAt,
       endpoint: rewrite.endpoint ?? null,
       requestId: rewrite.requestId ?? null,
       fetchRequestId: rewrite.fetchRequestId ?? null,
@@ -1015,6 +1016,20 @@ const networkMonitor = new ChatGptNetworkMonitor({
       error: rewrite.error ?? null,
     };
     if (rewrite.error) state.lastError = rewrite.error;
+    // Fetch interception is the terminal request authority. Work-mode requests can
+    // legitimately omit Network.requestWillBeSent's networkId at this boundary, so
+    // retain the forwarded request as first-class verification evidence instead of
+    // waiting forever for a Network requestId that may never be correlated.
+    if (rewrite.authorityKind === 'verification-transaction' && rewrite.modelAfter && !rewrite.error) {
+      state.lastForwardedRequest = {
+        capturedAt,
+        requestId: rewrite.requestId ?? null,
+        fetchRequestId: rewrite.fetchRequestId ?? null,
+        model: rewrite.modelAfter,
+        transportModel: rewrite.transportModelAfter ?? null,
+        authorityModel: rewrite.authorityModel ?? null,
+      };
+    }
     const verification = verificationTransactionForTab(tabId);
     if (verification?.model && rewrite.authorityKind !== 'verification-transaction') {
       state.lastError = 'verification_request_missing_terminal_authority';
@@ -1377,6 +1392,7 @@ function resetVerificationAttempt(state) {
   state.probeArmed = false;
   state.lastRewrite = null;
   state.lastRequest = null;
+  state.lastForwardedRequest = null;
   state.lastVerification = null;
   state.lastResponseEvidence = null;
   state.lastEvidenceDiagnostics = null;
