@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/b8vipvip/ModelPro.git",
+  "ref": "main",
+  "path": "src/model-verification.js",
+  "importPolicy": "Fix and test in ModelPro first, then import exact source into consumer."
+}
