@@ -11,3 +11,10 @@ test('model auto-lock helper is loaded after model discovery', () => {
   assert.ok(discovery >= 0);
   assert.ok(autoLock > discovery);
 });
+
+
+test('page model evidence recognizes verified Work model family labels', () => {
+  const evidence = fs.readFileSync(new URL('../page-model-evidence.js', import.meta.url), 'utf8');
+  for (const model of ['gpt-6-astra','gpt-6-sol','gpt-6-luna','gpt-5.6-terra','gpt-5.6-luna']) assert.match(evidence, new RegExp(model.replaceAll('.', '\\\.')));
+  assert.match(evidence, /'gpt-6-astra': \['gpt-6 astra'/);
+});
