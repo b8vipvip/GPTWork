@@ -488,3 +488,16 @@ test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without click
   assert.doesNotMatch(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
   assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
 });
+
+
+test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle', () => {
+  assert.match(background, /const workBootstrapTabs = new Set\(\)/);
+  assert.match(background, /workBootstrapTabs\.has\(Number\(tabId\)\)/);
+  assert.match(background, /function reacquirePickerBForModel|async function reacquirePickerBForModel/);
+  assert.match(background, /verification_work_activation_turn_started/);
+  assert.match(background, /normal_work_turn_picker_b_observed/);
+  assert.match(background, /picker_b_selection_settled_before_probe/);
+  assert.match(background, /enableResponseCapture\(tabId\)/);
+  assert.match(background, /state\.lastForwardedRequest/);
+  assert.doesNotMatch(background, /verification_sol_picker_b_unlock_started/);
+});
