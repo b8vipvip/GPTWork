@@ -726,6 +726,27 @@ export async function checkAndMaybeInstall(
     } catch (error) {
       const status = await getUpdateStatus(chromeApi).catch(() => null);
       const targetVersion = status?.targetVersion ?? null;
+      const currentAlreadyInstalled = compareVersions(currentVersion, targetVersion) >= 0;
+      const completedCurrentTarget = Boolean(
+        targetVersion
+          && currentAlreadyInstalled
+          && ['complete', 'up_to_date'].includes(status?.phase),
+      );
+      // A periodic policy/release fetch can fail after an update has already completed.
+      // Do not turn a verified installed version back into "Update incomplete" merely
+      // because the next network poll failed. The completed transaction remains the
+      // durable UI state across scheduled checks; the poll failure is diagnostic-only and will be retried.
+      if (completedCurrentTarget) {
+        await setActionUpdateState({ available: false }, chromeApi).catch(() => {});
+        logUpdate('warn', 'update_check_failed_after_completed_update', {
+          reason,
+          targetVersion,
+          currentVersion,
+          error: errorText(error),
+          forcedByAdmin: force,
+        });
+        throw error;
+      }
       if (targetVersion) await recordAttempt(targetVersion, 'failed', { error: errorText(error) }, chromeApi).catch(() => {});
       await restoreAfterFailedUpdate(chromeApi).catch(() => {});
       await setActionUpdateState({ available: Boolean(targetVersion), version: targetVersion, error: Boolean(targetVersion) }, chromeApi);
