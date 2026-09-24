@@ -92,7 +92,8 @@ function pathScore(path, key, kind, mode = 'response') {
     // message.metadata.model_slug is page/default/routing metadata in live traffic
     // and MUST NOT become served-model proof (v0.5.126 field evidence showed it
     // falsely reporting Sol for an Astra request).
-    if (SERVED_MODEL_KEYS.has(key)) return 130;
+    if (SERVED_MODEL_KEYS.has(key)) return 150;
+    if (key === 'default_model_slug') return 110;
     return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
@@ -140,17 +141,14 @@ function inspectObjects(values, mode = 'response') {
   for (const value of values) collectCandidates(value, candidates, [], 0, mode);
   const model = selectCandidate(candidates.model);
   const reasoning = selectCandidate(candidates.reasoning);
+  const defaultModel = selectCandidate(candidates.model.filter((candidate) => canonicalKey(candidate.path.split('.').at(-1) || '') === 'default_model_slug'));
   return {
     model: model.value,
+    defaultModel: defaultModel.value,
+    defaultModelField: defaultModel.path,
     reasoning: reasoning.value,
-    conflicts: {
-      model: model.conflict,
-      reasoning: reasoning.conflict,
-    },
-    fields: {
-      model: model.path,
-      reasoning: reasoning.path,
-    },
+    conflicts: { model: model.conflict, reasoning: reasoning.conflict },
+    fields: { model: model.path, reasoning: reasoning.path },
     diagnostics: {
       modelCandidateCount: candidates.model.length,
       reasoningCandidateCount: candidates.reasoning.length,
@@ -378,6 +376,8 @@ function mergeEvidence(headerEvidence, bodyEvidence) {
   ) || headerEvidence.conflicts.reasoning || bodyEvidence.conflicts.reasoning;
   return {
     model: modelConflict ? null : headerEvidence.model || bodyEvidence.model,
+    defaultModel: bodyEvidence.defaultModel || null,
+    defaultModelField: bodyEvidence.defaultModelField || null,
     reasoning: reasoningConflict ? null : headerEvidence.reasoning || bodyEvidence.reasoning,
     conflicts: { model: modelConflict, reasoning: reasoningConflict },
     fields: {
