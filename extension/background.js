@@ -1665,6 +1665,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     },
   });
   const { queue, knownKeys, progress } = catalog;
+  state.autoVerification.catalogVerification = progress;
   const mergeCatalog = catalog.merge;
 
   mergeCatalog(accountCatalog, 'initial');
