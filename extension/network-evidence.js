@@ -157,7 +157,12 @@ function inspectObjects(values, mode = 'response') {
       reasoningCandidateCount: candidates.reasoning.length,
       modelCandidatePaths: [...new Set(candidates.model.map((candidate) => candidate.path))].slice(-12),
       reasoningCandidatePaths: [...new Set(candidates.reasoning.map((candidate) => candidate.path))].slice(-12),
-      modelCandidateValues: [...new Set(candidates.model.map((candidate) => candidate.value))].slice(-12),
+      // Keep diagnostics aligned with the selected served-model authority. We retain
+      // defaultModel separately for Work-profile identity, so weaker default metadata
+      // must not pollute the served-model candidate value set.
+      modelCandidateValues: [...new Set(candidates.model
+        .filter((candidate) => candidate.score === Math.max(...candidates.model.map((item) => item.score)))
+        .map((candidate) => candidate.value))].slice(-12),
       reasoningCandidateValues: [...new Set(candidates.reasoning.map((candidate) => candidate.value))].slice(-12),
     },
   };
