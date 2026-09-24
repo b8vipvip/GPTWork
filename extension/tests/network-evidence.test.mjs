@@ -88,6 +88,21 @@ test('explicit served/resolved/used metadata remains authoritative', () => {
   }
 });
 
+test('ModelPro v0.1.38 preserves Work profile identity from default_model_slug', () => {
+  const result = extractResponseEvidence({
+    body: JSON.stringify({ message: { metadata: {
+      resolved_model_slug: 'gpt-5-6',
+      default_model_slug: 'gpt-6-sol-wm',
+      thinking_effort: 'extended',
+    } } }),
+    mimeType: 'application/json',
+  });
+  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.equal(result.defaultModel, 'gpt-6-sol');
+  assert.match(result.defaultModelField, /default_model_slug/);
+  assert.equal(result.reasoning, 'high');
+});
+
 test('generic metadata model_slug outside an assistant message has no response authority', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify([
