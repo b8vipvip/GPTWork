@@ -1,6 +1,7 @@
 import {
   DEFAULT_POLICY,
   DEFAULT_SETTINGS,
+  modelTransportId,
   normalizeConcreteModelId,
   normalizePolicy,
   normalizeReasoningLevel,
