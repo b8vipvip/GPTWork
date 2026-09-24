@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/b8vipvip/ModelPro.git",
-  "ref": "main",
+  "ref": "7d6e68d53a393ef72ebbb4fb9091da92b560dbcb",
   "path": "src/model-verification.js",
-  "importPolicy": "Fix and test in ModelPro first, then import exact source into consumer."
+  "importPolicy": "Fix and test in ModelPro first, merge there, then import the exact canonical source into consumer repositories."
 }
