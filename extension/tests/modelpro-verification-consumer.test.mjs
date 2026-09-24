@@ -18,3 +18,5 @@ test('vendored ModelPro keeps GPT-5.5 first and supports growing catalog', () =>
   assert.equal(catalog.progress.total, 3);
   assert.equal(summarizeVerificationOutcome({total:3,verified:3,failed:0,requestConfirmed:3}).outcome, 'verified');
 });
+
+// Consumer boundary: reusable verification policy is imported from ModelPro; browser/network adapters remain local.
