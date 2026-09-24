@@ -252,6 +252,27 @@ export function tabFeatureEnabledSync(tabId) {
   return state.workModeEnabled || state.modelLockEnabled;
 }
 
+export function requestPolicyForTabSync(tabId, pageModel) {
+  const feature = masterEnabled ? tabFeatureStateSync(tabId) : normalizeState(null);
+  const selected = normalizeConcreteModelId(pageModel);
+  let lockedModels = [];
+
+  // Work follows the model selected in ChatGPT. It only raises models below the
+  // product floor to GPT-5.6 Sol; it must never upgrade an already-eligible page
+  // selection (for example GPT-6 Astra -> some other preferred Work model).
+  if (feature.workModeEnabled) {
+    lockedModels = selected ? [isAtLeastSol(selected) ? selected : 'gpt-5.6-sol'] : [];
+  } else if (feature.modelLockEnabled) {
+    // Model Lock is an allow-list, not a priority list. Lock only when the model
+    // currently selected by ChatGPT is explicitly present. Otherwise leave the
+    // request model untouched and do not use Work transports as a fallback.
+    const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
+    lockedModels = selected && allowed.includes(selected) ? [selected] : [];
+  }
+
+  return normalizePolicy({ ...basePolicy, lockedModels });
+}
+
 export function effectivePolicyForTabSync(tabId) {
   const feature = masterEnabled ? tabFeatureStateSync(tabId) : normalizeState(null);
   const active = [];
