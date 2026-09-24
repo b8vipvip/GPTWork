@@ -1652,7 +1652,7 @@ async function sendVerificationReasoningProbe(tabId, marker, ordinal, total) {
   });
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog, {
+async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
   // ModelPro owns reusable verification policy: deterministic catalog identity,
   // ordering and convergence. GPTWork supplies browser/network adapters below.
   const catalog = createVerificationCatalog({
