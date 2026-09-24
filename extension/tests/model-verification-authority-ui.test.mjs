@@ -498,3 +498,11 @@ test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle', 
   assert.match(background, /state\.lastForwardedRequest/);
   assert.doesNotMatch(background, /verification_sol_picker_b_unlock_started/);
 });
+
+
+test('v0.5.144 restores the validated ModelPro prompt-bank implementation', () => {
+  assert.match(background, /let verificationPromptBankCache = null/);
+  assert.match(background, /async function loadVerificationPromptBank\(\)/);
+  assert.match(background, /async function randomVerificationPrompt\(\)/);
+  assert.match(background, /chrome\.runtime\.getURL\('prompt-bank\.json'\)/);
+});
