@@ -1229,14 +1229,18 @@ document.addEventListener('pointerdown', (event) => {
     const pickerIsOpen = picker?.getAttribute?.('data-state') !== 'closed'
       && picker?.closest?.('[data-state="closed"][role="menu"]') == null;
     const alreadyVisibleRows = pickerIsOpen && alreadyVisibleAdvanced ? distinctModelRows(alreadyVisibleAdvanced) : [];
-    if (alreadyVisibleRows.length) {
-      pickerTopologyProbe('third-layer-reused', {
+    // The slider's advanced view is still picker A. v0.1.20 incorrectly promoted
+    // its two inline rows (GPT-5.6 Sol + GPT-5.5) to picker B merely because the
+    // advanced view was mounted. Picker B is ONLY the catalog opened by activating
+    // the unique accessible "选择模型 / Select model" opener.
+    if (alreadyVisibleRows.length && !initialOpener) {
+      pickerTopologyProbe('picker-mode-a-advanced-inline-list', {
         pageContext,
-        opener: compactElementProbe(initialOpener),
+        pickerMode: 'A',
         submenu: compactElementProbe(alreadyVisibleAdvanced),
         modelRows: alreadyVisibleRows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
       });
-      return { trigger, picker, opener: initialOpener, submenu: alreadyVisibleAdvanced, rows: alreadyVisibleRows, pageContext, pickerMode: 'B' };
+      return { trigger, picker, opener: null, submenu: alreadyVisibleAdvanced, rows: alreadyVisibleRows, pageContext, pickerMode: 'A' };
     }
 
     if (!initialOpener) {
@@ -1254,20 +1258,49 @@ document.addEventListener('pointerdown', (event) => {
     // Single ownership chain: the final model list does not exist for GPTWork until
     // this exact second-layer row is activated. No pre-existing/global menu can win.
     const beforeScopes = new Set(modelPopupScopes());
-    const opened = await modelPickerPointer(opener, 'click', 'model-picker-submenu');
-    if (!opened) return { trigger, picker, opener, submenu: null, rows: [] };
+    let activeOpener = opener;
+    let opened = await modelPickerPointer(activeOpener, 'click', 'model-picker-submenu');
+    if (!opened) {
+      // The first debugger attach can close the whole Radix picker, not merely replace
+      // its Select-model row. Reacquire in-place only while the owned picker remains
+      // visible; otherwise reopen the SAME composer picker once, then reacquire the
+      // same accessible Select-model row. This preserves the mature selector authority.
+      activeOpener = modelSubmenuOpener(picker);
+      pickerTopologyProbe('second-layer-reacquired', {
+        previousOpener: compactElementProbe(opener),
+        opener: compactElementProbe(activeOpener),
+      });
+      if (activeOpener && activeOpener !== opener) {
+        opened = await modelPickerPointer(activeOpener, 'click', 'model-picker-submenu-reacquired');
+      }
+      if (!opened && (!picker?.isConnected || !visible(picker))) {
+        pointerTrace('picker_reopen_after_debugger_attach', { trigger: compactElementProbe(trigger) });
+        const reopenBeforeScopes = new Set(modelPopupScopes());
+        const triggerNow = composerIntelligenceTrigger();
+        if (triggerNow && await modelPickerPointer(triggerNow, 'click', 'model-picker-trigger-reopen')) {
+          picker = await waitUntil(() => popupOwnedByTrigger(triggerNow, reopenBeforeScopes), 2200, 80);
+          activeOpener = modelSubmenuOpener(picker);
+          pickerTopologyProbe('second-layer-reopened', {
+            ownedPicker: compactElementProbe(picker),
+            opener: compactElementProbe(activeOpener),
+          });
+          if (activeOpener) opened = await modelPickerPointer(activeOpener, 'click', 'model-picker-submenu-after-reopen');
+        }
+      }
+    }
+    if (!opened) return { trigger, picker, opener: activeOpener || opener, submenu: null, rows: [] };
     const submenu = await waitUntil(
-      () => visibleModelSubmenu(picker, opener, beforeScopes),
+      () => visibleModelSubmenu(picker, activeOpener, beforeScopes),
       2400,
       80,
     );
     const rows = submenu ? distinctModelRows(submenu) : [];
     pickerTopologyProbe('third-layer-ready', {
-      opener: compactElementProbe(opener),
+      opener: compactElementProbe(activeOpener),
       submenu: compactElementProbe(submenu),
       modelRows: rows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
     });
-    return { trigger, picker, opener, submenu, rows, pageContext, pickerMode: 'B' };
+    return { trigger, picker, opener: activeOpener, submenu, rows, pageContext, pickerMode: 'B' };
   }
 
   function rowModelDescriptor(row) {
