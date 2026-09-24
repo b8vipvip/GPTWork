@@ -33,7 +33,7 @@ import {
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 
-const RUNTIME_CODE_VERSION = '0.5.143';
+const RUNTIME_CODE_VERSION = '0.5.144';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1661,6 +1661,26 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
     tabId, method: 'stop-button', stopped: stopped?.stopped === true, settled: Boolean(ok),
   });
   return { settled: Boolean(ok), method: 'stop-button', stopped: stopped?.stopped === true };
+}
+
+let verificationPromptBankCache = null;
+
+async function loadVerificationPromptBank() {
+  if (verificationPromptBankCache) return verificationPromptBankCache;
+  const response = await fetch(chrome.runtime.getURL('prompt-bank.json'));
+  if (!response.ok) throw new Error(`Prompt bank load failed: ${response.status}`);
+  const parsed = await response.json();
+  const prompts = Array.isArray(parsed) ? parsed : parsed?.prompts;
+  if (!Array.isArray(prompts) || prompts.length < 100) throw new Error('Prompt bank must contain at least 100 prompts');
+  verificationPromptBankCache = prompts.map((item) => String(item || '').trim()).filter(Boolean);
+  return verificationPromptBankCache;
+}
+
+async function randomVerificationPrompt() {
+  const bank = await loadVerificationPromptBank();
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return bank[bytes[0] % bank.length];
 }
 
 async function sendVerificationReasoningProbe(tabId, marker, ordinal, total) {
