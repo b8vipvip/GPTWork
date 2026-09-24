@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+const modelpro = await readFile(new URL('../vendor/modelpro/model-verification.js', import.meta.url), 'utf8');
 const networkMonitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
 const content = await readFile(new URL('../content.js', import.meta.url), 'utf8');
 const policy = await readFile(new URL('../policy.js', import.meta.url), 'utf8');
@@ -257,8 +258,8 @@ test('v0.5.95 verification dynamically converges a growing account model catalog
   assert.match(background, /discoverAccountCatalog\(tabId\)/);
   assert.match(background, /mergeCatalog\(rediscovered, 'post-turn'\)/);
   assert.match(background, /mergeCatalog\(rediscovered, 'settle'\)/);
-  assert.match(background, /progress\.total = queue\.length/);
-  assert.match(background, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
+  assert.match(modelpro, /progress\.total = queue\.length/);
+  assert.match(modelpro, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
 });
 
 
@@ -373,9 +374,9 @@ test('v0.5.104 ordinary typing does not trigger full page observation', () => {
 
 
 test('v0.5.105 dynamic catalog converges by stable model identity', () => {
-  assert.match(background, /function|const catalogIdentity/);
-  assert.match(background, /if \(model\) return \`model:\$\{model\}\`/);
-  assert.match(background, /if \(knownKeys\.has\(key\)\)/);
+  assert.match(modelpro, /function catalogIdentity/);
+  assert.match(modelpro, /if \(model\) return \`model:\$\{model\}\`/);
+  assert.match(modelpro, /if \(knownKeys\.has\(key\)\)/);
   assert.match(background, /uniqueModels: knownKeys\.size/);
   assert.doesNotMatch(background, /\[model \|\| '', rawModel \|\| '', selectorKey, label\]\.join/);
 });
@@ -414,7 +415,7 @@ test('v0.5.108 shares verified model metadata without treating it as account acc
   assert.match(accountClient, /publishSharedModels/);
   assert.match(background, /shared_model_catalog_published/);
   assert.match(background, /requestConfirmed === true/);
-  assert.match(background, /pickerModes/);
+  assert.match(modelpro, /pickerModes/);
   assert.match(catalogOptions, /当前账户仍需验证/);
 });
 
