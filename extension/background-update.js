@@ -735,7 +735,7 @@ export async function checkAndMaybeInstall(
       // A periodic policy/release fetch can fail after an update has already completed.
       // Do not turn a verified installed version back into "Update incomplete" merely
       // because the next network poll failed. The completed transaction remains the
-      // durable UI state; the poll failure is diagnostic-only and will be retried.
+      // durable UI state across scheduled checks; the poll failure is diagnostic-only and will be retried.
       if (completedCurrentTarget) {
         await setActionUpdateState({ available: false }, chromeApi).catch(() => {});
         logUpdate('warn', 'update_check_failed_after_completed_update', {
