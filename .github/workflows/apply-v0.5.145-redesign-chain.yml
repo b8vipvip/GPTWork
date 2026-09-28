@@ -20,3 +20,6 @@ jobs:
           fetch-depth: 0
       - name: Apply validated redesign chain
         run: bash .github/apply-v0.5.145.sh
+      - name: Confirm one-shot patch completed
+        if: always()
+        run: git status --short
