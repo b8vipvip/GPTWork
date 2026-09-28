@@ -7,6 +7,7 @@ const CONTENT_SCRIPT_FILES = [
   'floating-ui-master-state.js',
   'page-model-evidence.js',
   'astra-model-evidence.js',
+  'composer-send-compat.js',
   'context-budget.js',
   'private-context-budget-authority.js',
   'content.js',
