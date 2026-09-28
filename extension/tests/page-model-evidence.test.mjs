@@ -36,7 +36,11 @@ test('uses the chat2api composer and selected-state page objects as model eviden
   assert.match(adapterSource, /function evidenceValues/);
   assert.match(adapterSource, /element\.innerText/);
   assert.match(adapterSource, /element\.textContent/);
-  assert.match(adapterSource, /generic aria-label/);
+  assert.match(adapterSource, /function composerModelTrigger/);
+  assert.match(adapterSource, /button\[aria-haspopup='menu'\]/);
+  assert.match(adapterSource, /选择\.\*模型\|模型\.\*选择/);
+  assert.match(adapterSource, /composer-redesign-default-sol/);
+  assert.match(adapterSource, /open-picker-default-sol/);
   assert.match(adapterSource, /effectiveModels\.length === 1/);
   assert.match(adapterSource, /ambiguous-dom/);
 });
