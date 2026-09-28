@@ -1,6 +1,6 @@
 #define MyAppName "GPTWork"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.146"
+  #define MyAppVersion "0.5.147"
 #endif
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
@@ -418,43 +418,53 @@ begin
   AllowedOrigins := '"chrome-extension://{#ExtensionId}/"';
   if (StoreExtensionId <> '') and (StoreExtensionId <> '{#ExtensionId}') then
     AllowedOrigins := AllowedOrigins + ', "chrome-extension://' + StoreExtensionId + '/"';
-
   Json := '{' + #13#10 +
     '  "name": "com.gptlock.core",' + #13#10 +
-    '  "description": "GPTWork Native Core",' + #13#10 +
+    '  "description": "GPTWork Local Verification Core",' + #13#10 +
     '  "path": "' + BinaryPath + '",' + #13#10 +
     '  "type": "stdio",' + #13#10 +
     '  "allowed_origins": [' + AllowedOrigins + ']' + #13#10 +
     '}' + #13#10;
-  SaveStringToFile(ExpandConstant(FileName), Json, False);
+  if not SaveStringToFile(FileName, UTF8Encode(Json), False) then
+    RaiseException('无法写入 Native Messaging 清单 / Cannot write Native Messaging manifest');
+end;
+
+procedure RemoveUnselectedBrowserRegistration;
+begin
+  if not ChromeSelected() then
+  begin
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core');
+    DeleteFile(ExpandConstant('{app}\native-messaging\chrome.json'));
+  end;
+  if not EdgeSelected() then
+  begin
+    RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Edge\NativeMessagingHosts\com.gptlock.core');
+    DeleteFile(ExpandConstant('{app}\native-messaging\edge.json'));
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstall then
+  if CurStep = ssPostInstall then
   begin
-    InstallCompleted := False;
     if not SwapExtensionPayload then
-      RaiseException('无法切换 GPTWork 扩展目录；旧版本已保留 / Could not swap the GPTWork extension directory; the old version was preserved.');
-  end
-  else if CurStep = ssPostInstall then
-  begin
-    ForceDirectories(ExpandConstant('{app}\native-messaging'));
+      RaiseException('无法原子切换 GPTWork 扩展目录；旧扩展保持不变。请关闭占用扩展目录的程序后重试 / Could not atomically swap the GPTWork extension payload.');
+
+    RemoveUnselectedBrowserRegistration;
     if ChromeSelected() then
-      WriteNativeManifest('{app}\native-messaging\chrome.json', '{#ChromeStoreExtensionId}');
+      WriteNativeManifest(ExpandConstant('{app}\native-messaging\chrome.json'), '{#ChromeStoreExtensionId}');
     if EdgeSelected() then
-      WriteNativeManifest('{app}\native-messaging\edge.json', '{#EdgeStoreExtensionId}');
-    InstallCompleted := True;
-    FinishExtensionSwap;
+      WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'), '{#EdgeStoreExtensionId}');
     FinishNativeMessagingPause;
+    FinishExtensionSwap;
+    InstallCompleted := True;
   end;
 end;
 
 procedure DeinitializeSetup;
 begin
   if not InstallCompleted then
-  begin
     RollbackExtensionSwap;
+  if NativeMessagingPaused and not InstallCompleted then
     RestorePausedNativeMessaging;
-  end;
 end;
