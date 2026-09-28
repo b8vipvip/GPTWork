@@ -1,0 +1,88 @@
+name: Apply v0.5.148 CI repair
+
+on:
+  push:
+    branches:
+      - fix/v0.5.145-modelpro-0.1.44-redesign-sync
+    paths:
+      - .github/workflows/apply-v0.5.148-ci-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Repair lockfile and synchronize v0.5.148
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+
+          VERSION = '0.5.148'
+
+          # Extension manifest.
+          p = Path('extension/manifest.json')
+          obj = json.loads(p.read_text(encoding='utf-8'))
+          obj['version'] = VERSION
+          p.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          # Extension package.
+          p = Path('extension/package.json')
+          obj = json.loads(p.read_text(encoding='utf-8'))
+          obj['version'] = VERSION
+          p.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          # Runtime code version.
+          p = Path('extension/background.js')
+          s = p.read_text(encoding='utf-8')
+          s, n = re.subn(r"const RUNTIME_CODE_VERSION = '[0-9]+\.[0-9]+\.[0-9]+';", f"const RUNTIME_CODE_VERSION = '{VERSION}';", s, count=1)
+          if n != 1:
+              raise SystemExit('failed to synchronize RUNTIME_CODE_VERSION')
+          p.write_text(s, encoding='utf-8')
+
+          # Native core package version.
+          p = Path('native-core/Cargo.toml')
+          s = p.read_text(encoding='utf-8')
+          s, n = re.subn(r'(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"$', f'version = "{VERSION}"', s, count=1)
+          if n != 1:
+              raise SystemExit('failed to synchronize Cargo.toml version')
+          p.write_text(s, encoding='utf-8')
+
+          # Repair the corrupted fastrand checksum and synchronize the lockfile package version.
+          p = Path('native-core/Cargo.lock')
+          s = p.read_text(encoding='utf-8')
+          bad = '''[[package]]\nname = "fastrand"\nversion = "2.5.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"'''
+          good = '''[[package]]\nname = "fastrand"\nversion = "2.5.0"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"'''
+          if bad not in s:
+              raise SystemExit('expected corrupted fastrand checksum anchor not found')
+          s = s.replace(bad, good, 1)
+          s, n = re.subn(r'(\[\[package\]\]\nname = "gptwork-core"\nversion = ")[0-9]+\.[0-9]+\.[0-9]+("\n)', rf'\g<1>{VERSION}\g<2>', s, count=1)
+          if n != 1:
+              raise SystemExit('failed to synchronize Cargo.lock gptwork-core version')
+          p.write_text(s, encoding='utf-8')
+
+          # Windows installer fallback version.
+          p = Path('packaging/windows/GPTWork.iss')
+          s = p.read_text(encoding='utf-8')
+          s, n = re.subn(r'#define MyAppVersion "[0-9]+\.[0-9]+\.[0-9]+"', f'#define MyAppVersion "{VERSION}"', s, count=1)
+          if n != 1:
+              raise SystemExit('failed to synchronize installer version')
+          p.write_text(s, encoding='utf-8')
+
+          # Self-remove: the repair workflow is intentionally one-shot and must not remain in the product tree.
+          Path('.github/workflows/apply-v0.5.148-ci-repair.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: repair Cargo lock and synchronize v0.5.148"
+          git push origin HEAD:${{ github.ref_name }}
