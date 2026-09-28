@@ -32,8 +32,13 @@ import {
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
+import {
+  createVerificationCatalog,
+  summarizeVerificationOutcome,
+  createModelVerificationHistoryRecord,
+} from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.148';
+const RUNTIME_CODE_VERSION = '0.5.149';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1720,100 +1725,21 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
 }
 
 async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
-  // v0.5.95: ChatGPT can expose only a starter catalog in a fresh chat and unlock
-  // additional models/reasoning after real turns. Treat discovery as a growing set,
-  // not a one-time snapshot. Network metadata remains the sole verification authority.
-  const queue = [];
-  const knownKeys = new Set();
-  const reasoningLevels = new Set();
-
-  const catalogIdentity = ({ model, rawModel, selectorKey, label }) => {
-    // A concrete backend model is the stable identity. Picker labels/selectors may
-    // change after each real turn (badges, retirement copy, localization), and must
-    // never turn one model into a new verification attempt.
-    if (model) return `model:${model}`;
-    if (rawModel) return `raw:${rawModel}`;
-    const selector = String(selectorKey || '').trim().toLowerCase();
-    if (selector) return `selector:${selector}`;
-    return `label:${String(label || '').trim().toLowerCase()}`;
-  };
-  const progress = state.autoVerification.catalogVerification = {
-    total: 0,
-    completed: 0,
-    requestConfirmed: 0,
-    verified: 0,
-    failed: 0,
-    currentModel: null,
-    currentSelectorKey: null,
-    currentLabel: null,
-    results: [],
-    discoveryPasses: 0,
-    stablePasses: 0,
-    reasoningLevels: [],
-    pickerModes: [],
-    workDiscovery: { attempted: false, entered: false, reason: 'pending_after_gpt_5_5' },
-  };
+  // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
+  // browser, Work activation, request interception and response evidence adapters.
+  const catalog = createVerificationCatalog({
+    normalizeModel: normalizeConcreteModelId,
+    onMerged: ({ phase, added, total, reasoningLevels }) => {
+      state.autoVerification.maxAttempts = total;
+      logRuntime('info', 'verification', 'account_model_catalog_merged', {
+        tabId, phase, added, total, reasoningLevels,
+      });
+    },
+  });
+  const { queue, knownKeys, progress } = catalog;
+  state.autoVerification.catalogVerification = progress;
+  const mergeCatalog = catalog.merge;
   let workActivationPending = false;
-
-  const verificationChronology = (item) => {
-    const model = normalizeConcreteModelId(item?.model || item?.rawModel);
-    // GPT-5.5 is destructive to picker-B availability in current ChatGPT: verify
-    // it first while it is still discoverable. All remaining GPT generations are
-    // ordered oldest -> newest by their public version lineage; variant name is
-    // only a deterministic tie-breaker inside the same generation.
-    if (model === 'gpt-5.5') return [-1, 5, 5, ''];
-    const match = /^gpt-(\d+)(?:\.(\d+))?(?:-(.*))?$/.exec(model || '');
-    if (!match) return [1, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, model || item?.label || ''];
-    return [0, Number(match[1]), Number(match[2] || 0), String(match[3] || '')];
-  };
-  const sortVerificationQueue = () => {
-    const completed = new Set(progress.results.map((result) => catalogIdentity(result)));
-    const pending = queue.filter((item) => !completed.has(catalogIdentity(item)));
-    const done = queue.filter((item) => completed.has(catalogIdentity(item)));
-    pending.sort((left, right) => {
-      const a = verificationChronology(left);
-      const b = verificationChronology(right);
-      for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return a[i] - b[i];
-      return String(a[3]).localeCompare(String(b[3]));
-    });
-    queue.splice(0, queue.length, ...done, ...pending);
-  };
-
-  const mergeCatalog = (catalog, phase) => {
-    let added = 0;
-    if (['A', 'B'].includes(catalog?.pickerMode) && !progress.pickerModes.includes(catalog.pickerMode)) progress.pickerModes.push(catalog.pickerMode);
-    for (const level of (catalog?.reasoningLevels || [])) reasoningLevels.add(level);
-    for (const row of (Array.isArray(catalog?.rows) ? catalog.rows : [])) {
-      const model = normalizeConcreteModelId(row?.model || row?.rawId);
-      const rawModel = normalizeConcreteModelId(row?.rawId);
-      const selectorKey = String(row?.selectorKey || '').trim().slice(0, 200);
-      const label = String(row?.label || model || selectorKey || '').trim().slice(0, 160);
-      if (!model && !selectorKey && !label) continue;
-      const key = catalogIdentity({ model, rawModel, selectorKey, label });
-      if (knownKeys.has(key)) {
-        // Refresh the not-yet-run row with the newest picker locator without
-        // increasing the terminal workload.
-        const existing = queue.find((item) => catalogIdentity(item) === key);
-        if (existing && !progress.results.some((result) => catalogIdentity(result) === key)) {
-          existing.rawModel = rawModel || existing.rawModel;
-          existing.selectorKey = selectorKey || existing.selectorKey;
-          existing.label = label || existing.label;
-        }
-        continue;
-      }
-      knownKeys.add(key);
-      queue.push({ model, rawModel, selectorKey, label, pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : catalog?.pickerMode || null });
-      added += 1;
-    }
-    sortVerificationQueue();
-    progress.total = queue.length;
-    progress.reasoningLevels = [...reasoningLevels];
-    state.autoVerification.maxAttempts = queue.length;
-    logRuntime('info', 'verification', 'account_model_catalog_merged', {
-      tabId, phase, added, total: queue.length, reasoningLevels: progress.reasoningLevels,
-    });
-    return added;
-  };
 
   mergeCatalog(accountCatalog, 'initial');
   await broadcastTabState(tabId);
@@ -2197,49 +2123,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 }
 
 function modelVerificationHistoryRecord(tabId, autoVerification) {
-  const catalog = autoVerification?.catalogVerification || {};
-  const record = {
-    id: `${autoVerification?.startedAt || new Date().toISOString()}:${tabId}`,
-    tabId,
-    startedAt: autoVerification?.startedAt ?? null,
-    completedAt: autoVerification?.completedAt ?? null,
-    outcome: autoVerification?.outcome ?? 'unverified',
-    reason: autoVerification?.reason ?? null,
-    total: Number(catalog.total || 0),
-    verified: Number(catalog.verified || 0),
-    failed: Number(catalog.failed || 0),
-    pageContext: autoVerification?.pageContext ?? null,
-    pickerModes: Array.isArray(catalog.pickerModes) ? [...catalog.pickerModes] : [],
-    results: (Array.isArray(catalog.results) ? catalog.results : []).map((item) => ({
-      model: item.model ?? null,
-      rawModel: item.rawModel ?? null,
-      selectorKey: item.selectorKey ?? null,
-      label: item.label ?? item.model ?? item.requestModel ?? 'Unknown model',
-      verified: item.verified === true,
-      requestConfirmed: item.requestConfirmed === true,
-      responseConfirmed: item.responseConfirmed === true,
-      requestId: item.requestId ?? null,
-      requestModel: item.requestModel ?? null,
-      networkObservedRequestModel: item.networkObservedRequestModel ?? null,
-      responseModel: item.responseModel ?? null,
-      evidenceModel: item.evidenceModel ?? null,
-      responseReasoning: item.responseReasoning ?? null,
-      responseVerdict: item.responseVerdict ?? null,
-      responseIssue: item.responseIssue ?? null,
-      evidenceSource: item.evidenceSource ?? null,
-      pickerMode: item.pickerMode ?? null,
-      timedOut: item.timedOut === true,
-      turnSettled: item.turnSettled === true,
-      error: item.error ?? null,
-    })),
-  };
-  record.report = {
-    schemaVersion: 1,
-    type: 'gptwork-model-verification-report',
-    generatedAt: record.completedAt || new Date().toISOString(),
-    verification: { ...record },
-  };
-  return record;
+  return createModelVerificationHistoryRecord(tabId, autoVerification, {
+    reportType: 'gptwork-model-verification-report',
+  });
 }
 
 async function persistModelVerificationHistory(tabId, autoVerification) {
@@ -2357,20 +2243,9 @@ async function autoVerify(tabId) {
   const lastResult = catalogVerification.results.at(-1) ?? null;
   const lastVerified = successful.at(-1) ?? null;
   const lastRequestConfirmed = requestConfirmedResults.at(-1) ?? null;
-  const finalOutcome = catalogVerification.total === 0
-    ? 'unverified'
-    : catalogVerification.failed === 0 && catalogVerification.verified === catalogVerification.total
-      ? 'verified'
-      : catalogVerification.verified > 0
-        ? 'partial'
-        : 'unverified';
-  const finalReason = catalogVerification.total === 0
-    ? 'account_model_catalog_empty'
-    : catalogVerification.failed
-      ? catalogVerification.requestConfirmed === catalogVerification.total
-        ? 'response_model_evidence_incomplete'
-        : 'account_model_verification_incomplete'
-      : null;
+  const verificationSummary = summarizeVerificationOutcome(catalogVerification);
+  const finalOutcome = verificationSummary.outcome;
+  const finalReason = verificationSummary.reason;
 
   state.autoVerification.running = false;
   state.autoVerification.completedAt = new Date().toISOString();
