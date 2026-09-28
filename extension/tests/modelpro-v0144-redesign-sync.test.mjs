@@ -4,15 +4,16 @@ import test from 'node:test';
 
 const r = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
-test('v0.5.145 ports live-validated ModelPro v0.1.44 redesign authority', async () => {
+test('current GPTWork version ports live-validated ModelPro v0.1.44 redesign authority', async () => {
   const [background, content, network, evidence, manifestText, packageText] = await Promise.all([
     r('background.js'), r('content.js'), r('network-monitor.js'), r('page-model-evidence.js'),
     r('manifest.json'), r('package.json'),
   ]);
   const manifest = JSON.parse(manifestText);
   const pkg = JSON.parse(packageText);
-  assert.equal(manifest.version, '0.5.145');
-  assert.equal(pkg.version, '0.5.145');
+  assert.equal(manifest.version, pkg.version);
+  assert.match(manifest.version, /^0\.5\.\d+$/);
+  assert.ok(background.includes(`const RUNTIME_CODE_VERSION = '${manifest.version}'`));
   assert.ok(manifest.content_scripts[0].js.includes('composer-send-compat.js'));
   assert.match(content, /picker-mode-a-redesigned-direct-chat-list/);
   assert.match(content, /verification_model_selection_deferred_to_network/);
