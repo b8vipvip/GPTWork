@@ -10,6 +10,7 @@ const settings = await readFile(new URL('../settings-v0521.html', import.meta.ur
 const popup = await readFile(new URL('../popup-v0513.html', import.meta.url), 'utf8');
 const popupJs = await readFile(new URL('../popup.js', import.meta.url), 'utf8');
 const historyUi = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
+const verificationPolicy = await readFile(new URL('../vendor/modelpro/model-verification.js', import.meta.url), 'utf8');
 
 test('model verification separates request confirmation from backend response verification', () => {
   assert.match(content, /selectionAttempted/);
@@ -256,8 +257,8 @@ test('v0.5.95 verification dynamically converges a growing account model catalog
   assert.match(background, /discoverAccountCatalog\(tabId\)/);
   assert.match(background, /mergeCatalog\(rediscovered, 'post-turn'\)/);
   assert.match(background, /mergeCatalog\(rediscovered, 'settle'\)/);
-  assert.match(background, /progress\.total = queue\.length/);
-  assert.match(background, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
+  assert.match(verificationPolicy, /progress\.total = queue\.length/);
+  assert.match(verificationPolicy, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
 });
 
 
@@ -372,11 +373,11 @@ test('v0.5.104 ordinary typing does not trigger full page observation', () => {
 
 
 test('v0.5.105 dynamic catalog converges by stable model identity', () => {
-  assert.match(background, /function|const catalogIdentity/);
-  assert.match(background, /if \(model\) return \`model:\$\{model\}\`/);
-  assert.match(background, /if \(knownKeys\.has\(key\)\)/);
+  assert.match(verificationPolicy, /function catalogIdentity/);
+  assert.match(verificationPolicy, /if \(model\) return \`model:\$\{model\}\`/);
+  assert.match(verificationPolicy, /if \(knownKeys\.has\(key\)\)/);
   assert.match(background, /uniqueModels: knownKeys\.size/);
-  assert.doesNotMatch(background, /\[model \|\| '', rawModel \|\| '', selectorKey, label\]\.join/);
+  assert.doesNotMatch(verificationPolicy, /\[model \|\| '', rawModel \|\| '', selectorKey, label\]\.join/);
 });
 
 test('v0.5.105 progress UI separates executed work from growing discovery', () => {
@@ -413,7 +414,7 @@ test('v0.5.108 shares verified model metadata without treating it as account acc
   assert.match(accountClient, /publishSharedModels/);
   assert.match(background, /shared_model_catalog_published/);
   assert.match(background, /requestConfirmed === true/);
-  assert.match(background, /pickerModes/);
+  assert.match(verificationPolicy, /pickerModes/);
   assert.match(catalogOptions, /当前账户仍需验证/);
 });
 
