@@ -17,7 +17,7 @@ test('auto verification checks the actual visible prompt text rather than a sema
   const block = content.slice(start, end);
 
   assert.match(block, /const probeMarker = typeof options\.probeMarker/);
-  assert.match(block, /const composerWitness = probeText\.slice\(0, 120\)/);
+  assert.match(block, /const composerWitness = probeText\.includes\(probeMarker\) \? probeMarker : probeText\.slice\(0, 120\)/);
   assert.match(block, /composerText\(composer\)\.includes\(composerWitness\)/);
   assert.match(block, /!current\.includes\(composerWitness\)/);
   assert.doesNotMatch(block, /composerText\(composer\)\.includes\(probeMarker\)/);
