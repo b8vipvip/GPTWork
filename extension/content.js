@@ -1803,9 +1803,12 @@ document.addEventListener('pointerdown', (event) => {
       const probeMarker = typeof options.probeMarker === 'string' && options.probeMarker.trim()
         ? options.probeMarker.trim().slice(0, 120)
         : 'GPTWork 自动验证';
+      // probeMarker is a semantic operation label. Randomized verification prompts do not
+      // contain it, so use text that is actually written into the composer as the liveness witness.
+      const composerWitness = probeText.includes(probeMarker) ? probeMarker : probeText.slice(0, 120);
 
       setComposerText(composer, probeText);
-      const filled = await waitUntil(() => composerText(composer).includes(probeMarker), 2500, 80);
+      const filled = await waitUntil(() => composerText(composer).includes(composerWitness), 2500, 80);
       if (!filled) throw new Error('Failed to write visible test message / 无法写入可见测试消息');
 
       const sendButton = await waitUntil(findSendButton, 5000, 100);
@@ -1818,7 +1821,7 @@ document.addEventListener('pointerdown', (event) => {
       const sent = await waitUntil(() => {
         const currentComposer = findComposer();
         const current = composerText(currentComposer);
-        return !current.includes(probeMarker) || Boolean(visibleGeneratingControl());
+        return !current.includes(composerWitness) || Boolean(visibleGeneratingControl());
       }, 5000, 100);
       if (!sent) {
         if (draftPreserved) setComposerText(composer, originalDraft);
