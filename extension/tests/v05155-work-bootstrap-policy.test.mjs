@@ -4,6 +4,8 @@ import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
+// Regression guard from the v0.5.154 live run: only the one-shot Work bootstrap
+// may widen from page-following runtime policy to the effective Work policy.
 test('verification Work bootstrap uses effective Work policy while normal traffic keeps page-following policy', () => {
   const start = background.indexOf('getLockConfiguration(tabId) {');
   const end = background.indexOf('getVerificationTransaction(tabId)', start);
