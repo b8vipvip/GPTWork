@@ -1442,7 +1442,34 @@ document.addEventListener('pointerdown', (event) => {
         return { attempted: true, observation };
       }
       const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
-      if (!attempted) return { attempted: false, observation: collectObservation() };
+      if (!attempted) {
+        const observation = collectObservation();
+        // Live v0.5.149 evidence shows the redesigned direct Chat list can expose the
+        // exact composer-owned Picker A radio row while Chromium's post-debugger
+        // elementFromPoint readiness gate returns no stable hit. Picker A verification
+        // already owns an explicit network transaction for the same concrete model, so
+        // allow only these two direct-Chat rows to continue to network evidence. Picker B
+        // still requires a real UI selection because it mutates Work's model state.
+        const networkDeferredAfterPointerReject = modern.pickerMode === 'A'
+          && (desired === 'gpt-5.5' || desired === 'gpt-5.6-sol')
+          && candidate.isConnected
+          && visible(candidate)
+          && modern.picker?.contains?.(candidate) === true;
+        pointerTrace(
+          networkDeferredAfterPointerReject
+            ? 'verification_model_selection_deferred_to_network'
+            : 'verification_model_selection_unconfirmed',
+          {
+            source: 'verification-model-row-pointer-rejected', desired, selectorKey: wantedKey, label: wantedLabel,
+            pickerMode: modern.pickerMode || null,
+            reason: networkDeferredAfterPointerReject ? 'owned_picker_a_row_pointer_hit_test_unavailable' : 'pointer_dispatch_rejected',
+            observation,
+          },
+        );
+        if (!networkDeferredAfterPointerReject) return { attempted: false, observation, uiConfirmed: false };
+        await closeModelMenus(modern.trigger);
+        return { attempted: true, observation, uiConfirmed: false, networkDeferred: true };
+      }
       // Never keep using the pre-click row as a liveness authority. Radix replaces or
       // collapses picker nodes during the transition; after the mandatory settle delay,
       // re-open/reacquire on any later verification step instead of timing out on a stale

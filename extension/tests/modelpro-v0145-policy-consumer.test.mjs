@@ -32,7 +32,7 @@ test('v0.5.149 consumes the exact ModelPro v0.1.45 verification policy seam', as
   assert.match(background, /reportType: 'gptwork-model-verification-report'/);
 });
 
-test('v0.5.149 release surfaces stay version coherent', async () => {
+test('current release surfaces stay version coherent while the ModelPro v0.1.45 seam remains pinned', async () => {
   const [manifestText, packageText, background, cargoToml, cargoLock, installer] = await Promise.all([
     read('manifest.json'),
     read('package.json'),
@@ -41,10 +41,11 @@ test('v0.5.149 release surfaces stay version coherent', async () => {
     readRepo('native-core/Cargo.lock'),
     readRepo('packaging/windows/GPTWork.iss'),
   ]);
-  assert.equal(JSON.parse(manifestText).version, '0.5.149');
-  assert.equal(JSON.parse(packageText).version, '0.5.149');
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.149';/);
-  assert.match(cargoToml, /version = "0\.5\.149"/);
-  assert.match(cargoLock, /name = "gptwork-core"\nversion = "0\.5\.149"/);
-  assert.match(installer, /#define MyAppVersion "0\.5\.149"/);
+  const version = JSON.parse(manifestText).version;
+  const escapedVersion = version.replaceAll('.', '\\.');
+  assert.equal(JSON.parse(packageText).version, version);
+  assert.match(background, new RegExp(`const RUNTIME_CODE_VERSION = '${escapedVersion}';`));
+  assert.match(cargoToml, new RegExp(`version = \"${escapedVersion}\"`));
+  assert.match(cargoLock, new RegExp(`name = \"gptwork-core\"\\nversion = \"${escapedVersion}\"`));
+  assert.match(installer, new RegExp(`#define MyAppVersion \"${escapedVersion}\"`));
 });
