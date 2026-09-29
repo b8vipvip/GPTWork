@@ -21,6 +21,7 @@ test('verification Work bootstrap uses effective Work policy while normal traffi
   assert.match(block, /preserveReasoning: workBootstrap/);
 });
 
+// Visible-model success is not terminal success if the Work catalog was never entered.
 test('failed Work discovery cannot be reported as a fully verified account', () => {
   assert.match(background, /catalogVerification\?\.workDiscovery\?\.attempted === true/);
   assert.match(background, /catalogVerification\.workDiscovery\.entered !== true/);
