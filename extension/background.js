@@ -38,7 +38,7 @@ import {
   createModelVerificationHistoryRecord,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.155';
+const RUNTIME_CODE_VERSION = '0.5.156';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -969,16 +969,28 @@ const networkMonitor = new ChatGptNetworkMonitor({
     const policy = workBootstrap
       ? effectivePolicyForTabSync(tabId)
       : runtimePolicyForTabSync(tabId);
+    // The Work bootstrap is not an allow-list pass. It must make one
+    // concrete Work transport request so ChatGPT enters the Work profile.
+    // If the tab-feature runtime was rehydrated during an update, fall back
+    // to the product Work default instead of silently sending the visible
+    // Chat model unchanged. Ordinary traffic never takes this branch.
+    const workBootstrapModel = workBootstrap
+      ? normalizeConcreteModelId(policy.lockedModels?.[0])
+        ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0])
+      : null;
     return {
-      lockedModels: policy.lockedModels,
+      lockedModels: workBootstrapModel ? [workBootstrapModel] : policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
       preferredReasoning: workBootstrap ? null : currentSettings.preferredReasoning,
       preserveModel: false,
       preserveReasoning: workBootstrap,
       bypassRewrite: false,
-      forceModel: null,
+      forceModel: workBootstrapModel,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
-      knownModels: [...sharedKnownModelIds],
+      knownModels: [...new Set([
+        ...sharedKnownModelIds,
+        ...(workBootstrapModel ? [workBootstrapModel] : []),
+      ])],
     };
   },
   getVerificationTransaction(tabId) {
