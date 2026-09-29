@@ -38,7 +38,7 @@ import {
   createModelVerificationHistoryRecord,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.153';
+const RUNTIME_CODE_VERSION = '0.5.154';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -67,6 +67,9 @@ const tabStates = new Map();
 // temporarily change request-lock behavior while a catalog model is being probed.
 // It is intentionally independent of URL/context state migration.
 const verificationTransactions = new Map();
+// Automatic model verification is single-flight per tab. Register the task before
+// autoVerify() can yield so duplicate starts join one picker/composer transaction.
+const autoVerificationTasks = new Map();
 // One-shot Work bootstrap follows normal Work policy outside verification authority.
 const workBootstrapTabs = new Set();
 const accountClient = createAccountClient();
@@ -2823,7 +2826,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (tabId === null) throw new Error('No ChatGPT tab / 没有打开的 ChatGPT 标签页');
         const state = tabStates.get(tabId);
         if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
-        return autoVerify(tabId);
+        const existingTask = autoVerificationTasks.get(tabId);
+        if (existingTask) {
+          logRuntime('info', 'verification', 'auto_verify_duplicate_joined', {
+            tabId,
+            running: Boolean(state.autoVerification?.running),
+          });
+          return existingTask;
+        }
+        const task = autoVerify(tabId);
+        autoVerificationTasks.set(tabId, task);
+        try {
+          return await task;
+        } finally {
+          if (autoVerificationTasks.get(tabId) === task) autoVerificationTasks.delete(tabId);
+        }
       }
       case 'GPTLOCK_SEND_BLOCKED': {
         logRuntime('warn', 'guard', 'send_blocked_in_page', {
