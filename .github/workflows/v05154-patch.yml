@@ -1,0 +1,123 @@
+name: v05154-patch
+
+on:
+  push:
+    branches:
+      - 'fix/v0.5.154-auto-verify-single-flight'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 'fix/v0.5.154-auto-verify-single-flight'
+          fetch-depth: 0
+      - name: Patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_one(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'missing expected text in {path}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          p = Path('extension/background.js')
+          text = p.read_text(encoding='utf-8')
+          replace_version_old = "const RUNTIME_CODE_VERSION = '0.5.153';"
+          if replace_version_old not in text:
+              raise SystemExit('runtime version anchor missing')
+          text = text.replace(replace_version_old, "const RUNTIME_CODE_VERSION = '0.5.154';", 1)
+
+          anchor = "const verificationTransactions = new Map();\n"
+          addition = anchor + "// Automatic model verification is single-flight per tab. Register the task before\n// autoVerify() can yield so duplicate starts join one picker/composer transaction.\nconst autoVerificationTasks = new Map();\n"
+          if anchor not in text:
+              raise SystemExit('verification transaction anchor missing')
+          text = text.replace(anchor, addition, 1)
+
+          old = """      case 'GPTLOCK_AUTO_VERIFY': {
+        const tabId = await chatGptTabId(Number.isInteger(message.tabId) ? message.tabId : null);
+        if (tabId === null) throw new Error('No ChatGPT tab / 没有打开的 ChatGPT 标签页');
+        const state = tabStates.get(tabId);
+        if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
+        return autoVerify(tabId);
+      }"""
+          new = """      case 'GPTLOCK_AUTO_VERIFY': {
+        const tabId = await chatGptTabId(Number.isInteger(message.tabId) ? message.tabId : null);
+        if (tabId === null) throw new Error('No ChatGPT tab / 没有打开的 ChatGPT 标签页');
+        const state = tabStates.get(tabId);
+        if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
+        const existingTask = autoVerificationTasks.get(tabId);
+        if (existingTask) {
+          logRuntime('info', 'verification', 'auto_verify_duplicate_joined', {
+            tabId,
+            running: Boolean(state.autoVerification?.running),
+          });
+          return existingTask;
+        }
+        const task = autoVerify(tabId);
+        autoVerificationTasks.set(tabId, task);
+        try {
+          return await task;
+        } finally {
+          if (autoVerificationTasks.get(tabId) === task) autoVerificationTasks.delete(tabId);
+        }
+      }"""
+          if old not in text:
+              raise SystemExit('auto verify router anchor missing')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8')
+
+          replace_one('extension/manifest.json', '"version": "0.5.153"', '"version": "0.5.154"')
+          replace_one('extension/package.json', '"version": "0.5.153"', '"version": "0.5.154"')
+          replace_one('native-core/Cargo.toml', 'version = "0.5.153"', 'version = "0.5.154"')
+          replace_one('native-core/Cargo.lock', 'name = "gptwork-core"\nversion = "0.5.153"', 'name = "gptwork-core"\nversion = "0.5.154"')
+          replace_one('packaging/windows/GPTWork.iss', '#define MyAppVersion "0.5.153"', '#define MyAppVersion "0.5.154"')
+
+          Path('extension/tests/v05154-auto-verify-single-flight.test.mjs').write_text("""import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import test from 'node:test';
+
+          const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+
+          test('v0.5.154 serializes automatic model verification per tab', () => {
+            assert.match(background, /const autoVerificationTasks = new Map\\(\\)/);
+            const start = background.indexOf(\"case 'GPTLOCK_AUTO_VERIFY'\");
+            const end = background.indexOf(\"case 'GPTLOCK_SEND_BLOCKED'\", start);
+            assert.ok(start >= 0 && end > start);
+            const block = background.slice(start, end);
+            assert.match(block, /autoVerificationTasks\\.get\\(tabId\\)/);
+            assert.match(block, /auto_verify_duplicate_joined/);
+            assert.match(block, /const task = autoVerify\\(tabId\\)/);
+            assert.match(block, /autoVerificationTasks\\.set\\(tabId, task\\)/);
+            assert.match(block, /return await task/);
+            assert.match(block, /autoVerificationTasks\\.get\\(tabId\\) === task/);
+            assert.match(block, /autoVerificationTasks\\.delete\\(tabId\\)/);
+          });
+
+          test('v0.5.154 registers the task before awaiting it', () => {
+            const start = background.indexOf(\"case 'GPTLOCK_AUTO_VERIFY'\");
+            const end = background.indexOf(\"case 'GPTLOCK_SEND_BLOCKED'\", start);
+            const block = background.slice(start, end);
+            const createAt = block.indexOf('const task = autoVerify(tabId)');
+            const setAt = block.indexOf('autoVerificationTasks.set(tabId, task)');
+            const awaitAt = block.indexOf('return await task');
+            assert.ok(createAt >= 0 && setAt > createAt && awaitAt > setAt);
+          });
+          """, encoding='utf-8')
+          PY
+          cd extension
+          node --test tests/v05154-auto-verify-single-flight.test.mjs
+          cd ..
+          rm -f .github/workflows/v05154-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'v0.5.154: serialize automatic verification per tab'
+          git push origin HEAD:fix/v0.5.154-auto-verify-single-flight
