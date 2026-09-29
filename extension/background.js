@@ -38,7 +38,7 @@ import {
   createModelVerificationHistoryRecord,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.154';
+const RUNTIME_CODE_VERSION = '0.5.155';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -963,13 +963,18 @@ async function applyNetworkEvidence(tabId, evidence) {
 
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
-    const policy = runtimePolicyForTabSync(tabId);
+    const workBootstrap = workBootstrapTabs.has(Number(tabId));
+    // Verification's one-shot Work bootstrap must use the effective Work policy;
+    // ordinary traffic and verification transactions keep runtimePolicyForTabSync.
+    const policy = workBootstrap
+      ? effectivePolicyForTabSync(tabId)
+      : runtimePolicyForTabSync(tabId);
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: workBootstrapTabs.has(Number(tabId)) ? null : currentSettings.preferredReasoning,
+      preferredReasoning: workBootstrap ? null : currentSettings.preferredReasoning,
       preserveModel: false,
-      preserveReasoning: workBootstrapTabs.has(Number(tabId)),
+      preserveReasoning: workBootstrap,
       bypassRewrite: false,
       forceModel: null,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
@@ -2247,8 +2252,15 @@ async function autoVerify(tabId) {
   const lastVerified = successful.at(-1) ?? null;
   const lastRequestConfirmed = requestConfirmedResults.at(-1) ?? null;
   const verificationSummary = summarizeVerificationOutcome(catalogVerification);
-  const finalOutcome = verificationSummary.outcome;
-  const finalReason = verificationSummary.reason;
+  let finalOutcome = verificationSummary.outcome;
+  let finalReason = verificationSummary.reason;
+  if (
+    catalogVerification?.workDiscovery?.attempted === true
+    && catalogVerification.workDiscovery.entered !== true
+  ) {
+    finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
+    finalReason = 'work_model_discovery_incomplete';
+  }
 
   state.autoVerification.running = false;
   state.autoVerification.completedAt = new Date().toISOString();
