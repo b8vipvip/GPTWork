@@ -1,15 +1,18 @@
 name: stage-v05157-source-repair
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - fix/v0.5.157-work-bootstrap-transaction-authority
+    paths:
+      - .github/workflows/stage-v05157-source-repair.yml
 
 permissions:
   contents: write
 
 jobs:
-  patch:
+  repair-source:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,140 +20,218 @@ jobs:
           ref: fix/v0.5.157-work-bootstrap-transaction-authority
           fetch-depth: 0
 
-      - name: Apply v0.5.157 source repair
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Apply single-authority Work bootstrap repair
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'extension/background.js';
+          let source = fs.readFileSync(path, 'utf8');
 
-          bg_path = Path('extension/background.js')
-          bg = bg_path.read_text(encoding='utf-8')
+          function replaceOnce(oldText, newText, label) {
+            const first = source.indexOf(oldText);
+            if (first < 0) throw new Error(`missing source anchor: ${label}`);
+            if (source.indexOf(oldText, first + oldText.length) >= 0) {
+              throw new Error(`non-unique source anchor: ${label}`);
+            }
+            source = source.slice(0, first) + newText + source.slice(first + oldText.length);
+          }
 
-          if "const RUNTIME_CODE_VERSION = '0.5.156';" not in bg:
-              raise SystemExit('unexpected background version')
+          function replaceBetween(startText, endText, newText, label) {
+            const start = source.indexOf(startText);
+            if (start < 0) throw new Error(`missing start anchor: ${label}`);
+            const end = source.indexOf(endText, start + startText.length);
+            if (end < 0) throw new Error(`missing end anchor: ${label}`);
+            source = source.slice(0, start) + newText + source.slice(end);
+          }
 
-          old_decl = """// One-shot Work bootstrap follows normal Work policy outside verification authority.\nconst workBootstrapTabs = new Set();\n"""
-          new_decl = """// Work bootstrap uses the same per-tab verification transaction authority as every\n// catalog probe. There is no parallel bootstrap lock path.\n"""
-          if bg.count(old_decl) != 1:
-              raise SystemExit('unexpected workBootstrapTabs declaration count')
-          bg = bg.replace(old_decl, new_decl)
+          replaceOnce(
+            "// One-shot Work bootstrap follows normal Work policy outside verification authority.\nconst workBootstrapTabs = new Set();\n",
+            "",
+            'legacy Work bootstrap Set',
+          );
 
-          anchor = """function verificationTransactionForTab(tabId) {\n  return verificationTransactions.get(Number(tabId)) || null;\n}\n\n"""
-          helper = """function verificationTransactionForTab(tabId) {\n  return verificationTransactions.get(Number(tabId)) || null;\n}\n\nfunction workBootstrapModelForTab(tabId) {\n  const policy = effectivePolicyForTabSync(tabId);\n  return normalizeConcreteModelId(policy.lockedModels?.[0])\n    ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0]);\n}\n\nfunction beginWorkBootstrapTransaction(tabId) {\n  const key = Number(tabId);\n  const previous = verificationTransactions.get(key) || null;\n  const model = workBootstrapModelForTab(tabId);\n  if (!model) throw new Error('work_bootstrap_model_unavailable');\n  const transaction = {\n    model,\n    selectorKey: '',\n    label: 'Work bootstrap',\n    startedAt: Date.now(),\n    phase: 'work-bootstrap',\n  };\n  verificationTransactions.set(key, transaction);\n  logRuntime('info', 'verification', 'verification_work_bootstrap_authority_started', {\n    tabId: key,\n    model,\n    replacedModel: previous?.model ?? null,\n  });\n  return {\n    model,\n    restore() {\n      const current = verificationTransactions.get(key);\n      if (current !== transaction) return;\n      if (previous) verificationTransactions.set(key, previous);\n      else verificationTransactions.delete(key);\n      logRuntime('info', 'verification', 'verification_work_bootstrap_authority_restored', {\n        tabId: key,\n        model,\n        restoredModel: previous?.model ?? null,\n      });\n    },\n  };\n}\n\n"""
-          if bg.count(anchor) != 1:
-              raise SystemExit('verification transaction anchor mismatch')
-          bg = bg.replace(anchor, helper)
+          const transactionHelper = `function verificationTransactionForTab(tabId) {
+            return verificationTransactions.get(Number(tabId)) || null;
+          }
 
-          lock_pattern = re.compile(
-              r"  getLockConfiguration\(tabId\) \{\n.*?\n  \},\n  getVerificationTransaction\(tabId\) \{",
-              re.S,
-          )
-          lock_replacement = """  getLockConfiguration(tabId) {\n    const policy = runtimePolicyForTabSync(tabId);\n    return {\n      lockedModels: policy.lockedModels,\n      allowedReasoningLevels: policy.allowedReasoningLevels,\n      preferredReasoning: currentSettings.preferredReasoning,\n      preserveModel: false,\n      preserveReasoning: false,\n      bypassRewrite: false,\n      forceModel: null,\n      responseVerificationEnabled: currentSettings.networkVerificationEnabled,\n      knownModels: [...sharedKnownModelIds],\n    };\n  },\n  getVerificationTransaction(tabId) {"""
-          bg, count = lock_pattern.subn(lock_replacement, bg, count=1)
-          if count != 1:
-              raise SystemExit('getLockConfiguration replacement failed')
+          function workBootstrapModelForTab(tabId) {
+            const policy = effectivePolicyForTabSync(tabId);
+            return normalizeConcreteModelId(policy.lockedModels?.[0])
+              ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0]);
+          }
 
-          if bg.count('workBootstrapTabs.add(Number(tabId));') != 2:
-              raise SystemExit('unexpected Work bootstrap add count')
-          if bg.count('workBootstrapTabs.delete(Number(tabId));') != 2:
-              raise SystemExit('unexpected Work bootstrap delete count')
-          bg = bg.replace(
-              'workBootstrapTabs.add(Number(tabId));',
-              'const workBootstrapTransaction = beginWorkBootstrapTransaction(tabId);',
-          )
-          bg = bg.replace(
-              'workBootstrapTabs.delete(Number(tabId));',
-              'workBootstrapTransaction.restore();',
-          )
-          if 'workBootstrapTabs' in bg:
-              raise SystemExit('parallel Work bootstrap Set still present')
+          function beginWorkBootstrapTransaction(tabId, source) {
+            const normalizedTabId = Number(tabId);
+            const previous = verificationTransactionForTab(normalizedTabId);
+            const model = workBootstrapModelForTab(normalizedTabId);
+            if (!model) throw new Error('Work bootstrap model is unavailable');
+            verificationTransactions.set(normalizedTabId, {
+              model,
+              selectorKey: '__work_bootstrap__',
+              label: 'Work bootstrap',
+              startedAt: Date.now(),
+              kind: 'work-bootstrap',
+              source: String(source || 'work-bootstrap'),
+            });
+            return { previous, model };
+          }
 
-          old_authority = """            && activationRewrite?.authorityKind === 'normal-policy'\n            && activationRewrite?.requestId\n"""
-          new_authority = """            && activationRewrite?.authorityKind === 'verification-transaction'\n            && activationRewrite?.authorityModel === activationTarget\n            && activationRewrite?.requestId\n"""
-          if bg.count(old_authority) != 1:
-              raise SystemExit('activation authority predicate mismatch')
-          bg = bg.replace(old_authority, new_authority)
-          bg = bg.replace("source: 'normal_work_policy_request'", "source: 'verification_transaction_work_bootstrap'")
-          bg = bg.replace("'normal_work_response_default_model'", "'verification_transaction_work_response_default_model'")
+          function endWorkBootstrapTransaction(tabId, previous) {
+            const normalizedTabId = Number(tabId);
+            if (previous) verificationTransactions.set(normalizedTabId, previous);
+            else verificationTransactions.delete(normalizedTabId);
+          }
 
-          bg = bg.replace("const RUNTIME_CODE_VERSION = '0.5.156';", "const RUNTIME_CODE_VERSION = '0.5.157';", 1)
-          bg_path.write_text(bg, encoding='utf-8')
+          `;
+          replaceBetween(
+            'function verificationTransactionForTab(tabId) {',
+            'function runtimePolicyForTabSync(tabId) {',
+            transactionHelper,
+            'verification transaction helper section',
+          );
 
-          for path in [
-              Path('extension/manifest.json'),
-              Path('extension/package.json'),
-              Path('native-core/Cargo.toml'),
-              Path('native-core/Cargo.lock'),
-              Path('packaging/windows/GPTWork.iss'),
-          ]:
-              text = path.read_text(encoding='utf-8')
-              if '0.5.156' not in text:
-                  raise SystemExit(f'no 0.5.156 version surface in {path}')
-              path.write_text(text.replace('0.5.156', '0.5.157'), encoding='utf-8')
+          const lockConfiguration = `  getLockConfiguration(tabId) {
+            const policy = runtimePolicyForTabSync(tabId);
+            return {
+              lockedModels: policy.lockedModels,
+              allowedReasoningLevels: policy.allowedReasoningLevels,
+              preferredReasoning: currentSettings.preferredReasoning,
+              preserveModel: false,
+              preserveReasoning: false,
+              bypassRewrite: false,
+              forceModel: null,
+              responseVerificationEnabled: currentSettings.networkVerificationEnabled,
+              knownModels: [...sharedKnownModelIds],
+            };
+          },
+          `;
+          replaceBetween(
+            '  getLockConfiguration(tabId) {',
+            '  getVerificationTransaction(tabId) {',
+            lockConfiguration,
+            'network lock configuration',
+          );
 
-          for obsolete in [
-              Path('extension/tests/v05155-work-bootstrap-policy.test.mjs'),
-              Path('extension/tests/v05156-work-bootstrap-force.test.mjs'),
-          ]:
-              if obsolete.exists():
-                  obsolete.unlink()
-          PY
+          replaceOnce(
+            `  workBootstrapTabs.add(Number(tabId));
+            try {
+              const probe = await sendVerificationReasoningProbe(tabId, 'work-mode-b-reacquire', progress.completed + 1, progress.total);
+              if (!probe?.sent) return catalog;
+              const settled = await sendTabMessage(tabId, { type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED', assistantCountBefore: probe.assistantCountBefore ?? 0, timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS });
+              if (settled?.settled !== true) return catalog;
+            } finally {
+              workBootstrapTabs.delete(Number(tabId));
+            }
+          `,
+            `  const workBootstrap = beginWorkBootstrapTransaction(tabId, 'picker-b-reacquire');
+            try {
+              const probe = await sendVerificationReasoningProbe(tabId, 'work-mode-b-reacquire', progress.completed + 1, progress.total);
+              if (!probe?.sent) return catalog;
+              const settled = await sendTabMessage(tabId, { type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED', assistantCountBefore: probe.assistantCountBefore ?? 0, timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS });
+              if (settled?.settled !== true) return catalog;
+            } finally {
+              endWorkBootstrapTransaction(tabId, workBootstrap.previous);
+            }
+          `,
+            'Picker B reacquire bootstrap authority',
+          );
 
-          cat > extension/tests/v05157-work-bootstrap-transaction.test.mjs <<'EOF'
-          import assert from 'node:assert/strict';
+          replaceOnce(
+            `        workBootstrapTabs.add(Number(tabId));
+            try {
+              activationProbe = await sendVerificationReasoningProbe(tabId, 'work-mode-bootstrap', index, queue.length);
+              if (activationProbe?.sent) {
+                activationSettled = await sendTabMessage(tabId, {
+                  type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+                  assistantCountBefore: activationProbe.assistantCountBefore ?? 0,
+                  timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+                });
+              }
+            } finally {
+              workBootstrapTabs.delete(Number(tabId));
+            }
+          `,
+            `        const workBootstrap = beginWorkBootstrapTransaction(tabId, 'post-sol-work-activation');
+            try {
+              activationProbe = await sendVerificationReasoningProbe(tabId, 'work-mode-bootstrap', index, queue.length);
+              if (activationProbe?.sent) {
+                activationSettled = await sendTabMessage(tabId, {
+                  type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+                  assistantCountBefore: activationProbe.assistantCountBefore ?? 0,
+                  timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+                });
+              }
+            } finally {
+              endWorkBootstrapTransaction(tabId, workBootstrap.previous);
+            }
+          `,
+            'post-Sol bootstrap authority',
+          );
+
+          replaceOnce(
+            "&& activationRewrite?.authorityKind === 'normal-policy'",
+            "&& activationRewrite?.authorityKind === 'verification-transaction'",
+            'activation rewrite authority check',
+          );
+
+          source = source
+            .replace(
+              '// ordinary natural turn outside verificationTransactions. That request therefore\n    // belongs exclusively to normal-policy (not the verification authority). Only the\n    // real B catalog is allowed to confirm the A -> Work/B transition.',
+              '// one-shot natural turn through the same verification transaction authority used\n    // at Fetch.requestPaused. Only the real B catalog or backend Work identity may\n    // confirm the A -> Work/B transition.',
+            )
+            .replaceAll("source: 'normal_work_policy_request'", "source: 'work_bootstrap_transaction'");
+
+          if (source.includes('workBootstrapTabs')) throw new Error('legacy workBootstrapTabs authority remains');
+          fs.writeFileSync(path, source);
+
+          fs.writeFileSync('extension/tests/v05155-work-bootstrap-policy.test.mjs', `import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import test from 'node:test';
+
+          const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+
+          test('verification Work bootstrap resolves the effective Work policy without a parallel tab Set', () => {
+            const start = background.indexOf('function workBootstrapModelForTab(tabId) {');
+            const end = background.indexOf('function beginWorkBootstrapTransaction', start);
+            assert.ok(start >= 0 && end > start);
+            const block = background.slice(start, end);
+            assert.match(block, /effectivePolicyForTabSync\\(tabId\\)/);
+            assert.match(block, /normalizeConcreteModelId\\(policy\\.lockedModels\\?\\.\\[0\\]\\)/);
+            assert.match(block, /normalizeConcreteModelId\\(DEFAULT_POLICY\\.lockedModels\\?\\.\\[0\\]\\)/);
+            assert.doesNotMatch(background, /workBootstrapTabs/);
+          });
+
+          test('failed Work discovery cannot be reported as a fully verified account', () => {
+            assert.match(background, /catalogVerification\\?\\.workDiscovery\\?\\.attempted === true/);
+            assert.match(background, /catalogVerification\\.workDiscovery\\.entered !== true/);
+            assert.match(background, /finalReason = 'work_model_discovery_incomplete'/);
+          });
+          `);
+
+          fs.writeFileSync('extension/tests/v05156-work-bootstrap-force.test.mjs', `import assert from 'node:assert/strict';
           import { readFile } from 'node:fs/promises';
           import test from 'node:test';
           import { rewriteConversationPostData } from '../network-evidence.js';
 
           const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
-          const networkMonitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
 
-          test('Work bootstrap uses the proven verification transaction as its only request authority', () => {
-            assert.doesNotMatch(background, /workBootstrapTabs/);
-            assert.match(background, /function workBootstrapModelForTab\(tabId\)/);
-            assert.match(background, /const policy = effectivePolicyForTabSync\(tabId\)/);
-            assert.match(background, /normalizeConcreteModelId\(policy\.lockedModels\?\.\[0\]\)/);
-            assert.match(background, /normalizeConcreteModelId\(DEFAULT_POLICY\.lockedModels\?\.\[0\]\)/);
-            assert.match(background, /function beginWorkBootstrapTransaction\(tabId\)/);
-            assert.match(background, /verificationTransactions\.set\(key, transaction\)/);
-            assert.match(background, /if \(current !== transaction\) return/);
-            assert.match(background, /if \(previous\) verificationTransactions\.set\(key, previous\)/);
-            assert.match(background, /else verificationTransactions\.delete\(key\)/);
-            assert.equal([...background.matchAll(/const workBootstrapTransaction = beginWorkBootstrapTransaction\(tabId\);/g)].length, 2);
-            assert.equal([...background.matchAll(/workBootstrapTransaction\.restore\(\);/g)].length, 2);
-          });
-
-          test('normal lock configuration has no parallel Work-bootstrap rewrite path', () => {
-            const start = background.indexOf('getLockConfiguration(tabId) {');
-            const end = background.indexOf('getVerificationTransaction(tabId)', start);
+          test('Work bootstrap forces its effective Work model through verificationTransactions', () => {
+            const start = background.indexOf('function beginWorkBootstrapTransaction(tabId, source) {');
+            const end = background.indexOf('function endWorkBootstrapTransaction', start);
             assert.ok(start >= 0 && end > start);
             const block = background.slice(start, end);
-            assert.match(block, /const policy = runtimePolicyForTabSync\(tabId\)/);
-            assert.match(block, /forceModel: null/);
-            assert.match(block, /knownModels: \[\.\.\.sharedKnownModelIds\]/);
-            assert.doesNotMatch(block, /effectivePolicyForTabSync/);
-            assert.doesNotMatch(block, /workBootstrap/);
+            assert.match(block, /const model = workBootstrapModelForTab\\(normalizedTabId\\)/);
+            assert.match(block, /verificationTransactions\\.set\\(normalizedTabId/);
+            assert.match(block, /kind: 'work-bootstrap'/);
+            assert.match(block, /return \\{ previous, model \\}/);
           });
 
-          test('network monitor turns a verification transaction into terminal Fetch authority', () => {
-            const start = networkMonitor.indexOf('effectiveConfiguration(tabId) {');
-            const end = networkMonitor.indexOf('async performAttach', start);
-            assert.ok(start >= 0 && end > start);
-            const block = networkMonitor.slice(start, end);
-            assert.match(block, /lockedModels: \[model\]/);
-            assert.match(block, /forceModel: model/);
-            assert.match(block, /authorityKind: 'verification-transaction'/);
-            assert.match(block, /authorityModel: model/);
-          });
-
-          test('bootstrap confirmation consumes transaction authority plus exact Work default model', () => {
-            assert.match(background, /activationRewrite\?\.authorityKind === 'verification-transaction'/);
-            assert.match(background, /activationRewrite\?\.authorityModel === activationTarget/);
-            assert.match(background, /activationDefaultModel === activationTarget/);
-          });
-
-          test('transaction-forced Work model rewrites visible Chat model to Work transport', () => {
+          test('forced Work bootstrap model is converted to its Work transport even when the visible Chat model is known', () => {
             const rewritten = rewriteConversationPostData(JSON.stringify({
               model: 'gpt-5.6-sol',
               thinking_effort: 'high',
@@ -168,28 +249,51 @@ jobs:
             assert.equal(rewritten.transportModelAfter, 'gpt-6-astra-wm');
             assert.equal(rewritten.reason, 'verification_model_forced');
           });
+          `);
 
-          test('failed Work discovery remains fail-closed at the account summary', () => {
-            assert.match(background, /catalogVerification\?\.workDiscovery\?\.attempted === true/);
-            assert.match(background, /catalogVerification\.workDiscovery\.entered !== true/);
-            assert.match(background, /finalReason = 'work_model_discovery_incomplete'/);
+          fs.writeFileSync('extension/tests/v05157-work-bootstrap-transaction-authority.test.mjs', `import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import test from 'node:test';
+
+          const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+          const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
+
+          test('v0.5.157 Work bootstrap has one terminal request authority', () => {
+            assert.doesNotMatch(background, /workBootstrapTabs/);
+            assert.match(background, /beginWorkBootstrapTransaction\\(tabId, 'picker-b-reacquire'\\)/);
+            assert.match(background, /endWorkBootstrapTransaction\\(tabId, workBootstrap\\.previous\\)/);
+            assert.match(background, /beginWorkBootstrapTransaction\\(tabId, 'post-sol-work-activation'\\)/);
+            assert.match(background, /activationRewrite\\?\\.authorityKind === 'verification-transaction'/);
+            assert.match(monitor, /authorityKind: 'verification-transaction'/);
+            assert.match(monitor, /forceModel: model/);
           });
-          EOF
 
-      - name: Validate focused and extension tests
-        shell: bash
+          test('nested Picker B bootstrap restores the catalog verification transaction', () => {
+            const start = background.indexOf('async function reacquirePickerBForModel');
+            const end = background.indexOf('async function verifyAccountCatalogModels', start);
+            const block = background.slice(start, end);
+            assert.match(block, /const workBootstrap = beginWorkBootstrapTransaction/);
+            assert.match(block, /finally \\{[\\s\\S]*endWorkBootstrapTransaction\\(tabId, workBootstrap\\.previous\\)/);
+          });
+          `);
+          NODE
+
+      - name: Validate repaired source
+        working-directory: extension
         run: |
-          node --check extension/background.js
-          node --test extension/tests/v05157-work-bootstrap-transaction.test.mjs
-          cd extension
+          node --check background.js
+          node --test tests/v05155-work-bootstrap-policy.test.mjs tests/v05156-work-bootstrap-force.test.mjs tests/v05157-work-bootstrap-transaction-authority.test.mjs
           npm test
 
-      - name: Commit source repair
+      - name: Commit repaired source and regression tests
         shell: bash
         run: |
-          git add extension/background.js extension/manifest.json extension/package.json extension/tests \
-            native-core/Cargo.toml native-core/Cargo.lock packaging/windows/GPTWork.iss
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "v0.5.157: unify Work bootstrap request authority"
+          if git diff --quiet -- extension/background.js extension/tests/v05155-work-bootstrap-policy.test.mjs extension/tests/v05156-work-bootstrap-force.test.mjs extension/tests/v05157-work-bootstrap-transaction-authority.test.mjs; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add extension/background.js extension/tests/v05155-work-bootstrap-policy.test.mjs extension/tests/v05156-work-bootstrap-force.test.mjs extension/tests/v05157-work-bootstrap-transaction-authority.test.mjs
+          git commit -m 'fix: route Work bootstrap through transaction authority'
           git push origin HEAD:fix/v0.5.157-work-bootstrap-transaction-authority
