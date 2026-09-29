@@ -33,11 +33,12 @@ test('background may keep semantic verification markers separate from randomized
   assert.match(block, /probeText: prompt/);
 });
 
-test('v0.5.152 release version surfaces stay synchronized', () => {
-  assert.equal(manifest.version, '0.5.152');
-  assert.equal(pkg.version, '0.5.152');
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.152'/);
-  assert.match(cargoToml, /version = "0\.5\.152"/);
-  assert.match(cargoLock, /name = "gptwork-core"\nversion = "0\.5\.152"/);
-  assert.match(installer, /#define MyAppVersion "0\.5\.152"/);
+test('current release version surfaces stay synchronized while preserving the v0.5.152 witness fix', () => {
+  const version = manifest.version;
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  assert.equal(pkg.version, version);
+  assert.ok(background.includes(`const RUNTIME_CODE_VERSION = '${version}'`));
+  assert.ok(cargoToml.includes(`version = "${version}"`));
+  assert.ok(cargoLock.includes(`name = "gptwork-core"\nversion = "${version}"`));
+  assert.ok(installer.includes(`#define MyAppVersion "${version}"`));
 });
