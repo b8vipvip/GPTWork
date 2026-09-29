@@ -28,42 +28,54 @@ jobs:
               preserveModel: false,
               preserveReasoning: workBootstrapTabs.has(Number(tabId)),
           """
-          # Match using exact source indentation from the checked-out file, independent of heredoc indentation.
-          old = old.replace('          ', '')
-          new = """  getLockConfiguration(tabId) {
-            const workBootstrap = workBootstrapTabs.has(Number(tabId));
-            // Verification's one-shot Work bootstrap must use the effective Work policy;
-            // ordinary traffic and verification transactions keep runtimePolicyForTabSync.
-            const policy = workBootstrap
-              ? effectivePolicyForTabSync(tabId)
-              : runtimePolicyForTabSync(tabId);
-            return {
-              lockedModels: policy.lockedModels,
-              allowedReasoningLevels: policy.allowedReasoningLevels,
-              preferredReasoning: workBootstrap ? null : currentSettings.preferredReasoning,
-              preserveModel: false,
-              preserveReasoning: workBootstrap,
-          """
-          new = new.replace('          ', '')
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.split('\n'))
+          # Build exact source text explicitly to avoid heredoc indentation affecting matching.
+          old = (
+              "  getLockConfiguration(tabId) {\n"
+              "    const policy = runtimePolicyForTabSync(tabId);\n"
+              "    return {\n"
+              "      lockedModels: policy.lockedModels,\n"
+              "      allowedReasoningLevels: policy.allowedReasoningLevels,\n"
+              "      preferredReasoning: workBootstrapTabs.has(Number(tabId)) ? null : currentSettings.preferredReasoning,\n"
+              "      preserveModel: false,\n"
+              "      preserveReasoning: workBootstrapTabs.has(Number(tabId)),\n"
+          )
+          new = (
+              "  getLockConfiguration(tabId) {\n"
+              "    const workBootstrap = workBootstrapTabs.has(Number(tabId));\n"
+              "    // Verification's one-shot Work bootstrap must use the effective Work policy;\n"
+              "    // ordinary traffic and verification transactions keep runtimePolicyForTabSync.\n"
+              "    const policy = workBootstrap\n"
+              "      ? effectivePolicyForTabSync(tabId)\n"
+              "      : runtimePolicyForTabSync(tabId);\n"
+              "    return {\n"
+              "      lockedModels: policy.lockedModels,\n"
+              "      allowedReasoningLevels: policy.allowedReasoningLevels,\n"
+              "      preferredReasoning: workBootstrap ? null : currentSettings.preferredReasoning,\n"
+              "      preserveModel: false,\n"
+              "      preserveReasoning: workBootstrap,\n"
+          )
           if s.count(old) != 1:
               raise SystemExit(f'lock block match count={s.count(old)}')
           s = s.replace(old, new, 1)
 
-          old2 = """  const verificationSummary = summarizeVerificationOutcome(catalogVerification);
-            const finalOutcome = verificationSummary.outcome;
-            const finalReason = verificationSummary.reason;
-          """.replace('          ', '')
-          new2 = """  const verificationSummary = summarizeVerificationOutcome(catalogVerification);
-            let finalOutcome = verificationSummary.outcome;
-            let finalReason = verificationSummary.reason;
-            if (
-              catalogVerification?.workDiscovery?.attempted === true
-              && catalogVerification.workDiscovery.entered !== true
-            ) {
-              finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
-              finalReason = 'work_model_discovery_incomplete';
-            }
-          """.replace('          ', '')
+          old2 = (
+              "  const verificationSummary = summarizeVerificationOutcome(catalogVerification);\n"
+              "  const finalOutcome = verificationSummary.outcome;\n"
+              "  const finalReason = verificationSummary.reason;\n"
+          )
+          new2 = (
+              "  const verificationSummary = summarizeVerificationOutcome(catalogVerification);\n"
+              "  let finalOutcome = verificationSummary.outcome;\n"
+              "  let finalReason = verificationSummary.reason;\n"
+              "  if (\n"
+              "    catalogVerification?.workDiscovery?.attempted === true\n"
+              "    && catalogVerification.workDiscovery.entered !== true\n"
+              "  ) {\n"
+              "    finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';\n"
+              "    finalReason = 'work_model_discovery_incomplete';\n"
+              "  }\n"
+          )
           if s.count(old2) != 1:
               raise SystemExit(f'summary block match count={s.count(old2)}')
           s = s.replace(old2, new2, 1)
