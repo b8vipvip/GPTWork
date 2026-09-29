@@ -1,0 +1,142 @@
+name: v0.5.155 Work bootstrap patch
+
+on:
+  push:
+    branches:
+      - fix/v0.5.155-work-bootstrap-policy
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v0.5.155-work-bootstrap-policy
+          fetch-depth: 0
+      - name: Apply v0.5.155 repair
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, got {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          background = Path('extension/background.js')
+          text = background.read_text(encoding='utf-8')
+
+          old_lock = """    getLockConfiguration(tabId) {
+      const policy = runtimePolicyForTabSync(tabId);
+      return {
+        lockedModels: policy.lockedModels,
+        allowedReasoningLevels: policy.allowedReasoningLevels,
+        preferredReasoning: workBootstrapTabs.has(Number(tabId)) ? null : currentSettings.preferredReasoning,
+        preserveModel: false,
+        preserveReasoning: workBootstrapTabs.has(Number(tabId)),
+"""
+          new_lock = """    getLockConfiguration(tabId) {
+      const workBootstrap = workBootstrapTabs.has(Number(tabId));
+      // Verification's one-shot Work bootstrap must use the Work/effective policy,
+      // not the ordinary page-following request policy. The normal request policy is
+      // intentionally fail-open when the visible page model is not in Model Lock;
+      // applying it here leaves the bootstrap with no locked model and can never
+      // enter the hidden Work transport profile.
+      const policy = workBootstrap
+        ? effectivePolicyForTabSync(tabId)
+        : runtimePolicyForTabSync(tabId);
+      return {
+        lockedModels: policy.lockedModels,
+        allowedReasoningLevels: policy.allowedReasoningLevels,
+        preferredReasoning: workBootstrap ? null : currentSettings.preferredReasoning,
+        preserveModel: false,
+        preserveReasoning: workBootstrap,
+"""
+          if text.count(old_lock) != 1:
+              raise SystemExit(f'background lock block mismatch: {text.count(old_lock)}')
+          text = text.replace(old_lock, new_lock, 1)
+
+          old_summary = """  const verificationSummary = summarizeVerificationOutcome(catalogVerification);
+  const finalOutcome = verificationSummary.outcome;
+  const finalReason = verificationSummary.reason;
+"""
+          new_summary = """  const verificationSummary = summarizeVerificationOutcome(catalogVerification);
+  let finalOutcome = verificationSummary.outcome;
+  let finalReason = verificationSummary.reason;
+  // Visible Picker-A success is not a complete account verification when the Work
+  // transition was attempted but never entered. Fail closed here so a 2/2 visible
+  // result cannot be promoted to an overall verified account while the shared/live
+  // catalog still contains hidden Work models that were never probed.
+  if (
+    catalogVerification?.workDiscovery?.attempted === true
+    && catalogVerification.workDiscovery.entered !== true
+  ) {
+    finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
+    finalReason = 'work_model_discovery_incomplete';
+  }
+"""
+          if text.count(old_summary) != 1:
+              raise SystemExit(f'background summary block mismatch: {text.count(old_summary)}')
+          text = text.replace(old_summary, new_summary, 1)
+          text = text.replace("const RUNTIME_CODE_VERSION = '0.5.154';", "const RUNTIME_CODE_VERSION = '0.5.155';", 1)
+          background.write_text(text, encoding='utf-8')
+
+          for path in [
+              'extension/manifest.json',
+              'extension/package.json',
+              'native-core/Cargo.toml',
+              'native-core/Cargo.lock',
+              'packaging/windows/GPTWork.iss',
+          ]:
+              p = Path(path)
+              data = p.read_text(encoding='utf-8')
+              if '0.5.154' not in data:
+                  raise SystemExit(f'{path}: v0.5.154 not found')
+              p.write_text(data.replace('0.5.154', '0.5.155'), encoding='utf-8')
+
+          test = Path('extension/tests/v05155-work-bootstrap-policy.test.mjs')
+          test.write_text(r'''import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import test from 'node:test';
+
+          const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+
+          test('verification Work bootstrap temporarily uses the effective Work policy', () => {
+            const start = background.indexOf('getLockConfiguration(tabId) {');
+            const end = background.indexOf('getVerificationTransaction(tabId)', start);
+            assert.ok(start >= 0 && end > start);
+            const block = background.slice(start, end);
+            assert.match(block, /const workBootstrap = workBootstrapTabs\.has\(Number\(tabId\)\)/);
+            assert.match(block, /const policy = workBootstrap\s*\? effectivePolicyForTabSync\(tabId\)\s*: runtimePolicyForTabSync\(tabId\)/);
+            assert.match(block, /preferredReasoning: workBootstrap \? null : currentSettings\.preferredReasoning/);
+            assert.match(block, /preserveReasoning: workBootstrap/);
+          });
+
+          test('normal traffic retains page-following request policy outside verification bootstrap', () => {
+            assert.match(background, /function runtimePolicyForTabSync\(tabId\)/);
+            assert.match(background, /return requestPolicyForTabSync\(tabId, pageModel\)/);
+            assert.match(background, /: runtimePolicyForTabSync\(tabId\)/);
+          });
+
+          test('failed Work discovery cannot be reported as an overall verified account', () => {
+            assert.match(background, /catalogVerification\?\.workDiscovery\?\.attempted === true/);
+            assert.match(background, /catalogVerification\.workDiscovery\.entered !== true/);
+            assert.match(background, /finalOutcome = Number\(catalogVerification\?\.verified \|\| 0\) > 0 \? 'partial' : 'unverified'/);
+            assert.match(background, /finalReason = 'work_model_discovery_incomplete'/);
+          });
+          '''.replace(/^          /gm, ''), encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/v05155-work-bootstrap-patch.yml
+          git add extension/background.js extension/manifest.json extension/package.json extension/tests/v05155-work-bootstrap-policy.test.mjs native-core/Cargo.toml native-core/Cargo.lock packaging/windows/GPTWork.iss
+          git commit -m "v0.5.155: restore Work bootstrap verification policy"
+          git push origin HEAD:fix/v0.5.155-work-bootstrap-policy
