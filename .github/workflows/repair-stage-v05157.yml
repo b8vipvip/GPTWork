@@ -1,0 +1,42 @@
+name: repair-stage-v05157
+
+on:
+  push:
+    branches:
+      - fix/v0.5.157-work-bootstrap-transaction-authority
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v0.5.157-work-bootstrap-transaction-authority
+          fetch-depth: 0
+
+      - name: Repair staging script syntax
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/stage-v05157-work-bootstrap-transaction.yml')
+          text = path.read_text(encoding='utf-8')
+          old = "'''.replace(/^          /gm, ''), encoding='utf-8')"
+          new = "''', encoding='utf-8')"
+          if text.count(old) != 1:
+              raise SystemExit('staging syntax target not found exactly once')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+      - name: Commit repair and remove helper workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/repair-stage-v05157.yml
+          git add .github/workflows/stage-v05157-work-bootstrap-transaction.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: repair v0.5.157 staging script"
+          git push origin HEAD:fix/v0.5.157-work-bootstrap-transaction-authority
