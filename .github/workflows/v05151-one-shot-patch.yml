@@ -1,0 +1,60 @@
+name: v0.5.151 one-shot release patch
+
+on:
+  push:
+    branches:
+      - fix/v0.5.151-restore-prompt-bank
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v0.5.151-restore-prompt-bank
+          fetch-depth: 0
+      - name: Apply v0.5.151 version patch and self-delete
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              'extension/background.js': [("const RUNTIME_CODE_VERSION = '0.5.150';", "const RUNTIME_CODE_VERSION = '0.5.151';")],
+              'extension/manifest.json': [('"version": "0.5.150"', '"version": "0.5.151"')],
+              'extension/package.json': [('"version": "0.5.150"', '"version": "0.5.151"')],
+              'native-core/Cargo.toml': [('version = "0.5.150"', 'version = "0.5.151"')],
+              'native-core/Cargo.lock': [('name = "gptwork-core"\nversion = "0.5.150"', 'name = "gptwork-core"\nversion = "0.5.151"')],
+              'packaging/windows/GPTWork.iss': [('#define MyAppVersion "0.5.150"', '#define MyAppVersion "0.5.151"')],
+          }
+
+          for name, pairs in replacements.items():
+              path = Path(name)
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{name}: expected exactly one {old!r}, found {count}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding='utf-8')
+
+          prompt = Path('extension/prompt-bank.json')
+          if not prompt.exists():
+              raise SystemExit('extension/prompt-bank.json is missing')
+
+          workflow = Path('.github/workflows/v05151-one-shot-patch.yml')
+          workflow.unlink()
+          PY
+      - name: Commit patched release surfaces
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "v0.5.151: restore live verification prompt bank"
+          git push origin HEAD:fix/v0.5.151-restore-prompt-bank
