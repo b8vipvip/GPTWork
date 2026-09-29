@@ -19,12 +19,15 @@ test('v0.5.154 serializes automatic model verification per tab', () => {
   assert.match(block, /autoVerificationTasks\.delete\(tabId\)/);
 });
 
-test('v0.5.154 registers the task before awaiting it', () => {
+test('v0.5.154 joins an existing task before a second task can be created', () => {
   const start = background.indexOf("case 'GPTLOCK_AUTO_VERIFY'");
   const end = background.indexOf("case 'GPTLOCK_SEND_BLOCKED'", start);
   const block = background.slice(start, end);
+  const existingAt = block.indexOf('const existingTask = autoVerificationTasks.get(tabId)');
+  const joinAt = block.indexOf('return existingTask');
   const createAt = block.indexOf('const task = autoVerify(tabId)');
   const setAt = block.indexOf('autoVerificationTasks.set(tabId, task)');
   const awaitAt = block.indexOf('return await task');
-  assert.ok(createAt >= 0 && setAt > createAt && awaitAt > setAt);
+  assert.ok(existingAt >= 0 && joinAt > existingAt && createAt > joinAt);
+  assert.ok(setAt > createAt && awaitAt > setAt);
 });
