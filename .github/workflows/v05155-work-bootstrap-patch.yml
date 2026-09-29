@@ -1,7 +1,0 @@
-name: v05155-branch-smoke
-on: [push]
-jobs:
-  smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo branch-workflow-ok
