@@ -1,0 +1,95 @@
+name: v0.5.152 one-shot visible probe witness patch
+
+on:
+  push:
+    branches:
+      - fix/v0.5.152-visible-probe-witness
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v0.5.152-visible-probe-witness
+          fetch-depth: 0
+
+      - name: Apply v0.5.152 visible probe witness repair and self-delete
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          content_path = Path('extension/content.js')
+          content = content_path.read_text(encoding='utf-8')
+          anchor = "        : 'GPTWork 自动验证';\n\n      setComposerText(composer, probeText);"
+          replacement = "        : 'GPTWork 自动验证';\n      // probeMarker is a semantic operation label. Randomized verification prompts do not\n      // contain it, so use text that is actually written into the composer as the liveness witness.\n      const composerWitness = probeText.includes(probeMarker) ? probeMarker : probeText.slice(0, 120);\n\n      setComposerText(composer, probeText);"
+          if content.count(anchor) != 1:
+              raise SystemExit(f'expected one autoSendProbe marker anchor, found {content.count(anchor)}')
+          content = content.replace(anchor, replacement, 1)
+
+          old_filled = 'const filled = await waitUntil(() => composerText(composer).includes(probeMarker), 2500, 80);'
+          new_filled = 'const filled = await waitUntil(() => composerText(composer).includes(composerWitness), 2500, 80);'
+          if content.count(old_filled) != 1:
+              raise SystemExit(f'expected one stale filled check, found {content.count(old_filled)}')
+          content = content.replace(old_filled, new_filled, 1)
+
+          old_sent = 'return !current.includes(probeMarker) || Boolean(visibleGeneratingControl());'
+          new_sent = 'return !current.includes(composerWitness) || Boolean(visibleGeneratingControl());'
+          if content.count(old_sent) != 1:
+              raise SystemExit(f'expected one stale sent check, found {content.count(old_sent)}')
+          content = content.replace(old_sent, new_sent, 1)
+          content_path.write_text(content, encoding='utf-8')
+
+          background_path = Path('extension/background.js')
+          background = background_path.read_text(encoding='utf-8')
+          old_runtime = "const RUNTIME_CODE_VERSION = '0.5.151';"
+          if background.count(old_runtime) != 1:
+              raise SystemExit(f'expected one runtime version, found {background.count(old_runtime)}')
+          background_path.write_text(background.replace(old_runtime, "const RUNTIME_CODE_VERSION = '0.5.152';", 1), encoding='utf-8')
+
+          for filename in ['extension/manifest.json', 'extension/package.json']:
+              path = Path(filename)
+              data = json.loads(path.read_text(encoding='utf-8'))
+              if data.get('version') != '0.5.151':
+                  raise SystemExit(f'{filename}: expected 0.5.151, found {data.get("version")}')
+              data['version'] = '0.5.152'
+              path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          cargo_toml_path = Path('native-core/Cargo.toml')
+          cargo_toml = cargo_toml_path.read_text(encoding='utf-8')
+          cargo_toml, n = re.subn(r'(?m)^version = "0\.5\.151"$', 'version = "0.5.152"', cargo_toml, count=1)
+          if n != 1:
+              raise SystemExit('native-core/Cargo.toml version anchor missing')
+          cargo_toml_path.write_text(cargo_toml, encoding='utf-8')
+
+          cargo_lock_path = Path('native-core/Cargo.lock')
+          cargo_lock = cargo_lock_path.read_text(encoding='utf-8')
+          old_lock = 'name = "gptwork-core"\nversion = "0.5.151"'
+          if cargo_lock.count(old_lock) != 1:
+              raise SystemExit(f'Cargo.lock gptwork-core anchor count={cargo_lock.count(old_lock)}')
+          cargo_lock_path.write_text(cargo_lock.replace(old_lock, 'name = "gptwork-core"\nversion = "0.5.152"', 1), encoding='utf-8')
+
+          installer_path = Path('packaging/windows/GPTWork.iss')
+          installer = installer_path.read_text(encoding='utf-8')
+          old_installer = '#define MyAppVersion "0.5.151"'
+          if installer.count(old_installer) != 1:
+              raise SystemExit(f'installer version anchor count={installer.count(old_installer)}')
+          installer_path.write_text(installer.replace(old_installer, '#define MyAppVersion "0.5.152"', 1), encoding='utf-8')
+          PY
+
+          rm .github/workflows/v05152-one-shot-patch.yml
+
+      - name: Commit patched release surfaces
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'v0.5.152: fix randomized verification prompt liveness witness'
+          git push origin HEAD:fix/v0.5.152-visible-probe-witness
