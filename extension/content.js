@@ -964,6 +964,26 @@ document.addEventListener('pointerdown', (event) => {
       if (!element?.isConnected || !visible(element)) return false;
       await new Promise((resolve) => window.setTimeout(resolve, 160 * attempt));
     }
+    // Live v0.5.152 evidence: Chrome's debugger infobar can leave the exact owned
+    // Picker A row geometrically visible while elementFromPoint() returns null for
+    // every trusted-pointer readiness probe. For verification only, retry the SAME
+    // already-owned DOM row through the page event path. This is not a selector,
+    // coordinate, or alternate-row fallback; the catalog row remains sole authority.
+    if (
+      action === 'click'
+      && source === 'verification-model-row'
+      && element?.isConnected
+      && visible(element)
+    ) {
+      pointerTrace('verification_exact_row_synthetic_fallback', {
+        source, target: compactElementProbe(element), href: location.href,
+      });
+      const dispatched = dispatchSyntheticPointer(element, action);
+      if (dispatched) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        return true;
+      }
+    }
     return false;
   }
 
@@ -1444,14 +1464,13 @@ document.addEventListener('pointerdown', (event) => {
       const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
       if (!attempted) {
         const observation = collectObservation();
-        // Live v0.5.149 evidence shows the redesigned direct Chat list can expose the
-        // exact composer-owned Picker A radio row while Chromium's post-debugger
-        // elementFromPoint readiness gate returns no stable hit. Picker A verification
-        // already owns an explicit network transaction for the same concrete model, so
-        // allow only these two direct-Chat rows to continue to network evidence. Picker B
-        // still requires a real UI selection because it mutates Work's model state.
+        // Network-only defer is safe only when the page already reports the requested
+        // direct-Chat model. Live v0.5.152 proved that rewriting a Sol request body to
+        // GPT-5.5 does not make the backend serve GPT-5.5. A model-changing turn must
+        // therefore obtain UI acknowledgement from this exact owned row first.
         const networkDeferredAfterPointerReject = modern.pickerMode === 'A'
           && (desired === 'gpt-5.5' || desired === 'gpt-5.6-sol')
+          && observation.model === desired
           && candidate.isConnected
           && visible(candidate)
           && modern.picker?.contains?.(candidate) === true;
@@ -1489,7 +1508,8 @@ document.addEventListener('pointerdown', (event) => {
       const observation = collectObservation();
       const networkDeferred = !confirmed
         && modern.pickerMode === 'A'
-        && (desired === 'gpt-5.5' || desired === 'gpt-5.6-sol');
+        && (desired === 'gpt-5.5' || desired === 'gpt-5.6-sol')
+        && observation.model === desired;
       pointerTrace(
         confirmed
           ? 'verification_model_selection_confirmed'
