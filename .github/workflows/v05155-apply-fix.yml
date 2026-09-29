@@ -1,7 +1,7 @@
 name: v05155-apply-fix
 on: [push]
 permissions:
-  contents: read
+  contents: write
 jobs:
   apply:
     runs-on: ubuntu-latest
@@ -10,7 +10,7 @@ jobs:
         with:
           ref: fix/v0.5.155-work-bootstrap-policy
           fetch-depth: 0
-          token: ${{ secrets.GPTAUTO_EXECUTOR_TOKEN || github.token }}
+          token: ${{ github.token }}
       - name: Apply source fix
         shell: bash
         run: |
@@ -19,17 +19,6 @@ jobs:
 
           p = Path('extension/background.js')
           s = p.read_text(encoding='utf-8')
-          old = """  getLockConfiguration(tabId) {
-            const policy = runtimePolicyForTabSync(tabId);
-            return {
-              lockedModels: policy.lockedModels,
-              allowedReasoningLevels: policy.allowedReasoningLevels,
-              preferredReasoning: workBootstrapTabs.has(Number(tabId)) ? null : currentSettings.preferredReasoning,
-              preserveModel: false,
-              preserveReasoning: workBootstrapTabs.has(Number(tabId)),
-          """
-          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.split('\n'))
-          # Build exact source text explicitly to avoid heredoc indentation affecting matching.
           old = (
               "  getLockConfiguration(tabId) {\n"
               "    const policy = runtimePolicyForTabSync(tabId);\n"
