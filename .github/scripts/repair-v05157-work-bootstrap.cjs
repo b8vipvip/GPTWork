@@ -135,6 +135,25 @@ source = source
 if (source.includes('workBootstrapTabs')) throw new Error('legacy workBootstrapTabs authority remains');
 fs.writeFileSync(path, source);
 
+const authorityUiPath = 'extension/tests/model-verification-authority-ui.test.mjs';
+let authorityUi = fs.readFileSync(authorityUiPath, 'utf8');
+authorityUi = authorityUi
+  .replaceAll("source: 'normal_work_policy_request'", "source: 'work_bootstrap_transaction'")
+  .replace(
+`  assert.match(background, /const workBootstrapTabs = new Set\\(\\)/);
+  assert.match(background, /workBootstrapTabs\\.has\\(Number\\(tabId\\)\\)/);`,
+`  assert.doesNotMatch(background, /workBootstrapTabs/);
+  assert.match(background, /function beginWorkBootstrapTransaction\\(tabId, source\\)/);
+  assert.match(background, /function endWorkBootstrapTransaction\\(tabId, previous\\)/);`
+  );
+if (authorityUi.includes("source: 'normal_work_policy_request'")) {
+  throw new Error('stale normal Work bootstrap authority assertion remains');
+}
+if (authorityUi.includes('assert.match(background, /const workBootstrapTabs')) {
+  throw new Error('stale workBootstrapTabs assertion remains');
+}
+fs.writeFileSync(authorityUiPath, authorityUi);
+
 fs.writeFileSync('extension/tests/v05155-work-bootstrap-policy.test.mjs', `import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
