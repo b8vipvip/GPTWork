@@ -8,14 +8,14 @@ import {
 
 const r = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
-test('v0.5.158 consumes ModelPro v0.1.46 ViewTrack and transient-response policy', async () => {
+test('ViewTrack and transient-response compatibility remains present after v0.5.158', async () => {
   const [background, content, vendor, source, manifestText, packageText] = await Promise.all([
     r('background.js'), r('content.js'), r('vendor/modelpro/model-verification.js'),
     r('vendor/modelpro/MODELPRO_SOURCE.json'), r('manifest.json'), r('package.json'),
   ]);
   const metadata = JSON.parse(source);
-  assert.equal(metadata.version, '0.1.46');
-  assert.equal(metadata.commit, 'f674411521d54f03682b7c60102a9c21d449f53d');
+  assert.equal(metadata.repository, 'b8vipvip/ModelPro');
+  assert.ok(/^0\.1\.(?:4[6-9]|[5-9]\d)$/.test(metadata.version));
   assert.equal(metadata.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
   assert.match(vendor, /export function shouldRetryTransientResponse/);
   assert.match(vendor, /export function publishableVerificationResults/);
@@ -28,12 +28,12 @@ test('v0.5.158 consumes ModelPro v0.1.46 ViewTrack and transient-response policy
   assert.match(background, /shouldRetryTransientResponse\(result, \{ maxRetries: 1 \}\)/);
   assert.match(background, /publishableVerificationResults\(progress\?\.results, normalizeConcreteModelId\)/);
   const manifest = JSON.parse(manifestText);
-  assert.equal(manifest.version, '0.5.158');
   assert.equal(JSON.parse(packageText).version, manifest.version);
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.158';/);
+  const escapedVersion = manifest.version.replaceAll('.', '\\.');
+  assert.match(background, new RegExp(`const RUNTIME_CODE_VERSION = '${escapedVersion}';`));
 });
 
-test('v0.5.158 retries only one request-confirmed canceled HTTP 200 turn and never shares it unverified', () => {
+test('one request-confirmed canceled HTTP 200 turn is retried once and never shared unverified', () => {
   const canceled = {
     model: 'gpt-6-luna',
     verified: false,
