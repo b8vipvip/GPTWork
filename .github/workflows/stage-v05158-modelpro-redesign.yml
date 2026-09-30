@@ -20,6 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Pin exact ModelPro v0.1.46 policy blob
+        shell: bash
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/b8vipvip/ModelPro/f674411521d54f03682b7c60102a9c21d449f53d/extension/model-verification.js -o extension/vendor/modelpro/model-verification.js
+          test "$(git hash-object extension/vendor/modelpro/model-verification.js)" = "5ab85559688ed0b605b517e27eec0682361d035c"
       - name: Apply v0.5.158 ModelPro migration
         run: node .github/scripts/stage-v05158-modelpro-redesign.cjs
       - name: Validate extension
@@ -43,5 +48,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add extension native-core/Cargo.toml native-core/Cargo.lock packaging/windows/GPTWork.iss
-          git commit -m "v0.5.158: consume ModelPro v0.1.46 and repair ChatGPT ViewTrack verification"
+          git commit -m "v0.5.158: consume exact ModelPro v0.1.46 policy and repair ChatGPT ViewTrack verification"
           git push origin "HEAD:${GITHUB_REF_NAME}"
