@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+// Regression coverage for the explicit legacy-core maintenance integration of ModelPro v0.1.48.
 const r = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
 test('pre-navigation discovery stays hit-test strict and exact ViewTrack navigation can causally reacquire semantic rows', async () => {
