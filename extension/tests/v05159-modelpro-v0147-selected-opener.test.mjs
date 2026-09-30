@@ -4,17 +4,14 @@ import test from 'node:test';
 
 const r = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
-test('v0.5.159 consumes ModelPro v0.1.47 and preserves exact Select-model ViewTrack authority', async () => {
-  const [content, source, manifestText, packageText, background] = await Promise.all([
+test('v0.5.159 Select-model ViewTrack authority remains present after later ModelPro integrations', async () => {
+  const [content, source] = await Promise.all([
     r('content.js'),
     r('vendor/modelpro/MODELPRO_SOURCE.json'),
-    r('manifest.json'),
-    r('package.json'),
-    r('background.js'),
   ]);
   const metadata = JSON.parse(source);
-  assert.equal(metadata.version, '0.1.47');
-  assert.equal(metadata.commit, '8a6d468b52ccba7395b56ac3c243773e3a420c8b');
+  assert.equal(metadata.repository, 'b8vipvip/ModelPro');
+  assert.ok(/^0\.1\.(?:4[7-9]|[5-9]\d)$/.test(metadata.version));
   assert.equal(metadata.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
 
   const openerStart = content.indexOf('function redesignedModelViewOpener(picker)');
@@ -35,9 +32,4 @@ test('v0.5.159 consumes ModelPro v0.1.47 and preserves exact Select-model ViewTr
   const navigation = content.slice(navStart, navEnd);
   assert.match(navigation, /picker-redesign-model-view-unresolved/);
   assert.match(navigation, /return \{ trigger, picker, opener: modelViewOpener, submenu: null, rows: \[\], pageContext, pickerMode: 'A' \};/);
-
-  const manifest = JSON.parse(manifestText);
-  assert.equal(manifest.version, '0.5.159');
-  assert.equal(JSON.parse(packageText).version, manifest.version);
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.159';/);
 });

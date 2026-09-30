@@ -20,7 +20,8 @@ test('ViewTrack and transient-response compatibility remains present after v0.5.
   assert.match(vendor, /export function shouldRetryTransientResponse/);
   assert.match(vendor, /export function publishableVerificationResults/);
   assert.match(content, /function interactionVisible\(element\)/);
-  assert.match(content, /distinctModelRows\(picker\)\.filter\(interactionVisible\)/);
+  assert.match(content, /function defaultChatDirectModelRows\(picker, \{ requireInteraction = true \} = \{\}\)/);
+  assert.match(content, /const rows = requireInteraction \? semanticRows\.filter\(interactionVisible\) : semanticRows;/);
   assert.match(content, /function redesignedModelViewOpener\(picker\)/);
   assert.match(content, /model-picker-redesign-model-view/);
   assert.match(content, /invalidated_after_debugger_attach/);

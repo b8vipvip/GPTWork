@@ -5,7 +5,7 @@ import test from 'node:test';
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const readRepo = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
-test('GPTWork consumes the exact ModelPro v0.1.47 verification policy seam', async () => {
+test('GPTWork consumes the exact ModelPro v0.1.48 verification policy seam', async () => {
   const [background, vendor, source] = await Promise.all([
     read('background.js'),
     read('vendor/modelpro/model-verification.js'),
@@ -13,8 +13,8 @@ test('GPTWork consumes the exact ModelPro v0.1.47 verification policy seam', asy
   ]);
   const metadata = JSON.parse(source);
   assert.equal(metadata.repository, 'b8vipvip/ModelPro');
-  assert.equal(metadata.version, '0.1.47');
-  assert.equal(metadata.commit, '8a6d468b52ccba7395b56ac3c243773e3a420c8b');
+  assert.equal(metadata.version, '0.1.48');
+  assert.equal(metadata.commit, 'df7f984bbd9d5b95e06523a228768ae924b16ade');
   assert.equal(metadata.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
 
   assert.match(vendor, /export function createVerificationCatalog/);
@@ -34,7 +34,7 @@ test('GPTWork consumes the exact ModelPro v0.1.47 verification policy seam', asy
   assert.match(background, /reportType: 'gptwork-model-verification-report'/);
 });
 
-test('current release surfaces stay version coherent while the ModelPro v0.1.47 seam remains pinned', async () => {
+test('current release surfaces stay version coherent while the ModelPro v0.1.48 seam remains pinned', async () => {
   const [manifestText, packageText, background, cargoToml, cargoLock, installer] = await Promise.all([
     read('manifest.json'),
     read('package.json'),
