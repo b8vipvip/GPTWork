@@ -437,7 +437,7 @@ test('v0.5.135 verification enables GPTWork Work state independently and waits f
   assert.match(background, /discoverAccountCatalog\(tabId\)/);
   assert.match(background, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
   assert.match(background, /account_model_verification_aborted_pending_response/);
-  assert.match(background, /source: 'normal_work_policy_request'/);
+  assert.match(background, /source: 'work_bootstrap_transaction'/);
   assert.match(background, /featureState\?\.workModeEnabled === true/);
   assert.match(content, /waitForProbeTurnSettled/);
   assert.match(content, /assistantCountBefore/);
@@ -480,7 +480,7 @@ test('v0.5.135 has one strict verification transaction authority with no native-
 test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without clicking its UI', async () => {
   const tabFeatureRuntime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
   assert.match(background, /enableWorkModeForVerification\(tabId\)/);
-  assert.match(background, /source: 'normal_work_policy_request'/);
+  assert.match(background, /source: 'work_bootstrap_transaction'/);
   assert.match(tabFeatureRuntime, /export async function enableWorkModeForVerification/);
   assert.match(tabFeatureRuntime, /setTabFeatureState\(tabId, \{ workModeEnabled: true \}\)/);
   assert.doesNotMatch(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
@@ -489,8 +489,9 @@ test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without click
 
 
 test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle', () => {
-  assert.match(background, /const workBootstrapTabs = new Set\(\)/);
-  assert.match(background, /workBootstrapTabs\.has\(Number\(tabId\)\)/);
+  assert.doesNotMatch(background, /workBootstrapTabs/);
+  assert.match(background, /function beginWorkBootstrapTransaction\(tabId, source\)/);
+  assert.match(background, /function endWorkBootstrapTransaction\(tabId, previous\)/);
   assert.match(background, /function reacquirePickerBForModel|async function reacquirePickerBForModel/);
   assert.match(background, /verification_work_activation_turn_started/);
   assert.match(background, /normal_work_turn_picker_b_observed/);

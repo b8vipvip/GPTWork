@@ -5,19 +5,15 @@ import { rewriteConversationPostData } from '../network-evidence.js';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
-test('Work bootstrap forces one effective Work model instead of preserving the visible Chat model', () => {
-  const start = background.indexOf('getLockConfiguration(tabId) {');
-  const end = background.indexOf('getVerificationTransaction(tabId)', start);
+test('Work bootstrap forces its effective Work model through verificationTransactions', () => {
+  const start = background.indexOf('function beginWorkBootstrapTransaction(tabId, source) {');
+  const end = background.indexOf('function endWorkBootstrapTransaction', start);
   assert.ok(start >= 0 && end > start);
   const block = background.slice(start, end);
-
-  assert.match(block, /const workBootstrapModel = workBootstrap/);
-  assert.match(block, /normalizeConcreteModelId\(policy\.lockedModels\?\.\[0\]\)/);
-  assert.match(block, /normalizeConcreteModelId\(DEFAULT_POLICY\.lockedModels\?\.\[0\]\)/);
-  assert.match(block, /lockedModels: workBootstrapModel \? \[workBootstrapModel\] : policy\.lockedModels/);
-  assert.match(block, /forceModel: workBootstrapModel/);
-  assert.match(block, /knownModels: \[\.\.\.new Set\(\[/);
-  assert.match(block, /\.\.\.\(workBootstrapModel \? \[workBootstrapModel\] : \[\]\)/);
+  assert.match(block, /const model = workBootstrapModelForTab\(normalizedTabId\)/);
+  assert.match(block, /verificationTransactions\.set\(normalizedTabId/);
+  assert.match(block, /kind: 'work-bootstrap'/);
+  assert.match(block, /return \{ previous, model \}/);
 });
 
 test('forced Work bootstrap model is converted to its Work transport even when the visible Chat model is known', () => {
@@ -32,7 +28,6 @@ test('forced Work bootstrap model is converted to its Work transport even when t
     preserveReasoning: true,
     allowedReasoningLevels: ['high'],
   });
-
   assert.equal(rewritten.changed, true);
   assert.equal(rewritten.modelBefore, 'gpt-5.6-sol');
   assert.equal(rewritten.modelAfter, 'gpt-6-astra');

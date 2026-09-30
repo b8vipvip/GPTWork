@@ -4,24 +4,17 @@ import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
-// Regression guard from the v0.5.154 live run: only the one-shot Work bootstrap
-// may widen from page-following runtime policy to the effective Work policy.
-test('verification Work bootstrap uses effective Work policy while normal traffic keeps page-following policy', () => {
-  const start = background.indexOf('getLockConfiguration(tabId) {');
-  const end = background.indexOf('getVerificationTransaction(tabId)', start);
+test('verification Work bootstrap resolves the effective Work policy without a parallel tab Set', () => {
+  const start = background.indexOf('function workBootstrapModelForTab(tabId) {');
+  const end = background.indexOf('function beginWorkBootstrapTransaction', start);
   assert.ok(start >= 0 && end > start);
   const block = background.slice(start, end);
-
-  assert.match(block, /const workBootstrap = workBootstrapTabs\.has\(Number\(tabId\)\)/);
-  assert.match(
-    block,
-    /const policy = workBootstrap\s*\? effectivePolicyForTabSync\(tabId\)\s*: runtimePolicyForTabSync\(tabId\)/,
-  );
-  assert.match(block, /preferredReasoning: workBootstrap \? null : currentSettings\.preferredReasoning/);
-  assert.match(block, /preserveReasoning: workBootstrap/);
+  assert.match(block, /effectivePolicyForTabSync\(tabId\)/);
+  assert.match(block, /normalizeConcreteModelId\(policy\.lockedModels\?\.\[0\]\)/);
+  assert.match(block, /normalizeConcreteModelId\(DEFAULT_POLICY\.lockedModels\?\.\[0\]\)/);
+  assert.doesNotMatch(background, /workBootstrapTabs/);
 });
 
-// Visible-model success is not terminal success if the Work catalog was never entered.
 test('failed Work discovery cannot be reported as a fully verified account', () => {
   assert.match(background, /catalogVerification\?\.workDiscovery\?\.attempted === true/);
   assert.match(background, /catalogVerification\.workDiscovery\.entered !== true/);

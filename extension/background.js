@@ -38,7 +38,7 @@ import {
   createModelVerificationHistoryRecord,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.156';
+const RUNTIME_CODE_VERSION = '0.5.157';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -70,8 +70,6 @@ const verificationTransactions = new Map();
 // Automatic model verification is single-flight per tab. Register the task before
 // autoVerify() can yield so duplicate starts join one picker/composer transaction.
 const autoVerificationTasks = new Map();
-// One-shot Work bootstrap follows normal Work policy outside verification authority.
-const workBootstrapTabs = new Set();
 const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
@@ -415,6 +413,34 @@ function effectiveSettingsForState(state) {
 
 function verificationTransactionForTab(tabId) {
   return verificationTransactions.get(Number(tabId)) || null;
+}
+
+function workBootstrapModelForTab(tabId) {
+  const policy = effectivePolicyForTabSync(tabId);
+  return normalizeConcreteModelId(policy.lockedModels?.[0])
+    ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0]);
+}
+
+function beginWorkBootstrapTransaction(tabId, source) {
+  const normalizedTabId = Number(tabId);
+  const previous = verificationTransactionForTab(normalizedTabId);
+  const model = workBootstrapModelForTab(normalizedTabId);
+  if (!model) throw new Error('Work bootstrap model is unavailable');
+  verificationTransactions.set(normalizedTabId, {
+    model,
+    selectorKey: '__work_bootstrap__',
+    label: 'Work bootstrap',
+    startedAt: Date.now(),
+    kind: 'work-bootstrap',
+    source: String(source || 'work-bootstrap'),
+  });
+  return { previous, model };
+}
+
+function endWorkBootstrapTransaction(tabId, previous) {
+  const normalizedTabId = Number(tabId);
+  if (previous) verificationTransactions.set(normalizedTabId, previous);
+  else verificationTransactions.delete(normalizedTabId);
 }
 
 function runtimePolicyForTabSync(tabId) {
@@ -963,34 +989,17 @@ async function applyNetworkEvidence(tabId, evidence) {
 
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
-    const workBootstrap = workBootstrapTabs.has(Number(tabId));
-    // Verification's one-shot Work bootstrap must use the effective Work policy;
-    // ordinary traffic and verification transactions keep runtimePolicyForTabSync.
-    const policy = workBootstrap
-      ? effectivePolicyForTabSync(tabId)
-      : runtimePolicyForTabSync(tabId);
-    // The Work bootstrap is not an allow-list pass. It must make one
-    // concrete Work transport request so ChatGPT enters the Work profile.
-    // If the tab-feature runtime was rehydrated during an update, fall back
-    // to the product Work default instead of silently sending the visible
-    // Chat model unchanged. Ordinary traffic never takes this branch.
-    const workBootstrapModel = workBootstrap
-      ? normalizeConcreteModelId(policy.lockedModels?.[0])
-        ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0])
-      : null;
+    const policy = runtimePolicyForTabSync(tabId);
     return {
-      lockedModels: workBootstrapModel ? [workBootstrapModel] : policy.lockedModels,
+      lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
-      preferredReasoning: workBootstrap ? null : currentSettings.preferredReasoning,
+      preferredReasoning: currentSettings.preferredReasoning,
       preserveModel: false,
-      preserveReasoning: workBootstrap,
+      preserveReasoning: false,
       bypassRewrite: false,
-      forceModel: workBootstrapModel,
+      forceModel: null,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
-      knownModels: [...new Set([
-        ...sharedKnownModelIds,
-        ...(workBootstrapModel ? [workBootstrapModel] : []),
-      ])],
+      knownModels: [...sharedKnownModelIds],
     };
   },
   getVerificationTransaction(tabId) {
@@ -1724,14 +1733,14 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   const hasDesired = () => (catalog?.rows || []).some((row) => normalizeConcreteModelId(row?.model || row?.rawId) === desiredModel);
   if (catalog?.pickerMode === 'B' && hasDesired()) return catalog;
   logRuntime('info', 'verification', 'picker_b_reacquire_started', { tabId, desiredModel, observedPickerMode: catalog?.pickerMode ?? null });
-  workBootstrapTabs.add(Number(tabId));
+  const workBootstrap = beginWorkBootstrapTransaction(tabId, 'picker-b-reacquire');
   try {
     const probe = await sendVerificationReasoningProbe(tabId, 'work-mode-b-reacquire', progress.completed + 1, progress.total);
     if (!probe?.sent) return catalog;
     const settled = await sendTabMessage(tabId, { type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED', assistantCountBefore: probe.assistantCountBefore ?? 0, timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS });
     if (settled?.settled !== true) return catalog;
   } finally {
-    workBootstrapTabs.delete(Number(tabId));
+    endWorkBootstrapTransaction(tabId, workBootstrap.previous);
   }
   const deadline = Date.now() + 10000;
   do {
@@ -1979,7 +1988,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         };
         logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
           tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
-          source: 'normal_work_policy_request',
+          source: 'work_bootstrap_transaction',
         });
       } catch (error) {
         progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
@@ -1991,9 +2000,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 
     // Picker B is unlocked by the same product path used during normal GPTWork use:
     // after A has verified Sol and the tab-scoped Work policy is armed, send ONE
-    // ordinary natural turn outside verificationTransactions. That request therefore
-    // belongs exclusively to normal-policy (not the verification authority). Only the
-    // real B catalog is allowed to confirm the A -> Work/B transition.
+    // one-shot natural turn through the same verification transaction authority used
+    // at Fetch.requestPaused. Only the real B catalog or backend Work identity may
+    // confirm the A -> Work/B transition.
     if (item.model === 'gpt-5.6-sol' && workActivationPending) {
       const completedSol = progress.results.at(-1);
       if (completedSol?.verified === true) {
@@ -2002,15 +2011,15 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
           entered: false,
           reason: 'waiting_for_normal_work_turn_and_picker_b',
           runtimeEnabled: true,
-          source: 'normal_work_policy_request',
+          source: 'work_bootstrap_transaction',
         };
         logRuntime('info', 'verification', 'verification_work_activation_turn_started', {
-          tabId, phase: 'post_gpt_5_6_sol', source: 'normal_work_policy_request',
+          tabId, phase: 'post_gpt_5_6_sol', source: 'work_bootstrap_transaction',
         });
 
         let activationProbe = null;
         let activationSettled = null;
-        workBootstrapTabs.add(Number(tabId));
+                const workBootstrap = beginWorkBootstrapTransaction(tabId, 'post-sol-work-activation');
         try {
           activationProbe = await sendVerificationReasoningProbe(tabId, 'work-mode-bootstrap', index, queue.length);
           if (activationProbe?.sent) {
@@ -2021,7 +2030,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
             });
           }
         } finally {
-          workBootstrapTabs.delete(Number(tabId));
+          endWorkBootstrapTransaction(tabId, workBootstrap.previous);
         }
 
         // Do not reload/stop/recover this bootstrap turn. The redesigned composer may
@@ -2034,7 +2043,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         const activationDefaultModel = normalizeConcreteModelId(activationResponse?.defaultModel);
         const activationWorkConfirmed = Boolean(
           activationSettled?.settled === true
-            && activationRewrite?.authorityKind === 'normal-policy'
+            && activationRewrite?.authorityKind === 'verification-transaction'
             && activationRewrite?.requestId
             && activationResponse?.requestId === activationRewrite.requestId
             && activationTarget
@@ -2103,7 +2112,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
           entered: false,
           reason: 'deferred_until_sol_verified',
           runtimeEnabled: true,
-          source: 'normal_work_policy_request',
+          source: 'work_bootstrap_transaction',
         };
       }
     }
