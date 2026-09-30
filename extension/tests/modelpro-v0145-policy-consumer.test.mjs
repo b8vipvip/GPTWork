@@ -22,6 +22,8 @@ test('v0.5.149 consumes the exact ModelPro v0.1.46 verification policy seam', as
   assert.match(vendor, /export function createModelVerificationHistoryRecord/);
   assert.match(vendor, /export function shouldRetryTransientResponse/);
   assert.match(vendor, /export function publishableVerificationResults/);
+  assert.match(vendor, /export function shouldRetryTransientResponse/);
+  assert.match(vendor, /export function publishableVerificationResults/);
 
   assert.match(background, /from '\.\/vendor\/modelpro\/model-verification\.js'/);
   assert.match(background, /createVerificationCatalog\(\{/);
