@@ -1,0 +1,53 @@
+name: stage-v05159-modelpro-v0147-selected-opener
+
+on:
+  push:
+    branches:
+      - fix/v0.5.159-modelpro-v0147-selected-opener
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply v0.5.159 selected-model ViewTrack repair
+        run: node .github/scripts/stage-v05159-modelpro-v0147-selected-opener.cjs
+      - name: Validate exact ModelPro policy blob
+        shell: bash
+        run: |
+          test "$(git hash-object extension/vendor/modelpro/model-verification.js)" = "5ab85559688ed0b605b517e27eec0682361d035c"
+          grep -q '"version": "0.1.47"' extension/vendor/modelpro/MODELPRO_SOURCE.json
+          grep -q '"commit": "8a6d468b52ccba7395b56ac3c243773e3a420c8b"' extension/vendor/modelpro/MODELPRO_SOURCE.json
+      - name: Validate extension
+        working-directory: extension
+        run: npm test
+      - name: Validate synchronized release surfaces
+        shell: bash
+        run: |
+          test "$(node -p "require('./extension/manifest.json').version")" = "0.5.159"
+          test "$(node -p "require('./extension/package.json').version")" = "0.5.159"
+          grep -q '^version = "0.5.159"' native-core/Cargo.toml
+          grep -A1 '^name = "gptwork-core"' native-core/Cargo.lock | grep -q 'version = "0.5.159"'
+          grep -q '#define MyAppVersion "0.5.159"' packaging/windows/GPTWork.iss
+      - name: Commit staged source
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Source already staged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension native-core/Cargo.toml native-core/Cargo.lock packaging/windows/GPTWork.iss
+          git commit -m "v0.5.159: consume ModelPro v0.1.47 and repair selected-model ViewTrack navigation"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
