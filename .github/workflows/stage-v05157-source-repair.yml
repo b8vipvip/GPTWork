@@ -47,14 +47,7 @@ jobs:
 
           if [ "$npm_status" -ne 0 ]; then
             echo '::group::npm test concise failures'
-            awk '
-              /^not ok / ||
-              /^# Subtest:/ ||
-              /AssertionError/ ||
-              /ERR_ASSERTION/ ||
-              /^[[:space:]]*(actual|expected|operator|location|failureType):/ ||
-              /^# (tests|pass|fail|cancelled|skipped|todo|duration_ms)/ { print }
-            ' /tmp/npm-test.log | tail -n 240 || true
+            grep -n -E '^[[:space:]]*not ok |AssertionError|ERR_ASSERTION|^[[:space:]]*(actual|expected|operator|location|failureType):|^# (tests|pass|fail|cancelled|skipped|todo|duration_ms)' /tmp/npm-test.log || true
             echo '::endgroup::'
             exit "$npm_status"
           fi
