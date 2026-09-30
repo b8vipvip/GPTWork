@@ -24,14 +24,6 @@ jobs:
         with:
           node-version: '22.16.0'
 
-      - name: Normalize deterministic repair anchor
-        shell: bash
-        run: |
-          sed -i "s/'        workBootstrapTabs.add(Number(tabId));'/'workBootstrapTabs.add(Number(tabId));'/" .github/scripts/repair-v05157-work-bootstrap.cjs
-
-      - name: Apply single-authority Work bootstrap repair
-        run: node .github/scripts/repair-v05157-work-bootstrap.cjs
-
       - name: Stage v0.5.157 release surfaces
         shell: bash
         run: |
