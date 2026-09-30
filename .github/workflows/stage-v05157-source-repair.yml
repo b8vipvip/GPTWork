@@ -34,10 +34,30 @@ jobs:
 
       - name: Validate repaired source
         working-directory: extension
+        shell: bash
         run: |
+          set -euo pipefail
           node --check background.js
           node --test tests/v05155-work-bootstrap-policy.test.mjs tests/v05156-work-bootstrap-force.test.mjs tests/v05157-work-bootstrap-transaction-authority.test.mjs
-          npm test
+
+          set +e
+          npm test > /tmp/npm-test.log 2>&1
+          npm_status=$?
+          set -e
+
+          if [ "$npm_status" -ne 0 ]; then
+            echo '::group::npm test concise failures'
+            awk '
+              /^not ok / ||
+              /^# Subtest:/ ||
+              /AssertionError/ ||
+              /ERR_ASSERTION/ ||
+              /^[[:space:]]*(actual|expected|operator|location|failureType):/ ||
+              /^# (tests|pass|fail|cancelled|skipped|todo|duration_ms)/ { print }
+            ' /tmp/npm-test.log | tail -n 240 || true
+            echo '::endgroup::'
+            exit "$npm_status"
+          fi
 
       - name: Commit repaired source and regression tests
         shell: bash
