@@ -1,0 +1,48 @@
+name: Recover v0.5.160 background source
+
+on:
+  push:
+    branches:
+      - fix/v0.5.160-modelpro-v0148-causal-viewtrack
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gptwork-v05160-background-recovery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: Restore background from v0.5.159 main and bump runtime version
+        shell: bash
+        run: |
+          git show 7635bf3f1879000272189502cc924e99e23a3274:extension/background.js > extension/background.js
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('extension/background.js')
+          text = path.read_text(encoding='utf-8')
+          old = "const RUNTIME_CODE_VERSION = '0.5.159';"
+          new = "const RUNTIME_CODE_VERSION = '0.5.160';"
+          if old not in text:
+              raise SystemExit('runtime version marker missing from restored background')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Commit recovery
+        shell: bash
+        run: |
+          if git diff --quiet -- extension/background.js; then
+            echo "Background already recovered"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension/background.js
+          git commit -m "fix: restore full background runtime for v0.5.160"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
