@@ -948,6 +948,13 @@ document.addEventListener('pointerdown', (event) => {
     return null;
   }
 
+  // ChatGPT's 2026-09 ViewTrack keeps inactive picker panels mounted with normal
+  // dimensions. CSS visibility is observation-only; an actionable model row must
+  // also own a real viewport point through elementFromPoint().
+  function interactionVisible(element) {
+    return visible(element) && Boolean(pointerOwnedVisiblePoint(element));
+  }
+
   async function modelPickerPointer(element, action = 'click', source = 'model-picker') {
     // chrome.debugger's infobar, picker animations, and compositor movement can make
     // an otherwise correct owned row briefly fail the center-point hit test. Retry
@@ -1004,6 +1011,10 @@ document.addEventListener('pointerdown', (event) => {
       // Attaching chrome.debugger can show Chrome's debugging infobar and move the
       // entire viewport. Never compute coordinates until that layout change is over.
       await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER_PREPARE' });
+      if (!element.isConnected || !visible(element)) {
+        pointerTrace('invalidated_after_debugger_attach', { traceId, action, source, target: compactElementProbe(element) });
+        return false;
+      }
       // chrome.debugger's infobar and Radix slider transitions can both move the picker.
       // Wait for the exact owned element to stop moving AND own its center before dispatch.
       // This is a readiness barrier, not a second selector/authority path.
@@ -1126,7 +1137,7 @@ document.addEventListener('pointerdown', (event) => {
     // two Chat models and an accessible Select-model control. The model rows are
     // already authoritative; clicking the nested opener leaves this valid list.
     if (picker.matches?.('[data-testid="composer-intelligence-picker-content"]')) return [];
-    const rows = distinctModelRows(picker);
+    const rows = distinctModelRows(picker).filter(interactionVisible);
     const models = new Set(rows.map((row) => rowModelDescriptor(row).model).filter(Boolean));
     if (models.size !== 2 || !models.has('gpt-5.5') || !models.has('gpt-5.6-sol')) return [];
     return rows.filter((row) => {
@@ -1142,6 +1153,22 @@ document.addEventListener('pointerdown', (event) => {
   function advancedPickerToggle(picker) {
     return [...(picker?.querySelectorAll?.('[role="menuitem"],button,[role="button"]') || [])].filter(visible)
       .find((element) => /advanced|高级|進階|고급|avanzad|erweitert/i.test(normalizedPickerLabel(element))) || null;
+  }
+
+  function redesignedModelViewOpener(picker) {
+    if (!picker || !visible(picker)) return null;
+    const candidates = [...picker.querySelectorAll('[role="menuitem"],button,[role="button"]')]
+      .filter((element) => interactionVisible(element))
+      .filter((element) => !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'))
+      .filter((element) => {
+        const descriptor = rowModelDescriptor(element);
+        if (descriptor.model || descriptor.rawId) return false;
+        if (element.matches?.('[role="slider"],input[type="range"]')) return false;
+        if (element.querySelector?.('[role="slider"],input[type="range"]')) return false;
+        const label = normalizedPickerLabel(element).replace(/[›»>]+\s*$/, '').trim();
+        return Boolean(normalizeDisplayedReasoning(label));
+      });
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
   function isModelListScope(scope) {
@@ -1240,7 +1267,7 @@ document.addEventListener('pointerdown', (event) => {
     // B = intelligence slider/advanced picker with a nested account model catalog.
     // Detect the structure that is actually open so a verification turn may migrate
     // A -> B or B -> A without treating reasoning controls as model rows.
-    const redesignedDirectRows = defaultChatDirectModelRows(picker);
+    let redesignedDirectRows = defaultChatDirectModelRows(picker);
     if (redesignedDirectRows.length === 2) {
       pickerTopologyProbe('picker-mode-a-redesigned-direct-chat-list', {
         pageContext,
@@ -1260,6 +1287,36 @@ document.addEventListener('pointerdown', (event) => {
         pageContext,
         pickerMode: 'A',
       };
+    }
+
+    // The redesigned picker may open on the reasoning slider while its model panel
+    // stays mounted in an inactive ViewPanel. Navigate through the exact visible
+    // reasoning summary row, then reacquire only hit-test-owned rows in this picker.
+    const modelViewOpener = redesignedModelViewOpener(picker);
+    if (modelViewOpener) {
+      pickerTopologyProbe('picker-redesign-reasoning-view-detected', {
+        pageContext,
+        opener: compactElementProbe(modelViewOpener),
+      });
+      const navigated = await modelPickerPointer(modelViewOpener, 'click', 'model-picker-redesign-model-view');
+      if (navigated) {
+        redesignedDirectRows = await waitUntil(() => {
+          const rows = defaultChatDirectModelRows(picker);
+          return rows.length === 2 ? rows : null;
+        }, 2600, 80) || [];
+        if (redesignedDirectRows.length === 2) {
+          pickerTopologyProbe('picker-mode-a-redesigned-model-view', {
+            pageContext,
+            pickerMode: 'A',
+            ownedPicker: compactElementProbe(picker),
+            modelRows: redesignedDirectRows.map((row) => ({
+              element: compactElementProbe(row),
+              descriptor: rowModelDescriptor(row),
+            })),
+          });
+          return { trigger, picker, opener: null, submenu: picker, rows: redesignedDirectRows, pageContext, pickerMode: 'A' };
+        }
+      }
     }
 
     const initialOpener = modelSubmenuOpener(picker);
