@@ -5,7 +5,7 @@ import test from 'node:test';
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const readRepo = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8');
 
-test('v0.5.149 consumes the exact ModelPro v0.1.45 verification policy seam', async () => {
+test('v0.5.149 consumes the exact ModelPro v0.1.46 verification policy seam', async () => {
   const [background, vendor, source] = await Promise.all([
     read('background.js'),
     read('vendor/modelpro/model-verification.js'),
@@ -13,13 +13,17 @@ test('v0.5.149 consumes the exact ModelPro v0.1.45 verification policy seam', as
   ]);
   const metadata = JSON.parse(source);
   assert.equal(metadata.repository, 'b8vipvip/ModelPro');
-  assert.equal(metadata.version, '0.1.45');
-  assert.equal(metadata.commit, '33bc784dbf91c52aa1776ee46550acb2dcf04c8b');
-  assert.equal(metadata.blob, 'b7a070a4aeec86b4cb7e0c4ec4dc4750b4e2e215');
+  assert.equal(metadata.version, '0.1.46');
+  assert.equal(metadata.commit, 'f674411521d54f03682b7c60102a9c21d449f53d');
+  assert.equal(metadata.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
 
   assert.match(vendor, /export function createVerificationCatalog/);
   assert.match(vendor, /export function summarizeVerificationOutcome/);
   assert.match(vendor, /export function createModelVerificationHistoryRecord/);
+  assert.match(vendor, /export function shouldRetryTransientResponse/);
+  assert.match(vendor, /export function publishableVerificationResults/);
+  assert.match(vendor, /export function shouldRetryTransientResponse/);
+  assert.match(vendor, /export function publishableVerificationResults/);
 
   assert.match(background, /from '\.\/vendor\/modelpro\/model-verification\.js'/);
   assert.match(background, /createVerificationCatalog\(\{/);
@@ -32,7 +36,7 @@ test('v0.5.149 consumes the exact ModelPro v0.1.45 verification policy seam', as
   assert.match(background, /reportType: 'gptwork-model-verification-report'/);
 });
 
-test('current release surfaces stay version coherent while the ModelPro v0.1.45 seam remains pinned', async () => {
+test('current release surfaces stay version coherent while the ModelPro v0.1.46 seam remains pinned', async () => {
   const [manifestText, packageText, background, cargoToml, cargoLock, installer] = await Promise.all([
     read('manifest.json'),
     read('package.json'),

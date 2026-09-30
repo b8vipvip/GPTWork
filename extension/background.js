@@ -36,9 +36,11 @@ import {
   createVerificationCatalog,
   summarizeVerificationOutcome,
   createModelVerificationHistoryRecord,
+  shouldRetryTransientResponse,
+  publishableVerificationResults,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.157';
+const RUNTIME_CODE_VERSION = '0.5.158';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1602,8 +1604,7 @@ function mergeAccountCatalogs(...catalogs) {
 }
 
 async function publishVerifiedModels(progress) {
-  const models = (Array.isArray(progress?.results) ? progress.results : [])
-    .filter((item) => item?.requestConfirmed === true && normalizeConcreteModelId(item?.model))
+  const models = publishableVerificationResults(progress?.results, normalizeConcreteModelId)
     .map((item) => ({
       model: normalizeConcreteModelId(item.model),
       label: String(item.label || item.model).trim().slice(0, 120),
@@ -1778,6 +1779,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
 
   let index = 0;
   let stablePasses = 0;
+  const transientRetryCounts = new Map();
   while (index < queue.length || stablePasses < 2) {
     if (index >= queue.length) {
       const rediscovered = await discoverAccountCatalog(tabId);
@@ -1932,6 +1934,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         : requestConfirmed
           ? (item.model ? 'fetch_forwarded_request_metadata' : 'network_request_metadata')
           : null;
+      const retryKey = catalog.identity(item);
+      const retryCount = transientRetryCounts.get(retryKey) || 0;
       const result = {
         model: item.model || requestModel, rawModel: item.rawModel || requestModel,
         selectorKey: item.selectorKey, label: item.label, verified,
@@ -1940,10 +1944,26 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         responseReasoning: responseEvidence?.reasoning ?? null,
         responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
         responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
+        responseHttpStatus: Number(responseEvidence?.diagnostics?.httpStatus || 0),
+        responseBodyError: responseEvidence?.bodyError ?? null,
+        retryCount,
         pickerMode: item.pickerMode || null,
         evidenceSource,
         timedOut: waited.timedOut, turnSettled: true, observation: selection.observation || null,
       };
+      if (shouldRetryTransientResponse(result, { maxRetries: 1 })) {
+        transientRetryCounts.set(retryKey, retryCount + 1);
+        logRuntime('warn', 'verification', 'account_model_verification_transient_response_retry', {
+          tabId, index: index + 1, total: queue.length, model: result.model,
+          requestId: result.requestId, responseHttpStatus: result.responseHttpStatus,
+          responseBodyError: result.responseBodyError, responseIssue: result.responseIssue,
+          retryCount: retryCount + 1, maxRetries: 1,
+        });
+        verificationTransactions.delete(Number(tabId));
+        await broadcastTabState(tabId);
+        await sleep(650);
+        continue;
+      }
       progress.results.push(result);
       if (requestConfirmed) progress.requestConfirmed += 1;
       if (verified) progress.verified += 1; else progress.failed += 1;
