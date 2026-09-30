@@ -1157,14 +1157,23 @@ document.addEventListener('pointerdown', (event) => {
 
   function redesignedModelViewOpener(picker) {
     if (!picker || !visible(picker)) return null;
+    const exactModelViewName = /^(?:select model|choose model|选择模型|選擇模型|모델 선택)$/i;
     const candidates = [...picker.querySelectorAll('[role="menuitem"],button,[role="button"]')]
       .filter((element) => interactionVisible(element))
       .filter((element) => !element.closest?.('#gptlock-indicator-host,#gptlock-verification-progress-host'))
       .filter((element) => {
-        const descriptor = rowModelDescriptor(element);
-        if (descriptor.model || descriptor.rawId) return false;
         if (element.matches?.('[role="slider"],input[type="range"]')) return false;
         if (element.querySelector?.('[role="slider"],input[type="range"]')) return false;
+        // Current ChatGPT keeps this ViewTrack toggle's accessible name stable as
+        // "选择模型 / Select model" after selection, while visible text becomes
+        // a model+effort summary such as "5.5 高". Accessible identity must win
+        // before that text can be parsed as a concrete model row.
+        const accessibleName = String(
+          element.getAttribute?.('aria-label') || element.getAttribute?.('title') || ''
+        ).trim();
+        if (exactModelViewName.test(accessibleName)) return true;
+        const descriptor = rowModelDescriptor(element);
+        if (descriptor.model || descriptor.rawId) return false;
         const label = normalizedPickerLabel(element).replace(/[›»>]+\s*$/, '').trim();
         return Boolean(normalizeDisplayedReasoning(label));
       });
@@ -1316,6 +1325,15 @@ document.addEventListener('pointerdown', (event) => {
           });
           return { trigger, picker, opener: null, submenu: picker, rows: redesignedDirectRows, pageContext, pickerMode: 'A' };
         }
+        // A dispatched ViewTrack navigation owns this attempt. Never fall through
+        // to modelSubmenuOpener and click the same Select-model toggle a second time.
+        pickerTopologyProbe('picker-redesign-model-view-unresolved', {
+          pageContext,
+          pickerMode: 'A',
+          opener: compactElementProbe(modelViewOpener),
+          ownedPicker: compactElementProbe(picker),
+        });
+        return { trigger, picker, opener: modelViewOpener, submenu: null, rows: [], pageContext, pickerMode: 'A' };
       }
     }
 
