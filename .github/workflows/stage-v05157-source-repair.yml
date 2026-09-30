@@ -43,6 +43,7 @@ jobs:
 
           replace_once('extension/manifest.json', '"version": "0.5.156"', '"version": "0.5.157"')
           replace_once('extension/package.json', '"version": "0.5.156"', '"version": "0.5.157"')
+          replace_once('extension/background.js', "const RUNTIME_CODE_VERSION = '0.5.156';", "const RUNTIME_CODE_VERSION = '0.5.157';")
           replace_once('native-core/Cargo.toml', 'version = "0.5.156"', 'version = "0.5.157"')
           replace_once('packaging/windows/GPTWork.iss', '#define MyAppVersion "0.5.156"', '#define MyAppVersion "0.5.157"')
 
@@ -84,6 +85,7 @@ jobs:
           set -euo pipefail
           grep -F '"version": "0.5.157"' extension/manifest.json
           grep -F '"version": "0.5.157"' extension/package.json
+          grep -F "const RUNTIME_CODE_VERSION = '0.5.157';" extension/background.js
           grep -F 'version = "0.5.157"' native-core/Cargo.toml
           grep -A1 -F 'name = "gptwork-core"' native-core/Cargo.lock | grep -F 'version = "0.5.157"'
           grep -F '#define MyAppVersion "0.5.157"' packaging/windows/GPTWork.iss
