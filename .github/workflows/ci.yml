@@ -10,12 +10,96 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-v2-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-v3-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Select affected CI jobs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      extension: ${{ steps.filter.outputs.extension }}
+      private_engine: ${{ steps.filter.outputs.private_engine }}
+      native_core: ${{ steps.filter.outputs.native_core }}
+      windows: ${{ steps.filter.outputs.windows }}
+      linux: ${{ steps.filter.outputs.linux }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify changed paths
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          extension=false
+          private_engine=false
+          native_core=false
+          windows=false
+          linux=false
+          all=false
+
+          if [[ "$EVENT_NAME" != "pull_request" || -z "$BASE_SHA" ]]; then
+            all=true
+            : > /tmp/changed-files.txt
+          else
+            git diff --name-only "$BASE_SHA"...HEAD > /tmp/changed-files.txt
+          fi
+
+          while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            case "$path" in
+              .github/workflows/ci.yml)
+                all=true
+                ;;
+              extension/*|license-server/*|packaging/native-messaging/*)
+                extension=true; windows=true; linux=true
+                ;;
+              native-core/*)
+                extension=true; native_core=true; windows=true; linux=true
+                ;;
+              private-engine/*)
+                private_engine=true; windows=true; linux=true
+                ;;
+              packaging/windows/*)
+                windows=true
+                ;;
+              packaging/linux/*)
+                extension=true; linux=true
+                ;;
+              .github/gptauto/*|.github/actions/upload-gptauto-log/*)
+                extension=true
+                ;;
+              .github/workflows/release.yml|.github/workflows/actions-recovery.yml)
+                extension=true; windows=true; linux=true
+                ;;
+            esac
+          done < /tmp/changed-files.txt
+
+          if [[ "$all" == "true" ]]; then
+            extension=true
+            private_engine=true
+            native_core=true
+            windows=true
+            linux=true
+          fi
+
+          echo "Changed files:"
+          cat /tmp/changed-files.txt || true
+          for key in extension private_engine native_core windows linux; do
+            value="${!key}"
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+            echo "$key=$value"
+          done
+
   extension:
     name: Extension checks
+    needs: changes
+    if: needs.changes.outputs.extension == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -48,16 +132,13 @@ jobs:
           python - <<'PY'
           import json
           import tomllib
-
           with open('extension/manifest.json', encoding='utf-8') as handle:
               manifest_version = json.load(handle)['version']
           with open('extension/package.json', encoding='utf-8') as handle:
               package_version = json.load(handle)['version']
           with open('native-core/Cargo.toml', 'rb') as handle:
               cargo_version = tomllib.load(handle)['package']['version']
-          assert manifest_version == package_version == cargo_version, (
-              manifest_version, package_version, cargo_version
-          )
+          assert manifest_version == package_version == cargo_version, (manifest_version, package_version, cargo_version)
           PY
       - name: Test extension policy
         working-directory: extension
@@ -88,6 +169,8 @@ jobs:
 
   private-engine:
     name: Private Engine (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.private_engine == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -122,6 +205,8 @@ jobs:
 
   native-core:
     name: Native Core (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.native_core == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -156,6 +241,8 @@ jobs:
 
   windows-installer:
     name: Windows Setup
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -163,7 +250,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native-core
+          workspaces: |
+            native-core
+            private-engine
       - name: Parse PowerShell installer
         shell: pwsh
         run: |
@@ -178,9 +267,7 @@ jobs:
             }
             $tokens = $null
             $parseErrors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path $file), [ref]$tokens, [ref]$parseErrors
-            ) | Out-Null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$parseErrors) | Out-Null
             if ($parseErrors.Count -gt 0) {
               $parseErrors | Format-List | Out-String | Write-Error
               exit 1
@@ -190,17 +277,58 @@ jobs:
         run: cargo build --locked --release --manifest-path native-core/Cargo.toml
       - name: Build Private Engine
         run: cargo build --release --manifest-path private-engine/Cargo.toml
-      - name: Compile Setup
+      - name: Compile and optionally sign Setup
         shell: pwsh
+        env:
+          SIGN_RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          GPTLOCK_CODESIGN_PFX_BASE64: ${{ secrets.GPTLOCK_CODESIGN_PFX_BASE64 }}
+          GPTLOCK_CODESIGN_PFX_PASSWORD: ${{ secrets.GPTLOCK_CODESIGN_PFX_PASSWORD }}
+          GPTLOCK_CODESIGN_TIMESTAMP_URL: ${{ secrets.GPTLOCK_CODESIGN_TIMESTAMP_URL }}
         run: |
+          $ErrorActionPreference = 'Stop'
           $version = (Get-Content 'extension\manifest.json' -Raw | ConvertFrom-Json).version
           $privateEngine = (Resolve-Path 'private-engine\target\release\gptwork-private-engine.exe').Path
-          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          if (-not (Test-Path -LiteralPath $iscc)) {
-            choco install innosetup --yes --no-progress
+          $core = (Resolve-Path 'native-core\target\release\gptwork-core.exe').Path
+          $signingEnabled = $env:SIGN_RELEASE -eq 'true' -and -not [string]::IsNullOrWhiteSpace($env:GPTLOCK_CODESIGN_PFX_BASE64)
+          $certPath = Join-Path $env:RUNNER_TEMP 'gptlock-codesign.pfx'
+          $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:GPTLOCK_CODESIGN_TIMESTAMP_URL)) { 'http://timestamp.digicert.com' } else { $env:GPTLOCK_CODESIGN_TIMESTAMP_URL }
+
+          function Find-SignTool {
+            $root = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+            $tool = Get-ChildItem -Path $root -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $tool) { throw 'signtool.exe was not found on the Windows runner.' }
+            return $tool.FullName
           }
-          & $iscc "/DMyAppVersion=$version" "/DPrivateEnginePath=$privateEngine" 'packaging\windows\GPTWork.iss'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          function Sign-GPTWorkFile([string]$Path, [string]$SignTool) {
+            & $SignTool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $certPath /p $env:GPTLOCK_CODESIGN_PFX_PASSWORD $Path
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed: $Path" }
+            $signature = Get-AuthenticodeSignature -LiteralPath $Path
+            if ($signature.Status -ne 'Valid') { throw "Authenticode signature is not valid for ${Path}: $($signature.Status)" }
+          }
+
+          try {
+            if ($signingEnabled) {
+              if ([string]::IsNullOrWhiteSpace($env:GPTLOCK_CODESIGN_PFX_PASSWORD)) { throw 'GPTLOCK_CODESIGN_PFX_PASSWORD is required when signing is enabled.' }
+              [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:GPTLOCK_CODESIGN_PFX_BASE64))
+              $signTool = Find-SignTool
+              Sign-GPTWorkFile $core $signTool
+              Sign-GPTWorkFile $privateEngine $signTool
+            } else {
+              $signTool = $null
+            }
+
+            $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+            if (-not (Test-Path -LiteralPath $iscc)) { choco install innosetup --yes --no-progress }
+            & $iscc "/DMyAppVersion=$version" "/DPrivateEnginePath=$privateEngine" 'packaging\windows\GPTWork.iss'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($signingEnabled) { Sign-GPTWorkFile 'dist\windows\GPTWorkSetup-x64.exe' $signTool }
+          }
+          finally {
+            if (Test-Path -LiteralPath $certPath) { Remove-Item -LiteralPath $certPath -Force }
+          }
       - name: Install and verify Setup registration
         shell: pwsh
         run: |
@@ -226,9 +354,7 @@ jobs:
           $sourceLeaks = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
             $_.Extension -eq '.rs' -or $_.Name -in @('Cargo.toml', 'Cargo.lock')
           })
-          if ($sourceLeaks.Count -gt 0) {
-            throw "Private Rust source leaked into Setup payload: $($sourceLeaks.FullName -join ', ')"
-          }
+          if ($sourceLeaks.Count -gt 0) { throw "Private Rust source leaked into Setup payload: $($sourceLeaks.FullName -join ', ')" }
           & $repair
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($registryPath in @(
@@ -238,9 +364,7 @@ jobs:
             $manifestPath = (Get-Item -LiteralPath $registryPath).GetValue('')
             $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
             if ($manifest.path -ne $binary) { throw "Wrong native binary path: $($manifest.path)" }
-            if (@($manifest.allowed_origins)[0] -ne 'chrome-extension://bhchcpeodphgjfjoookncemnamdbfcof/') {
-              throw "Wrong allowed origin: $(@($manifest.allowed_origins)[0])"
-            }
+            if (@($manifest.allowed_origins)[0] -ne 'chrome-extension://bhchcpeodphgjfjoookncemnamdbfcof/') { throw "Wrong allowed origin: $(@($manifest.allowed_origins)[0])" }
           }
           & $binary doctor
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -263,14 +387,25 @@ jobs:
           $chromeManifestPath = (Get-Item -LiteralPath 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.gptlock.core').GetValue('')
           $chromeManifest = Get-Content -LiteralPath $chromeManifestPath -Raw | ConvertFrom-Json
           if ($chromeManifest.path -ne $sourceBinary) { throw "Custom source root was not registered: $($chromeManifest.path)" }
+      - name: Write exact-SHA Windows release provenance
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          $version = (Get-Content 'extension\manifest.json' -Raw | ConvertFrom-Json).version
+          @{ schema='gptwork.ci-release-provenance/v1'; sha=$env:GITHUB_SHA; version=$version; artifact='gptwork-windows-setup' } |
+            ConvertTo-Json | Set-Content 'dist\windows\release-provenance.json' -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: gptwork-windows-setup
-          path: dist/windows/GPTWorkSetup-x64.exe
+          path: |
+            dist/windows/GPTWorkSetup-x64.exe
+            dist/windows/release-provenance.json
           if-no-files-found: error
 
   linux-package:
     name: Linux deb package
+    needs: changes
+    if: needs.changes.outputs.linux == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -278,7 +413,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native-core
+          workspaces: |
+            native-core
+            private-engine
       - name: Build Native Core
         run: cargo build --locked --release --manifest-path native-core/Cargo.toml
       - name: Build Private Engine
@@ -299,8 +436,40 @@ jobs:
             echo 'Private implementation source leaked into Linux package.' >&2
             exit 1
           fi
+      - name: Assemble exact-SHA Linux release bundle
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(python -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')"
+          mkdir -p dist/release /tmp/gptwork-release-bin
+          deb="$(find dist/linux -maxdepth 1 -type f -name 'GPTWork_*_amd64.deb' -print -quit)"
+          test -n "$deb"
+          cp "$deb" dist/release/
+          cp native-core/target/release/gptwork-core /tmp/gptwork-release-bin/gptwork-core
+          cp private-engine/target/release/gptwork-private-engine /tmp/gptwork-release-bin/gptwork-engine
+          chmod 0755 /tmp/gptwork-release-bin/gptwork-core /tmp/gptwork-release-bin/gptwork-engine
+          tar -C /tmp/gptwork-release-bin -czf "dist/release/GPTWork-core-${version}-linux-x64.tar.gz" gptwork-core gptwork-engine
+          (cd extension && zip -9 "../dist/release/GPTWork-extension-${version}.zip" *.js *.css *.html manifest.json icons/*.png)
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          version=json.load(open('extension/manifest.json', encoding='utf-8'))['version']
+          Path('dist/release/release-provenance.json').write_text(json.dumps({
+              'schema':'gptwork.ci-release-provenance/v1',
+              'sha':os.environ['GITHUB_SHA'],
+              'version':version,
+              'artifact':'gptwork-linux-release',
+          }, indent=2) + '\n', encoding='utf-8')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: gptwork-linux-deb
           path: dist/linux/GPTWork_*_amd64.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: gptwork-linux-release
+          path: dist/release/*
           if-no-files-found: error
