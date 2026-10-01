@@ -31,13 +31,13 @@ test('pre-navigation discovery stays hit-test strict and exact ViewTrack navigat
   );
 });
 
-test('failed unified picker discovery cannot fabricate a catalog row from the composer summary', async () => {
+test('failed or absent picker discovery cannot fabricate a catalog row from the composer summary', async () => {
   const content = await r('content.js');
   const start = content.indexOf('async function discoverAccountModelMetadata()');
   const end = content.indexOf('function diagnosticPerformanceSnapshot', start);
   assert.ok(start >= 0 && end > start);
   const section = content.slice(start, end);
-  assert.match(section, /const currentCanJoinCatalog = !modern\.picker \|\| modern\.rows\.length > 0;/);
+  assert.match(section, /const currentCanJoinCatalog = candidateCount > 0;/);
   assert.match(section, /modern\.pickerMode !== 'B' && currentCanJoinCatalog && current\?\.model/);
   assert.doesNotMatch(section, /modern\.pickerMode !== 'B' && current\?\.model && !models\.some/);
 });
