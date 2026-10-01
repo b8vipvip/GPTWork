@@ -1,4 +1,4 @@
-import { normalizeConcreteModelId, normalizePolicy } from './policy.js';
+import { normalizeConcreteModelId, normalizePolicy, prioritizeModels } from './policy.js';
 import { appendRuntimeLog } from './runtime-log.js';
 import { scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
@@ -14,7 +14,8 @@ export const WINDOW_QUOTA_MESSAGE = '当前账户并发窗口超限';
 const MODEL_SELECTION_KEY = 'gptworkModelLockSelection';
 const DISCOVERED_MODELS_KEY = 'discoveredModels';
 const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';
-const BASE_WORK_MODELS = Object.freeze(['gpt-6-astra', 'gpt-5.6-sol']);
+export const WORK_MODEL_FLOOR = 'gpt-6-astra';
+const BASE_WORK_MODELS = Object.freeze([WORK_MODEL_FLOOR]);
 const DEFAULT_TAB_FEATURE_STATE = Object.freeze({
   workModeEnabled: true,
   modelLockEnabled: true,
@@ -60,21 +61,16 @@ function sameModels(left, right) {
   return JSON.stringify(normalizeModels(left)) === JSON.stringify(normalizeModels(right));
 }
 
-function isAtLeastSol(model) {
+function isAtLeastWorkFloor(model) {
   const normalized = normalizeConcreteModelId(model);
   if (!normalized) return false;
-  if (normalized === 'gpt-6-astra' || normalized === 'gpt-5.6-sol') return true;
-  const match = normalized.match(/^gpt-(\d+)(?:[.-](\d+))?/i);
-  if (!match) return false;
-  const major = Number(match[1]);
-  const minor = Number(match[2] || 0);
-  return major > 5 || (major === 5 && minor >= 6);
+  return prioritizeModels([normalized, WORK_MODEL_FLOOR])[0] === normalized;
 }
 
 function workModels() {
   return [...new Set([
     ...BASE_WORK_MODELS,
-    ...normalizeModels(discoveredModels).filter(isAtLeastSol),
+    ...normalizeModels(discoveredModels).filter(isAtLeastWorkFloor),
   ])];
 }
 
@@ -258,8 +254,8 @@ export function requestPolicyForTabSync(tabId, pageModel) {
   let lockedModels = [];
 
   // Work follows the model selected in ChatGPT. It only raises models below the
-  // product floor to GPT-5.6 Sol; it must never upgrade an already-eligible page
-  // selection (for example GPT-6 Astra -> some other preferred Work model).
+  // product floor to GPT-6 Astra; it must never replace an already-eligible page
+  // selection (for example GPT-6.1 Sol stays GPT-6.1 Sol).
   if (feature.modelLockEnabled) {
     // Model Lock is an allow-list, not a priority list. Lock only when the model
     // currently selected by ChatGPT is explicitly present. If it is absent, fail
@@ -267,9 +263,9 @@ export function requestPolicyForTabSync(tabId, pageModel) {
     const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
     lockedModels = selected && allowed.includes(selected) ? [selected] : [];
   } else if (feature.workModeEnabled) {
-    // Work follows the current page model. Only selections below GPT-5.6 Sol are
+    // Work follows the current page model. Only selections below GPT-6 Astra are
     // raised to the Work floor; eligible selections keep their exact identity.
-    lockedModels = selected ? [isAtLeastSol(selected) ? selected : 'gpt-5.6-sol'] : [];
+    lockedModels = selected ? [isAtLeastWorkFloor(selected) ? selected : WORK_MODEL_FLOOR] : [];
   }
 
   return normalizePolicy({ ...basePolicy, lockedModels });

@@ -16,7 +16,7 @@ test('tab feature authority derives Work models from the shared discovery catalo
   assert.match(runtime, /BASE_WORK_MODELS/);
   assert.match(runtime, /DISCOVERED_MODELS_KEY/);
   assert.match(runtime, /function workModels\(\)/);
-  assert.match(runtime, /filter\(isAtLeastSol\)/);
+  assert.match(runtime, /filter\(isAtLeastWorkFloor\)/);
   assert.match(runtime, /effectivePolicyForTabSync/);
 });
 
