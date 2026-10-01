@@ -14,13 +14,14 @@ test('GPTWork consumes the exact ModelPro v0.1.48 verification policy seam', asy
   const metadata = JSON.parse(source);
   assert.equal(metadata.repository, 'b8vipvip/ModelPro');
   assert.equal(metadata.version, '0.1.48');
-  assert.equal(metadata.commit, 'df7f984bbd9d5b95e06523a228768ae924b16ade');
-  assert.equal(metadata.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
+  assert.equal(metadata.commit, 'e6c53093c726d689065b3c62fb5d8582ebc4ca7c');
+  assert.equal(metadata.blob, '07cffd300731947b9da387b940f8acf1ae830b02');
 
   assert.match(vendor, /export function createVerificationCatalog/);
   assert.match(vendor, /export function summarizeVerificationOutcome/);
   assert.match(vendor, /export function createModelVerificationHistoryRecord/);
   assert.match(vendor, /export function shouldRetryTransientResponse/);
+  assert.match(vendor, /responseIssue === 'response_metadata_conflict'/);
   assert.match(vendor, /export function publishableVerificationResults/);
 
   assert.match(background, /from '\.\/vendor\/modelpro\/model-verification\.js'/);
