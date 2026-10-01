@@ -63,7 +63,9 @@ def canonicalize_task(task:Task)->dict:
         generation+=1
     task.metadata["phase"]=phase
     task.metadata["generation"]=generation
-    task.metadata["repair_owner"]="foreground" if phase=="REPAIR_REQUIRED" and not task.metadata.get("ai_provider_configured") else (task.metadata.get("repair_owner") or "")
+    # One repair generation has exactly one owner. The three repair tiers are
+    # sequential stages inside this pipeline, never competing repair authorities.
+    task.metadata["repair_owner"]="repair_pipeline" if phase=="REPAIR_REQUIRED" else ""
     terminal=phase=="DONE"
     task.metadata["terminal_done"]=terminal
     task.metadata["allow_foreground_exit"]=terminal
