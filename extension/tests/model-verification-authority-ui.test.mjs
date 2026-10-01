@@ -488,21 +488,14 @@ test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without click
 });
 
 
-test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle', () => {
-  assert.doesNotMatch(background, /workBootstrapTabs/);
-  assert.doesNotMatch(background, /function beginWorkBootstrapTransaction\(tabId, source\)/);
-  assert.doesNotMatch(background, /function endWorkBootstrapTransaction\(tabId, previous\)/);
-  assert.doesNotMatch(background, /function reacquirePickerBForModel|async function reacquirePickerBForModel/);
-  assert.doesNotMatch(background, /verification_work_activation_turn_started/);
-  assert.doesNotMatch(background, /normal_work_turn_picker_b_observed/);
-  assert.doesNotMatch(background, /picker_b_selection_settled_before_probe/);
+test('v0.5.161 keeps verification Work on network transport without requiring native Picker B', () => {
   assert.match(background, /enableResponseCapture\(tabId\)/);
   assert.match(background, /state\.lastForwardedRequest/);
-  assert.doesNotMatch(background, /verification_sol_picker_b_unlock_started/);
   assert.match(background, /reason: 'network_work_catalog_seeded'/);
   assert.match(background, /source: 'network_work_transport'/);
+  assert.match(background, /selectorKey: '__work_transport__'/);
+  assert.match(background, /model: 'gpt-6-astra'/);
 });
-
 
 test('v0.5.144 restores the validated ModelPro prompt-bank implementation', () => {
   assert.match(background, /let verificationPromptBankCache = null/);
