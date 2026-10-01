@@ -212,11 +212,15 @@ export function bindUpdateStatusLogging(chromeApi = globalThis.chrome) {
   if (!chromeApi?.storage?.onChanged?.addListener) return () => {};
   const listener = (changes, areaName) => {
     if (areaName !== 'local' || !changes?.[UPDATE_STATUS_KEY]) return;
-    const status = changes[UPDATE_STATUS_KEY].newValue;
-    const event = updateStatusEventName(status?.phase);
+    const change = changes[UPDATE_STATUS_KEY];
+    const previousPhase = change.oldValue?.phase ?? null;
+    const status = change.newValue;
+    const nextPhase = status?.phase ?? null;
+    if (previousPhase === nextPhase) return;
+    const event = updateStatusEventName(nextPhase);
     if (!event) return;
-    logUpdate(status.phase === 'error' ? 'error' : 'info', event, {
-      phase: status.phase,
+    logUpdate(nextPhase === 'error' ? 'error' : 'info', event, {
+      phase: nextPhase,
       targetVersion: status.targetVersion ?? null,
       nativeVersion: status.nativeVersion ?? null,
       error: status.error ?? null,
