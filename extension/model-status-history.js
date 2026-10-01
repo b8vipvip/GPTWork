@@ -140,12 +140,17 @@
       && (responseReasons.includes('model_not_allowed') || verification?.verdict === 'mismatch')
     );
 
-    const historicalRequest = !currentRequest
+    // Automatic verification clears the current turn before every catalog probe. During
+    // that interval the stored trusted history belongs to the previous turn and must not
+    // be rendered as if it were the in-flight request/response. The live indicator should
+    // say "waiting" until the new probe produces current network evidence.
+    const suppressHistory = state?.autoVerification?.running === true;
+    const historicalRequest = !suppressHistory && !currentRequest
       && fresh(history?.request, nowMs, maxAgeMs)
       && policyAllows(history?.request?.model, policy)
       ? normalizeModelId(history.request.model)
       : null;
-    const historicalResponse = !currentRequest
+    const historicalResponse = !suppressHistory && !currentRequest
       && fresh(history?.response, nowMs, maxAgeMs)
       && history?.response?.confirmed === true
       && policyAllows(history?.response?.model, policy)
