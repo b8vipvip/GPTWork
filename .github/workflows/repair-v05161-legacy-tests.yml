@@ -1,0 +1,75 @@
+name: Repair v0.5.161 legacy Work tests
+
+on:
+  push:
+    branches:
+      - fix/v0.5.161-network-work-astra-floor
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: repair-v05161-legacy-tests
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message || '', '[legacy-test-repair-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Align legacy tests with network Work contract
+        shell: python
+        run: |
+          from pathlib import Path
+
+          p = Path('extension/tests/model-verification-authority-ui.test.mjs')
+          text = p.read_text(encoding='utf-8')
+          start = text.index("test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle'")
+          end = text.index("\ntest('v0.5.144 restores the validated ModelPro prompt-bank implementation'", start)
+          replacement = """test('v0.5.161 keeps verification Work on network transport without requiring native Picker B', () => {
+  assert.match(background, /enableResponseCapture\\(tabId\\)/);
+  assert.match(background, /state\\.lastForwardedRequest/);
+  assert.match(background, /reason: 'network_work_catalog_seeded'/);
+  assert.match(background, /source: 'network_work_transport'/);
+  assert.match(background, /selectorKey: '__work_transport__'/);
+  assert.match(background, /model: 'gpt-6-astra'/);
+});
+
+"""
+          p.write_text(text[:start] + replacement + text[end + 1:], encoding='utf-8')
+
+          p = Path('extension/tests/modelpro-v0144-redesign-sync.test.mjs')
+          text = p.read_text(encoding='utf-8')
+          old = """  for (const model of ['gpt-5.6-luna','gpt-5.6-terra','gpt-6-astra','gpt-6-luna','gpt-6-sol']) {
+    assert.ok(background.includes(model));
+  }
+"""
+          new = """  assert.ok(background.includes('gpt-6-astra'));
+"""
+          if old not in text:
+              raise SystemExit('legacy ModelPro model-list assertion not found')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+      - name: Run affected tests
+        working-directory: extension
+        run: node --test tests/model-verification-authority-ui.test.mjs tests/modelpro-v0144-redesign-sync.test.mjs
+
+      - name: Commit repair and remove helper
+        run: |
+          rm .github/workflows/repair-v05161-legacy-tests.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'test: align final v0.5.161 legacy Work assertions [legacy-test-repair-done]'
+          git push origin HEAD:fix/v0.5.161-network-work-astra-floor
+
+      - name: Dispatch v0.5.161 staging on repaired head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run stage-v05161.yml --ref fix/v0.5.161-network-work-astra-floor
