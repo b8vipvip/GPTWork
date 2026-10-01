@@ -24,8 +24,8 @@ test('current GPTWork version ports live-validated ModelPro v0.1.44 redesign aut
   assert.match(network, /initial_conversation_aborted/);
   assert.match(network, /defaultModel: evidence\.defaultModel/);
   assert.match(background, /__work_transport__/);
-  assert.match(background, /normal_work_turn_work_profile_confirmed_by_default_model/);
-  assert.match(background, /activationDefaultModel === activationTarget/);
+  assert.match(background, /network_work_catalog_seeded/);
+  assert.match(background, /source: 'network_work_transport'/);
   for (const model of ['gpt-5.6-luna','gpt-5.6-terra','gpt-6-astra','gpt-6-luna','gpt-6-sol']) {
     assert.ok(background.includes(model));
   }
