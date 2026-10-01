@@ -21,11 +21,11 @@ test('v0.5.163 keeps ChatGPT deprecation copy out of the canonical model id', ()
   assert.equal(normalizeDisplayedModel('GPT-6 Astra'), 'gpt-6-astra');
 });
 
-test('v0.5.163 release surfaces stay synchronized', () => {
-  assert.equal(manifest.version, '0.5.163');
+test('release surfaces stay synchronized after the v0.5.163 compatibility fix', () => {
+  const escapedVersion = manifest.version.replaceAll('.', '\\.');
   assert.equal(pkg.version, manifest.version);
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.163';/);
-  assert.match(installer, /#define MyAppVersion "0\.5\.163"/);
+  assert.match(background, new RegExp(`const RUNTIME_CODE_VERSION = '${escapedVersion}';`));
+  assert.match(installer, new RegExp(`#define MyAppVersion "${escapedVersion}"`));
 });
 
 test('deprecation-label compatibility is narrow and keeps the exact default Chat pair contract', () => {
