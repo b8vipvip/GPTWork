@@ -32,26 +32,26 @@ jobs:
           text = p.read_text(encoding='utf-8')
           start = text.index("test('v0.5.142 completes the validated ModelPro Work/B verification lifecycle'")
           end = text.index("\ntest('v0.5.144 restores the validated ModelPro prompt-bank implementation'", start)
-          replacement = """test('v0.5.161 keeps verification Work on network transport without requiring native Picker B', () => {
-  assert.match(background, /enableResponseCapture\\(tabId\\)/);
-  assert.match(background, /state\\.lastForwardedRequest/);
-  assert.match(background, /reason: 'network_work_catalog_seeded'/);
-  assert.match(background, /source: 'network_work_transport'/);
-  assert.match(background, /selectorKey: '__work_transport__'/);
-  assert.match(background, /model: 'gpt-6-astra'/);
-});
-
-"""
+          replacement = (
+              "test('v0.5.161 keeps verification Work on network transport without requiring native Picker B', () => {\n"
+              "  assert.match(background, /enableResponseCapture\\(tabId\\)/);\n"
+              "  assert.match(background, /state\\.lastForwardedRequest/);\n"
+              "  assert.match(background, /reason: 'network_work_catalog_seeded'/);\n"
+              "  assert.match(background, /source: 'network_work_transport'/);\n"
+              "  assert.match(background, /selectorKey: '__work_transport__'/);\n"
+              "  assert.match(background, /model: 'gpt-6-astra'/);\n"
+              "});\n\n"
+          )
           p.write_text(text[:start] + replacement + text[end + 1:], encoding='utf-8')
 
           p = Path('extension/tests/modelpro-v0144-redesign-sync.test.mjs')
           text = p.read_text(encoding='utf-8')
-          old = """  for (const model of ['gpt-5.6-luna','gpt-5.6-terra','gpt-6-astra','gpt-6-luna','gpt-6-sol']) {
-    assert.ok(background.includes(model));
-  }
-"""
-          new = """  assert.ok(background.includes('gpt-6-astra'));
-"""
+          old = (
+              "  for (const model of ['gpt-5.6-luna','gpt-5.6-terra','gpt-6-astra','gpt-6-luna','gpt-6-sol']) {\n"
+              "    assert.ok(background.includes(model));\n"
+              "  }\n"
+          )
+          new = "  assert.ok(background.includes('gpt-6-astra'));\n"
           if old not in text:
               raise SystemExit('legacy ModelPro model-list assertion not found')
           p.write_text(text.replace(old, new, 1), encoding='utf-8')
