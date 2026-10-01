@@ -1,0 +1,37 @@
+name: GPTAuto one-shot canonical runtime sync
+
+on:
+  push:
+    branches:
+      - chore/gptauto-canonicalize-v0.15.1
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chore/gptauto-canonicalize-v0.15.1
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - name: Replace embedded GPTAuto runtime with canonical v0.15.1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base='https://raw.githubusercontent.com/b8vipvip/GPTAuto/main'
+          runtime=(__init__.py audit.py cli.py engine.py executor.py github.py model.py observer.py orchestrator.py planner.py registry.py repair.py runner.py time_budget.py)
+          mkdir -p .github/gptauto .github/actions/upload-gptauto-log
+          for file in "${runtime[@]}"; do curl -fsSL "$base/gptauto/$file" -o ".github/gptauto/$file"; done
+          printf '0.15.1\n' > .github/gptauto/VERSION
+          curl -fsSL "$base/.github/actions/upload-gptauto-log/action.yml" -o .github/actions/upload-gptauto-log/action.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/gptauto .github/actions/upload-gptauto-log
+          git diff --cached --check
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'chore: canonicalize embedded GPTAuto v0.15.1 runtime'
+          git push origin HEAD:chore/gptauto-canonicalize-v0.15.1
