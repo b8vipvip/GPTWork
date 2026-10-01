@@ -1,8 +1,8 @@
 {
   "repository": "b8vipvip/ModelPro",
   "version": "0.1.48",
-  "commit": "df7f984bbd9d5b95e06523a228768ae924b16ade",
+  "commit": "e6c53093c726d689065b3c62fb5d8582ebc4ca7c",
   "path": "extension/model-verification.js",
-  "blob": "5ab85559688ed0b605b517e27eec0682361d035c",
+  "blob": "07cffd300731947b9da387b940f8acf1ae830b02",
   "purpose": "product-neutral model verification policy consumed by GPTWork"
 }
