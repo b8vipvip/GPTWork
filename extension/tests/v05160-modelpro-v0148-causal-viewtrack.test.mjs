@@ -42,7 +42,7 @@ test('failed unified picker discovery cannot fabricate a catalog row from the co
   assert.doesNotMatch(section, /modern\.pickerMode !== 'B' && current\?\.model && !models\.some/);
 });
 
-test('current release consumes ModelPro v0.1.48 without product-neutral verification policy drift', async () => {
+test('current release consumes ModelPro v0.1.48 with the merged response-conflict retry policy', async () => {
   const [sourceText, manifestText, packageText, background] = await Promise.all([
     r('vendor/modelpro/MODELPRO_SOURCE.json'),
     r('manifest.json'),
@@ -52,10 +52,9 @@ test('current release consumes ModelPro v0.1.48 without product-neutral verifica
   const source = JSON.parse(sourceText);
   const manifest = JSON.parse(manifestText);
   const pkg = JSON.parse(packageText);
-  assert.equal(manifest.version, '0.5.161');
   assert.equal(pkg.version, manifest.version);
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.161';/);
+  assert.match(background, new RegExp(`const RUNTIME_CODE_VERSION = '${manifest.version.replaceAll('.', '\\.')}';`));
   assert.equal(source.version, '0.1.48');
-  assert.equal(source.commit, 'df7f984bbd9d5b95e06523a228768ae924b16ade');
-  assert.equal(source.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
+  assert.equal(source.commit, 'e6c53093c726d689065b3c62fb5d8582ebc4ca7c');
+  assert.equal(source.blob, '07cffd300731947b9da387b940f8acf1ae830b02');
 });

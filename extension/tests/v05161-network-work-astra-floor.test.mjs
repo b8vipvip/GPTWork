@@ -27,16 +27,17 @@ test('v0.5.161 verifies Work through GPT-6 Astra transport without native Work o
   assert.doesNotMatch(block, /beginWorkBootstrapTransaction\(tabId, 'post-sol-work-activation'\)/);
 });
 
-test('v0.5.161 release surfaces are coherent', async () => {
+test('release surfaces remain coherent after v0.5.161', async () => {
   const [manifestText, packageText, background, cargoToml, cargoLock, installer] = await Promise.all([
     read('manifest.json'), read('package.json'), read('background.js'),
     readRepo('native-core/Cargo.toml'), readRepo('native-core/Cargo.lock'),
     readRepo('packaging/windows/GPTWork.iss'),
   ]);
-  assert.equal(JSON.parse(manifestText).version, '0.5.161');
-  assert.equal(JSON.parse(packageText).version, '0.5.161');
-  assert.match(background, /RUNTIME_CODE_VERSION = '0\.5\.161'/);
-  assert.match(cargoToml, /version = "0\.5\.161"/);
-  assert.match(cargoLock, /name = "gptwork-core"\nversion = "0\.5\.161"/);
-  assert.match(installer, /#define MyAppVersion "0\.5\.161"/);
+  const version = JSON.parse(manifestText).version;
+  const escapedVersion = version.replaceAll('.', '\\.');
+  assert.equal(JSON.parse(packageText).version, version);
+  assert.match(background, new RegExp(`RUNTIME_CODE_VERSION = '${escapedVersion}'`));
+  assert.match(cargoToml, new RegExp(`version = "${escapedVersion}"`));
+  assert.match(cargoLock, new RegExp(`name = "gptwork-core"\\nversion = "${escapedVersion}"`));
+  assert.match(installer, new RegExp(`#define MyAppVersion "${escapedVersion}"`));
 });

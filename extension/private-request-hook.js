@@ -13,6 +13,10 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function obsoletePausedRequestError(error) {
+  return /(?:Invalid InterceptionId|Fetch domain is not enabled)/i.test(errorText(error));
+}
+
 function errorCode(error, fallback = 'private_request_authority_unavailable') {
   const code = String(error?.code || '').trim();
   return /^[a-z0-9_:-]{1,80}$/i.test(code) ? code : fallback;
@@ -28,6 +32,10 @@ async function continueUnmodified(monitor, tabId, requestId, endpoint, reason, e
   try {
     await monitor.continuePaused(tabId, requestId);
   } catch (continueError) {
+    // A tab detach/reload can invalidate the paused Fetch request while private-core
+    // evaluation is in flight. The browser has already disposed that interception;
+    // reporting it as a rewrite failure creates false lock diagnostics.
+    if (obsoletePausedRequestError(continueError)) return;
     monitor.onRewrite?.(tabId, {
       endpoint,
       changed: false,
@@ -38,6 +46,9 @@ async function continueUnmodified(monitor, tabId, requestId, endpoint, reason, e
 }
 
 async function continueAfterDecisionFailure(monitor, tabId, requestId, endpoint, decision, initialError) {
+  // Do not retry or surface a failure for an interception Chromium already invalidated
+  // because Fetch was disabled or the request ID expired during a tab lifecycle change.
+  if (obsoletePausedRequestError(initialError)) return;
   monitor.onRewrite?.(tabId, {
     endpoint,
     changed: false,
@@ -49,6 +60,7 @@ async function continueAfterDecisionFailure(monitor, tabId, requestId, endpoint,
   try {
     await monitor.continuePaused(tabId, requestId);
   } catch (continueError) {
+    if (obsoletePausedRequestError(continueError)) return;
     monitor.onRewrite?.(tabId, {
       endpoint,
       changed: false,

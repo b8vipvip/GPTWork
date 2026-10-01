@@ -16,7 +16,7 @@ test('ViewTrack and transient-response compatibility remains present after v0.5.
   const metadata = JSON.parse(source);
   assert.equal(metadata.repository, 'b8vipvip/ModelPro');
   assert.ok(/^0\.1\.(?:4[6-9]|[5-9]\d)$/.test(metadata.version));
-  assert.equal(metadata.blob, '5ab85559688ed0b605b517e27eec0682361d035c');
+  assert.equal(metadata.blob, '07cffd300731947b9da387b940f8acf1ae830b02');
   assert.match(vendor, /export function shouldRetryTransientResponse/);
   assert.match(vendor, /export function publishableVerificationResults/);
   assert.match(content, /function interactionVisible\(element\)/);
