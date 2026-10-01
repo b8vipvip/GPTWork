@@ -42,7 +42,7 @@ test('failed unified picker discovery cannot fabricate a catalog row from the co
   assert.doesNotMatch(section, /modern\.pickerMode !== 'B' && current\?\.model && !models\.some/);
 });
 
-test('v0.5.160 consumes ModelPro v0.1.48 without product-neutral verification policy drift', async () => {
+test('current release consumes ModelPro v0.1.48 without product-neutral verification policy drift', async () => {
   const [sourceText, manifestText, packageText, background] = await Promise.all([
     r('vendor/modelpro/MODELPRO_SOURCE.json'),
     r('manifest.json'),
@@ -52,9 +52,9 @@ test('v0.5.160 consumes ModelPro v0.1.48 without product-neutral verification po
   const source = JSON.parse(sourceText);
   const manifest = JSON.parse(manifestText);
   const pkg = JSON.parse(packageText);
-  assert.equal(manifest.version, '0.5.160');
+  assert.equal(manifest.version, '0.5.161');
   assert.equal(pkg.version, manifest.version);
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.160';/);
+  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.161';/);
   assert.equal(source.version, '0.1.48');
   assert.equal(source.commit, 'df7f984bbd9d5b95e06523a228768ae924b16ade');
   assert.equal(source.blob, '5ab85559688ed0b605b517e27eec0682361d035c');

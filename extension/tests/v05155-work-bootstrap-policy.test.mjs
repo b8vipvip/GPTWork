@@ -2,17 +2,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+const runtime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
-test('verification Work bootstrap resolves the effective Work policy without a parallel tab Set', () => {
-  const start = background.indexOf('function workBootstrapModelForTab(tabId) {');
-  const end = background.indexOf('function beginWorkBootstrapTransaction', start);
-  assert.ok(start >= 0 && end > start);
-  const block = background.slice(start, end);
-  assert.match(block, /effectivePolicyForTabSync\(tabId\)/);
-  assert.match(block, /normalizeConcreteModelId\(policy\.lockedModels\?\.\[0\]\)/);
-  assert.match(block, /normalizeConcreteModelId\(DEFAULT_POLICY\.lockedModels\?\.\[0\]\)/);
-  assert.doesNotMatch(background, /workBootstrapTabs/);
+test('Work policy has one GPT-6 Astra floor and preserves eligible page models', () => {
+  assert.match(runtime, /export const WORK_MODEL_FLOOR = 'gpt-6-astra'/);
+  assert.match(runtime, /prioritizeModels\(\[normalized, WORK_MODEL_FLOOR\]\)\[0\] === normalized/);
+  assert.match(runtime, /isAtLeastWorkFloor\(selected\) \? selected : WORK_MODEL_FLOOR/);
+  assert.doesNotMatch(runtime, /isAtLeastSol\(/);
 });
 
 test('failed Work discovery cannot be reported as a fully verified account', () => {

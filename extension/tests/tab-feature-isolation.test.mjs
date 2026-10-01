@@ -113,10 +113,10 @@ test('quota denial remains window-based even though feature state is tab-based',
 });
 
 
-test('v0.5.143 request locking follows the current page model instead of model-list priority', () => {
+test('Work request locking follows the current page model above the GPT-6 Astra floor', () => {
   assert.match(runtime, /export function requestPolicyForTabSync\(tabId, pageModel\)/);
   assert.match(runtime, /selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
-  assert.match(runtime, /isAtLeastSol\(selected\) \? selected : 'gpt-5\.6-sol'/);
+  assert.match(runtime, /isAtLeastWorkFloor\(selected\) \? selected : WORK_MODEL_FLOOR/);
   const resolver = runtime.slice(runtime.indexOf('export function requestPolicyForTabSync'), runtime.indexOf('export function effectivePolicyForTabSync'));
   assert.ok(resolver.indexOf('feature.modelLockEnabled') < resolver.indexOf('feature.workModeEnabled'));
   assert.match(resolver, /lockedModels = selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
