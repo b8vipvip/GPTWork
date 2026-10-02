@@ -5,10 +5,10 @@ import test from 'node:test';
 const runtime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
-test('Work policy has one GPT-6 Astra floor and preserves eligible page models', () => {
-  assert.match(runtime, /export const WORK_MODEL_FLOOR = 'gpt-6-astra'/);
-  assert.match(runtime, /prioritizeModels\(\[normalized, WORK_MODEL_FLOOR\]\)\[0\] === normalized/);
-  assert.match(runtime, /isAtLeastWorkFloor\(selected\) \? selected : WORK_MODEL_FLOOR/);
+test('Work policy has a configurable floor and preserves eligible page models', () => {
+  assert.match(runtime, /export const DEFAULT_WORK_MODEL = 'gpt-6-astra'/);
+  assert.match(runtime, /prioritizeModels\(\[normalized, normalizedFloor\]\)\[0\] === normalized/);
+  assert.match(runtime, /isAtLeastWorkFloor\(selected, floor\) \? selected : floor/);
   assert.doesNotMatch(runtime, /isAtLeastSol\(/);
 });
 

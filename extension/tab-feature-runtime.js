@@ -14,8 +14,7 @@ export const WINDOW_QUOTA_MESSAGE = '当前账户并发窗口超限';
 const MODEL_SELECTION_KEY = 'gptworkModelLockSelection';
 const DISCOVERED_MODELS_KEY = 'discoveredModels';
 const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';
-export const WORK_MODEL_FLOOR = 'gpt-6-astra';
-const BASE_WORK_MODELS = Object.freeze([WORK_MODEL_FLOOR]);
+export const DEFAULT_WORK_MODEL = 'gpt-6-astra';
 const DEFAULT_TAB_FEATURE_STATE = Object.freeze({
   workModeEnabled: true,
   modelLockEnabled: true,
@@ -61,16 +60,18 @@ function sameModels(left, right) {
   return JSON.stringify(normalizeModels(left)) === JSON.stringify(normalizeModels(right));
 }
 
-function isAtLeastWorkFloor(model) {
+function isAtLeastWorkFloor(model, floor = basePolicy.workDefaultModel) {
   const normalized = normalizeConcreteModelId(model);
+  const normalizedFloor = normalizeConcreteModelId(floor) || DEFAULT_WORK_MODEL;
   if (!normalized) return false;
-  return prioritizeModels([normalized, WORK_MODEL_FLOOR])[0] === normalized;
+  return prioritizeModels([normalized, normalizedFloor])[0] === normalized;
 }
 
 function workModels() {
+  const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
   return [...new Set([
-    ...BASE_WORK_MODELS,
-    ...normalizeModels(discoveredModels).filter(isAtLeastWorkFloor),
+    floor,
+    ...normalizeModels(discoveredModels).filter((model) => isAtLeastWorkFloor(model, floor)),
   ])];
 }
 
@@ -254,7 +255,7 @@ export function requestPolicyForTabSync(tabId, pageModel) {
   let lockedModels = [];
 
   // Work follows the model selected in ChatGPT. It only raises models below the
-  // product floor to GPT-6 Astra; it must never replace an already-eligible page
+  // user-selected floor; it must never replace an already-eligible page
   // selection (for example GPT-6.1 Sol stays GPT-6.1 Sol).
   if (feature.modelLockEnabled) {
     // Model Lock is an allow-list, not a priority list. Lock only when the model
@@ -262,10 +263,15 @@ export function requestPolicyForTabSync(tabId, pageModel) {
     // open for the model: Work must not become a second fallback locking authority.
     const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
     lockedModels = selected && allowed.includes(selected) ? [selected] : [];
+    if (lockedModels.length && feature.workModeEnabled) {
+      const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
+      lockedModels = [isAtLeastWorkFloor(selected, floor) ? selected : floor];
+    }
   } else if (feature.workModeEnabled) {
-    // Work follows the current page model. Only selections below GPT-6 Astra are
+    // Work follows the current page model. Only selections below the configured
     // raised to the Work floor; eligible selections keep their exact identity.
-    lockedModels = selected ? [isAtLeastWorkFloor(selected) ? selected : WORK_MODEL_FLOOR] : [];
+    const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
+    lockedModels = selected ? [isAtLeastWorkFloor(selected, floor) ? selected : floor] : [];
   }
 
   return normalizePolicy({ ...basePolicy, lockedModels });

@@ -23,6 +23,7 @@
   let noticeTimer = null;
   let switchingBack = false;
   let verificationOwned = false;
+  let workDefaultModelLabel = 'GPT-6 Astra';
 
   function syncEnabled() {
     enabled = Boolean(workModeSelected && backgroundAllowed);
@@ -223,10 +224,32 @@
     return row;
   }
 
+  function renderWorkStrategy() {
+    const host = document.getElementById(MODEL_INDICATOR_ID);
+    const root = host?.shadowRoot;
+    const button = root?.querySelector('button');
+    if (!root || !button) return;
+    let row = root.querySelector('[data-source="work-strategy"]');
+    if (!row) {
+      row = document.createElement('span');
+      row.className = 'model-row';
+      row.dataset.source = 'work-strategy';
+      row.style.gridTemplateColumns = '84px minmax(0,1fr)';
+      row.innerHTML = '<span class="model-key">Work策略</span><span class="model-value"></span>';
+      const processing = root.querySelector('[data-source="processing-mode"]');
+      if (processing) processing.after(row); else button.prepend(row);
+    }
+    row.hidden = !workModeSelected;
+    const value = row.querySelector('.model-value');
+    if (value) value.textContent = workDefaultModelLabel;
+    row.title = `Work 请求最低档模型：${workDefaultModelLabel}`;
+  }
+
   function renderProcessingMode() {
     refreshTimer = null;
     const row = ensureProcessingModeRow();
     if (!row) return;
+    renderWorkStrategy();
     if (!enabled || document.hidden) {
       row.dataset.status = 'chat';
       const value = row.querySelector('.model-value');
@@ -270,6 +293,8 @@
     }
     if (message?.type === 'GPTWORK_TAB_FEATURE_STATE') {
       workModeSelected = message.featureState?.workModeEnabled === true;
+      const model = message.policy?.workDefaultModel;
+      if (model) workDefaultModelLabel = model.replace(/^gpt-/i, 'GPT-').replace(/(^|[-.])([a-z])/g, (_, lead, letter) => `${lead === '-' ? ' ' : lead}${letter.toUpperCase()}`);
       syncEnabled();
       scheduleRefresh();
     }
@@ -306,6 +331,8 @@
   chrome.runtime.sendMessage({ type: 'GPTWORK_TAB_FEATURE_GET' }, (featureResponse) => {
     if (!chrome.runtime.lastError && featureResponse?.ok) {
       workModeSelected = featureResponse.data?.featureState?.workModeEnabled === true;
+      const model = featureResponse.data?.policy?.workDefaultModel;
+      if (model) workDefaultModelLabel = model.replace(/^gpt-/i, 'GPT-').replace(/(^|[-.])([a-z])/g, (_, lead, letter) => `${lead === '-' ? ' ' : lead}${letter.toUpperCase()}`);
     }
     chrome.runtime.sendMessage({ type: 'GPTLOCK_GET_STATE' }, (response) => {
       if (!chrome.runtime.lastError && response?.ok) {

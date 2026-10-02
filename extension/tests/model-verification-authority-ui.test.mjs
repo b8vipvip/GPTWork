@@ -494,7 +494,7 @@ test('v0.5.161 keeps verification Work on network transport without requiring na
   assert.match(background, /reason: 'network_work_catalog_seeded'/);
   assert.match(background, /source: 'network_work_transport'/);
   assert.match(background, /selectorKey: '__work_transport__'/);
-  assert.match(background, /model: 'gpt-6-astra'/);
+  assert.match(background, /model: workDefaultModel/);
 });
 
 test('v0.5.144 restores the validated ModelPro prompt-bank implementation', () => {

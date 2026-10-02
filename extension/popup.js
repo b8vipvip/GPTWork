@@ -326,8 +326,11 @@ elements.popupModelChoices?.addEventListener('change', async () => {
     .map((input) => normalizeConcreteModelId(input.value)).filter(Boolean);
   const stored = await chrome.storage.sync.get('policy');
   const policy = normalizePolicy(stored.policy);
+  const workDefaultModel = selected.includes(policy.workDefaultModel)
+    ? policy.workDefaultModel
+    : selected[0] || policy.workDefaultModel;
   await chrome.storage.sync.set({
-    policy: normalizePolicy({ ...policy, lockedModels: selected }),
+    policy: normalizePolicy({ ...policy, lockedModels: selected, workDefaultModel }),
     gptworkModelLockSelection: selected,
   });
   if (elements.popupLockMessage) elements.popupLockMessage.textContent = selected.length ? '锁定模型已保存。' : '已取消全部模型锁定。';

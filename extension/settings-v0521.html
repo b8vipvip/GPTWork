@@ -29,7 +29,7 @@
       
       <label class="check-row wide">
         <input id="workModeEnabled" type="checkbox">
-        <span><strong>Work 模式</strong><small>仅当前 ChatGPT 标签页生效，不与同一窗口中的其他标签页共享。启用后自动锁定 GPT-5.6 Sol 及以上模型。</small></span>
+        <span><strong>Work 模式</strong><small>仅当前 ChatGPT 标签页生效。请求模型低于 Work 默认模型时会自动提升，高于或等于时保持页面模型。</small></span>
       </label>
     </section>
 
@@ -42,6 +42,12 @@
       </div>
       <p class="lock-summary-line"><strong>锁定模型：</strong><span id="lockedModelSummary">—</span></p>
       <p class="lock-summary-line"><strong>推理强度：</strong><span id="reasoningSummary">—</span></p>
+      <label class="field" for="workDefaultModel">
+        <span>Work 模式默认模型</span>
+        <small>候选项来自下方已勾选的锁定模型；它也是 Work 请求的最低档模型。</small>
+      </label>
+      <select id="workDefaultModel" aria-describedby="workDefaultModelHelp"></select>
+      <p id="workDefaultModelHelp" class="permission-note">当前页面模型低于此模型时，Work 会改写为该模型的 Work transport；否则保持页面模型。</p>
       <div id="lockEditor" class="lock-editor" hidden>
         <p class="help">列表只来自 GPTWork 自动识别的历史模型和内置模型；不再支持手动输入自定义模型。勾选模型即可启用锁定，并用下方选项设置允许及优先推理强度。</p>
         <div id="modelChoices" class="choices"></div>

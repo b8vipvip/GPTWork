@@ -28,6 +28,7 @@ function loadPageEvidenceAdapter() {
 
 test('Astra is the default preferred model while Sol remains an allowed fallback', () => {
   assert.deepEqual(DEFAULT_POLICY.lockedModels, ['gpt-6-astra', 'gpt-5.6-sol']);
+  assert.equal(DEFAULT_POLICY.workDefaultModel, 'gpt-6-astra');
   assert.equal(KNOWN_MODELS[0].id, 'gpt-6-astra');
   assert.equal(KNOWN_MODELS[0].label, 'GPT-6 Astra');
 });

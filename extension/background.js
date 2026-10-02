@@ -40,7 +40,7 @@ import {
   publishableVerificationResults,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.165';
+const RUNTIME_CODE_VERSION = '0.5.166';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1755,6 +1755,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
 }
 
 async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
+  const workDefaultModel = workBootstrapModelForTab(tabId);
   // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
   // browser, Work activation, request interception and response evidence adapters.
   const catalog = createVerificationCatalog({
@@ -2006,7 +2007,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       };
       logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
         tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
-        source: 'network_work_policy', floorModel: 'gpt-6-astra',
+        source: 'network_work_policy', floorModel: workDefaultModel,
       });
     } catch (error) {
       progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
@@ -2016,10 +2017,10 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     }
   }
 
-  // Network-layer Work has GPT-6 Astra as its minimum. Once Chat A's Sol turn
-  // is proven, add the Astra Work transport directly to the verification queue.
+  // Once Chat A's Sol turn is proven, add the configured Work default transport
+  // directly to the verification queue.
   // The existing verification transaction is the sole request authority, so the
-  // conversation POST is rewritten to gpt-6-astra-wm and response metadata is
+  // conversation POST is rewritten to that model's Work transport and response metadata is
   // still required for terminal verification. Picker B is deliberately irrelevant.
   if (item.model === 'gpt-5.6-sol' && workActivationPending) {
     const completedSol = progress.results.at(-1);
@@ -2028,9 +2029,9 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         pickerMode: null,
         reasoningLevels: [],
         rows: [{
-          model: 'gpt-6-astra',
-          rawId: 'gpt-6-astra',
-          label: 'GPT-6 Astra',
+          model: workDefaultModel,
+          rawId: workDefaultModel,
+          label: `Work Default · ${workDefaultModel}`,
           selectorKey: '__work_transport__',
           pickerMode: null,
         }],
@@ -2044,12 +2045,12 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         source: 'network_work_transport',
         pickerMode: null,
         added: addedFromWork,
-        floorModel: 'gpt-6-astra',
+        floorModel: workDefaultModel,
       };
       logRuntime('info', 'verification', 'verification_work_mode_transition', {
         tabId, phase: 'post_gpt_5_6_sol', entered: true,
         source: 'network_work_transport', reason: 'network_work_catalog_seeded',
-        pickerMode: null, added: addedFromWork, floorModel: 'gpt-6-astra',
+        pickerMode: null, added: addedFromWork, floorModel: workDefaultModel,
       });
       if (addedFromWork) stablePasses = 0;
       await broadcastTabState(tabId);
@@ -2060,7 +2061,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         reason: 'deferred_until_sol_verified',
         runtimeEnabled: true,
         source: 'network_work_policy',
-        floorModel: 'gpt-6-astra',
+        floorModel: workDefaultModel,
       };
     }
     workActivationPending = false;

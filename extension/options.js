@@ -13,6 +13,7 @@ const elements = {
   modelChoices: document.getElementById('modelChoices'),
   reasoningChoices: document.getElementById('reasoningChoices'),
   preferredReasoning: document.getElementById('preferredReasoning'),
+  workDefaultModel: document.getElementById('workDefaultModel'),
   lockedModelSummary: document.getElementById('lockedModelSummary'),
   reasoningSummary: document.getElementById('reasoningSummary'),
   lockEditorToggle: document.getElementById('lockEditorToggle'),
@@ -189,6 +190,23 @@ function concreteSelectedModels() {
   return selected('model').map(normalizeConcreteModelId).filter(Boolean);
 }
 
+function renderWorkDefaultOptions(policy) {
+  if (!elements.workDefaultModel) return;
+  const models = [...new Set(policy.lockedModels.map(normalizeConcreteModelId).filter(Boolean))];
+  const selected = models.includes(policy.workDefaultModel)
+    ? policy.workDefaultModel
+    : models[0] || policy.workDefaultModel;
+  elements.workDefaultModel.replaceChildren();
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model;
+    option.textContent = modelLabel(model);
+    elements.workDefaultModel.append(option);
+  }
+  elements.workDefaultModel.value = selected;
+  elements.workDefaultModel.disabled = models.length === 0;
+}
+
 function renderLockSummary(policy, settings) {
   if (elements.lockedModelSummary) {
     elements.lockedModelSummary.textContent = policy.lockedModels.map(modelLabel).join(' / ') || '—';
@@ -297,6 +315,7 @@ async function applyState(state) {
     const mode = document.querySelector(`input[name="mode"][value="${policy.strictMode}"]`);
     if (mode) mode.checked = true;
     elements.preferredReasoning.value = settings.preferredReasoning;
+    renderWorkDefaultOptions(policy);
     renderLockSummary(policy, settings);
     // #enabled is local-only Master authority and is rendered exclusively by
     // master-ui-controller.js. Never repaint it from legacy/synced settings.enabled.
@@ -327,7 +346,12 @@ async function load() {
 
 async function persistModelSelection(changedInput) {
   const lockedModels = [...new Set(concreteSelectedModels())];
-  await patchPolicy({ lockedModels });
+  const stored = await storageGet('policy');
+  const current = normalizePolicy(stored.policy);
+  const workDefaultModel = lockedModels.includes(current.workDefaultModel)
+    ? current.workDefaultModel
+    : lockedModels[0] || current.workDefaultModel;
+  await patchPolicy({ lockedModels, workDefaultModel });
 }
 
 async function persistReasoningSelection(changedInput) {
@@ -375,6 +399,15 @@ function persistFromChange(event) {
       return;
     }
     void queueWrite(() => patchSettings({ preferredReasoning })).catch(() => void load().catch(() => {}));
+    return;
+  }
+  if (target === elements.workDefaultModel) {
+    if (!concreteSelectedModels().includes(target.value)) {
+      void load().catch(() => {});
+      showMessage('Work 默认模型必须来自锁定模型列表。', 'bad');
+      return;
+    }
+    void queueWrite(() => patchPolicy({ workDefaultModel: target.value })).catch(() => void load().catch(() => {}));
     return;
   }
   // #enabled is owned exclusively by master-ui-controller.js. Its capture-phase

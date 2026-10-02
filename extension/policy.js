@@ -1,5 +1,6 @@
 export const DEFAULT_POLICY = Object.freeze({
   lockedModels: ['gpt-6-astra', 'gpt-5.6-sol'],
+  workDefaultModel: 'gpt-6-astra',
   allowedReasoningLevels: ['medium', 'high', 'extra-high'],
   strictMode: true,
 });
@@ -129,6 +130,8 @@ export function normalizePolicy(input) {
       : DEFAULT_POLICY.allowedReasoningLevels;
 
   const lockedModels = unique(rawModels.map(normalizeConcreteModelId).filter(Boolean));
+  const workDefaultModel = normalizeConcreteModelId(source.workDefaultModel)
+    ?? DEFAULT_POLICY.workDefaultModel;
   const allowedReasoningLevels = unique(rawLevels.map(normalizeReasoningLevel).filter(Boolean));
   const fallbackModels = hasExplicitPolicy && rawModels.length
     ? INVALID_EXPLICIT_POLICY_FALLBACK
@@ -141,6 +144,10 @@ export function normalizePolicy(input) {
     lockedModels: hasExplicitPolicy && rawModels.length === 0
       ? []
       : lockedModels.length ? lockedModels : [...fallbackModels],
+    // Work's configurable floor is stored with the model-lock policy because its
+    // choices come from that same synchronized catalog. Older policies migrate
+    // implicitly to Astra without a destructive storage rewrite.
+    workDefaultModel,
     allowedReasoningLevels: allowedReasoningLevels.length
       ? allowedReasoningLevels
       : [...DEFAULT_POLICY.allowedReasoningLevels],

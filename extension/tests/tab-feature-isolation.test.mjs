@@ -116,7 +116,7 @@ test('quota denial remains window-based even though feature state is tab-based',
 test('Work request locking follows the current page model above the GPT-6 Astra floor', () => {
   assert.match(runtime, /export function requestPolicyForTabSync\(tabId, pageModel\)/);
   assert.match(runtime, /selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
-  assert.match(runtime, /isAtLeastWorkFloor\(selected\) \? selected : WORK_MODEL_FLOOR/);
+  assert.match(runtime, /isAtLeastWorkFloor\(selected, floor\) \? selected : floor/);
   const resolver = runtime.slice(runtime.indexOf('export function requestPolicyForTabSync'), runtime.indexOf('export function effectivePolicyForTabSync'));
   assert.ok(resolver.indexOf('feature.modelLockEnabled') < resolver.indexOf('feature.workModeEnabled'));
   assert.match(resolver, /lockedModels = selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
