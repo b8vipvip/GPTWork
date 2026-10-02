@@ -24,6 +24,7 @@ test('migrates legacy extension field names', () => {
     }),
     {
       lockedModels: ['gpt-5.6-sol'],
+      workDefaultModel: 'gpt-6-astra',
       allowedReasoningLevels: ['extra-high', 'high'],
       strictMode: false,
     },

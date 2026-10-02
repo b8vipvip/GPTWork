@@ -13,10 +13,10 @@ test('content auto-lock helper no longer mutates global policy from one tab', ()
 });
 
 test('tab feature authority derives Work models from the shared discovery catalog', () => {
-  assert.match(runtime, /BASE_WORK_MODELS/);
+  assert.match(runtime, /basePolicy\.workDefaultModel/);
   assert.match(runtime, /DISCOVERED_MODELS_KEY/);
   assert.match(runtime, /function workModels\(\)/);
-  assert.match(runtime, /filter\(isAtLeastWorkFloor\)/);
+  assert.match(runtime, /filter\(\(model\) => isAtLeastWorkFloor\(model, floor\)\)/);
   assert.match(runtime, /effectivePolicyForTabSync/);
 });
 
