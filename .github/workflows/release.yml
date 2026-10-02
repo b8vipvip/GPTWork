@@ -1,5 +1,5 @@
 name: Release
-# Governed release supports both native push runs and GPTAuto workflow_dispatch gates.
+# Governed release reuses release-ready artifacts produced by the exact main CI SHA.
 
 on:
   push:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   metadata:
     name: Resolve release metadata
-    timeout-minutes: 30
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -36,6 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -Eeuo pipefail
           version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' native-core/Cargo.toml | head -n 1)"
           manifest_version="$(python -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')"
           package_version="$(python -c 'import json; print(json.load(open("extension/package.json"))["version"])')"
@@ -70,40 +71,42 @@ jobs:
 
   wait-for-ci:
     name: Require successful main CI
-    timeout-minutes: 30
+    timeout-minutes: 20
     needs: metadata
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      ci_run_id: ${{ steps.wait.outputs.ci_run_id }}
     steps:
-      - name: Wait for CI on this commit
+      - id: wait
+        name: Wait for exact-SHA CI and retain its run ID
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for attempt in $(seq 1 60); do
-            run_json="$(gh api \
-              -H 'Accept: application/vnd.github+json' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20")"
-            candidate="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | reverse | .[0] // {}' <<<"$run_json")"
+          set -Eeuo pipefail
+          for attempt in $(seq 1 90); do
+            run_json="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20")"
+            candidate="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at,.id) | reverse | .[0] // {}' <<<"$run_json")"
+            run_id="$(jq -r '.id // empty' <<<"$candidate")"
             status="$(jq -r '.status // "missing"' <<<"$candidate")"
             conclusion="$(jq -r '.conclusion // ""' <<<"$candidate")"
-            event="$(jq -r '.event // ""' <<<"$candidate")"
-            url="$(jq -r '.html_url // ""' <<<"$candidate")"
-            echo "CI attempt $attempt: event=${event:-missing} status=$status conclusion=${conclusion:-pending} $url"
+            echo "CI attempt $attempt: run=${run_id:-missing} status=$status conclusion=${conclusion:-pending}"
             if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
+              echo "ci_run_id=$run_id" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
               echo "CI did not succeed: $conclusion" >&2
               exit 1
             fi
-            sleep 10
+            sleep 5
           done
           echo "Timed out waiting for CI on $GITHUB_SHA." >&2
           exit 1
 
   wait-for-governance:
     name: Require PR-only main governance
-    timeout-minutes: 30
+    timeout-minutes: 10
     needs: metadata
     if: needs.metadata.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
@@ -114,68 +117,69 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/verify-pr-only-main.sh
 
-  linux:
-    name: Linux release assets
-    timeout-minutes: 30
+  reuse-ci-assets:
+    name: Reuse exact-SHA CI release assets
+    timeout-minutes: 10
     needs: [metadata, wait-for-ci, wait-for-governance]
-    if: needs.metadata.outputs.should_publish == 'true'
+    if: >-
+      ${{
+        needs.metadata.outputs.should_publish == 'true'
+        && needs.wait-for-ci.result == 'success'
+        && needs.wait-for-governance.result == 'success'
+      }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            native-core
-            private-engine
-      - name: Validate tag version
+      - name: Download release-ready artifacts from exact CI run
         env:
-          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
-        run: |
-          cargo_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' native-core/Cargo.toml | head -n 1)"
-          manifest_version="$(python -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')"
-          test "$RELEASE_VERSION" = "$cargo_version"
-          test "$RELEASE_VERSION" = "$manifest_version"
-      - name: Build private engine from this commit
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ needs.wait-for-ci.outputs.ci_run_id }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          cargo build --release --manifest-path private-engine/Cargo.toml
-          engine="$GITHUB_WORKSPACE/private-engine/target/release/gptwork-private-engine"
-          test -x "$engine"
-          echo "GPTLOCK_PRIVATE_ENGINE=$engine" >> "$GITHUB_ENV"
-          echo "GPTLOCK_REQUIRE_PRIVATE_ENGINE=1" >> "$GITHUB_ENV"
-      - name: Build assets
+          test -n "$CI_RUN_ID"
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
+          linux_id="$(jq -r '[.artifacts[] | select(.name == "gptwork-linux-release")][0].id // empty' <<<"$artifacts")"
+          windows_id="$(jq -r '[.artifacts[] | select(.name == "gptwork-windows-setup")][0].id // empty' <<<"$artifacts")"
+          [[ -n "$linux_id" && -n "$windows_id" ]] || {
+            echo "Exact-SHA CI run $CI_RUN_ID is missing release-ready artifacts." >&2
+            exit 1
+          }
+          mkdir -p /tmp/ci-assets/linux /tmp/ci-assets/windows
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$linux_id/zip" > /tmp/linux.zip
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$windows_id/zip" > /tmp/windows.zip
+          unzip -q /tmp/linux.zip -d /tmp/ci-assets/linux
+          unzip -q /tmp/windows.zip -d /tmp/ci-assets/windows
+
+      - name: Verify exact SHA and version provenance
         env:
           RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
-        run: |
-          cargo build --locked --release --manifest-path native-core/Cargo.toml
-          chmod +x packaging/linux/build-deb.sh
-          GPTLOCK_VERSION="$RELEASE_VERSION" packaging/linux/build-deb.sh dist
-          tar_files=(gptwork-core)
-          if [[ -n "${GPTLOCK_PRIVATE_ENGINE:-}" ]]; then
-            cp "$GPTLOCK_PRIVATE_ENGINE" native-core/target/release/gptwork-engine
-            chmod 0755 native-core/target/release/gptwork-engine
-            tar_files+=(gptwork-engine)
-          fi
-          tar -C native-core/target/release -czf "dist/GPTWork-core-${RELEASE_VERSION}-linux-x64.tar.gz" "${tar_files[@]}"
-          cd extension
-          zip -9 "../dist/GPTWork-extension-${RELEASE_VERSION}.zip" *.js *.css *.html manifest.json icons/*.png
-          unzip -l "../dist/GPTWork-extension-${RELEASE_VERSION}.zip" | grep -q 'account-client.js'
-          unzip -l "../dist/GPTWork-extension-${RELEASE_VERSION}.zip" | grep -q 'auth-gate.js'
-          unzip -l "../dist/GPTWork-extension-${RELEASE_VERSION}.zip" | grep -q 'account.html'
-          unzip -l "../dist/GPTWork-extension-${RELEASE_VERSION}.zip" | grep -q 'icons/icon128.png'
-      - name: Enforce Linux release distribution boundary
         shell: bash
         run: |
           set -Eeuo pipefail
-          version="$(python -c 'import json; print(json.load(open("extension/manifest.json"))["version"])')"
-          extension_zip="dist/GPTWork-extension-${version}.zip"
-          core_tar="dist/GPTWork-core-${version}-linux-x64.tar.gz"
-          deb="$(find dist -maxdepth 1 -type f -name 'GPTWork_*_amd64.deb' -print -quit)"
-          test -f "$extension_zip"
-          test -f "$core_tar"
-          test -n "$deb" && test -f "$deb"
+          linux_prov="$(find /tmp/ci-assets/linux -name release-provenance.json -type f -print -quit)"
+          windows_prov="$(find /tmp/ci-assets/windows -name release-provenance.json -type f -print -quit)"
+          [[ -n "$linux_prov" && -n "$windows_prov" ]]
+          for prov in "$linux_prov" "$windows_prov"; do
+            jq -e --arg sha "$GITHUB_SHA" --arg version "$RELEASE_VERSION" \
+              '.schema == "gptwork.ci-release-provenance/v1" and .sha == $sha and .version == $version' "$prov" >/dev/null
+          done
+
+      - name: Assemble and verify release surface without rebuilding
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p dist
+          deb="$(find /tmp/ci-assets/linux -type f -name 'GPTWork_*_amd64.deb' -print -quit)"
+          core_tar="$(find /tmp/ci-assets/linux -type f -name "GPTWork-core-${RELEASE_VERSION}-linux-x64.tar.gz" -print -quit)"
+          extension_zip="$(find /tmp/ci-assets/linux -type f -name "GPTWork-extension-${RELEASE_VERSION}.zip" -print -quit)"
+          setup="$(find /tmp/ci-assets/windows -type f -name 'GPTWorkSetup-x64.exe' -print -quit)"
+          for file in "$deb" "$core_tar" "$extension_zip" "$setup"; do
+            [[ -n "$file" && -s "$file" ]] || { echo "Missing release asset: $file" >&2; exit 1; }
+            cp "$file" dist/
+          done
+
           if unzip -Z1 "$extension_zip" | grep -Eq '(^|/)(private-engine|Cargo\.(toml|lock)|[^/]+\.rs)(/|$)'; then
             echo 'Private engine source leaked into extension archive.' >&2
             exit 1
@@ -193,171 +197,31 @@ jobs:
             echo 'Private engine source leaked into Linux deb.' >&2
             exit 1
           fi
+
       - uses: actions/upload-artifact@v4
         with:
-          name: release-linux
+          name: release-ready
           path: dist/*
-          if-no-files-found: error
-
-  windows:
-    name: Windows release assets
-    timeout-minutes: 30
-    needs: [metadata, wait-for-ci, wait-for-governance]
-    if: needs.metadata.outputs.should_publish == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            native-core
-            private-engine
-      - name: Build private engine from this commit
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          cargo build --release --manifest-path private-engine/Cargo.toml
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $engine = (Resolve-Path 'private-engine\target\release\gptwork-private-engine.exe').Path
-          if (-not (Test-Path -LiteralPath $engine -PathType Leaf)) { throw 'Private engine build output is missing.' }
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "GPTLOCK_PRIVATE_ENGINE=$engine"
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value 'GPTLOCK_REQUIRE_PRIVATE_ENGINE=1'
-      - name: Build Setup
-        shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
-          GPTLOCK_CODESIGN_PFX_BASE64: ${{ secrets.GPTLOCK_CODESIGN_PFX_BASE64 }}
-          GPTLOCK_CODESIGN_PFX_PASSWORD: ${{ secrets.GPTLOCK_CODESIGN_PFX_PASSWORD }}
-          GPTLOCK_CODESIGN_TIMESTAMP_URL: ${{ secrets.GPTLOCK_CODESIGN_TIMESTAMP_URL }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $version = $env:RELEASE_VERSION
-          $manifest = Get-Content 'extension\manifest.json' -Raw | ConvertFrom-Json
-          if ($manifest.version -ne $version) { throw 'Tag and extension version differ.' }
-
-          $signingEnabled = -not [string]::IsNullOrWhiteSpace($env:GPTLOCK_CODESIGN_PFX_BASE64)
-          $certPath = Join-Path $env:RUNNER_TEMP 'gptlock-codesign.pfx'
-          $timestampUrl = if ([string]::IsNullOrWhiteSpace($env:GPTLOCK_CODESIGN_TIMESTAMP_URL)) {
-            'http://timestamp.digicert.com'
-          } else {
-            $env:GPTLOCK_CODESIGN_TIMESTAMP_URL
-          }
-
-          function Find-SignTool {
-            $root = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
-            $tool = Get-ChildItem -Path $root -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1
-            if (-not $tool) { throw 'signtool.exe was not found on the Windows runner.' }
-            return $tool.FullName
-          }
-
-          function Sign-GPTWorkFile([string]$Path, [string]$SignTool) {
-            & $SignTool sign /fd SHA256 /td SHA256 /tr $timestampUrl /f $certPath /p $env:GPTLOCK_CODESIGN_PFX_PASSWORD $Path
-            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed: $Path" }
-            $signature = Get-AuthenticodeSignature -LiteralPath $Path
-            if ($signature.Status -ne 'Valid') {
-              throw "Authenticode signature is not valid for ${Path}: $($signature.Status)"
-            }
-            Write-Host "Authenticode signature valid: $Path"
-          }
-
-          try {
-            if ($signingEnabled) {
-              if ([string]::IsNullOrWhiteSpace($env:GPTLOCK_CODESIGN_PFX_PASSWORD)) {
-                throw 'GPTLOCK_CODESIGN_PFX_PASSWORD must be configured when signing certificate is present.'
-              }
-              [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:GPTLOCK_CODESIGN_PFX_BASE64))
-              $signTool = Find-SignTool
-              Write-Host 'Windows Authenticode signing is enabled.'
-            } else {
-              $signTool = $null
-              Write-Warning 'Windows code-signing certificate is not configured. Setup will be unsigned and manual downloads may trigger SmartScreen.'
-            }
-
-            cargo build --locked --release --manifest-path native-core/Cargo.toml
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-            if ($signingEnabled) {
-              Sign-GPTWorkFile 'native-core\target\release\gptwork-core.exe' $signTool
-              if (-not [string]::IsNullOrWhiteSpace($env:GPTLOCK_PRIVATE_ENGINE) -and (Test-Path -LiteralPath $env:GPTLOCK_PRIVATE_ENGINE)) {
-                Sign-GPTWorkFile $env:GPTLOCK_PRIVATE_ENGINE $signTool
-              }
-            }
-
-            $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-            if (-not (Test-Path -LiteralPath $iscc)) {
-              choco install innosetup --yes --no-progress
-            }
-            $isccArgs = @("/DMyAppVersion=$version")
-            if (-not [string]::IsNullOrWhiteSpace($env:GPTLOCK_PRIVATE_ENGINE)) {
-              if (-not (Test-Path -LiteralPath $env:GPTLOCK_PRIVATE_ENGINE)) { throw 'Configured private engine path does not exist.' }
-              $isccArgs += "/DPrivateEnginePath=$($env:GPTLOCK_PRIVATE_ENGINE)"
-            }
-            $isccArgs += 'packaging\windows\GPTWork.iss'
-            & $iscc @isccArgs
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-            if ($signingEnabled) {
-              Sign-GPTWorkFile 'dist\windows\GPTWorkSetup-x64.exe' $signTool
-            }
-          }
-          finally {
-            if (Test-Path -LiteralPath $certPath) {
-              Remove-Item -LiteralPath $certPath -Force
-            }
-          }
-      - name: Enforce Windows release distribution boundary
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $setup = (Resolve-Path 'dist\windows\GPTWorkSetup-x64.exe').Path
-          $root = Join-Path $env:RUNNER_TEMP 'GPTWork-Release-Boundary-Inspect'
-          Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
-          & $setup /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- "/DIR=$root"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          foreach ($required in @(
-            (Join-Path $root 'bin\gptwork-core.exe'),
-            (Join-Path $root 'bin\gptwork-engine.exe'),
-            (Join-Path $root 'extension\manifest.json')
-          )) {
-            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing release payload: $required" }
-          }
-          $leaks = @(Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object {
-            $_.Extension -eq '.rs' -or $_.Name -in @('Cargo.toml', 'Cargo.lock') -or $_.FullName -match '[\\/]private-engine[\\/]'
-          })
-          if ($leaks.Count -gt 0) {
-            $leaks.FullName | Write-Error
-            throw 'Private engine source leaked into Windows Setup.'
-          }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-windows
-          path: dist/windows/GPTWorkSetup-x64.exe
           if-no-files-found: error
 
   publish:
     name: Publish GitHub Release
-    timeout-minutes: 30
-    needs: [metadata, wait-for-ci, wait-for-governance, linux, windows]
+    timeout-minutes: 15
+    needs: [metadata, wait-for-ci, wait-for-governance, reuse-ci-assets]
     if: >-
       ${{
         always()
         && needs.metadata.outputs.should_publish == 'true'
         && needs.wait-for-ci.result == 'success'
         && needs.wait-for-governance.result == 'success'
-        && needs.linux.result == 'success'
-        && needs.windows.result == 'success'
+        && needs.reuse-ci-assets.result == 'success'
       }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          name: release-ready
           path: dist
-          merge-multiple: true
       - name: Generate checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt
@@ -367,6 +231,7 @@ jobs:
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
           TAG_EXISTS: ${{ needs.metadata.outputs.tag_exists }}
         run: |
+          set -Eeuo pipefail
           tag_arguments=(--target "$GITHUB_SHA")
           if [[ "$TAG_EXISTS" == "true" ]]; then
             tag_arguments=(--verify-tag)
