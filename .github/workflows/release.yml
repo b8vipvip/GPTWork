@@ -79,29 +79,53 @@ jobs:
       ci_run_id: ${{ steps.wait.outputs.ci_run_id }}
     steps:
       - id: wait
-        name: Wait for exact-SHA CI and retain its run ID
+        name: Wait for exact-SHA release-ready CI and retain its run ID
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -Eeuo pipefail
           for attempt in $(seq 1 90); do
             run_json="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20")"
-            candidate="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at,.id) | reverse | .[0] // {}' <<<"$run_json")"
-            run_id="$(jq -r '.id // empty' <<<"$candidate")"
-            status="$(jq -r '.status // "missing"' <<<"$candidate")"
-            conclusion="$(jq -r '.conclusion // ""' <<<"$candidate")"
-            echo "CI attempt $attempt: run=${run_id:-missing} status=$status conclusion=${conclusion:-pending}"
-            if [[ "$status" == "completed" && "$conclusion" == "success" ]]; then
-              echo "ci_run_id=$run_id" >> "$GITHUB_OUTPUT"
+            candidates="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at,.id) | reverse' <<<"$run_json")"
+            selected_run_id=""
+
+            while IFS= read -r candidate; do
+              [[ -n "$candidate" ]] || continue
+              run_id="$(jq -r '.id // empty' <<<"$candidate")"
+              status="$(jq -r '.status // "missing"' <<<"$candidate")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"$candidate")"
+              [[ "$status" == "completed" && "$conclusion" == "success" && -n "$run_id" ]] || continue
+
+              artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100")"
+              linux_count="$(jq '[.artifacts[] | select(.name == "gptwork-linux-release" and .expired == false)] | length' <<<"$artifacts")"
+              windows_count="$(jq '[.artifacts[] | select(.name == "gptwork-windows-setup" and .expired == false)] | length' <<<"$artifacts")"
+              if [[ "$linux_count" -gt 0 && "$windows_count" -gt 0 ]]; then
+                selected_run_id="$run_id"
+                break
+              fi
+              echo "CI run $run_id succeeded but is not release-ready; continuing search."
+            done < <(jq -c '.[]' <<<"$candidates")
+
+            if [[ -n "$selected_run_id" ]]; then
+              echo "CI attempt $attempt: selected release-ready run=$selected_run_id"
+              echo "ci_run_id=$selected_run_id" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
-              echo "CI did not succeed: $conclusion" >&2
+
+            latest="$(jq -c '.[0] // {}' <<<"$candidates")"
+            latest_id="$(jq -r '.id // empty' <<<"$latest")"
+            latest_status="$(jq -r '.status // "missing"' <<<"$latest")"
+            latest_conclusion="$(jq -r '.conclusion // ""' <<<"$latest")"
+            active_count="$(jq '[.[] | select(.status != "completed")] | length' <<<"$candidates")"
+            echo "CI attempt $attempt: latest=${latest_id:-missing} status=$latest_status conclusion=${latest_conclusion:-pending} active=$active_count"
+
+            if [[ "$latest_status" != "missing" && "$active_count" -eq 0 ]]; then
+              echo "No successful exact-SHA CI run currently has both release-ready artifacts." >&2
               exit 1
             fi
             sleep 5
           done
-          echo "Timed out waiting for CI on $GITHUB_SHA." >&2
+          echo "Timed out waiting for release-ready CI on $GITHUB_SHA." >&2
           exit 1
 
   wait-for-governance:
