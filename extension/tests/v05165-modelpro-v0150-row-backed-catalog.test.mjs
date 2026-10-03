@@ -35,12 +35,12 @@ test('current release surfaces are synchronized while the verification-policy se
   const manifest = JSON.parse(manifestText);
   const pkg = JSON.parse(packageText);
   const source = JSON.parse(sourceText);
-  assert.equal(manifest.version, '0.5.167');
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
   assert.equal(pkg.version, manifest.version);
-  assert.match(background, /const RUNTIME_CODE_VERSION = '0\.5\.167';/);
-  assert.match(cargoToml, /version = "0\.5\.167"/);
-  assert.match(cargoLock, /name = "gptwork-core"\nversion = "0\.5\.167"/);
-  assert.match(installer, /#define MyAppVersion "0\.5\.167"/);
+  assert.ok(background.includes(`const RUNTIME_CODE_VERSION = '${manifest.version}';`));
+  assert.ok(cargoToml.includes(`version = "${manifest.version}"`));
+  assert.ok(cargoLock.includes(`name = "gptwork-core"\nversion = "${manifest.version}"`));
+  assert.ok(installer.includes(`#define MyAppVersion "${manifest.version}"`));
   assert.equal(source.version, '0.1.48');
   assert.equal(source.commit, 'e6c53093c726d689065b3c62fb5d8582ebc4ca7c');
   assert.equal(source.blob, '07cffd300731947b9da387b940f8acf1ae830b02');
