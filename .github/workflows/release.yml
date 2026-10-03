@@ -1,6 +1,7 @@
 name: Release
 # Governed release reuses release-ready artifacts produced by the exact main CI SHA.
-# Existing incomplete releases are repaired from the CI artifacts for their immutable tag SHA.
+# CI keeps a richer internal release bundle for provenance/validation; the public
+# GitHub Release surface intentionally contains installers only.
 
 on:
   push:
@@ -73,17 +74,16 @@ jobs:
             test -n "$tag_commit"
             release_sha="$tag_commit"
 
+            # Public Release contract: installers only. Richer exact-SHA artifacts
+            # remain in Actions for provenance, repair, and validation.
             required_assets=(
               "GPTWorkSetup-x64.exe"
               "GPTWork_${version}_amd64.deb"
-              "GPTWork-core-${version}-linux-x64.tar.gz"
-              "GPTWork-extension-${version}.zip"
-              "SHA256SUMS.txt"
             )
             should_publish=false
             for asset in "${required_assets[@]}"; do
               if ! jq -e --arg name "$asset" 'any(.assets[]?; .name == $name)' <<<"$release_json" >/dev/null; then
-                echo "Existing release $tag is incomplete; missing asset: $asset"
+                echo "Existing release $tag is incomplete; missing public installer: $asset"
                 should_publish=true
               fi
             done
@@ -280,9 +280,6 @@ jobs:
         with:
           name: release-ready
           path: dist
-      - name: Generate checksums
-        working-directory: dist
-        run: sha256sum * > SHA256SUMS.txt
       - name: Create release metadata when absent
         env:
           GH_TOKEN: ${{ github.token }}
@@ -293,7 +290,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           if [[ "$RELEASE_EXISTS" == "true" ]]; then
-            echo "Release $RELEASE_TAG already exists; reconciling its asset set."
+            echo "Release $RELEASE_TAG already exists; reconciling its installer surface."
             exit 0
           fi
           tag_arguments=(--target "$RELEASE_SHA")
@@ -305,48 +302,53 @@ jobs:
             "${tag_arguments[@]}" \
             --generate-notes \
             --title "GPTWork $RELEASE_TAG"
-      - name: Upload and verify complete release asset set
+      - name: Upload and verify public installer assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          shopt -s nullglob
-          assets=(dist/*)
-          [[ ${#assets[@]} -eq 5 ]] || {
-            printf 'Expected 5 release files, got %s:\n' "${#assets[@]}" >&2
-            printf '  %s\n' "${assets[@]}" >&2
-            exit 1
-          }
+          public_assets=(
+            "dist/GPTWorkSetup-x64.exe"
+            "dist/GPTWork_${RELEASE_VERSION}_amd64.deb"
+          )
+          [[ ${#public_assets[@]} -eq 2 ]] || exit 1
+          for asset in "${public_assets[@]}"; do
+            [[ -s "$asset" ]] || { echo "Missing public installer: $asset" >&2; exit 1; }
+          done
 
+          # The core tarball and extension zip stay in Actions as exact-SHA
+          # verification/repair material. release-asset-cleanup.yml enforces the
+          # same installer-only public Release contract after this workflow.
           release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
-          for asset in "${assets[@]}"; do
+          for asset in "${public_assets[@]}"; do
             name="$(basename "$asset")"
             local_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
             remote_digest="$(jq -r --arg name "$name" '[.assets[]? | select(.name == $name)][0].digest // ""' <<<"$release_json")"
             if [[ "$remote_digest" == "$local_digest" ]]; then
-              echo "KEEP verified asset: $name"
+              echo "KEEP verified installer: $name"
               continue
             fi
             if [[ -n "$remote_digest" ]]; then
-              echo "REPLACE asset with mismatched digest: $name"
+              echo "REPLACE installer with mismatched digest: $name"
               gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
             else
-              echo "UPLOAD missing asset: $name"
+              echo "UPLOAD missing installer: $name"
               gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
             fi
             release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
           done
 
           release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
-          for asset in "${assets[@]}"; do
+          for asset in "${public_assets[@]}"; do
             name="$(basename "$asset")"
             local_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
             remote_digest="$(jq -r --arg name "$name" '[.assets[]? | select(.name == $name)][0].digest // ""' <<<"$release_json")"
             [[ "$remote_digest" == "$local_digest" ]] || {
-              echo "Release asset verification failed for $name: local=$local_digest remote=${remote_digest:-missing}" >&2
+              echo "Public installer verification failed for $name: local=$local_digest remote=${remote_digest:-missing}" >&2
               exit 1
             }
           done
-          echo "Release $RELEASE_TAG has the complete verified 5-file asset set."
+          echo "Release $RELEASE_TAG has the complete verified installer-only public asset set."

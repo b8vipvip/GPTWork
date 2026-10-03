@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const ciWorkflow = new URL('../../.github/workflows/ci.yml', import.meta.url);
 const releaseWorkflow = new URL('../../.github/workflows/release.yml', import.meta.url);
+const cleanupWorkflow = new URL('../../.github/workflows/release-asset-cleanup.yml', import.meta.url);
 const housekeepingWorkflow = new URL('../../.github/workflows/repository-housekeeping.yml', import.meta.url);
 const governanceScript = new URL('../../.github/scripts/verify-pr-only-main.sh', import.meta.url);
 
@@ -30,9 +31,12 @@ test('release reuses exact-SHA CI artifacts instead of rebuilding native runtime
   assert.match(release, /\.version == \$version/);
   assert.match(release, /Assemble and verify release surface without rebuilding/);
   assert.match(release, /gh release upload/);
-  assert.match(release, /Expected 5 release files/);
-  assert.match(release, /SHA256SUMS\.txt/);
-  assert.match(release, /Release asset verification failed/);
+  assert.match(release, /public_assets=\(/);
+  assert.match(release, /GPTWorkSetup-x64\.exe/);
+  assert.match(release, /GPTWork_\$\{RELEASE_VERSION\}_amd64\.deb/);
+  assert.match(release, /Public installer verification failed/);
+  assert.doesNotMatch(release, /Expected 5 release files/);
+  assert.doesNotMatch(release, /Generate checksums/);
 
   assert.match(ci, /cargo build --release --manifest-path private-engine\/Cargo\.toml/);
   assert.match(ci, /cargo build --locked --release --manifest-path native-core\/Cargo\.toml/);
@@ -41,6 +45,20 @@ test('release reuses exact-SHA CI artifacts instead of rebuilding native runtime
   assert.match(ci, /name: gptwork-windows-setup/);
   assert.match(ci, /Enforce extension distribution boundary/);
   assert.match(ci, /Install and verify Setup registration/);
+});
+
+test('public release surface agrees with installer-only cleanup contract', async () => {
+  const [release, cleanup] = await Promise.all([
+    readFile(releaseWorkflow, 'utf8'),
+    readFile(cleanupWorkflow, 'utf8'),
+  ]);
+
+  assert.match(release, /Public Release contract: installers only/);
+  assert.match(release, /complete verified installer-only public asset set/);
+  assert.match(cleanup, /name: Keep installers only/);
+  assert.match(cleanup, /gh release delete-asset/);
+  assert.match(cleanup, /Setup-x64\\\.exe/);
+  assert.match(cleanup, /amd64\\\.deb/);
 });
 
 test('CI release-producing jobs cache both native runtime crates', async () => {
