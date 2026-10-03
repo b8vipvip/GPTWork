@@ -1,5 +1,6 @@
 name: Release
 # Governed release reuses release-ready artifacts produced by the exact main CI SHA.
+# Existing incomplete releases are repaired from the CI artifacts for their immutable tag SHA.
 
 on:
   push:
@@ -26,6 +27,8 @@ jobs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
       tag_exists: ${{ steps.release.outputs.tag_exists }}
+      release_exists: ${{ steps.release.outputs.release_exists }}
+      release_sha: ${{ steps.release.outputs.release_sha }}
       should_publish: ${{ steps.release.outputs.should_publish }}
     steps:
       - uses: actions/checkout@v4
@@ -50,23 +53,50 @@ jobs:
             exit 1
           fi
 
-          should_publish=true
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            should_publish=false
-          fi
-
           tag_exists=false
+          tag_commit=""
           if tag_commit="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
             tag_exists=true
-            if [[ "$should_publish" == "true" && "$tag_commit" != "$GITHUB_SHA" ]]; then
-              echo "Existing unpublished tag $tag points to $tag_commit instead of $GITHUB_SHA." >&2
-              exit 1
+          fi
+
+          release_exists=false
+          release_sha="$GITHUB_SHA"
+          should_publish=true
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null || true)"
+          if [[ -n "$release_json" ]]; then
+            release_exists=true
+            if [[ "$tag_exists" != "true" ]]; then
+              git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
+              tag_commit="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"
+              tag_exists=true
             fi
+            test -n "$tag_commit"
+            release_sha="$tag_commit"
+
+            required_assets=(
+              "GPTWorkSetup-x64.exe"
+              "GPTWork_${version}_amd64.deb"
+              "GPTWork-core-${version}-linux-x64.tar.gz"
+              "GPTWork-extension-${version}.zip"
+              "SHA256SUMS.txt"
+            )
+            should_publish=false
+            for asset in "${required_assets[@]}"; do
+              if ! jq -e --arg name "$asset" 'any(.assets[]?; .name == $name)' <<<"$release_json" >/dev/null; then
+                echo "Existing release $tag is incomplete; missing asset: $asset"
+                should_publish=true
+              fi
+            done
+          elif [[ "$tag_exists" == "true" && "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Existing unpublished tag $tag points to $tag_commit instead of $GITHUB_SHA." >&2
+            exit 1
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "tag_exists=$tag_exists" >> "$GITHUB_OUTPUT"
+          echo "release_exists=$release_exists" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
           echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
 
   wait-for-ci:
@@ -82,10 +112,12 @@ jobs:
         name: Wait for exact-SHA release-ready CI and retain its run ID
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.metadata.outputs.release_sha }}
         run: |
           set -Eeuo pipefail
+          test -n "$RELEASE_SHA"
           for attempt in $(seq 1 90); do
-            run_json="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20")"
+            run_json="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$RELEASE_SHA&per_page=20")"
             candidates="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at,.id) | reverse' <<<"$run_json")"
             selected_run_id=""
 
@@ -107,7 +139,7 @@ jobs:
             done < <(jq -c '.[]' <<<"$candidates")
 
             if [[ -n "$selected_run_id" ]]; then
-              echo "CI attempt $attempt: selected release-ready run=$selected_run_id"
+              echo "CI attempt $attempt: selected release-ready run=$selected_run_id for sha=$RELEASE_SHA"
               echo "ci_run_id=$selected_run_id" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -120,12 +152,12 @@ jobs:
             echo "CI attempt $attempt: latest=${latest_id:-missing} status=$latest_status conclusion=${latest_conclusion:-pending} active=$active_count"
 
             if [[ "$latest_status" != "missing" && "$active_count" -eq 0 ]]; then
-              echo "No successful exact-SHA CI run currently has both release-ready artifacts." >&2
+              echo "No successful exact-SHA CI run currently has both release-ready artifacts for $RELEASE_SHA." >&2
               exit 1
             fi
             sleep 5
           done
-          echo "Timed out waiting for release-ready CI on $GITHUB_SHA." >&2
+          echo "Timed out waiting for release-ready CI on $RELEASE_SHA." >&2
           exit 1
 
   wait-for-governance:
@@ -136,9 +168,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify PR-only main governance on this commit
+      - name: Verify PR-only main governance on release commit
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_SHA: ${{ needs.metadata.outputs.release_sha }}
         run: bash .github/scripts/verify-pr-only-main.sh
 
   reuse-ci-assets:
@@ -162,10 +195,10 @@ jobs:
           set -Eeuo pipefail
           test -n "$CI_RUN_ID"
           artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID/artifacts?per_page=100")"
-          linux_id="$(jq -r '[.artifacts[] | select(.name == "gptwork-linux-release")][0].id // empty' <<<"$artifacts")"
-          windows_id="$(jq -r '[.artifacts[] | select(.name == "gptwork-windows-setup")][0].id // empty' <<<"$artifacts")"
+          linux_id="$(jq -r '[.artifacts[] | select(.name == "gptwork-linux-release" and .expired == false)][0].id // empty' <<<"$artifacts")"
+          windows_id="$(jq -r '[.artifacts[] | select(.name == "gptwork-windows-setup" and .expired == false)][0].id // empty' <<<"$artifacts")"
           [[ -n "$linux_id" && -n "$windows_id" ]] || {
-            echo "Exact-SHA CI run $CI_RUN_ID is missing release-ready artifacts." >&2
+            echo "Exact-SHA CI run $CI_RUN_ID is missing non-expired release-ready artifacts." >&2
             exit 1
           }
           mkdir -p /tmp/ci-assets/linux /tmp/ci-assets/windows
@@ -177,6 +210,7 @@ jobs:
       - name: Verify exact SHA and version provenance
         env:
           RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          RELEASE_SHA: ${{ needs.metadata.outputs.release_sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -184,7 +218,7 @@ jobs:
           windows_prov="$(find /tmp/ci-assets/windows -name release-provenance.json -type f -print -quit)"
           [[ -n "$linux_prov" && -n "$windows_prov" ]]
           for prov in "$linux_prov" "$windows_prov"; do
-            jq -e --arg sha "$GITHUB_SHA" --arg version "$RELEASE_VERSION" \
+            jq -e --arg sha "$RELEASE_SHA" --arg version "$RELEASE_VERSION" \
               '.schema == "gptwork.ci-release-provenance/v1" and .sha == $sha and .version == $version' "$prov" >/dev/null
           done
 
@@ -249,19 +283,70 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt
-      - name: Create release
+      - name: Create release metadata when absent
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+          RELEASE_SHA: ${{ needs.metadata.outputs.release_sha }}
+          RELEASE_EXISTS: ${{ needs.metadata.outputs.release_exists }}
           TAG_EXISTS: ${{ needs.metadata.outputs.tag_exists }}
         run: |
           set -Eeuo pipefail
-          tag_arguments=(--target "$GITHUB_SHA")
+          if [[ "$RELEASE_EXISTS" == "true" ]]; then
+            echo "Release $RELEASE_TAG already exists; reconciling its asset set."
+            exit 0
+          fi
+          tag_arguments=(--target "$RELEASE_SHA")
           if [[ "$TAG_EXISTS" == "true" ]]; then
             tag_arguments=(--verify-tag)
           fi
-          gh release create "$RELEASE_TAG" dist/* \
+          gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             "${tag_arguments[@]}" \
             --generate-notes \
             --title "GPTWork $RELEASE_TAG"
+      - name: Upload and verify complete release asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          assets=(dist/*)
+          [[ ${#assets[@]} -eq 5 ]] || {
+            printf 'Expected 5 release files, got %s:\n' "${#assets[@]}" >&2
+            printf '  %s\n' "${assets[@]}" >&2
+            exit 1
+          }
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          for asset in "${assets[@]}"; do
+            name="$(basename "$asset")"
+            local_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
+            remote_digest="$(jq -r --arg name "$name" '[.assets[]? | select(.name == $name)][0].digest // ""' <<<"$release_json")"
+            if [[ "$remote_digest" == "$local_digest" ]]; then
+              echo "KEEP verified asset: $name"
+              continue
+            fi
+            if [[ -n "$remote_digest" ]]; then
+              echo "REPLACE asset with mismatched digest: $name"
+              gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY" --clobber
+            else
+              echo "UPLOAD missing asset: $name"
+              gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
+            fi
+            release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          done
+
+          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          for asset in "${assets[@]}"; do
+            name="$(basename "$asset")"
+            local_digest="sha256:$(sha256sum "$asset" | awk '{print $1}')"
+            remote_digest="$(jq -r --arg name "$name" '[.assets[]? | select(.name == $name)][0].digest // ""' <<<"$release_json")"
+            [[ "$remote_digest" == "$local_digest" ]] || {
+              echo "Release asset verification failed for $name: local=$local_digest remote=${remote_digest:-missing}" >&2
+              exit 1
+            }
+          done
+          echo "Release $RELEASE_TAG has the complete verified 5-file asset set."
