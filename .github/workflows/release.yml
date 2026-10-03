@@ -85,8 +85,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           for attempt in $(seq 1 90); do
-            run_json="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=20")"
-            candidate="$(jq -c '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at,.id) | reverse | .[0] // {}' <<<"$run_json")"
+            run_json="$(gh api -H 'Accept: application/vnd.github+json' "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=20")"
+            candidate="$(jq -c '.workflow_runs | sort_by(.created_at,.id) | reverse | .[0] // {}' <<<"$run_json")"
             run_id="$(jq -r '.id // empty' <<<"$candidate")"
             status="$(jq -r '.status // "missing"' <<<"$candidate")"
             conclusion="$(jq -r '.conclusion // ""' <<<"$candidate")"
