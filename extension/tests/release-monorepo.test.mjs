@@ -22,12 +22,17 @@ test('release reuses exact-SHA CI artifacts instead of rebuilding native runtime
   assert.doesNotMatch(release, /dtolnay\/rust-toolchain|Swatinem\/rust-cache/);
 
   assert.match(release, /ci_run_id=/);
+  assert.match(release, /release_sha=/);
   assert.match(release, /gptwork-linux-release/);
   assert.match(release, /gptwork-windows-setup/);
   assert.match(release, /gptwork\.ci-release-provenance\/v1/);
   assert.match(release, /\.sha == \$sha/);
   assert.match(release, /\.version == \$version/);
   assert.match(release, /Assemble and verify release surface without rebuilding/);
+  assert.match(release, /gh release upload/);
+  assert.match(release, /Expected 5 release files/);
+  assert.match(release, /SHA256SUMS\.txt/);
+  assert.match(release, /Release asset verification failed/);
 
   assert.match(ci, /cargo build --release --manifest-path private-engine\/Cargo\.toml/);
   assert.match(ci, /cargo build --locked --release --manifest-path native-core\/Cargo\.toml/);
@@ -51,6 +56,8 @@ test('release gates support GPTAuto-dispatched main CI and share one PR-only gov
 
   assert.doesNotMatch(release, /head_sha=\$GITHUB_SHA&event=push&per_page=1/);
   assert.match(release, /select\(\.event == "push" or \.event == "workflow_dispatch"\)/);
+  assert.match(release, /head_sha=\$RELEASE_SHA&per_page=20/);
+  assert.match(release, /GITHUB_SHA: \$\{\{ needs\.metadata\.outputs\.release_sha \}\}/);
   assert.equal(
     (release.match(/bash \.github\/scripts\/verify-pr-only-main\.sh/g) || []).length,
     1,
