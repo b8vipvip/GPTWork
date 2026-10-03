@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-v3-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-v4-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -280,7 +280,7 @@ jobs:
       - name: Compile and optionally sign Setup
         shell: pwsh
         env:
-          SIGN_RELEASE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          SIGN_RELEASE: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
           GPTLOCK_CODESIGN_PFX_BASE64: ${{ secrets.GPTLOCK_CODESIGN_PFX_BASE64 }}
           GPTLOCK_CODESIGN_PFX_PASSWORD: ${{ secrets.GPTLOCK_CODESIGN_PFX_PASSWORD }}
           GPTLOCK_CODESIGN_TIMESTAMP_URL: ${{ secrets.GPTLOCK_CODESIGN_TIMESTAMP_URL }}
@@ -388,7 +388,7 @@ jobs:
           $chromeManifest = Get-Content -LiteralPath $chromeManifestPath -Raw | ConvertFrom-Json
           if ($chromeManifest.path -ne $sourceBinary) { throw "Custom source root was not registered: $($chromeManifest.path)" }
       - name: Write exact-SHA Windows release provenance
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
           $version = (Get-Content 'extension\manifest.json' -Raw | ConvertFrom-Json).version
@@ -437,7 +437,7 @@ jobs:
             exit 1
           fi
       - name: Assemble exact-SHA Linux release bundle
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -468,7 +468,7 @@ jobs:
           path: dist/linux/GPTWork_*_amd64.deb
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         with:
           name: gptwork-linux-release
           path: dist/release/*
