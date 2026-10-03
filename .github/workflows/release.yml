@@ -63,8 +63,8 @@ jobs:
           release_exists=false
           release_sha="$GITHUB_SHA"
           should_publish=true
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null || true)"
-          if [[ -n "$release_json" ]]; then
+          release_json=""
+          if release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" 2>/dev/null)"; then
             release_exists=true
             if [[ "$tag_exists" != "true" ]]; then
               git fetch --force origin "refs/tags/$tag:refs/tags/$tag"
