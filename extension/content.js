@@ -847,6 +847,26 @@ document.addEventListener('pointerdown', (event) => {
     return null;
   }
 
+  function verificationSurfaceStatus() {
+    const composer = findComposer();
+    const trigger = composerIntelligenceTrigger();
+    const composerReady = Boolean(composer);
+    const modelTriggerReady = Boolean(trigger);
+    const documentVisible = document.visibilityState === 'visible';
+    const structuralReady = composerReady && modelTriggerReady;
+    return {
+      ready: structuralReady && documentVisible,
+      structuralReady,
+      contentRuntimeReady: true,
+      composerReady,
+      modelTriggerReady,
+      documentVisible,
+      visibilityState: document.visibilityState,
+      pathname: location.pathname,
+      href: location.href,
+    };
+  }
+
   function stayInChatModeButton() {
     const labels = [
       /留在聊天模式/,
@@ -2170,6 +2190,10 @@ document.addEventListener('pointerdown', (event) => {
         (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
       );
       return true;
+    }
+    if (message?.type === 'GPTLOCK_VERIFICATION_SURFACE_STATUS') {
+      sendResponse({ ok: true, ...verificationSurfaceStatus() });
+      return false;
     }
     if (message?.type === 'GPTLOCK_DISCOVER_ACCOUNT_MODELS') {
       void discoverAccountModelMetadata().then(
