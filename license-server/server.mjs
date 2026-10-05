@@ -159,7 +159,7 @@ paymentSystem.attachSettlement((orderId, context) => accountSystem.markOrderPaid
 const siteAccounts = createSiteAccountSystem({ db, env, publicOrigin: PUBLIC_ORIGIN, json, bodyJson, clientIp, accountSummary: accountSystem.accountSummary, paymentSystem });
 const issuesSystem = createIssuesSystem({ db, publicOrigin: PUBLIC_ORIGIN, json, bodyJson });
 const websiteSystem = createWebsiteSystem({ db, json });
-const siteReleases = createSiteReleaseFeed({ serverRoot: ROOT, env });
+const siteReleases = createSiteReleaseFeed({ serverRoot: ROOT, env, runtimeLogger });
 const clientRuntimeLogs = createClientRuntimeLogManager({ db, env, json });
 siteReleases.start();
 

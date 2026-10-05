@@ -146,6 +146,133 @@ test('a second sync reuses already verified local assets instead of downloading 
   assert.equal(secondAssetCalls, 3);
 });
 
+test('asset API verification failure falls back to the trusted public Release URL without forwarding the token', async (t) => {
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-public-fallback-'));
+  t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
+
+  const tag = 'v0.5.167';
+  const installer = Buffer.from('installer-public-fallback');
+  const deb = Buffer.from('deb-public-fallback');
+  const debName = 'GPTWork_0.5.167_amd64.deb';
+  const rows = releaseRow({
+    tag,
+    assets: [
+      asset(INSTALLER, 6101, installer, tag),
+      asset(debName, 6102, deb, tag),
+    ],
+  });
+
+  const bytesByUrl = new Map([
+    [rows[0].assets[0].browser_download_url, installer],
+    [rows[0].assets[1].url, deb],
+  ]);
+  const calls = [];
+  const diagnostics = [];
+  const fetchImpl = async (url, options = {}) => {
+    const target = String(url);
+    calls.push({ url: target, options });
+    if (target.includes('/releases?per_page=12')) {
+      return new Response(JSON.stringify(rows), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (target === rows[0].assets[0].url) {
+      return new Response(JSON.stringify({ message: 'metadata instead of installer bytes' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const bytes = bytesByUrl.get(target);
+    if (bytes) return new Response(bytes, { status: 200 });
+    throw new Error(`Unexpected URL: ${target}`);
+  };
+
+  const feed = createSiteReleaseFeed({
+    serverRoot: SERVER_ROOT,
+    fetchImpl,
+    runtimeLogger: {
+      log(level, event, detail) {
+        diagnostics.push({ level, event, detail });
+      },
+    },
+    env: {
+      GPTLOCK_GITHUB_TOKEN: TOKEN,
+      GPTLOCK_LICENSE_PUBLIC_ORIGIN: ORIGIN,
+      GPTLOCK_RELEASE_MIRROR_DIR: mirrorRoot,
+      GPTLOCK_RELEASE_SYNC_INTERVAL_MS: '60000',
+      GPTLOCK_RELEASE_FETCH_RETRIES: '1',
+    },
+  });
+
+  const result = await feed.sync();
+  assert.equal(result.warning, undefined);
+  assert.equal(result.latestVersion, '0.5.167');
+  assert.equal(result.releases[0].assets.length, 2);
+
+  const fallbackCall = calls.find((call) => call.url === rows[0].assets[0].browser_download_url);
+  assert.ok(fallbackCall);
+  assert.equal(fallbackCall.options.headers.Authorization, undefined);
+  assert.equal(existsSync(join(mirrorRoot, tag, INSTALLER)), true);
+  assert.equal(existsSync(join(mirrorRoot, tag, debName)), true);
+
+  const fallbackDiagnostic = diagnostics.find((entry) => entry.event === 'release_mirror_asset_fallback');
+  assert.ok(fallbackDiagnostic);
+  assert.equal(fallbackDiagnostic.level, 'warn');
+  assert.equal(fallbackDiagnostic.detail.releaseTag, tag);
+  assert.equal(fallbackDiagnostic.detail.asset, INSTALLER);
+  assert.doesNotMatch(JSON.stringify(diagnostics), new RegExp(TOKEN));
+});
+
+test('fatal asset mirror failures are written to runtime diagnostics without leaking the token', async (t) => {
+  const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-runtime-diagnostic-'));
+  t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
+
+  const tag = 'v0.5.167';
+  const installer = Buffer.from('installer-runtime-diagnostic');
+  const rows = releaseRow({
+    tag,
+    assets: [asset(INSTALLER, 6201, installer, tag)],
+  });
+  const diagnostics = [];
+  const fetchImpl = async (url) => {
+    const target = String(url);
+    if (target.includes('/releases?per_page=12')) {
+      return new Response(JSON.stringify(rows), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response('upstream unavailable', { status: 503 });
+  };
+
+  const feed = createSiteReleaseFeed({
+    serverRoot: SERVER_ROOT,
+    fetchImpl,
+    runtimeLogger: {
+      log(level, event, detail) {
+        diagnostics.push({ level, event, detail });
+      },
+    },
+    env: {
+      GPTLOCK_GITHUB_TOKEN: TOKEN,
+      GPTLOCK_LICENSE_PUBLIC_ORIGIN: ORIGIN,
+      GPTLOCK_RELEASE_MIRROR_DIR: mirrorRoot,
+      GPTLOCK_RELEASE_SYNC_INTERVAL_MS: '60000',
+      GPTLOCK_RELEASE_FETCH_RETRIES: '1',
+    },
+  });
+
+  const result = await feed.sync();
+  assert.equal(result.warning, 'release_feed_unavailable');
+  const failure = diagnostics.find((entry) => entry.event === 'release_mirror_sync_failed');
+  assert.ok(failure);
+  assert.equal(failure.level, 'warn');
+  assert.equal(failure.detail.releaseTag, tag);
+  assert.match(failure.detail.message, /Release asset download failed: GPTWorkSetup-x64\.exe/);
+  assert.doesNotMatch(JSON.stringify(diagnostics), new RegExp(TOKEN));
+});
+
 test('latest release publication is atomic when one of its assets fails verification', async (t) => {
   const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-atomic-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));

@@ -152,6 +152,7 @@ export function createSiteReleaseFeed({
   fetchImpl = fetch,
   env = process.env,
   curlTransport: injectedCurlTransport = null,
+  runtimeLogger = null,
 }) {
   const token = String(env.GPTLOCK_GITHUB_TOKEN || env.GH_TOKEN || '').trim();
   const publicOrigin = normalizeOrigin(env.GPTLOCK_LICENSE_PUBLIC_ORIGIN);
@@ -266,6 +267,25 @@ export function createSiteReleaseFeed({
     };
     if (token) headers.Authorization = `Bearer ${token}`;
     return headers;
+  }
+
+  function publicAssetHeaders() {
+    return {
+      Accept: 'application/octet-stream',
+      'User-Agent': 'GPTWork-release-mirror/1.0',
+    };
+  }
+
+  function publicReleaseAssetUrl(releaseTag, name) {
+    return `https://github.com/b8vipvip/GPTWork/releases/download/${encodeURIComponent(releaseTag)}/${encodeURIComponent(name)}`;
+  }
+
+  function runtimeDiagnostic(level, event, detail) {
+    try {
+      runtimeLogger?.log?.(level, event, detail);
+    } catch {
+      // Diagnostics must never make the release mirror less available.
+    }
   }
 
   async function fetchDirect(url, options, timeoutMs) {
@@ -434,16 +454,52 @@ export function createSiteReleaseFeed({
       }
     }
 
-    const response = await githubFetch(apiUrl, {
-      headers: githubHeaders('application/octet-stream'),
-      redirect: 'follow',
-    }, assetTimeoutMs);
-    if (!response.ok) throw new Error(`GitHub asset download failed (${response.status}): ${name}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (expectedSize && bytes.length !== expectedSize) throw new Error(`Release asset size mismatch: ${name}`);
-    const actualDigest = sha256Buffer(bytes);
-    if (expectedDigest && actualDigest !== expectedDigest) throw new Error(`Release asset SHA-256 mismatch: ${name}`);
+    async function fetchVerifiedBytes(url, headers, source) {
+      const response = await githubFetch(url, {
+        headers,
+        redirect: 'follow',
+      }, assetTimeoutMs);
+      if (!response.ok) throw new Error(`${source} returned ${response.status}`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (expectedSize && bytes.length !== expectedSize) {
+        throw new Error(`${source} size mismatch expected=${expectedSize} actual=${bytes.length}`);
+      }
+      const actualDigest = sha256Buffer(bytes);
+      if (expectedDigest && actualDigest !== expectedDigest) {
+        throw new Error(`${source} SHA-256 mismatch expected=${expectedDigest} actual=${actualDigest}`);
+      }
+      return { bytes, actualDigest };
+    }
 
+    let downloaded;
+    try {
+      downloaded = await fetchVerifiedBytes(
+        apiUrl,
+        githubHeaders('application/octet-stream'),
+        'GitHub asset API',
+      );
+    } catch (apiError) {
+      const publicUrl = publicReleaseAssetUrl(releaseTag, name);
+      try {
+        downloaded = await fetchVerifiedBytes(
+          publicUrl,
+          publicAssetHeaders(),
+          'GitHub public Release download',
+        );
+        runtimeDiagnostic('warn', 'release_mirror_asset_fallback', {
+          releaseTag,
+          asset: name,
+          transport: lastTransport || null,
+          apiError: errorText(apiError),
+        });
+      } catch (publicError) {
+        throw new Error(
+          `Release asset download failed: ${name}; API=${errorText(apiError)}; public=${errorText(publicError)}`,
+        );
+      }
+    }
+
+    const { bytes, actualDigest } = downloaded;
     const tmp = `${destination}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, bytes, { mode: 0o644 });
     renameSync(tmp, destination);
@@ -508,6 +564,14 @@ export function createSiteReleaseFeed({
     const message = errorText(error);
     if (message !== lastLoggedError) {
       console.warn(`[release-mirror] sync failed transport=${lastTransport || 'none'}: ${message}`);
+      runtimeDiagnostic('warn', 'release_mirror_sync_failed', {
+        message,
+        warning: lastWarning,
+        transport: lastTransport || null,
+        stage: progress.stage,
+        releaseTag: progress.releaseTag,
+        currentAsset: progress.currentAsset,
+      });
       lastLoggedError = message;
     }
   }
@@ -611,7 +675,13 @@ export function createSiteReleaseFeed({
       totalAssets: final.releases[0]?.assets?.length || latest.assets.length,
     });
     if (final.latestVersion && final.latestVersion !== lastLoggedPublishedVersion) {
-      console.log(`[release-mirror] published v${final.latestVersion} transport=${lastTransport || 'unknown'} assets=${final.releases[0]?.assets?.length || 0}`);
+      const publishedAssets = final.releases[0]?.assets?.length || 0;
+      console.log(`[release-mirror] published v${final.latestVersion} transport=${lastTransport || 'unknown'} assets=${publishedAssets}`);
+      runtimeDiagnostic('info', 'release_mirror_published', {
+        version: final.latestVersion,
+        transport: lastTransport || null,
+        assets: publishedAssets,
+      });
       lastLoggedPublishedVersion = final.latestVersion;
     }
   }
