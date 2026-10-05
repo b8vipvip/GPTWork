@@ -22,7 +22,9 @@ test('new-chat Work clicks are guided back to Chat only when Work handling is en
   assert.match(source, /switchBackToChat/);
   assert.match(source, /WORK_LABEL/);
   assert.match(source, /CHAT_LABEL/);
-  assert.match(source, /verificationOwned \|\| !enabled \|\| !isPristineNewChat\(\)/);
+  assert.match(source, /verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
+  assert.match(source, /message\.settings\?\.workModeGuidanceEnabled !== false/);
+  assert.match(source, /response\.data\?\.settings\?\.workModeGuidanceEnabled !== false/);
 });
 
 test('processing mode requires Work conversation marker plus Work output/source panel evidence', () => {
