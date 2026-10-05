@@ -31,6 +31,7 @@ import {
   requestPolicyForTabSync,
   enableWorkModeForVerification,
   isolateTabForNativeDiscovery,
+  isolateTabForVerification,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
@@ -41,7 +42,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.172';
+const RUNTIME_CODE_VERSION = '0.5.173';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1678,6 +1679,167 @@ async function loadTrustedLocalNetworkCandidates() {
     .map((model) => ({ model, label: model }));
 }
 
+async function broadcastVerificationState(executionTabId, ownerTabId) {
+  await broadcastTabState(executionTabId);
+  if (Number.isInteger(ownerTabId) && ownerTabId !== executionTabId) {
+    await broadcastTabState(ownerTabId);
+  }
+}
+
+async function verificationSurfaceStatus(tabId) {
+  return sendTabMessage(tabId, { type: 'GPTLOCK_VERIFICATION_SURFACE_STATUS' }).catch((error) => ({
+    ok: false,
+    ready: false,
+    structuralReady: false,
+    contentRuntimeReady: false,
+    composerReady: false,
+    modelTriggerReady: false,
+    documentVisible: false,
+    reason: errorText(error),
+  }));
+}
+
+async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = true } = {}) {
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
+  let last = {
+    ready: false,
+    structuralReady: false,
+    contentRuntimeReady: false,
+    composerReady: false,
+    modelTriggerReady: false,
+    documentVisible: false,
+    reason: 'content_runtime_unavailable',
+  };
+  do {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return { ...last, reason: 'verification_tab_closed' };
+    if (tab.status === 'complete') {
+      last = await verificationSurfaceStatus(tabId);
+      const structuralReady = last?.contentRuntimeReady === true
+        && last?.composerReady === true
+        && last?.modelTriggerReady === true;
+      if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
+        return { ...last, ready: true, structuralReady: true };
+      }
+    }
+    await sleep(250);
+  } while (Date.now() < deadline);
+  return {
+    ...last,
+    ready: false,
+    structuralReady: Boolean(last?.contentRuntimeReady && last?.composerReady && last?.modelTriggerReady),
+    reason: last?.reason || 'verification_surface_not_ready',
+  };
+}
+
+async function createVerificationExecutionTab(sourceTabId) {
+  const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
+  if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
+    throw new Error('Source ChatGPT tab is unavailable');
+  }
+
+  const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
+  const restoreActiveTabId = Number(activeTabs?.[0]?.id) || sourceTabId;
+  let verificationTab = null;
+  let verificationTabId = null;
+  let activatedForReadiness = false;
+  try {
+    verificationTab = await chrome.tabs.create({
+      windowId: sourceTab.windowId,
+      url: 'https://chatgpt.com/',
+      active: false,
+    });
+    verificationTabId = Number(verificationTab?.id);
+    if (!Number.isInteger(verificationTabId)) throw new Error('Temporary verification tab was not created');
+
+    await isolateTabForVerification(verificationTabId);
+    logRuntime('info', 'verification', 'verification_surface_tab_created', {
+      sourceTabId,
+      verificationTabId,
+      active: false,
+    });
+
+    let surface = await waitForVerificationSurface(verificationTabId, 3000, { requireVisible: false });
+    if (surface?.ready !== true || surface?.documentVisible !== true) {
+      await chrome.tabs.update(verificationTabId, { active: true }).catch(() => null);
+      activatedForReadiness = true;
+      logRuntime('info', 'verification', 'verification_surface_activation_fallback', {
+        sourceTabId,
+        verificationTabId,
+        reason: surface?.reason || (surface?.structuralReady ? 'document_hidden' : 'surface_not_ready_in_background'),
+      });
+      surface = await waitForVerificationSurface(verificationTabId, 9000, { requireVisible: true });
+    }
+
+    if (surface?.ready !== true) {
+      return {
+        sourceTabId,
+        verificationTabId,
+        verificationTab,
+        restoreActiveTabId,
+        activatedForReadiness,
+        surface,
+        ready: false,
+      };
+    }
+
+    logRuntime('info', 'verification', 'verification_surface_ready', {
+      sourceTabId,
+      verificationTabId,
+      composerReady: surface.composerReady === true,
+      modelTriggerReady: surface.modelTriggerReady === true,
+      documentVisible: surface.documentVisible === true,
+      pathname: surface.pathname || null,
+    });
+    return {
+      sourceTabId,
+      verificationTabId,
+      verificationTab,
+      restoreActiveTabId,
+      activatedForReadiness,
+      surface,
+      ready: true,
+    };
+  } catch (error) {
+    if (activatedForReadiness && Number.isInteger(restoreActiveTabId) && restoreActiveTabId !== verificationTabId) {
+      await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
+    }
+    if (Number.isInteger(verificationTabId)) {
+      await chrome.tabs.remove(verificationTabId).catch(() => null);
+    }
+    logRuntime('warn', 'verification', 'verification_surface_tab_create_failed', {
+      sourceTabId,
+      verificationTabId,
+      error: errorText(error),
+    });
+    throw error;
+  }
+}
+
+async function closeVerificationExecutionTab(session) {
+  const verificationTabId = Number(session?.verificationTabId);
+  const restoreActiveTabId = Number(session?.restoreActiveTabId);
+  if (Number.isInteger(verificationTabId)) {
+    await networkMonitor.disableResponseCapture(verificationTabId).catch(() => {});
+    await networkMonitor.detach(verificationTabId).catch(() => {});
+  }
+  if (
+    session?.activatedForReadiness === true
+    && Number.isInteger(restoreActiveTabId)
+    && restoreActiveTabId !== verificationTabId
+  ) {
+    await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
+  }
+  if (Number.isInteger(verificationTabId)) {
+    await chrome.tabs.remove(verificationTabId).catch(() => null);
+    logRuntime('info', 'verification', 'verification_surface_tab_closed', {
+      sourceTabId: Number(session?.sourceTabId) || null,
+      verificationTabId,
+      restoredActiveTabId: session?.activatedForReadiness === true ? restoreActiveTabId : null,
+    });
+  }
+}
+
 async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
   let last = { entered: false, reason: 'content_runtime_unavailable' };
@@ -2013,7 +2175,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [] } = {}) {
+async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {}) {
   const workDefaultModel = workBootstrapModelForTab(tabId);
   // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
   // browser, Work activation, request interception and response evidence adapters.
@@ -2034,7 +2196,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   mergeCatalog(accountCatalog, 'initial');
   mergeCatalog(networkCandidateCatalog(sharedCandidates, 'shared-server'), 'shared-network-candidates');
   mergeCatalog(networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence'), 'local-network-candidates');
-  await broadcastTabState(tabId);
+  await broadcastVerificationState(tabId, ownerTabId);
   logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
     tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
   });
@@ -2049,7 +2211,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const added = mergeCatalog(rediscovered, 'settle');
       stablePasses = added ? 0 : stablePasses + 1;
       progress.stablePasses = stablePasses;
-      await broadcastTabState(tabId);
+      await broadcastVerificationState(tabId, ownerTabId);
       if (index >= queue.length && stablePasses < 2) {
         await new Promise((resolve) => setTimeout(resolve, 650));
       }
@@ -2069,7 +2231,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       startedAt: transactionStartedAtMs,
     });
     resetVerificationAttempt(state);
-    await broadcastTabState(tabId);
+    await broadcastVerificationState(tabId, ownerTabId);
     logRuntime('info', 'verification', 'account_model_verification_model_started', {
       tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
     });
@@ -2229,7 +2391,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
           retryCount: retryCount + 1, maxRetries: 1,
         });
         verificationTransactions.delete(Number(tabId));
-        await broadcastTabState(tabId);
+        await broadcastVerificationState(tabId, ownerTabId);
         await sleep(650);
         continue;
       }
@@ -2254,7 +2416,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     verificationTransactions.delete(Number(tabId));
     index += 1;
     progress.completed = index;
-    await broadcastTabState(tabId);
+    await broadcastVerificationState(tabId, ownerTabId);
 
     if (abortForPendingTurn) {
       logRuntime('warn', 'verification', 'account_model_verification_aborted_pending_response', { tabId, index, total: queue.length });
@@ -2326,7 +2488,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         pickerMode: null, added: addedFromWork, nativeDiscovered: addedFromNative, floorModel: workDefaultModel,
       });
       if (addedFromWork) stablePasses = 0;
-      await broadcastTabState(tabId);
+      await broadcastVerificationState(tabId, ownerTabId);
     } else {
       progress.workDiscovery = {
         attempted: false,
@@ -2351,7 +2513,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     const added = mergeCatalog(rediscovered, 'post-turn');
     stablePasses = added ? 0 : stablePasses + 1;
     progress.stablePasses = stablePasses;
-    await broadcastTabState(tabId);
+    await broadcastVerificationState(tabId, ownerTabId);
   }
 
   verificationTransactions.delete(Number(tabId));
@@ -2370,7 +2532,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
     reasoningLevels: progress.reasoningLevels, results: progress.results,
   });
-  await broadcastTabState(tabId);
+  await broadcastVerificationState(tabId, ownerTabId);
   return progress;
 }
 
@@ -2398,35 +2560,23 @@ async function persistModelVerificationHistory(tabId, autoVerification) {
 
 async function autoVerify(tabId) {
   if (!masterRuntimeEnabled()) throw new Error('GPTWork is disabled / GPTWork 已关闭');
-  const tab = await chrome.tabs.get(tabId);
-  if (!isChatGptUrl(tab.url ?? '')) throw new Error('Open chatgpt.com first / 请先打开 chatgpt.com');
-  const state = ensureTabState(tabId, tab.url);
+  const sourceTabId = tabId;
+  const sourceTab = await chrome.tabs.get(sourceTabId);
+  if (!isChatGptUrl(sourceTab.url ?? '')) throw new Error('Open chatgpt.com first / 请先打开 chatgpt.com');
+
+  const sourceState = ensureTabState(sourceTabId, sourceTab.url);
+  sourceState.windowId = Number.isInteger(sourceTab.windowId) ? sourceTab.windowId : null;
   const startedAt = new Date().toISOString();
-  const pageContext = /^https:\/\/chatgpt\.com\/c\/[^/?#]+/i.test(tab.url || '') ? 'existing_chat' : 'new_chat';
-  logRuntime('info', 'verification', 'auto_verify_started', { tabId, pageContext });
-
-  const coreCheck = await refreshNativeCore({ tolerateFailure: true });
-  const monitorAttached = await networkMonitor.attach(tabId);
-  const responseCaptureEnabled = monitorAttached
-    ? await networkMonitor.enableResponseCapture(tabId).catch(() => false)
-    : false;
-  logRuntime(responseCaptureEnabled ? 'info' : 'warn', 'network', 'verification_response_capture', {
-    tabId,
-    enabled: responseCaptureEnabled,
-    attachedTabs: networkMonitor.attachedCount(),
-    responseCaptureTabs: networkMonitor.responseCaptureCount(),
-  });
-  const page = await collectPageObservation(tabId, state);
-  const restoreModel = normalizeConcreteModelId(state.pageObservation?.model);
-
-  // Verification owns its visible lifecycle from the moment the transaction starts.
-  // Catalog discovery is a phase of that same transaction, not a prerequisite hidden
-  // from the progress UI.
-  state.autoVerification = {
+  const pageContext = /^https:\/\/chatgpt\.com\/c\/[^/?#]+/i.test(sourceTab.url || '') ? 'existing_chat' : 'new_chat';
+  const autoVerification = {
     running: true,
     startedAt,
     completedAt: null,
     pageContext,
+    sourceTabId,
+    executionTabId: null,
+    verificationSurface: null,
+    infrastructureFailure: false,
     attempt: 0,
     maxAttempts: 0,
     retries: 0,
@@ -2440,155 +2590,326 @@ async function autoVerify(tabId) {
     attempts: [],
     catalogVerification: null,
   };
-  try {
-    await startAutoVerificationStreamCapture(tabId, startedAt);
-  } catch (error) {
-    logRuntime('warn', 'diagnostics', 'auto_verify_stream_capture_start_failed', { tabId, error: errorText(error) });
-  }
-  resetVerificationAttempt(state);
-  state.lastError = page.error;
-  await broadcastTabState(tabId);
+  sourceState.autoVerification = autoVerification;
+  sourceState.lastError = null;
+  resetVerificationAttempt(sourceState);
+  sourceState.autoVerification = autoVerification;
+  logRuntime('info', 'verification', 'auto_verify_started', { tabId: sourceTabId, pageContext, execution: 'isolated_tab' });
+  await broadcastTabState(sourceTabId);
 
-  const [sharedKnownModels, localNetworkCandidates] = await Promise.all([
-    syncSharedKnownModels(),
-    loadTrustedLocalNetworkCandidates(),
-  ]);
-  state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-  state.autoVerification.localNetworkCandidateCount = localNetworkCandidates.length;
-  // Verify the visible Chat/Picker-A catalog first. Work verification is a
-  // network-layer phase: after Chat A is proven, verifyAccountCatalogModels() arms
-  // the tab-scoped Work policy and seeds Work-transport probes without switching the
-  // page into ChatGPT's native Work UI or depending on Picker B.
-  const accountCatalog = await discoverAccountCatalog(tabId);
-  state.autoVerification.workDiscovery = { attempted: false, entered: false, reason: 'deferred_until_after_gpt_5_5' };
-  state.autoVerification.maxAttempts = accountCatalog.rows.length;
-  await broadcastTabState(tabId);
+  let session = null;
+  let state = null;
+  let coreCheck = { connected: false, error: null };
+  let monitorAttached = false;
+  let responseCaptureEnabled = false;
+  let streamCaptureStarted = false;
+  let streamCaptureFinalized = false;
+  let page = { collected: false, error: null };
+  let accountCatalog = { rows: [], models: [], reasoningLevels: [], pickerMode: null, triggerFound: false, candidateCount: 0 };
 
-  if (!monitorAttached) {
-    logRuntime('warn', 'verification', 'auto_verify_request_lock_unavailable', {
-      tabId,
-      monitorError: state.monitor?.error ?? null,
-    });
-  }
-
-  const catalogVerification = await verifyAccountCatalogModels(
-    tabId,
-    state,
-    accountCatalog,
-    { restoreModel, sharedCandidates: sharedKnownModels, localNetworkCandidates },
-  );
-  await publishAccountModels(accountCatalog, catalogVerification);
-  state.autoVerification.attempts = catalogVerification.results.map((item, index) => ({
-    attempt: index + 1,
-    sent: Boolean(item.requestId),
-    requestLockConfirmed: item.requestConfirmed === true,
-    requestModel: item.requestModel ?? null,
-    responseModel: item.responseModel ?? null,
-    responseConfirmed: item.responseConfirmed === true,
-    evidenceModel: item.evidenceModel ?? null,
-    responseReasoning: item.responseReasoning ?? null,
-    responseIssue: item.responseIssue ?? null,
-    evidenceSource: item.evidenceSource ?? null,
-    verdict: item.responseVerdict ?? null,
-    outcome: item.verified ? 'verified' : 'unverified',
-    reason: item.verified ? null : item.error || 'model_verification_incomplete',
-  }));
-
-  const successful = catalogVerification.results.filter((item) => item.verified);
-  const requestConfirmedResults = catalogVerification.results.filter((item) => item.requestConfirmed);
-  const lastResult = catalogVerification.results.at(-1) ?? null;
-  const lastVerified = successful.at(-1) ?? null;
-  const lastRequestConfirmed = requestConfirmedResults.at(-1) ?? null;
-  const verificationSummary = summarizeVerificationOutcome(catalogVerification);
-  let finalOutcome = verificationSummary.outcome;
-  let finalReason = verificationSummary.reason;
-  if (
-    catalogVerification?.workDiscovery?.attempted === true
-    && catalogVerification.workDiscovery.entered !== true
-  ) {
-    finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
-    finalReason = 'work_model_discovery_incomplete';
-  }
-
-  state.autoVerification.running = false;
-  state.autoVerification.completedAt = new Date().toISOString();
-  state.autoVerification.outcome = finalOutcome;
-  state.autoVerification.reason = finalReason;
-  state.autoVerification.retries = 0;
-  state.autoVerification.requestLockConfirmed = catalogVerification.total > 0
-    && catalogVerification.requestConfirmed === catalogVerification.total;
-  state.autoVerification.requestModel = lastResult?.requestModel ?? lastRequestConfirmed?.requestModel ?? null;
-  state.autoVerification.responseModel = lastVerified?.responseModel ?? null;
-  state.autoVerification.responseReasoning = lastVerified?.responseReasoning ?? null;
-  state.autoVerification.evidenceSource = lastVerified
-    ? 'network_response_metadata'
-    : lastRequestConfirmed
-      ? 'network_request_metadata'
-      : null;
-  try {
-    await finalizeAutoVerificationStreamCapture(tabId, state.autoVerification.completedAt);
-  } catch (error) {
-    logRuntime('warn', 'diagnostics', 'auto_verify_stream_capture_finalize_failed', { tabId, error: errorText(error) });
-  }
-  try {
-    await persistModelVerificationHistory(tabId, state.autoVerification);
-  } catch (error) {
-    logRuntime('warn', 'verification', 'model_verification_history_write_failed', { tabId, error: errorText(error) });
-  }
-  await networkMonitor.disableResponseCapture(tabId);
-  await broadcastTabState(tabId);
-
-  logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'verification', 'auto_verify_completed', {
-    tabId,
-    outcome: finalOutcome,
-    reason: finalReason,
-    catalogTotal: catalogVerification.total,
-    catalogRequestConfirmed: catalogVerification.requestConfirmed,
-    catalogVerified: catalogVerification.verified,
-    catalogFailed: catalogVerification.failed,
-    models: catalogVerification.results.map((item) => ({
-      model: item.model,
-      verified: item.verified,
-      requestConfirmed: item.requestConfirmed === true,
-      responseConfirmed: item.responseConfirmed === true,
-      requestModel: item.requestModel ?? null,
-      networkObservedRequestModel: item.networkObservedRequestModel ?? null,
-      responseModel: item.responseModel ?? null,
-      evidenceModel: item.evidenceModel ?? null,
-      evidenceSource: item.evidenceSource ?? null,
-    })),
-  });
-
-  return {
-    ready: catalogVerification.total > 0,
-    sent: catalogVerification.results.some((item) => Boolean(item.requestId)),
-    outcome: finalOutcome,
-    reason: finalReason,
-    attempts: catalogVerification.total,
-    retries: 0,
-    requestLockConfirmed: state.autoVerification.requestLockConfirmed,
-    requestModel: state.autoVerification.requestModel,
-    responseModel: state.autoVerification.responseModel,
-    responseReasoning: state.autoVerification.responseReasoning,
-    evidenceSource: state.autoVerification.evidenceSource,
-    catalogTotal: catalogVerification.total,
-    catalogRequestConfirmed: catalogVerification.requestConfirmed,
-    catalogVerified: catalogVerification.verified,
-    catalogFailed: catalogVerification.failed,
-    checks: {
-      coreConnected: coreCheck.connected,
-      coreError: coreCheck.error,
-      monitorAttached,
-      pageCollected: page.collected,
-      pageCollectionError: page.error,
-      pageModel: restoreModel,
-      pageReasoning: state.pageObservation?.reasoning ?? null,
-      discoveredModels: accountCatalog.models,
-      discoveredReasoningLevels: accountCatalog.reasoningLevels,
-    },
-    autoVerification: state.autoVerification,
-    tabState: publicTabState(state),
+  const finalizeStreamCapture = async () => {
+    if (!streamCaptureStarted || streamCaptureFinalized || !Number.isInteger(autoVerification.executionTabId)) return;
+    try {
+      await finalizeAutoVerificationStreamCapture(autoVerification.executionTabId, autoVerification.completedAt || new Date().toISOString());
+      streamCaptureFinalized = true;
+    } catch (error) {
+      logRuntime('warn', 'diagnostics', 'auto_verify_stream_capture_finalize_failed', {
+        tabId: autoVerification.executionTabId,
+        sourceTabId,
+        error: errorText(error),
+      });
+    }
   };
+
+  const finishInfrastructureFailure = async (reason, error = null, details = {}) => {
+    autoVerification.running = false;
+    autoVerification.completedAt = new Date().toISOString();
+    autoVerification.outcome = 'unverified';
+    autoVerification.reason = reason;
+    autoVerification.infrastructureFailure = true;
+    autoVerification.requestLockConfirmed = false;
+    autoVerification.infrastructure = {
+      reason,
+      error: error ? errorText(error) : null,
+      ...details,
+    };
+    sourceState.lastError = error ? errorText(error) : reason;
+    if (state) {
+      state.autoVerification = autoVerification;
+      state.lastError = sourceState.lastError;
+    }
+    await finalizeStreamCapture();
+    try {
+      await persistModelVerificationHistory(sourceTabId, autoVerification);
+    } catch (historyError) {
+      logRuntime('warn', 'verification', 'model_verification_history_write_failed', {
+        tabId: sourceTabId,
+        error: errorText(historyError),
+      });
+    }
+    if (state && Number.isInteger(autoVerification.executionTabId)) {
+      await broadcastVerificationState(autoVerification.executionTabId, sourceTabId);
+    } else {
+      await broadcastTabState(sourceTabId);
+    }
+    logRuntime('warn', 'verification', 'auto_verify_infrastructure_failed', {
+      tabId: sourceTabId,
+      executionTabId: autoVerification.executionTabId,
+      reason,
+      error: error ? errorText(error) : null,
+      verificationSurface: autoVerification.verificationSurface,
+      coreConnected: coreCheck.connected === true,
+      monitorAttached,
+      responseCaptureEnabled,
+      ...details,
+    });
+    return {
+      ready: false,
+      sent: false,
+      outcome: 'unverified',
+      reason,
+      attempts: 0,
+      retries: 0,
+      requestLockConfirmed: false,
+      requestModel: null,
+      responseModel: null,
+      responseReasoning: null,
+      evidenceSource: null,
+      catalogTotal: 0,
+      catalogRequestConfirmed: 0,
+      catalogVerified: 0,
+      catalogFailed: 0,
+      checks: {
+        coreConnected: coreCheck.connected === true,
+        coreError: coreCheck.error ?? null,
+        monitorAttached,
+        responseCaptureEnabled,
+        verificationSurface: autoVerification.verificationSurface,
+        pageCollected: page.collected,
+        pageCollectionError: page.error,
+      },
+      autoVerification,
+      tabState: publicTabState(sourceState),
+    };
+  };
+
+  try {
+    session = await createVerificationExecutionTab(sourceTabId);
+    tabId = session.verificationTabId;
+    autoVerification.executionTabId = tabId;
+    autoVerification.verificationSurface = session.surface || null;
+
+    const executionTab = await chrome.tabs.get(tabId).catch(() => session.verificationTab || null);
+    state = ensureTabState(tabId, executionTab?.url || 'https://chatgpt.com/');
+    state.windowId = Number.isInteger(executionTab?.windowId) ? executionTab.windowId : sourceState.windowId;
+    state.autoVerification = autoVerification;
+    resetVerificationAttempt(state);
+    state.autoVerification = autoVerification;
+    await broadcastVerificationState(tabId, sourceTabId);
+
+    if (session.ready !== true) {
+      return await finishInfrastructureFailure('verification_surface_unavailable', null, {
+        surface: session.surface || null,
+      });
+    }
+
+    coreCheck = await refreshNativeCore({ tolerateFailure: true });
+    if (coreCheck.connected !== true) {
+      return await finishInfrastructureFailure('verification_core_unavailable', coreCheck.error || 'native_core_unavailable');
+    }
+
+    monitorAttached = await networkMonitor.attach(tabId);
+    responseCaptureEnabled = monitorAttached
+      ? await networkMonitor.enableResponseCapture(tabId).catch(() => false)
+      : false;
+    logRuntime(responseCaptureEnabled ? 'info' : 'warn', 'network', 'verification_response_capture', {
+      tabId,
+      sourceTabId,
+      enabled: responseCaptureEnabled,
+      attachedTabs: networkMonitor.attachedCount(),
+      responseCaptureTabs: networkMonitor.responseCaptureCount(),
+    });
+    if (!monitorAttached || !responseCaptureEnabled) {
+      return await finishInfrastructureFailure('verification_network_monitor_unavailable', state.monitor?.error || null);
+    }
+
+    try {
+      await startAutoVerificationStreamCapture(tabId, startedAt);
+      streamCaptureStarted = true;
+    } catch (error) {
+      logRuntime('warn', 'diagnostics', 'auto_verify_stream_capture_start_failed', { tabId, sourceTabId, error: errorText(error) });
+    }
+
+    page = await collectPageObservation(tabId, state);
+    state.lastError = page.error;
+    await broadcastVerificationState(tabId, sourceTabId);
+
+    const [sharedKnownModels, localNetworkCandidates] = await Promise.all([
+      syncSharedKnownModels(),
+      loadTrustedLocalNetworkCandidates(),
+    ]);
+    autoVerification.sharedKnownModelCount = sharedKnownModels.length;
+    autoVerification.localNetworkCandidateCount = localNetworkCandidates.length;
+
+    // All picker/composer discovery now runs on the isolated verification surface.
+    // The user's source tab is only the progress/result owner and never supplies
+    // request/response evidence for this transaction.
+    accountCatalog = await discoverAccountCatalog(tabId);
+    autoVerification.workDiscovery = { attempted: false, entered: false, reason: 'deferred_until_after_gpt_5_5' };
+    autoVerification.maxAttempts = accountCatalog.rows.length;
+    await broadcastVerificationState(tabId, sourceTabId);
+
+    const catalogVerification = await verifyAccountCatalogModels(
+      tabId,
+      state,
+      accountCatalog,
+      {
+        restoreModel: null,
+        sharedCandidates: sharedKnownModels,
+        localNetworkCandidates,
+        ownerTabId: sourceTabId,
+      },
+    );
+
+    if (catalogVerification.requestConfirmed > 0) {
+      await publishAccountModels(accountCatalog, catalogVerification);
+    } else {
+      logRuntime('warn', 'verification', 'shared_model_catalog_publish_skipped', {
+        tabId,
+        sourceTabId,
+        reason: 'zero_request_confirmed',
+        total: catalogVerification.total,
+        verified: catalogVerification.verified,
+        failed: catalogVerification.failed,
+      });
+    }
+
+    autoVerification.attempts = catalogVerification.results.map((item, index) => ({
+      attempt: index + 1,
+      sent: Boolean(item.requestId),
+      requestLockConfirmed: item.requestConfirmed === true,
+      requestModel: item.requestModel ?? null,
+      responseModel: item.responseModel ?? null,
+      responseConfirmed: item.responseConfirmed === true,
+      evidenceModel: item.evidenceModel ?? null,
+      responseReasoning: item.responseReasoning ?? null,
+      responseIssue: item.responseIssue ?? null,
+      evidenceSource: item.evidenceSource ?? null,
+      verdict: item.responseVerdict ?? null,
+      outcome: item.verified ? 'verified' : 'unverified',
+      reason: item.verified ? null : item.error || 'model_verification_incomplete',
+    }));
+
+    const successful = catalogVerification.results.filter((item) => item.verified);
+    const requestConfirmedResults = catalogVerification.results.filter((item) => item.requestConfirmed);
+    const lastResult = catalogVerification.results.at(-1) ?? null;
+    const lastVerified = successful.at(-1) ?? null;
+    const lastRequestConfirmed = requestConfirmedResults.at(-1) ?? null;
+    const verificationSummary = summarizeVerificationOutcome(catalogVerification);
+    let finalOutcome = verificationSummary.outcome;
+    let finalReason = verificationSummary.reason;
+
+    if (catalogVerification.total > 0 && catalogVerification.requestConfirmed === 0) {
+      finalOutcome = 'unverified';
+      finalReason = 'verification_infrastructure_no_requests_confirmed';
+      autoVerification.infrastructureFailure = true;
+    } else if (
+      catalogVerification?.workDiscovery?.attempted === true
+      && catalogVerification.workDiscovery.entered !== true
+    ) {
+      finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
+      finalReason = 'work_model_discovery_incomplete';
+    }
+
+    autoVerification.running = false;
+    autoVerification.completedAt = new Date().toISOString();
+    autoVerification.outcome = finalOutcome;
+    autoVerification.reason = finalReason;
+    autoVerification.retries = 0;
+    autoVerification.requestLockConfirmed = catalogVerification.total > 0
+      && catalogVerification.requestConfirmed === catalogVerification.total;
+    autoVerification.requestModel = lastResult?.requestModel ?? lastRequestConfirmed?.requestModel ?? null;
+    autoVerification.responseModel = lastVerified?.responseModel ?? null;
+    autoVerification.responseReasoning = lastVerified?.responseReasoning ?? null;
+    autoVerification.evidenceSource = lastVerified
+      ? 'network_response_metadata'
+      : lastRequestConfirmed
+        ? 'network_request_metadata'
+        : null;
+
+    await finalizeStreamCapture();
+    try {
+      await persistModelVerificationHistory(sourceTabId, autoVerification);
+    } catch (error) {
+      logRuntime('warn', 'verification', 'model_verification_history_write_failed', { tabId: sourceTabId, error: errorText(error) });
+    }
+    await networkMonitor.disableResponseCapture(tabId);
+    await broadcastVerificationState(tabId, sourceTabId);
+
+    logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'verification', 'auto_verify_completed', {
+      tabId: sourceTabId,
+      executionTabId: tabId,
+      outcome: finalOutcome,
+      reason: finalReason,
+      catalogTotal: catalogVerification.total,
+      catalogRequestConfirmed: catalogVerification.requestConfirmed,
+      catalogVerified: catalogVerification.verified,
+      catalogFailed: catalogVerification.failed,
+      sharedPublishSkipped: catalogVerification.requestConfirmed === 0,
+      models: catalogVerification.results.map((item) => ({
+        model: item.model,
+        verified: item.verified,
+        requestConfirmed: item.requestConfirmed === true,
+        responseConfirmed: item.responseConfirmed === true,
+        requestModel: item.requestModel ?? null,
+        networkObservedRequestModel: item.networkObservedRequestModel ?? null,
+        responseModel: item.responseModel ?? null,
+        evidenceModel: item.evidenceModel ?? null,
+        evidenceSource: item.evidenceSource ?? null,
+      })),
+    });
+
+    sourceState.lastError = state.lastError;
+    return {
+      ready: catalogVerification.total > 0 && catalogVerification.requestConfirmed > 0,
+      sent: catalogVerification.results.some((item) => Boolean(item.requestId)),
+      outcome: finalOutcome,
+      reason: finalReason,
+      attempts: catalogVerification.total,
+      retries: 0,
+      requestLockConfirmed: autoVerification.requestLockConfirmed,
+      requestModel: autoVerification.requestModel,
+      responseModel: autoVerification.responseModel,
+      responseReasoning: autoVerification.responseReasoning,
+      evidenceSource: autoVerification.evidenceSource,
+      catalogTotal: catalogVerification.total,
+      catalogRequestConfirmed: catalogVerification.requestConfirmed,
+      catalogVerified: catalogVerification.verified,
+      catalogFailed: catalogVerification.failed,
+      checks: {
+        coreConnected: coreCheck.connected,
+        coreError: coreCheck.error,
+        monitorAttached,
+        responseCaptureEnabled,
+        verificationSurface: autoVerification.verificationSurface,
+        pageCollected: page.collected,
+        pageCollectionError: page.error,
+        pageModel: normalizeConcreteModelId(state.pageObservation?.model),
+        pageReasoning: state.pageObservation?.reasoning ?? null,
+        discoveredModels: accountCatalog.models,
+        discoveredReasoningLevels: accountCatalog.reasoningLevels,
+      },
+      autoVerification,
+      tabState: publicTabState(sourceState),
+    };
+  } catch (error) {
+    return await finishInfrastructureFailure('verification_infrastructure_failure', error);
+  } finally {
+    await finalizeStreamCapture();
+    if (session) await closeVerificationExecutionTab(session);
+    sourceState.autoVerification = autoVerification;
+    await broadcastTabState(sourceTabId);
+  }
 }
 
 function diagnosticTabState(state) {

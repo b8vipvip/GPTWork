@@ -80,7 +80,7 @@ test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () 
 
   const autoStart = background.indexOf('async function autoVerify');
   const autoBody = background.slice(autoStart);
-  const initialDiscovery = autoBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
+  const initialDiscovery = autoBody.indexOf('accountCatalog = await discoverAccountCatalog(tabId)');
   const verification = autoBody.indexOf('verifyAccountCatalogModels', initialDiscovery);
   const prematureWork = autoBody.indexOf('enableWorkModeForVerification(tabId)', initialDiscovery);
   assert(initialDiscovery >= 0 && verification > initialDiscovery);
@@ -176,13 +176,14 @@ test('v0.5.87 menu cleanup is idempotent and cannot toggle a closed model trigge
 
 test('v0.5.87 progress starts before catalog discovery so discovery failure remains visible', () => {
   const verifyStart = background.indexOf('async function autoVerify');
-  const verifyBody = background.slice(verifyStart, verifyStart + 9000);
-  const runningAt = verifyBody.indexOf('state.autoVerification = {');
-  const broadcastAt = verifyBody.indexOf('await broadcastTabState(tabId)', runningAt);
-  const discoverAt = verifyBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
+  const verifyEnd = background.indexOf('function diagnosticTabState', verifyStart);
+  const verifyBody = background.slice(verifyStart, verifyEnd);
+  const runningAt = verifyBody.indexOf('const autoVerification = {');
+  const broadcastAt = verifyBody.indexOf('await broadcastTabState(sourceTabId)', runningAt);
+  const discoverAt = verifyBody.indexOf('accountCatalog = await discoverAccountCatalog(tabId)');
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
-  assert.match(verifyBody, /state\.autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
+  assert.match(verifyBody, /autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
   assert.match(verifyBody, /deferred_until_after_gpt_5_5/);
 });
 
