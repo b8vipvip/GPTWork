@@ -155,6 +155,15 @@ export function normalizePolicy(input) {
   };
 }
 
+export function toNativePolicy(input) {
+  const policy = normalizePolicy(input);
+  return {
+    lockedModels: [...policy.lockedModels],
+    allowedReasoningLevels: [...policy.allowedReasoningLevels],
+    strictMode: policy.strictMode,
+  };
+}
+
 export function normalizeSettings(input) {
   const source = input && typeof input === 'object' ? input : DEFAULT_SETTINGS;
   return {
