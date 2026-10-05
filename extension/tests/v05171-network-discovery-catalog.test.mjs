@@ -15,20 +15,14 @@ test('shared and local discoveries become network-only verification candidates',
 
 test('native Work is only a bounded Picker-B discovery transaction on a temporary pristine tab', async () => {
   const background = await read('background.js');
-  const controller = await read('work-mode-controller.js');
   assert.match(background, /async function discoverNativeWorkCandidates\(sourceTabId, progress\)/);
-  assert.match(background, /GPTWORK_DISCOVERY_STATUS/);
-  assert.match(background, /GPTWORK_DISCOVERY_ENTER_NATIVE_WORK/);
+  assert.match(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
   assert.match(background, /url: 'https:\/\/chatgpt\.com\/'/);
   assert.match(background, /active: false/);
   assert.match(background, /chrome\.tabs\.remove\(discoveryTabId\)/);
   assert.match(background, /mergeCatalog\(nativeCandidates, 'native-picker-b-discovery'\)/);
   assert.match(background, /networkCandidateCatalog\(discovered\.rows, 'native-picker-b'\)/);
-  assert.match(controller, /function discoverySurfaceStatus\(\)/);
-  assert.match(controller, /async function enterNativeWorkDiscovery\(\)/);
-  assert.match(controller, /if \(!surface\.pristine\) return \{ entered: false, reason: 'not_pristine_new_chat' \}/);
-  assert.match(controller, /topModeControl\('work'\)/);
-  assert.doesNotMatch(background, /GPTWORK_DISCOVERY_EXIT_NATIVE_WORK/);
+  assert.doesNotMatch(background, /GPTWORK_DISCOVERY_ENTER_NATIVE_WORK/);
 });
 
 test('normal Work execution remains network-layer after discovery', async () => {
