@@ -1,6 +1,6 @@
 #define MyAppName "GPTWork"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.167"
+  #define MyAppVersion "0.5.168"
 #endif
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
@@ -44,20 +44,20 @@ VersionInfoDescription=GPTWork Installer
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [InstallDelete]
-; Never recursively delete the live extension directory while Chrome/Edge may still be
-; executing that generation. New files are copied to extension.next and swapped only
-; after the complete payload exists. These two directories are transaction scratch space.
+; Never overwrite the live Core or extension generation in place. Both payloads are
+; staged first, validated, and committed together from ssPostInstall. The .previous
+; directories are rollback snapshots and the .next directories are transaction scratch.
+Type: filesandordirs; Name: "{app}\bin.next"
+Type: filesandordirs; Name: "{app}\bin.previous"
 Type: filesandordirs; Name: "{app}\extension.next"
 Type: filesandordirs; Name: "{app}\extension.previous"
-Type: files; Name: "{app}\bin\gptlock-core.exe"
-Type: files; Name: "{app}\bin\gptlock-engine.exe"
 Type: files; Name: "{app}\tools\Update-GPTLock.ps1"
 Type: files; Name: "{app}\tools\Repair-GPTLock.ps1"
 
 [Files]
-Source: "..\..\native-core\target\release\gptwork-core.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
+Source: "..\..\native-core\target\release\gptwork-core.exe"; DestDir: "{app}\bin.next"; Flags: ignoreversion
 #if PrivateEnginePath != ""
-Source: "{#PrivateEnginePath}"; DestDir: "{app}\bin"; DestName: "gptwork-engine.exe"; Flags: ignoreversion
+Source: "{#PrivateEnginePath}"; DestDir: "{app}\bin.next"; DestName: "gptwork-engine.exe"; Flags: ignoreversion
 #endif
 Source: "..\..\extension\*"; DestDir: "{app}\extension.next"; Excludes: "tests\*,README.md,package.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Update-GPTWork.ps1"; DestDir: "{app}\tools"; Flags: ignoreversion
@@ -93,6 +93,9 @@ var
   EdgeManifestPaused: Boolean;
   NativeMessagingPaused: Boolean;
   ExtensionSwapped: Boolean;
+  ExtensionHadPrevious: Boolean;
+  CorePayloadSwapped: Boolean;
+  CorePayloadHadPrevious: Boolean;
   InstallCompleted: Boolean;
 
 function JsonEscape(Value: String): String;
@@ -250,6 +253,132 @@ begin
   NativeMessagingPaused := False;
 end;
 
+function RecoverInterruptedCoreSwap(): Boolean;
+var
+  LiveDir: String;
+  NextDir: String;
+  PreviousDir: String;
+begin
+  LiveDir := ExpandConstant('{app}\bin');
+  NextDir := ExpandConstant('{app}\bin.next');
+  PreviousDir := ExpandConstant('{app}\bin.previous');
+  Result := True;
+
+  if (not DirExists(LiveDir)) and DirExists(PreviousDir) then
+  begin
+    if not RenameFile(PreviousDir, LiveDir) then
+    begin
+      Result := False;
+      exit;
+    end;
+  end;
+
+  if DirExists(LiveDir) and DirExists(PreviousDir) then
+    if not DelTree(PreviousDir, True, True, True) then
+    begin
+      Result := False;
+      exit;
+    end;
+
+  if DirExists(NextDir) then
+    if not DelTree(NextDir, True, True, True) then
+      Result := False;
+end;
+
+function ValidateStagedCorePayload(): Boolean;
+var
+  CorePath: String;
+  Script: String;
+  Params: String;
+  ResultCode: Integer;
+begin
+  CorePath := PowerShellSingleQuote(ExpandConstant('{app}\bin.next\gptwork-core.exe'));
+  if not FileExists(ExpandConstant('{app}\bin.next\gptwork-core.exe')) then
+  begin
+    Result := False;
+    exit;
+  end;
+
+  Script :=
+    '$ErrorActionPreference=''Stop''; ' +
+    '$versionOutput=(& ''' + CorePath + ''' --version 2>&1 | Out-String).Trim(); ' +
+    'if ($versionOutput -notmatch [regex]::Escape(''{#MyAppVersion}'')) { ' +
+    'throw (''Staged Core version mismatch: '' + $versionOutput) }';
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"';
+  Result := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    Params,
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  ) and (ResultCode = 0);
+end;
+
+function SwapCorePayload(): Boolean;
+var
+  LiveDir: String;
+  NextDir: String;
+  PreviousDir: String;
+begin
+  LiveDir := ExpandConstant('{app}\bin');
+  NextDir := ExpandConstant('{app}\bin.next');
+  PreviousDir := ExpandConstant('{app}\bin.previous');
+  Result := False;
+  CorePayloadHadPrevious := DirExists(LiveDir);
+
+  if not FileExists(NextDir + '\gptwork-core.exe') then
+    exit;
+  if DirExists(PreviousDir) and not DelTree(PreviousDir, True, True, True) then
+    exit;
+
+  if CorePayloadHadPrevious then
+    if not RenameFile(LiveDir, PreviousDir) then
+      exit;
+
+  if not RenameFile(NextDir, LiveDir) then
+  begin
+    if CorePayloadHadPrevious and (not DirExists(LiveDir)) and DirExists(PreviousDir) then
+      RenameFile(PreviousDir, LiveDir);
+    CorePayloadHadPrevious := False;
+    exit;
+  end;
+
+  CorePayloadSwapped := True;
+  Result := True;
+end;
+
+procedure RollbackCorePayloadSwap;
+var
+  LiveDir: String;
+  PreviousDir: String;
+begin
+  if not CorePayloadSwapped then
+    exit;
+  LiveDir := ExpandConstant('{app}\bin');
+  PreviousDir := ExpandConstant('{app}\bin.previous');
+
+  if CorePayloadHadPrevious and DirExists(PreviousDir) then
+  begin
+    if DirExists(LiveDir) then
+      DelTree(LiveDir, True, True, True);
+    RenameFile(PreviousDir, LiveDir);
+  end
+  else if (not CorePayloadHadPrevious) and DirExists(LiveDir) then
+    DelTree(LiveDir, True, True, True);
+
+  CorePayloadSwapped := False;
+  CorePayloadHadPrevious := False;
+end;
+
+procedure FinishCorePayloadSwap;
+begin
+  if DirExists(ExpandConstant('{app}\bin.previous')) then
+    DelTree(ExpandConstant('{app}\bin.previous'), True, True, True);
+  CorePayloadSwapped := False;
+  CorePayloadHadPrevious := False;
+end;
+
 function RecoverInterruptedExtensionSwap(): Boolean;
 var
   LiveDir: String;
@@ -292,6 +421,7 @@ begin
   NextDir := ExpandConstant('{app}\extension.next');
   PreviousDir := ExpandConstant('{app}\extension.previous');
   Result := False;
+  ExtensionHadPrevious := DirExists(LiveDir);
 
   if not FileExists(NextDir + '\manifest.json') then
     exit;
@@ -299,7 +429,7 @@ begin
   if DirExists(PreviousDir) and not DelTree(PreviousDir, True, True, True) then
     exit;
 
-  if DirExists(LiveDir) then
+  if ExtensionHadPrevious then
   begin
     if not RenameFile(LiveDir, PreviousDir) then
       exit;
@@ -307,8 +437,9 @@ begin
 
   if not RenameFile(NextDir, LiveDir) then
   begin
-    if (not DirExists(LiveDir)) and DirExists(PreviousDir) then
+    if ExtensionHadPrevious and (not DirExists(LiveDir)) and DirExists(PreviousDir) then
       RenameFile(PreviousDir, LiveDir);
+    ExtensionHadPrevious := False;
     exit;
   end;
 
@@ -325,13 +456,16 @@ begin
     exit;
   LiveDir := ExpandConstant('{app}\extension');
   PreviousDir := ExpandConstant('{app}\extension.previous');
-  if DirExists(PreviousDir) then
+  if ExtensionHadPrevious and DirExists(PreviousDir) then
   begin
     if DirExists(LiveDir) then
       DelTree(LiveDir, True, True, True);
     RenameFile(PreviousDir, LiveDir);
-  end;
+  end
+  else if (not ExtensionHadPrevious) and DirExists(LiveDir) then
+    DelTree(LiveDir, True, True, True);
   ExtensionSwapped := False;
+  ExtensionHadPrevious := False;
 end;
 
 procedure FinishExtensionSwap;
@@ -339,6 +473,7 @@ begin
   if DirExists(ExpandConstant('{app}\extension.previous')) then
     DelTree(ExpandConstant('{app}\extension.previous'), True, True, True);
   ExtensionSwapped := False;
+  ExtensionHadPrevious := False;
 end;
 
 function StopInstalledCoreProcesses(): Boolean;
@@ -382,6 +517,12 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+
+  if not RecoverInterruptedCoreSwap then
+  begin
+    Result := '无法恢复上次 GPTWork Core 更新事务，请完全退出浏览器后重试 / Could not recover the previous GPTWork Core update transaction.';
+    exit;
+  end;
 
   if not RecoverInterruptedExtensionSwap then
   begin
@@ -447,8 +588,17 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    if not ValidateStagedCorePayload then
+      RaiseException('新 GPTWork Core 版本校验失败；旧 Core 和扩展保持不变 / Staged GPTWork Core version validation failed; the previous generation remains active.');
+
+    if not SwapCorePayload then
+      RaiseException('无法原子切换 GPTWork Core；旧 Core 和扩展保持不变。请关闭占用程序后重试 / Could not atomically swap the GPTWork Core payload.');
+
     if not SwapExtensionPayload then
-      RaiseException('无法原子切换 GPTWork 扩展目录；旧扩展保持不变。请关闭占用扩展目录的程序后重试 / Could not atomically swap the GPTWork extension payload.');
+    begin
+      RollbackCorePayloadSwap;
+      RaiseException('无法原子切换 GPTWork 扩展目录；已回滚 Core，旧版本保持不变。请关闭占用扩展目录的程序后重试 / Could not atomically swap the GPTWork extension payload; Core was rolled back.');
+    end;
 
     RemoveUnselectedBrowserRegistration;
     if ChromeSelected() then
@@ -457,6 +607,7 @@ begin
       WriteNativeManifest(ExpandConstant('{app}\native-messaging\edge.json'), '{#EdgeStoreExtensionId}');
     FinishNativeMessagingPause;
     FinishExtensionSwap;
+    FinishCorePayloadSwap;
     InstallCompleted := True;
   end;
 end;
@@ -464,7 +615,10 @@ end;
 procedure DeinitializeSetup;
 begin
   if not InstallCompleted then
+  begin
     RollbackExtensionSwap;
+    RollbackCorePayloadSwap;
+  end;
   if NativeMessagingPaused and not InstallCompleted then
     RestorePausedNativeMessaging;
 end;
