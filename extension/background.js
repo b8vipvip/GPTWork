@@ -38,7 +38,6 @@ import {
   summarizeVerificationOutcome,
   createModelVerificationHistoryRecord,
   shouldRetryTransientResponse,
-  publishableVerificationResults,
 } from './vendor/modelpro/model-verification.js';
 
 const RUNTIME_CODE_VERSION = '0.5.169';
