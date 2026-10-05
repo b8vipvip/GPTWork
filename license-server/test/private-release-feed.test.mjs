@@ -324,29 +324,47 @@ test('notification wait resolves when a newly mirrored release changes the gener
   assert.notEqual(payload.generation, first.generation);
 });
 
-test('private repository without a server token never contacts GitHub and safely serves the local mirror state', async (t) => {
+test('public GPTWork releases remain available without a server GitHub token', async (t) => {
   const mirrorRoot = mkdtempSync(join(tmpdir(), 'gptwork-release-no-token-'));
   t.after(() => rmSync(mirrorRoot, { recursive: true, force: true }));
-  let calls = 0;
+
+  const rows = fixture('v0.5.167', 6300);
+  const calls = [];
+  const fetchImpl = async (url, options = {}) => {
+    const target = String(url);
+    calls.push({ url: target, options });
+    if (target.includes('/releases?per_page=12')) {
+      return new Response(JSON.stringify(rows), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const found = rows.flatMap((row) => row?.assets || []).find((item) => item.url === target);
+    if (!found) throw new Error(`Unexpected URL: ${target}`);
+    return new Response(rows.bytesByName[found.name], {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    });
+  };
+
   const feed = createSiteReleaseFeed({
     serverRoot: SERVER_ROOT,
     env: {
       GPTLOCK_LICENSE_PUBLIC_ORIGIN: ORIGIN,
       GPTLOCK_RELEASE_MIRROR_DIR: mirrorRoot,
+      GPTLOCK_RELEASE_FETCH_RETRIES: '1',
     },
-    fetchImpl: async () => {
-      calls += 1;
-      throw new Error('must not be called');
-    },
+    fetchImpl,
   });
 
   const result = await feed.sync();
-  assert.equal(calls, 0);
   assert.equal(result.ok, true);
-  assert.equal(result.source, 'local');
-  assert.equal(result.warning, 'private_release_token_required');
-  assert.deepEqual(result.releases, []);
-
-  const loaded = await feed.load();
-  assert.equal(loaded.warning, 'private_release_token_required');
+  assert.equal(result.source, 'server-mirror');
+  assert.equal(result.latestVersion, '0.5.167');
+  assert.equal(result.warning, undefined);
+  assert.equal(result.mirror.tokenConfigured, false);
+  assert.equal(result.mirror.tokenRejected, false);
+  assert.equal(result.mirror.authMode, 'public');
+  assert.equal(calls.length, 4);
+  assert.equal(calls.every((call) => call.options.headers?.Authorization === undefined), true);
 });
