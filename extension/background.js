@@ -1677,24 +1677,29 @@ async function loadTrustedLocalNetworkCandidates() {
     .map((model) => ({ model, label: model }));
 }
 
-async function waitForNativeDiscoverySurface(tabId, timeoutMs) {
+async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
-  let last = { ready: false, pristine: false, workControlAvailable: false, reason: 'content_runtime_unavailable' };
+  let last = { entered: false, reason: 'content_runtime_unavailable' };
   do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'discovery_tab_closed' };
     if (tab.status === 'complete') {
-      last = await sendTabMessage(tabId, { type: 'GPTWORK_DISCOVERY_STATUS' }).catch((error) => ({
-        ready: false,
-        pristine: false,
-        workControlAvailable: false,
+      const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
+        ok: false,
+        attempted: false,
         reason: errorText(error),
       }));
-      if (last?.ready === true && last?.pristine === true && last?.workControlAvailable === true) return last;
+      last = {
+        entered: response?.ok === true && (response?.attempted === true || response?.alreadySelected === true),
+        reason: response?.reason || null,
+        attempted: response?.attempted === true,
+        alreadySelected: response?.alreadySelected === true,
+      };
+      if (last.entered) return last;
     }
-    await sleep(250);
+    await sleep(300);
   } while (Date.now() < deadline);
-  return { ...last, ready: false, reason: last?.reason || 'native_work_surface_not_ready' };
+  return { ...last, entered: false, reason: last?.reason || 'native_work_surface_not_ready' };
 }
 
 async function discoverNativeWorkCandidates(sourceTabId, progress) {
@@ -1726,41 +1731,25 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
       active: false,
     });
 
-    let surface = await waitForNativeDiscoverySurface(discoveryTabId, 9000);
-    if (surface?.ready !== true) {
-      // Some ChatGPT builds defer top-level mode controls while a tab is hidden.
-      // Activate only as a bounded fallback, then restore the user's previous tab.
+    let enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 9000);
+    if (enter?.entered !== true) {
+      // Some ChatGPT builds defer top-level controls while a tab is hidden. Activate
+      // only as a bounded fallback, then restore the user's previously active tab.
       await chrome.tabs.update(discoveryTabId, { active: true }).catch(() => null);
       activatedForReadiness = true;
       logRuntime('info', 'verification', 'native_work_catalog_discovery_activation_fallback', {
         sourceTabId,
         discoveryTabId,
-        reason: surface?.reason || 'surface_not_ready_in_background',
+        reason: enter?.reason || 'work_control_not_ready_in_background',
       });
-      surface = await waitForNativeDiscoverySurface(discoveryTabId, 6500);
+      enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
     }
 
-    if (surface?.ready !== true || surface?.pristine !== true || surface?.workControlAvailable !== true) {
-      logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
-        sourceTabId,
-        discoveryTabId,
-        reason: surface?.reason || (surface?.pristine === false ? 'not_pristine_new_chat' : 'work_control_missing'),
-        pristine: surface?.pristine === true,
-        workControlAvailable: surface?.workControlAvailable === true,
-        pathname: surface?.pathname || null,
-      });
-      return networkCandidateCatalog([], 'native-picker-b');
-    }
-
-    const enter = await sendTabMessage(discoveryTabId, { type: 'GPTWORK_DISCOVERY_ENTER_NATIVE_WORK' }).catch((error) => ({
-      entered: false,
-      reason: errorText(error),
-    }));
     if (enter?.entered !== true) {
       logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
         sourceTabId,
         discoveryTabId,
-        reason: enter?.reason || 'work_control_unavailable',
+        reason: enter?.reason || 'work_control_not_found',
       });
       return networkCandidateCatalog([], 'native-picker-b');
     }
