@@ -2842,6 +2842,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         // Normal user turns need Network lifecycle events as well as Fetch interception.
+        // v0.5.169 exposed the gap here: Fetch stayed attached after auto verification,
+        // but responseCaptureTabs returned to zero, so ordinary turns had no served-model evidence.
         // Auto verification deliberately tears response capture down when it finishes;
         // re-enable it just-in-time before every user send so request/response metadata can
         // be correlated and the served response model is surfaced in the UI.
