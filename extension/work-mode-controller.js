@@ -96,29 +96,24 @@
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
-  function discoverySurfaceStatus() {
-    const pristine = isPristineNewChat();
-    const work = topModeControl('work');
-    const chat = topModeControl('chat');
-    return {
-      ready: pristine && Boolean(work),
-      pristine,
-      workControlAvailable: Boolean(work),
-      chatControlAvailable: Boolean(chat),
-      pathname: location.pathname,
-      reason: !pristine ? 'not_pristine_new_chat' : work ? null : 'work_control_missing',
-    };
-  }
-
   async function enterNativeWorkDiscovery() {
-    const surface = discoverySurfaceStatus();
-    if (!surface.pristine) return { entered: false, reason: 'not_pristine_new_chat' };
-    const work = topModeControl('work');
-    if (!work) return { entered: false, reason: 'work_control_missing' };
     nativeDiscoveryOwned = true;
+    const work = topModeControl('work');
+    if (!work) {
+      nativeDiscoveryOwned = false;
+      return { entered: false, reason: 'work_control_missing' };
+    }
     work.click();
     await wait(650);
     return { entered: true, reason: null };
+  }
+
+  async function exitNativeWorkDiscovery() {
+    const chat = topModeControl('chat');
+    if (chat) chat.click();
+    await wait(450);
+    nativeDiscoveryOwned = false;
+    return { exited: Boolean(chat), reason: chat ? null : 'chat_control_missing' };
   }
 
   function switchBackToChat() {
@@ -316,14 +311,17 @@
   }, true);
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === 'GPTWORK_DISCOVERY_STATUS') {
-      sendResponse(discoverySurfaceStatus());
-      return false;
-    }
     if (message?.type === 'GPTWORK_DISCOVERY_ENTER_NATIVE_WORK') {
       void enterNativeWorkDiscovery().then(sendResponse, (error) => {
         nativeDiscoveryOwned = false;
         sendResponse({ entered: false, reason: String(error?.message || error || 'native_work_enter_failed') });
+      });
+      return true;
+    }
+    if (message?.type === 'GPTWORK_DISCOVERY_EXIT_NATIVE_WORK') {
+      void exitNativeWorkDiscovery().then(sendResponse, (error) => {
+        nativeDiscoveryOwned = false;
+        sendResponse({ exited: false, reason: String(error?.message || error || 'native_work_exit_failed') });
       });
       return true;
     }
