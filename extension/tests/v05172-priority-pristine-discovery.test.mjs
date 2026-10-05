@@ -79,15 +79,14 @@ test('v0.5.172 Picker-B discovery owns an isolated pristine tab and never mutate
   const controller = await read('work-mode-controller.js');
 
   assert.match(background, /chrome\.tabs\.create\(\{[\s\S]*url: 'https:\/\/chatgpt\.com\/'[\s\S]*active: false/);
-  assert.match(background, /waitForNativeDiscoverySurface\(discoveryTabId, 9000\)/);
+  assert.match(background, /enterNativeWorkOnDiscoveryTab\(discoveryTabId, 9000\)/);
+  assert.match(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
   assert.match(background, /discoverAccountCatalog\(discoveryTabId\)/);
   assert.match(background, /sendVerificationReasoningProbe\([\s\S]*discoveryTabId/);
   assert.match(background, /chrome\.tabs\.remove\(discoveryTabId\)/);
   assert.match(background, /native_work_catalog_discovery_temp_tab_closed/);
-  assert.doesNotMatch(background, /sendTabMessage\(sourceTabId, \{ type: 'GPTWORK_DISCOVERY_ENTER_NATIVE_WORK'/);
+  assert.doesNotMatch(background, /sendTabMessage\(sourceTabId, \{ type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE'/);
 
-  assert.match(controller, /GPTWORK_DISCOVERY_STATUS/);
-  assert.match(controller, /ready: pristine && Boolean\(work\)/);
-  assert.match(controller, /reason: !pristine \? 'not_pristine_new_chat'/);
-  assert.doesNotMatch(controller, /GPTWORK_DISCOVERY_EXIT_NATIVE_WORK/);
+  assert.doesNotMatch(controller, /GPTWORK_DISCOVERY_/);
+  assert.match(controller, /verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
 });
