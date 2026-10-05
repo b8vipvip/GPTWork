@@ -79,6 +79,7 @@ test('v0.5.172 Picker-B discovery owns an isolated pristine tab and never mutate
   const controller = await read('work-mode-controller.js');
 
   assert.match(background, /chrome\.tabs\.create\(\{[\s\S]*url: 'https:\/\/chatgpt\.com\/'[\s\S]*active: false/);
+  assert.match(background, /isolateTabForNativeDiscovery\(discoveryTabId\)/);
   assert.match(background, /enterNativeWorkOnDiscoveryTab\(discoveryTabId, 9000\)/);
   assert.match(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
   assert.match(background, /discoverAccountCatalog\(discoveryTabId\)/);
@@ -89,4 +90,12 @@ test('v0.5.172 Picker-B discovery owns an isolated pristine tab and never mutate
 
   assert.doesNotMatch(controller, /GPTWORK_DISCOVERY_/);
   assert.match(controller, /verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
+});
+
+test('v0.5.172 temporary native discovery tab disables normal GPTWork routing authority', async () => {
+  const runtime = await read('tab-feature-runtime.js');
+  assert.match(runtime, /export async function isolateTabForNativeDiscovery\(tabId\)/);
+  assert.match(runtime, /workModeEnabled: false/);
+  assert.match(runtime, /modelLockEnabled: false/);
+  assert.match(runtime, /native_discovery_tab_isolated/);
 });
