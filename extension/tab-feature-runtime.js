@@ -243,6 +243,20 @@ export async function enableWorkModeForVerification(tabId) {
   return featureState;
 }
 
+export async function isolateTabForNativeDiscovery(tabId) {
+  const featureState = await setTabFeatureState(tabId, {
+    workModeEnabled: false,
+    modelLockEnabled: false,
+  });
+  await pushFeatureState(Number(tabId), featureState);
+  log('native_discovery_tab_isolated', {
+    tabId: Number(tabId),
+    workModeEnabled: false,
+    modelLockEnabled: false,
+  });
+  return featureState;
+}
+
 export function tabFeatureEnabledSync(tabId) {
   if (!masterEnabled) return false;
   const state = tabFeatureStateSync(tabId);
