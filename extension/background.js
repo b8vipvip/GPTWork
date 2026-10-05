@@ -2158,7 +2158,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [] } = {}) {
+async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {}) {
   const workDefaultModel = workBootstrapModelForTab(tabId);
   // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
   // browser, Work activation, request interception and response evidence adapters.
@@ -2179,7 +2179,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   mergeCatalog(accountCatalog, 'initial');
   mergeCatalog(networkCandidateCatalog(sharedCandidates, 'shared-server'), 'shared-network-candidates');
   mergeCatalog(networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence'), 'local-network-candidates');
-  await broadcastTabState(tabId);
+  await broadcastVerificationState(tabId, ownerTabId);
   logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
     tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
   });
@@ -2194,7 +2194,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       const added = mergeCatalog(rediscovered, 'settle');
       stablePasses = added ? 0 : stablePasses + 1;
       progress.stablePasses = stablePasses;
-      await broadcastTabState(tabId);
+      await broadcastVerificationState(tabId, ownerTabId);
       if (index >= queue.length && stablePasses < 2) {
         await new Promise((resolve) => setTimeout(resolve, 650));
       }
@@ -2214,7 +2214,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       startedAt: transactionStartedAtMs,
     });
     resetVerificationAttempt(state);
-    await broadcastTabState(tabId);
+    await broadcastVerificationState(tabId, ownerTabId);
     logRuntime('info', 'verification', 'account_model_verification_model_started', {
       tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
     });
@@ -2374,7 +2374,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
           retryCount: retryCount + 1, maxRetries: 1,
         });
         verificationTransactions.delete(Number(tabId));
-        await broadcastTabState(tabId);
+        await broadcastVerificationState(tabId, ownerTabId);
         await sleep(650);
         continue;
       }
@@ -2399,7 +2399,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     verificationTransactions.delete(Number(tabId));
     index += 1;
     progress.completed = index;
-    await broadcastTabState(tabId);
+    await broadcastVerificationState(tabId, ownerTabId);
 
     if (abortForPendingTurn) {
       logRuntime('warn', 'verification', 'account_model_verification_aborted_pending_response', { tabId, index, total: queue.length });
@@ -2471,7 +2471,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         pickerMode: null, added: addedFromWork, nativeDiscovered: addedFromNative, floorModel: workDefaultModel,
       });
       if (addedFromWork) stablePasses = 0;
-      await broadcastTabState(tabId);
+      await broadcastVerificationState(tabId, ownerTabId);
     } else {
       progress.workDiscovery = {
         attempted: false,
@@ -2496,7 +2496,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     const added = mergeCatalog(rediscovered, 'post-turn');
     stablePasses = added ? 0 : stablePasses + 1;
     progress.stablePasses = stablePasses;
-    await broadcastTabState(tabId);
+    await broadcastVerificationState(tabId, ownerTabId);
   }
 
   verificationTransactions.delete(Number(tabId));
@@ -2515,7 +2515,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
     reasoningLevels: progress.reasoningLevels, results: progress.results,
   });
-  await broadcastTabState(tabId);
+  await broadcastVerificationState(tabId, ownerTabId);
   return progress;
 }
 
