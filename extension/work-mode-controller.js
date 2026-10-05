@@ -24,6 +24,7 @@
   let noticeTimer = null;
   let switchingBack = false;
   let verificationOwned = false;
+  let nativeDiscoveryOwned = false;
   let workDefaultModelLabel = 'GPT-6 Astra';
 
   function syncEnabled() {
@@ -89,6 +90,30 @@
     root.querySelector('div').textContent = GUIDANCE_TEXT;
     document.documentElement.append(host);
     noticeTimer = window.setTimeout(() => host.remove(), 5200);
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async function enterNativeWorkDiscovery() {
+    nativeDiscoveryOwned = true;
+    const work = topModeControl('work');
+    if (!work) {
+      nativeDiscoveryOwned = false;
+      return { entered: false, reason: 'work_control_missing' };
+    }
+    work.click();
+    await wait(650);
+    return { entered: true, reason: null };
+  }
+
+  async function exitNativeWorkDiscovery() {
+    const chat = topModeControl('chat');
+    if (chat) chat.click();
+    await wait(450);
+    nativeDiscoveryOwned = false;
+    return { exited: Boolean(chat), reason: chat ? null : 'chat_control_missing' };
   }
 
   function switchBackToChat() {
@@ -278,14 +303,28 @@
   document.addEventListener('click', (event) => {
     // Verification owns Chat/Work mode while probing account capabilities. The user's
     // Work toggle must not switch the page back to Chat during that transaction.
-    if (verificationOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat()) return;
+    if (verificationOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat() || nativeDiscoveryOwned) return;
     const control = event.target?.closest?.(MODE_CONTROL_SELECTOR);
     if (!isWorkControl(control)) return;
     showGuidance();
     switchBackToChat();
   }, true);
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'GPTWORK_DISCOVERY_ENTER_NATIVE_WORK') {
+      void enterNativeWorkDiscovery().then(sendResponse, (error) => {
+        nativeDiscoveryOwned = false;
+        sendResponse({ entered: false, reason: String(error?.message || error || 'native_work_enter_failed') });
+      });
+      return true;
+    }
+    if (message?.type === 'GPTWORK_DISCOVERY_EXIT_NATIVE_WORK') {
+      void exitNativeWorkDiscovery().then(sendResponse, (error) => {
+        nativeDiscoveryOwned = false;
+        sendResponse({ exited: false, reason: String(error?.message || error || 'native_work_exit_failed') });
+      });
+      return true;
+    }
     if (message?.type === 'GPTLOCK_GUARD_STATE') {
       backgroundAllowed = message.settings?.enabled === true;
       workModeGuidanceEnabled = message.settings?.workModeGuidanceEnabled !== false;

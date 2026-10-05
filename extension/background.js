@@ -40,7 +40,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.170';
+const RUNTIME_CODE_VERSION = '0.5.171';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -56,6 +56,9 @@ const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
 const SHARED_MODEL_CATALOG_GENERATION_KEY = 'gptworkSharedModelCatalogGenerationV1';
 const SHARED_MODEL_CATALOG_ACCOUNT_KEY = 'gptworkSharedModelCatalogAccountV1';
+const LOCAL_DISCOVERED_MODELS_KEY = 'discoveredModels';
+const LOCAL_DISCOVERED_EVIDENCE_KEY = 'discoveredModelEvidence';
+const NETWORK_CANDIDATE_SELECTOR = '__network_candidate__';
 const JANK_ISOLATION_KEY = 'gptworkJankIsolationV1';
 
 let nativePort = null;
@@ -1633,6 +1636,122 @@ function mergeAccountCatalogs(...catalogs) {
   return { rows, models: [...models], reasoningLevels: [...reasoningLevels], pickerMode };
 }
 
+function networkCandidateCatalog(items, source = 'network-candidate') {
+  const rows = [];
+  const seen = new Set();
+  for (const item of Array.isArray(items) ? items : []) {
+    const raw = typeof item === 'string' ? item : (item?.model || item?.rawId);
+    const model = normalizeConcreteModelId(raw);
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    rows.push({
+      model,
+      rawId: model,
+      label: String(typeof item === 'string' ? model : (item?.label || model)).trim().slice(0, 160),
+      selectorKey: NETWORK_CANDIDATE_SELECTOR,
+      pickerMode: null,
+      discoverySource: source,
+    });
+  }
+  return {
+    rows,
+    models: rows.map((row) => row.model),
+    reasoningLevels: [],
+    pickerMode: null,
+  };
+}
+
+async function loadTrustedLocalNetworkCandidates() {
+  const stored = await chrome.storage.sync.get([LOCAL_DISCOVERED_MODELS_KEY, LOCAL_DISCOVERED_EVIDENCE_KEY]);
+  const models = Array.isArray(stored[LOCAL_DISCOVERED_MODELS_KEY]) ? stored[LOCAL_DISCOVERED_MODELS_KEY] : [];
+  const evidence = stored[LOCAL_DISCOVERED_EVIDENCE_KEY] && typeof stored[LOCAL_DISCOVERED_EVIDENCE_KEY] === 'object'
+    ? stored[LOCAL_DISCOVERED_EVIDENCE_KEY]
+    : {};
+  return models
+    .map((value) => normalizeConcreteModelId(value))
+    .filter(Boolean)
+    .filter((model) => {
+      const sources = Array.isArray(evidence?.[model]?.sources) ? evidence[model].sources : [];
+      return sources.includes('network_request_metadata') || sources.includes('network_response_metadata');
+    })
+    .map((model) => ({ model, label: model }));
+}
+
+async function discoverNativeWorkCandidates(tabId, progress) {
+  const enter = await sendTabMessage(tabId, { type: 'GPTWORK_DISCOVERY_ENTER_NATIVE_WORK' }).catch((error) => ({
+    entered: false,
+    reason: errorText(error),
+  }));
+  if (enter?.entered !== true) {
+    logRuntime('info', 'verification', 'native_work_catalog_discovery_unavailable', {
+      tabId,
+      reason: enter?.reason || 'work_control_unavailable',
+    });
+    return networkCandidateCatalog([], 'native-picker-b');
+  }
+
+  const scanForPickerB = async (timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    let latest = null;
+    do {
+      latest = await discoverAccountCatalog(tabId);
+      progress.discoveryPasses += 1;
+      if (latest?.pickerMode === 'B' && Array.isArray(latest?.rows) && latest.rows.length) return latest;
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    } while (Date.now() < deadline);
+    return latest;
+  };
+
+  let discovered = null;
+  let bootstrapSent = false;
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    discovered = await scanForPickerB(3600);
+
+    if (discovered?.pickerMode !== 'B') {
+      const probe = await sendVerificationReasoningProbe(
+        tabId,
+        'GPTWork 模型目录发现',
+        Math.max(1, Number(progress.completed || 0) + 1),
+        Math.max(1, Number(progress.total || 1)),
+      );
+      bootstrapSent = probe?.sent === true;
+      if (bootstrapSent) {
+        await sendTabMessage(tabId, {
+          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+          assistantCountBefore: probe.assistantCountBefore ?? 0,
+          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+        }).catch(() => null);
+        discovered = await scanForPickerB(6000);
+      }
+    }
+
+    const candidates = discovered?.pickerMode === 'B'
+      ? networkCandidateCatalog(discovered.rows, 'native-picker-b')
+      : networkCandidateCatalog([], 'native-picker-b');
+    logRuntime(candidates.rows.length ? 'info' : 'warn', 'verification', 'native_work_catalog_discovery_completed', {
+      tabId,
+      entered: true,
+      bootstrapSent,
+      pickerMode: discovered?.pickerMode ?? null,
+      candidates: candidates.models,
+      candidateCount: candidates.rows.length,
+    });
+    return candidates;
+  } finally {
+    const exit = await sendTabMessage(tabId, { type: 'GPTWORK_DISCOVERY_EXIT_NATIVE_WORK' }).catch((error) => ({
+      exited: false,
+      reason: errorText(error),
+    }));
+    logRuntime(exit?.exited === true ? 'info' : 'warn', 'verification', 'native_work_catalog_discovery_restored_chat', {
+      tabId,
+      exited: exit?.exited === true,
+      reason: exit?.reason || null,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+  }
+}
+
 async function publishAccountModels(accountCatalog, progress) {
   const byModel = new Map();
   for (const row of accountCatalog?.rows || []) {
@@ -1819,7 +1938,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null } = {}) {
+async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [] } = {}) {
   const workDefaultModel = workBootstrapModelForTab(tabId);
   // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
   // browser, Work activation, request interception and response evidence adapters.
@@ -1838,6 +1957,8 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   let workActivationPending = false;
 
   mergeCatalog(accountCatalog, 'initial');
+  mergeCatalog(networkCandidateCatalog(sharedCandidates, 'shared-server'), 'shared-network-candidates');
+  mergeCatalog(networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence'), 'local-network-candidates');
   await broadcastTabState(tabId);
   logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
     tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
@@ -1890,7 +2011,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
           item.label = String(freshRow.label || item.label || '');
         }
       }
-      const transportOnly = item.selectorKey === '__work_transport__';
+      const transportOnly = item.selectorKey === '__work_transport__' || item.selectorKey === NETWORK_CANDIDATE_SELECTOR;
       let selectionResponse = null;
       let selection = { selectionAttempted: false, observation: state.pageObservation || null };
       if (!transportOnly) {
@@ -1908,7 +2029,14 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         }
       }
       if (!transportOnly && selection.selectionAttempted !== true) throw new Error('Model selection control was not activated');
-      if (transportOnly) logRuntime('info', 'verification', 'verification_hidden_work_transport_probe', { tabId, model: item.model });
+      if (transportOnly) {
+        logRuntime(
+          'info',
+          'verification',
+          item.selectorKey === NETWORK_CANDIDATE_SELECTOR ? 'verification_network_candidate_probe' : 'verification_hidden_work_transport_probe',
+          { tabId, model: item.model, selectorKey: item.selectorKey },
+        );
+      }
 
       // Picker B updates ChatGPT's Work model state asynchronously. v0.1.34 proved
       // that sending in the same task can leave the native conversation body on the
@@ -2082,14 +2210,18 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     }
   }
 
-  // Once Chat A's Sol turn is proven, add the configured Work default transport
-  // directly to the verification queue.
-  // The existing verification transaction is the sole request authority, so the
-  // conversation POST is rewritten to that model's Work transport and response metadata is
-  // still required for terminal verification. Picker B is deliberately irrelevant.
+  // Once Chat A's Sol turn is proven, native Work is entered only as a bounded
+  // discovery transaction. Picker-B rows are converted immediately into network-only
+  // candidates and the page returns to Chat. Normal GPTWork Work execution remains
+  // independent of ChatGPT's native Work UI.
   if (item.model === 'gpt-5.6-sol' && workActivationPending) {
     const completedSol = progress.results.at(-1);
     if (completedSol?.verified === true) {
+      const nativeCandidates = await discoverNativeWorkCandidates(tabId, progress);
+      const addedFromNative = mergeCatalog(nativeCandidates, 'native-picker-b-discovery');
+
+      // The configured Work default is a network candidate even when the page does
+      // not expose it. Request/response evidence remains the terminal authority.
       const networkWorkCatalog = {
         pickerMode: null,
         reasoningLevels: [],
@@ -2110,12 +2242,13 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
         source: 'network_work_transport',
         pickerMode: null,
         added: addedFromWork,
+        nativeDiscovered: addedFromNative,
         floorModel: workDefaultModel,
       };
       logRuntime('info', 'verification', 'verification_work_mode_transition', {
         tabId, phase: 'post_gpt_5_6_sol', entered: true,
         source: 'network_work_transport', reason: 'network_work_catalog_seeded',
-        pickerMode: null, added: addedFromWork, floorModel: workDefaultModel,
+        pickerMode: null, added: addedFromWork, nativeDiscovered: addedFromNative, floorModel: workDefaultModel,
       });
       if (addedFromWork) stablePasses = 0;
       await broadcastTabState(tabId);
@@ -2241,8 +2374,12 @@ async function autoVerify(tabId) {
   state.lastError = page.error;
   await broadcastTabState(tabId);
 
-  const sharedKnownModels = await syncSharedKnownModels();
+  const [sharedKnownModels, localNetworkCandidates] = await Promise.all([
+    syncSharedKnownModels(),
+    loadTrustedLocalNetworkCandidates(),
+  ]);
   state.autoVerification.sharedKnownModelCount = sharedKnownModels.length;
+  state.autoVerification.localNetworkCandidateCount = localNetworkCandidates.length;
   // Verify the visible Chat/Picker-A catalog first. Work verification is a
   // network-layer phase: after Chat A is proven, verifyAccountCatalogModels() arms
   // the tab-scoped Work policy and seeds Work-transport probes without switching the
@@ -2263,7 +2400,7 @@ async function autoVerify(tabId) {
     tabId,
     state,
     accountCatalog,
-    { restoreModel },
+    { restoreModel, sharedCandidates: sharedKnownModels, localNetworkCandidates },
   );
   await publishAccountModels(accountCatalog, catalogVerification);
   state.autoVerification.attempts = catalogVerification.results.map((item, index) => ({
