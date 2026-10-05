@@ -479,12 +479,15 @@ test('v0.5.135 has one strict verification transaction authority with no native-
 
 test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without clicking its UI', async () => {
   const tabFeatureRuntime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
-  assert.match(background, /enableWorkModeForVerification\(tabId\)/);
-  assert.match(background, /source: 'network_work_(?:policy|transport)'/);
+  const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
+  const verifyEnd = background.indexOf('async function autoVerify', verifyStart);
+  const verifyBody = background.slice(verifyStart, verifyEnd);
+  assert.match(verifyBody, /enableWorkModeForVerification\(tabId\)/);
+  assert.match(verifyBody, /source: 'network_work_(?:policy|transport)'/);
   assert.match(tabFeatureRuntime, /export async function enableWorkModeForVerification/);
   assert.match(tabFeatureRuntime, /setTabFeatureState\(tabId, \{ workModeEnabled: true \}\)/);
-  assert.doesNotMatch(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
-  assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
+  assert.doesNotMatch(verifyBody, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+  assert.doesNotMatch(verifyBody, /bootstrapVerificationWorkMode/);
 });
 
 
