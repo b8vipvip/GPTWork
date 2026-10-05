@@ -33,3 +33,33 @@ test('successful install recreates manifests only after the replacement payload 
   assert.match(postInstall, /FinishNativeMessagingPause/);
   assert.match(postInstall, /InstallCompleted := True/);
 });
+
+test('Windows installer stages and atomically commits Core with the extension generation', () => {
+  assert.match(installer, /DestDir: "\{app\}\\bin\.next"/);
+  assert.doesNotMatch(installer, /DestDir: "\{app\}\\bin"; Flags: ignoreversion/);
+  assert.match(installer, /function RecoverInterruptedCoreSwap\(\): Boolean;/);
+  assert.match(installer, /function ValidateStagedCorePayload\(\): Boolean;/);
+  assert.match(installer, /function SwapCorePayload\(\): Boolean;/);
+  assert.match(installer, /procedure RollbackCorePayloadSwap;/);
+  assert.match(installer, /procedure FinishCorePayloadSwap;/);
+  assert.match(installer, /bin\.previous/);
+  assert.match(installer, /gptwork-core\.exe/);
+  assert.match(installer, /--version/);
+  assert.match(installer, /\[regex\]::Escape\(''\{#MyAppVersion\}''\)/);
+
+  const postInstall = installer.match(/procedure CurStepChanged[\s\S]*?procedure DeinitializeSetup/)?.[0] ?? '';
+  assert.ok(
+    postInstall.indexOf('ValidateStagedCorePayload') < postInstall.indexOf('SwapCorePayload'),
+    'staged Core must be version-validated before it becomes live',
+  );
+  assert.ok(
+    postInstall.indexOf('SwapCorePayload') < postInstall.indexOf('SwapExtensionPayload'),
+    'Core must become live before the matching extension generation is exposed',
+  );
+  assert.match(postInstall, /RollbackCorePayloadSwap/);
+  assert.match(postInstall, /FinishCorePayloadSwap/);
+
+  const deinitialize = installer.slice(installer.indexOf('procedure DeinitializeSetup'));
+  assert.match(deinitialize, /RollbackExtensionSwap/);
+  assert.match(deinitialize, /RollbackCorePayloadSwap/);
+});
