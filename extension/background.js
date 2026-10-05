@@ -1740,35 +1740,57 @@ async function createVerificationExecutionTab(sourceTabId) {
 
   const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
   const restoreActiveTabId = Number(activeTabs?.[0]?.id) || sourceTabId;
-  const verificationTab = await chrome.tabs.create({
-    windowId: sourceTab.windowId,
-    url: 'https://chatgpt.com/',
-    active: false,
-  });
-  const verificationTabId = Number(verificationTab?.id);
-  if (!Number.isInteger(verificationTabId)) throw new Error('Temporary verification tab was not created');
-
-  await isolateTabForVerification(verificationTabId);
-  logRuntime('info', 'verification', 'verification_surface_tab_created', {
-    sourceTabId,
-    verificationTabId,
-    active: false,
-  });
-
+  let verificationTab = null;
+  let verificationTabId = null;
   let activatedForReadiness = false;
-  let surface = await waitForVerificationSurface(verificationTabId, 3000, { requireVisible: false });
-  if (surface?.ready !== true || surface?.documentVisible !== true) {
-    await chrome.tabs.update(verificationTabId, { active: true }).catch(() => null);
-    activatedForReadiness = true;
-    logRuntime('info', 'verification', 'verification_surface_activation_fallback', {
+  try {
+    verificationTab = await chrome.tabs.create({
+      windowId: sourceTab.windowId,
+      url: 'https://chatgpt.com/',
+      active: false,
+    });
+    verificationTabId = Number(verificationTab?.id);
+    if (!Number.isInteger(verificationTabId)) throw new Error('Temporary verification tab was not created');
+
+    await isolateTabForVerification(verificationTabId);
+    logRuntime('info', 'verification', 'verification_surface_tab_created', {
       sourceTabId,
       verificationTabId,
-      reason: surface?.reason || (surface?.structuralReady ? 'document_hidden' : 'surface_not_ready_in_background'),
+      active: false,
     });
-    surface = await waitForVerificationSurface(verificationTabId, 9000, { requireVisible: true });
-  }
 
-  if (surface?.ready !== true) {
+    let surface = await waitForVerificationSurface(verificationTabId, 3000, { requireVisible: false });
+    if (surface?.ready !== true || surface?.documentVisible !== true) {
+      await chrome.tabs.update(verificationTabId, { active: true }).catch(() => null);
+      activatedForReadiness = true;
+      logRuntime('info', 'verification', 'verification_surface_activation_fallback', {
+        sourceTabId,
+        verificationTabId,
+        reason: surface?.reason || (surface?.structuralReady ? 'document_hidden' : 'surface_not_ready_in_background'),
+      });
+      surface = await waitForVerificationSurface(verificationTabId, 9000, { requireVisible: true });
+    }
+
+    if (surface?.ready !== true) {
+      return {
+        sourceTabId,
+        verificationTabId,
+        verificationTab,
+        restoreActiveTabId,
+        activatedForReadiness,
+        surface,
+        ready: false,
+      };
+    }
+
+    logRuntime('info', 'verification', 'verification_surface_ready', {
+      sourceTabId,
+      verificationTabId,
+      composerReady: surface.composerReady === true,
+      modelTriggerReady: surface.modelTriggerReady === true,
+      documentVisible: surface.documentVisible === true,
+      pathname: surface.pathname || null,
+    });
     return {
       sourceTabId,
       verificationTabId,
@@ -1776,27 +1798,22 @@ async function createVerificationExecutionTab(sourceTabId) {
       restoreActiveTabId,
       activatedForReadiness,
       surface,
-      ready: false,
+      ready: true,
     };
+  } catch (error) {
+    if (activatedForReadiness && Number.isInteger(restoreActiveTabId) && restoreActiveTabId !== verificationTabId) {
+      await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
+    }
+    if (Number.isInteger(verificationTabId)) {
+      await chrome.tabs.remove(verificationTabId).catch(() => null);
+    }
+    logRuntime('warn', 'verification', 'verification_surface_tab_create_failed', {
+      sourceTabId,
+      verificationTabId,
+      error: errorText(error),
+    });
+    throw error;
   }
-
-  logRuntime('info', 'verification', 'verification_surface_ready', {
-    sourceTabId,
-    verificationTabId,
-    composerReady: surface.composerReady === true,
-    modelTriggerReady: surface.modelTriggerReady === true,
-    documentVisible: surface.documentVisible === true,
-    pathname: surface.pathname || null,
-  });
-  return {
-    sourceTabId,
-    verificationTabId,
-    verificationTab,
-    restoreActiveTabId,
-    activatedForReadiness,
-    surface,
-    ready: true,
-  };
 }
 
 async function closeVerificationExecutionTab(session) {
