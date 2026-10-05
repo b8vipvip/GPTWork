@@ -30,6 +30,7 @@ import {
   effectivePolicyForTabSync,
   requestPolicyForTabSync,
   enableWorkModeForVerification,
+  isolateTabForNativeDiscovery,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
@@ -40,7 +41,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.171';
+const RUNTIME_CODE_VERSION = '0.5.172';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1677,47 +1678,111 @@ async function loadTrustedLocalNetworkCandidates() {
     .map((model) => ({ model, label: model }));
 }
 
-async function discoverNativeWorkCandidates(tabId, progress) {
-  const enter = await sendTabMessage(tabId, { type: 'GPTWORK_DISCOVERY_ENTER_NATIVE_WORK' }).catch((error) => ({
-    entered: false,
-    reason: errorText(error),
-  }));
-  if (enter?.entered !== true) {
-    logRuntime('info', 'verification', 'native_work_catalog_discovery_unavailable', {
-      tabId,
-      reason: enter?.reason || 'work_control_unavailable',
+async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
+  let last = { entered: false, reason: 'content_runtime_unavailable' };
+  do {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return { ...last, reason: 'discovery_tab_closed' };
+    if (tab.status === 'complete') {
+      const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
+        ok: false,
+        attempted: false,
+        reason: errorText(error),
+      }));
+      last = {
+        entered: response?.ok === true && (response?.attempted === true || response?.alreadySelected === true),
+        reason: response?.reason || null,
+        attempted: response?.attempted === true,
+        alreadySelected: response?.alreadySelected === true,
+      };
+      if (last.entered) return last;
+    }
+    await sleep(300);
+  } while (Date.now() < deadline);
+  return { ...last, entered: false, reason: last?.reason || 'native_work_surface_not_ready' };
+}
+
+async function discoverNativeWorkCandidates(sourceTabId, progress) {
+  const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
+  if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
+    logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+      sourceTabId,
+      reason: 'source_tab_unavailable',
     });
     return networkCandidateCatalog([], 'native-picker-b');
   }
 
-  const scanForPickerB = async (timeoutMs) => {
-    const deadline = Date.now() + timeoutMs;
-    let latest = null;
-    do {
-      latest = await discoverAccountCatalog(tabId);
-      progress.discoveryPasses += 1;
-      if (latest?.pickerMode === 'B' && Array.isArray(latest?.rows) && latest.rows.length) return latest;
-      await new Promise((resolve) => setTimeout(resolve, 450));
-    } while (Date.now() < deadline);
-    return latest;
-  };
-
-  let discovered = null;
-  let bootstrapSent = false;
+  const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
+  const restoreActiveTabId = Number(activeTabs?.[0]?.id) || null;
+  let discoveryTab = null;
+  let activatedForReadiness = false;
   try {
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    discoveryTab = await chrome.tabs.create({
+      windowId: sourceTab.windowId,
+      url: 'https://chatgpt.com/',
+      active: false,
+    });
+    const discoveryTabId = Number(discoveryTab?.id);
+    if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary discovery tab was not created');
+    await isolateTabForNativeDiscovery(discoveryTabId);
+
+    logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_created', {
+      sourceTabId,
+      discoveryTabId,
+      active: false,
+    });
+
+    let enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 9000);
+    if (enter?.entered !== true) {
+      // Some ChatGPT builds defer top-level controls while a tab is hidden. Activate
+      // only as a bounded fallback, then restore the user's previously active tab.
+      await chrome.tabs.update(discoveryTabId, { active: true }).catch(() => null);
+      activatedForReadiness = true;
+      logRuntime('info', 'verification', 'native_work_catalog_discovery_activation_fallback', {
+        sourceTabId,
+        discoveryTabId,
+        reason: enter?.reason || 'work_control_not_ready_in_background',
+      });
+      enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
+    }
+
+    if (enter?.entered !== true) {
+      logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+        sourceTabId,
+        discoveryTabId,
+        reason: enter?.reason || 'work_control_not_found',
+      });
+      return networkCandidateCatalog([], 'native-picker-b');
+    }
+
+    const scanForPickerB = async (timeoutMs) => {
+      const deadline = Date.now() + timeoutMs;
+      let latest = null;
+      do {
+        latest = await discoverAccountCatalog(discoveryTabId);
+        progress.discoveryPasses += 1;
+        if (latest?.pickerMode === 'B' && Array.isArray(latest?.rows) && latest.rows.length) return latest;
+        await sleep(450);
+      } while (Date.now() < deadline);
+      return latest;
+    };
+
+    let discovered = null;
+    let bootstrapSent = false;
+    await sleep(700);
     discovered = await scanForPickerB(3600);
 
     if (discovered?.pickerMode !== 'B') {
       const probe = await sendVerificationReasoningProbe(
-        tabId,
+        discoveryTabId,
         'GPTWork 模型目录发现',
         Math.max(1, Number(progress.completed || 0) + 1),
         Math.max(1, Number(progress.total || 1)),
       );
       bootstrapSent = probe?.sent === true;
       if (bootstrapSent) {
-        await sendTabMessage(tabId, {
+        await sendTabMessage(discoveryTabId, {
           type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
           assistantCountBefore: probe.assistantCountBefore ?? 0,
           timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
@@ -1730,7 +1795,8 @@ async function discoverNativeWorkCandidates(tabId, progress) {
       ? networkCandidateCatalog(discovered.rows, 'native-picker-b')
       : networkCandidateCatalog([], 'native-picker-b');
     logRuntime(candidates.rows.length ? 'info' : 'warn', 'verification', 'native_work_catalog_discovery_completed', {
-      tabId,
+      sourceTabId,
+      discoveryTabId,
       entered: true,
       bootstrapSent,
       pickerMode: discovered?.pickerMode ?? null,
@@ -1738,17 +1804,26 @@ async function discoverNativeWorkCandidates(tabId, progress) {
       candidateCount: candidates.rows.length,
     });
     return candidates;
-  } finally {
-    const exit = await sendTabMessage(tabId, { type: 'GPTWORK_DISCOVERY_EXIT_NATIVE_WORK' }).catch((error) => ({
-      exited: false,
+  } catch (error) {
+    logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+      sourceTabId,
+      discoveryTabId: Number(discoveryTab?.id) || null,
       reason: errorText(error),
-    }));
-    logRuntime(exit?.exited === true ? 'info' : 'warn', 'verification', 'native_work_catalog_discovery_restored_chat', {
-      tabId,
-      exited: exit?.exited === true,
-      reason: exit?.reason || null,
     });
-    await new Promise((resolve) => setTimeout(resolve, 350));
+    return networkCandidateCatalog([], 'native-picker-b');
+  } finally {
+    const discoveryTabId = Number(discoveryTab?.id) || null;
+    if (activatedForReadiness && restoreActiveTabId && restoreActiveTabId !== discoveryTabId) {
+      await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
+    }
+    if (discoveryTabId) await chrome.tabs.remove(discoveryTabId).catch(() => null);
+    if (discoveryTabId) {
+      logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_closed', {
+        sourceTabId,
+        discoveryTabId,
+        restoredActiveTabId: activatedForReadiness ? restoreActiveTabId : null,
+      });
+    }
   }
 }
 
