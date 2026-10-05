@@ -80,7 +80,7 @@ test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () 
 
   const autoStart = background.indexOf('async function autoVerify');
   const autoBody = background.slice(autoStart);
-  const initialDiscovery = autoBody.indexOf('const accountCatalog = await discoverAccountCatalog(tabId)');
+  const initialDiscovery = autoBody.indexOf('accountCatalog = await discoverAccountCatalog(tabId)');
   const verification = autoBody.indexOf('verifyAccountCatalogModels', initialDiscovery);
   const prematureWork = autoBody.indexOf('enableWorkModeForVerification(tabId)', initialDiscovery);
   assert(initialDiscovery >= 0 && verification > initialDiscovery);
