@@ -153,6 +153,8 @@ function render(data) {
       '',
       '[transport diagnostics]',
       `tokenConfigured: ${mirror.tokenConfigured ? 'yes' : 'no'}`,
+      `tokenRejected: ${mirror.tokenRejected ? 'yes' : 'no'}`,
+      `authMode: ${mirror.authMode || '—'}`,
       `storageAvailable: ${mirror.storageAvailable ? 'yes' : 'no'}`,
       `transportPolicy: ${mirror.transportPolicy || 'auto'}`,
       `lastTransport: ${mirror.lastTransport || '—'}`,

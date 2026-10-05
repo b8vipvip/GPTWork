@@ -177,6 +177,7 @@ export function createSiteReleaseFeed({
   let lastSyncErrorAt = null;
   let lastSyncError = null;
   let lastTransport = null;
+  let tokenRejected = false;
   let historyFailures = [];
   let lastLoggedError = null;
   let lastLoggedPublishedVersion = null;
@@ -259,13 +260,13 @@ export function createSiteReleaseFeed({
     };
   }
 
-  function githubHeaders(accept = 'application/vnd.github+json') {
+  function githubHeaders(accept = 'application/vnd.github+json', { authenticated = true } = {}) {
     const headers = {
       Accept: accept,
       'User-Agent': 'GPTWork-release-mirror/1.0',
       'X-GitHub-Api-Version': '2022-11-28',
     };
-    if (token) headers.Authorization = `Bearer ${token}`;
+    if (authenticated && token && !tokenRejected) headers.Authorization = `Bearer ${token}`;
     return headers;
   }
 
@@ -351,6 +352,47 @@ export function createSiteReleaseFeed({
 
     return fetchCurl(url, options, timeoutMs);
   }
+
+  function authFailureStatus(value) {
+    const status = Number(value?.status || 0);
+    if (status === 401 || status === 403) return status;
+    const message = errorText(value);
+    const match = message.match(/(?:returned(?: error)?:?|status[= :]*)\s*(401|403)\b|\berror:\s*(401|403)\b/i);
+    return match ? Number(match[1] || match[2]) : null;
+  }
+
+  async function fetchReleaseFeed() {
+    const attemptPublic = async () => githubFetch(
+      RELEASES_API,
+      { headers: githubHeaders('application/vnd.github+json', { authenticated: false }) },
+      20_000,
+    );
+
+    if (!token || tokenRejected) return attemptPublic();
+
+    try {
+      const response = await githubFetch(RELEASES_API, { headers: githubHeaders() }, 20_000);
+      const rejectedStatus = authFailureStatus(response);
+      if (!rejectedStatus) return response;
+      tokenRejected = true;
+      runtimeDiagnostic('warn', 'release_mirror_token_rejected', {
+        status: rejectedStatus,
+        fallback: 'public-release-feed',
+      });
+      return attemptPublic();
+    } catch (error) {
+      const rejectedStatus = authFailureStatus(error);
+      if (!rejectedStatus) throw error;
+      tokenRejected = true;
+      runtimeDiagnostic('warn', 'release_mirror_token_rejected', {
+        status: rejectedStatus,
+        fallback: 'public-release-feed',
+        message: errorText(error),
+      });
+      return attemptPublic();
+    }
+  }
+
 
   function normalizedIndex(raw = {}) {
     const rawReleases = Array.isArray(raw.releases) ? raw.releases : [];
@@ -604,16 +646,8 @@ export function createSiteReleaseFeed({
     resetProgress('fetching_release_feed');
 
     if (!ensureStorage()) throw storageError;
-    if (!token) {
-      lastWarning = 'private_release_token_required';
-      lastSyncErrorAt = lastSyncAttemptAt;
-      lastSyncError = 'GPTLOCK_GITHUB_TOKEN or GH_TOKEN is not configured in the running service';
-      updateProgress('failed', { finishedAt: lastSyncErrorAt });
-      logFatal(new Error(lastSyncError));
-      return;
-    }
 
-    const response = await githubFetch(RELEASES_API, { headers: githubHeaders() }, 20_000);
+    const response = await fetchReleaseFeed();
     if (!response.ok) throw new Error(`GitHub release feed returned ${response.status}`);
     const rows = safeReleaseRows(await response.json());
     if (!rows.length) throw new Error('GitHub release feed contains no formal releases');
@@ -693,6 +727,8 @@ export function createSiteReleaseFeed({
       mirror: {
         root: mirrorRoot,
         tokenConfigured: Boolean(token),
+        tokenRejected,
+        authMode: token ? (tokenRejected ? 'public-fallback' : 'token') : 'public',
         storageAvailable: !storageError,
         syncInProgress: Boolean(syncing),
         syncIntervalMs,
