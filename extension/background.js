@@ -2829,6 +2829,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!sender.tab?.id) throw new Error('Send event requires a tab');
         const state = ensureTabState(sender.tab.id, sender.tab.url);
         const verification = verificationTransactionForTab(sender.tab.id);
+
+        // The request policy must be computed from a fresh page observation. Conversation
+        // navigation can replace tab state and leave pageObservation empty even though the
+        // floating indicator has already rediscovered the visible model.
+        const page = await collectPageObservation(sender.tab.id, state);
+        if (!page.collected) {
+          logRuntime('warn', 'page', 'pre_send_page_observation_unavailable', {
+            tabId: sender.tab.id,
+            error: page.error,
+          });
+        }
+
+        // Normal user turns need Network lifecycle events as well as Fetch interception.
+        // Auto verification deliberately tears response capture down when it finishes;
+        // re-enable it just-in-time before every user send so request/response metadata can
+        // be correlated and the served response model is surfaced in the UI.
+        if (currentSettings.networkVerificationEnabled) {
+          const captureReady = await networkMonitor.enableResponseCapture(sender.tab.id).catch(() => false);
+          logRuntime(captureReady ? 'info' : 'warn', 'network', 'normal_response_capture_armed', {
+            tabId: sender.tab.id,
+            enabled: captureReady,
+            responseCaptureTabs: networkMonitor.responseCaptureCount(),
+          });
+        }
+
         const guard = guardFor(state);
         if (!verification && !guard.canSend) {
           logRuntime('warn', 'guard', 'send_rejected', {
