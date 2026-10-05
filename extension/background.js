@@ -31,6 +31,7 @@ import {
   requestPolicyForTabSync,
   enableWorkModeForVerification,
   isolateTabForNativeDiscovery,
+  isolateTabForVerification,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
@@ -1676,6 +1677,150 @@ async function loadTrustedLocalNetworkCandidates() {
       return sources.includes('network_request_metadata') || sources.includes('network_response_metadata');
     })
     .map((model) => ({ model, label: model }));
+}
+
+async function broadcastVerificationState(executionTabId, ownerTabId) {
+  await broadcastTabState(executionTabId);
+  if (Number.isInteger(ownerTabId) && ownerTabId !== executionTabId) {
+    await broadcastTabState(ownerTabId);
+  }
+}
+
+async function verificationSurfaceStatus(tabId) {
+  return sendTabMessage(tabId, { type: 'GPTLOCK_VERIFICATION_SURFACE_STATUS' }).catch((error) => ({
+    ok: false,
+    ready: false,
+    structuralReady: false,
+    contentRuntimeReady: false,
+    composerReady: false,
+    modelTriggerReady: false,
+    documentVisible: false,
+    reason: errorText(error),
+  }));
+}
+
+async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = true } = {}) {
+  const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
+  let last = {
+    ready: false,
+    structuralReady: false,
+    contentRuntimeReady: false,
+    composerReady: false,
+    modelTriggerReady: false,
+    documentVisible: false,
+    reason: 'content_runtime_unavailable',
+  };
+  do {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return { ...last, reason: 'verification_tab_closed' };
+    if (tab.status === 'complete') {
+      last = await verificationSurfaceStatus(tabId);
+      const structuralReady = last?.contentRuntimeReady === true
+        && last?.composerReady === true
+        && last?.modelTriggerReady === true;
+      if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
+        return { ...last, ready: true, structuralReady: true };
+      }
+    }
+    await sleep(250);
+  } while (Date.now() < deadline);
+  return {
+    ...last,
+    ready: false,
+    structuralReady: Boolean(last?.contentRuntimeReady && last?.composerReady && last?.modelTriggerReady),
+    reason: last?.reason || 'verification_surface_not_ready',
+  };
+}
+
+async function createVerificationExecutionTab(sourceTabId) {
+  const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
+  if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
+    throw new Error('Source ChatGPT tab is unavailable');
+  }
+
+  const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
+  const restoreActiveTabId = Number(activeTabs?.[0]?.id) || sourceTabId;
+  const verificationTab = await chrome.tabs.create({
+    windowId: sourceTab.windowId,
+    url: 'https://chatgpt.com/',
+    active: false,
+  });
+  const verificationTabId = Number(verificationTab?.id);
+  if (!Number.isInteger(verificationTabId)) throw new Error('Temporary verification tab was not created');
+
+  await isolateTabForVerification(verificationTabId);
+  logRuntime('info', 'verification', 'verification_surface_tab_created', {
+    sourceTabId,
+    verificationTabId,
+    active: false,
+  });
+
+  let activatedForReadiness = false;
+  let surface = await waitForVerificationSurface(verificationTabId, 3000, { requireVisible: false });
+  if (surface?.ready !== true || surface?.documentVisible !== true) {
+    await chrome.tabs.update(verificationTabId, { active: true }).catch(() => null);
+    activatedForReadiness = true;
+    logRuntime('info', 'verification', 'verification_surface_activation_fallback', {
+      sourceTabId,
+      verificationTabId,
+      reason: surface?.reason || (surface?.structuralReady ? 'document_hidden' : 'surface_not_ready_in_background'),
+    });
+    surface = await waitForVerificationSurface(verificationTabId, 9000, { requireVisible: true });
+  }
+
+  if (surface?.ready !== true) {
+    return {
+      sourceTabId,
+      verificationTabId,
+      verificationTab,
+      restoreActiveTabId,
+      activatedForReadiness,
+      surface,
+      ready: false,
+    };
+  }
+
+  logRuntime('info', 'verification', 'verification_surface_ready', {
+    sourceTabId,
+    verificationTabId,
+    composerReady: surface.composerReady === true,
+    modelTriggerReady: surface.modelTriggerReady === true,
+    documentVisible: surface.documentVisible === true,
+    pathname: surface.pathname || null,
+  });
+  return {
+    sourceTabId,
+    verificationTabId,
+    verificationTab,
+    restoreActiveTabId,
+    activatedForReadiness,
+    surface,
+    ready: true,
+  };
+}
+
+async function closeVerificationExecutionTab(session) {
+  const verificationTabId = Number(session?.verificationTabId);
+  const restoreActiveTabId = Number(session?.restoreActiveTabId);
+  if (Number.isInteger(verificationTabId)) {
+    await networkMonitor.disableResponseCapture(verificationTabId).catch(() => {});
+    await networkMonitor.detach(verificationTabId).catch(() => {});
+  }
+  if (
+    session?.activatedForReadiness === true
+    && Number.isInteger(restoreActiveTabId)
+    && restoreActiveTabId !== verificationTabId
+  ) {
+    await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
+  }
+  if (Number.isInteger(verificationTabId)) {
+    await chrome.tabs.remove(verificationTabId).catch(() => null);
+    logRuntime('info', 'verification', 'verification_surface_tab_closed', {
+      sourceTabId: Number(session?.sourceTabId) || null,
+      verificationTabId,
+      restoredActiveTabId: session?.activatedForReadiness === true ? restoreActiveTabId : null,
+    });
+  }
 }
 
 async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
