@@ -6,6 +6,7 @@ import {
   normalizePolicy,
   normalizeReasoningLevel,
   normalizeSettings,
+  toNativePolicy,
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { evaluateGuard } from './guard.js';
@@ -40,7 +41,7 @@ import {
   publishableVerificationResults,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.167';
+const RUNTIME_CODE_VERSION = '0.5.168';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -742,7 +743,7 @@ async function syncRuntimeLogsToNative() {
 }
 
 async function syncPolicy() {
-  const result = await sendNative('set_policy', { policy: currentPolicy });
+  const result = await sendNative('set_policy', { policy: toNativePolicy(currentPolicy) });
   await writeNativeStatus({
     connected: true,
     lastError: null,
@@ -754,7 +755,7 @@ async function syncPolicy() {
 
 async function verifyObservation(observation, policy = currentPolicy) {
   const result = await sendNative('verify', {
-    policy,
+    policy: toNativePolicy(policy),
     observation: {
       model: observation.model ?? null,
       reasoning: observation.reasoning ?? null,
