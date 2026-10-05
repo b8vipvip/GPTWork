@@ -86,16 +86,32 @@ export function createVerificationCatalog({
         selectorKey,
         label,
         pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : catalog?.pickerMode || null,
+        discoverySource: String(row?.discoverySource || phase || '').trim().slice(0, 80) || null,
       };
       const key = identity(candidate);
       if (knownKeys.has(key)) {
-        // A concrete model is the stable identity. Refresh only the still-pending
-        // locator/label after ChatGPT rebuilds a picker; never create a second probe.
+        // A concrete model is the stable identity. A later shared/network candidate
+        // must never downgrade a real Picker-A/B locator. Equal-priority locators may
+        // still refresh after ChatGPT rebuilds the picker, while a stronger locator
+        // (for example Picker A arriving after a server candidate) upgrades in place.
         const existing = queue.find((item) => identity(item) === key);
         if (existing && !progress.results.some((result) => identity(result) === key)) {
+          const locatorPriority = (item) => {
+            const selector = String(item?.selectorKey || '').trim();
+            if (selector && !selector.startsWith('__')) return 30;
+            if (selector === '__work_transport__') return 20;
+            if (selector === '__network_candidate__') return 10;
+            return selector ? 5 : 0;
+          };
+          const existingPriority = locatorPriority(existing);
+          const candidatePriority = locatorPriority(candidate);
           existing.rawModel = rawModel || existing.rawModel;
-          existing.selectorKey = selectorKey || existing.selectorKey;
-          existing.label = label || existing.label;
+          if (candidatePriority >= existingPriority) {
+            existing.selectorKey = selectorKey || existing.selectorKey;
+            existing.label = label || existing.label;
+            existing.pickerMode = candidate.pickerMode || existing.pickerMode;
+            existing.discoverySource = candidate.discoverySource || existing.discoverySource;
+          }
         }
         continue;
       }
