@@ -18,6 +18,7 @@
   // account/master gate remains a separate prerequisite.
   let workModeSelected = false;
   let backgroundAllowed = false;
+  let workModeGuidanceEnabled = true;
   let enabled = false;
   let refreshTimer = null;
   let noticeTimer = null;
@@ -277,7 +278,7 @@
   document.addEventListener('click', (event) => {
     // Verification owns Chat/Work mode while probing account capabilities. The user's
     // Work toggle must not switch the page back to Chat during that transaction.
-    if (verificationOwned || !enabled || !isPristineNewChat()) return;
+    if (verificationOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat()) return;
     const control = event.target?.closest?.(MODE_CONTROL_SELECTOR);
     if (!isWorkControl(control)) return;
     showGuidance();
@@ -287,6 +288,7 @@
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === 'GPTLOCK_GUARD_STATE') {
       backgroundAllowed = message.settings?.enabled === true;
+      workModeGuidanceEnabled = message.settings?.workModeGuidanceEnabled !== false;
       verificationOwned = message.state?.autoVerification?.running === true;
       syncEnabled();
       scheduleRefresh();
@@ -341,6 +343,7 @@
           && response.data?.accountWindowAllowed !== false
           && account?.authenticated === true
           && account?.entitlement?.active === true;
+        workModeGuidanceEnabled = response.data?.settings?.workModeGuidanceEnabled !== false;
       }
       syncEnabled();
       scheduleRefresh();
