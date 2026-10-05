@@ -30,6 +30,7 @@ import {
   effectivePolicyForTabSync,
   requestPolicyForTabSync,
   enableWorkModeForVerification,
+  isolateTabForNativeDiscovery,
   tabFeatureEnabledSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
@@ -1724,6 +1725,7 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
     });
     const discoveryTabId = Number(discoveryTab?.id);
     if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary discovery tab was not created');
+    await isolateTabForNativeDiscovery(discoveryTabId);
 
     logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_created', {
       sourceTabId,
