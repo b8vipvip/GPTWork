@@ -254,24 +254,17 @@ export function requestPolicyForTabSync(tabId, pageModel) {
   const selected = normalizeConcreteModelId(pageModel);
   let lockedModels = [];
 
-  // Work follows the model selected in ChatGPT. It only raises models below the
-  // user-selected floor; it must never replace an already-eligible page
-  // selection (for example GPT-6.1 Sol stays GPT-6.1 Sol).
-  if (feature.modelLockEnabled) {
-    // Model Lock is an allow-list, not a priority list. Lock only when the model
-    // currently selected by ChatGPT is explicitly present. If it is absent, fail
-    // open for the model: Work must not become a second fallback locking authority.
+  // Work owns the minimum request floor. A missing/stale page observation must not
+  // silently disable Work: when no concrete page model is available, use the configured
+  // Work default directly. When the page selection is concrete, preserve it only if it
+  // is at least as capable as the configured floor.
+  if (feature.workModeEnabled) {
+    const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
+    lockedModels = [selected && isAtLeastWorkFloor(selected, floor) ? selected : floor];
+  } else if (feature.modelLockEnabled) {
+    // Outside Work, Model Lock remains a strict allow-list over the page-selected model.
     const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
     lockedModels = selected && allowed.includes(selected) ? [selected] : [];
-    if (lockedModels.length && feature.workModeEnabled) {
-      const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
-      lockedModels = [isAtLeastWorkFloor(selected, floor) ? selected : floor];
-    }
-  } else if (feature.workModeEnabled) {
-    // Work follows the current page model. Only selections below the configured
-    // raised to the Work floor; eligible selections keep their exact identity.
-    const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
-    lockedModels = selected ? [isAtLeastWorkFloor(selected, floor) ? selected : floor] : [];
   }
 
   return normalizePolicy({ ...basePolicy, lockedModels });
