@@ -25,7 +25,7 @@ test('native Work is only a bounded Picker-B discovery transaction and returns t
   assert.match(controller, /async function exitNativeWorkDiscovery\(\)/);
   assert.match(controller, /topModeControl\('work'\)/);
   assert.match(controller, /topModeControl\('chat'\)/);
-  assert.match(controller, /verificationOwned \|\| nativeDiscoveryOwned/);
+  assert.match(controller, /!isPristineNewChat\(\) \|\| nativeDiscoveryOwned/);
 });
 
 test('normal Work execution remains network-layer after discovery', async () => {
