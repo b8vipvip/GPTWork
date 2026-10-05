@@ -303,7 +303,7 @@
   document.addEventListener('click', (event) => {
     // Verification owns Chat/Work mode while probing account capabilities. The user's
     // Work toggle must not switch the page back to Chat during that transaction.
-    if (verificationOwned || nativeDiscoveryOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat()) return;
+    if (verificationOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat() || nativeDiscoveryOwned) return;
     const control = event.target?.closest?.(MODE_CONTROL_SELECTOR);
     if (!isWorkControl(control)) return;
     showGuidance();
