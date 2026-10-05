@@ -537,8 +537,8 @@ export function createAccountSystem({
       || pickerMode !== (current.picker_mode || null)
       || Number(enabled) !== Number(current.enabled);
     if (changed) {
-      db.prepare('UPDATE shared_model_catalog SET display_name=?,picker_mode=?,enabled=?,last_seen_at=? WHERE model_id=?')
-        .run(label, pickerMode, enabled ? 1 : 0, nowIso(), model);
+      db.prepare('UPDATE shared_model_catalog SET display_name=?,picker_mode=?,enabled=? WHERE model_id=?')
+        .run(label, pickerMode, enabled ? 1 : 0, model);
       bumpSharedModelCatalogGeneration();
     }
     return {
