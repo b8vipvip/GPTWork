@@ -9,6 +9,7 @@ import {
   normalizePolicy,
   normalizeReasoningLevel,
   normalizeSettings,
+  toNativePolicy,
 } from '../policy.js';
 
 test('uses the canonical default policy', () => {
@@ -38,6 +39,22 @@ test('rejects malformed custom model identifiers', () => {
     strictMode: true,
   });
   assert.deepEqual(policy.lockedModels, ['valid-model']);
+});
+
+test('native policy projection excludes extension-only Work default', () => {
+  assert.deepEqual(
+    toNativePolicy({
+      lockedModels: ['gpt-6-astra', 'gpt-6-sol'],
+      workDefaultModel: 'gpt-6-sol',
+      allowedReasoningLevels: ['extra-high', 'high'],
+      strictMode: true,
+    }),
+    {
+      lockedModels: ['gpt-6-astra', 'gpt-6-sol'],
+      allowedReasoningLevels: ['extra-high', 'high'],
+      strictMode: true,
+    },
+  );
 });
 
 test('normalizes extra-high aliases', () => {
