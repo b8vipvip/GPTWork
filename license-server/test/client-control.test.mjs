@@ -50,6 +50,11 @@ function fixture() {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     ) STRICT;
+    CREATE TABLE shared_model_catalog_state (
+      id INTEGER PRIMARY KEY CHECK(id=1),
+      generation INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    ) STRICT;
   `);
   const now = new Date();
   db.prepare('INSERT INTO users(id,email,status,free_expires_at,max_devices_override,max_windows_override,created_at,updated_at) VALUES(1,?,?,?,?,?,?,?)')
@@ -57,6 +62,7 @@ function fixture() {
   db.prepare('INSERT INTO users(id,email,status,free_expires_at,max_devices_override,max_windows_override,created_at,updated_at) VALUES(2,?,?,?,?,?,?,?)')
     .run('two@example.com', 'active', new Date(now.getTime() + 86400000).toISOString(), null, null, now.toISOString(), now.toISOString());
   db.prepare("INSERT INTO app_settings(key,value,updated_at) VALUES('account_free_days','7',?)").run(now.toISOString());
+  db.prepare('INSERT INTO shared_model_catalog_state(id,generation,updated_at) VALUES(1,7,?)').run(now.toISOString());
   const system = createClientControlSystem({ db, json() {}, bodyJson: async () => ({}), windowTtlSeconds: 150 });
   return { db, system, now };
 }
@@ -119,8 +125,17 @@ test('reset account restores registration entitlement baseline and queues accoun
 });
 
 
-test('runtime log server sync is disabled by default', () => {
+test('runtime log server sync is disabled and Work guidance is enabled by default', () => {
   const { system } = fixture();
   const settings = system.featureSettings();
   assert.equal(settings.runtimeLogSyncEnabled, false);
+  assert.equal(settings.workModeGuidanceEnabled, true);
+});
+
+test('client control advertises the current model catalog generation', () => {
+  const { db, system, now } = fixture();
+  const future = new Date(now.getTime() + 86400000).toISOString();
+  db.prepare('INSERT INTO user_sessions(user_id,token_hash,device_id,extension_version,last_seen_at,expires_at,revoked_at) VALUES(1,?,?,?,?,?,NULL)')
+    .run('generation-token', 'device-generation', '0.5.169', now.toISOString(), future);
+  assert.equal(system.modelCatalogGeneration(), 7);
 });
