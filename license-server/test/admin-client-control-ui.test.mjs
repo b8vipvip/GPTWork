@@ -8,6 +8,11 @@ const updateHtml = await readFile(new URL('../public/admin-update.html', import.
 const updateJs = await readFile(new URL('../public/admin-client-control.js', import.meta.url), 'utf8');
 const server = await readFile(new URL('../server.mjs', import.meta.url), 'utf8');
 const updater = await readFile(new URL('../../extension/background-update.js', import.meta.url), 'utf8');
+const clientSettingsHtml = await readFile(new URL('../public/admin-client-settings.html', import.meta.url), 'utf8');
+const clientSettingsJs = await readFile(new URL('../public/admin-client-settings.js', import.meta.url), 'utf8');
+const modelAdminHtml = await readFile(new URL('../public/admin-models.html', import.meta.url), 'utf8');
+const modelAdminJs = await readFile(new URL('../public/admin-models.js', import.meta.url), 'utf8');
+
 
 test('user admin is a plain-value list with client version and online state', () => {
   assert.match(usersHtml, /<h2>用户列表<\/h2>/);
@@ -56,4 +61,21 @@ test('extension gates automatic release checks and consumes queued admin command
   assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);
   assert.match(updater, /ADMIN_UPDATE_GENERATION_KEY/);
   assert.match(updater, /ACCOUNT_SYNC_GENERATION_KEY/);
+});
+
+test('client settings expose the server-controlled Work guidance behavior switch', () => {
+  assert.match(clientSettingsHtml, /id="clientWorkModeGuidance"/);
+  assert.match(clientSettingsHtml, /无需手动选择工作模式/);
+  assert.match(clientSettingsJs, /workModeGuidanceEnabled/);
+});
+
+test('model management is a dedicated admin surface for uploaded catalog entries', () => {
+  assert.match(modelAdminHtml, /data-admin-page="models"/);
+  assert.match(modelAdminHtml, /共享模型目录/);
+  assert.match(modelAdminHtml, /发现账户/);
+  assert.match(modelAdminJs, /\/admin\/api\/account\/model-catalog/);
+  assert.match(modelAdminJs, /method:'PUT'/);
+  assert.match(modelAdminJs, /method:'DELETE'/);
+  assert.match(server, /'\/admin\/models':'admin-models\.html'/);
+  assert.match(server, /url\.pathname === '\/admin-models\.js'/);
 });
