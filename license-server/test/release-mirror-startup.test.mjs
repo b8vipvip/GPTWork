@@ -28,7 +28,10 @@ test('release mirror defaults beside the configured production database instead 
     },
     fetchImpl: async () => {
       networkCalls += 1;
-      throw new Error('must not contact GitHub without a token');
+      return new Response('[]', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     },
   });
 
@@ -37,8 +40,9 @@ test('release mirror defaults beside the configured production database instead 
 
   const result = await feed.sync();
   assert.equal(result.ok, true);
-  assert.equal(result.warning, 'private_release_token_required');
-  assert.equal(networkCalls, 0);
+  assert.equal(result.warning, 'release_feed_unavailable');
+  assert.equal(result.mirror.authMode, 'public');
+  assert.equal(networkCalls, 1);
 });
 
 test('an unavailable release mirror degrades only the update channel and never throws during server construction', async (t) => {
