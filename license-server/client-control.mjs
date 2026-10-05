@@ -400,6 +400,7 @@ export function createClientControlSystem({
     handleAdmin,
     publicConfig,
     featureSettings,
+    modelCatalogGeneration,
     userClientStatus,
     queueUserUpdate,
     queueAllUpdates,
