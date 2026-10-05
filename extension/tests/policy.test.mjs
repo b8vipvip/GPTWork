@@ -78,6 +78,7 @@ test('normalizes extension-only verification settings independently', () => {
       networkVerificationEnabled: false,
       firstRequestMode: 'block',
       autoAlignSelection: false,
+      workModeGuidanceEnabled: true,
       preferredReasoning: 'extra-high',
     },
   );

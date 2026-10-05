@@ -66,6 +66,9 @@ export function createClientControlSystem({
   if (!featureColumns.some((column) => column.name === 'runtime_log_sync_enabled')) {
     db.exec('ALTER TABLE client_feature_settings ADD COLUMN runtime_log_sync_enabled INTEGER NOT NULL DEFAULT 0 CHECK(runtime_log_sync_enabled IN (0,1))');
   }
+  if (!featureColumns.some((column) => column.name === 'work_mode_guidance_enabled')) {
+    db.exec('ALTER TABLE client_feature_settings ADD COLUMN work_mode_guidance_enabled INTEGER NOT NULL DEFAULT 1 CHECK(work_mode_guidance_enabled IN (0,1))');
+  }
 
   const waiters = new Map();
   const onlineTtlSeconds = Math.max(90, Number(windowTtlSeconds || DEFAULT_ONLINE_TTL_SECONDS));
@@ -124,6 +127,14 @@ export function createClientControlSystem({
       timer = setTimeout(done, timeoutMs);
     });
   }
+  function modelCatalogGeneration() {
+    try {
+      const row = db.prepare('SELECT generation FROM shared_model_catalog_state WHERE id=1').get();
+      return Math.max(0, Number(row?.generation || 0));
+    } catch {
+      return 0;
+    }
+  }
   function featureSettings() {
     const row = db.prepare('SELECT * FROM client_feature_settings WHERE id=1').get();
     return {
@@ -131,6 +142,7 @@ export function createClientControlSystem({
       autoAlignSelection: Boolean(row.auto_align_selection),
       strictMode: Boolean(row.strict_mode),
       runtimeLogSyncEnabled: Boolean(row.runtime_log_sync_enabled),
+      workModeGuidanceEnabled: Boolean(row.work_mode_guidance_enabled),
       generation: Number(row.generation || 0),
       updatedAt: row.updated_at,
     };
@@ -152,6 +164,7 @@ export function createClientControlSystem({
       accountSyncGeneration: Number(user.account_sync_generation || 0),
       forceUpdate: sameOrNewerGeneration(user.update_generation, sinceUpdate),
       accountSync: sameOrNewerGeneration(user.account_sync_generation, sinceAccount),
+      modelCatalogGeneration: modelCatalogGeneration(),
       featureSettings: featureSettings(),
     };
   }
@@ -326,12 +339,16 @@ export function createClientControlSystem({
       const runtimeLogSyncEnabled = input.runtimeLogSyncEnabled === undefined
         ? current.runtimeLogSyncEnabled
         : input.runtimeLogSyncEnabled === true;
-      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,runtime_log_sync_enabled=?,generation=generation+1,updated_at=? WHERE id=1`)
+      const workModeGuidanceEnabled = input.workModeGuidanceEnabled === undefined
+        ? current.workModeGuidanceEnabled
+        : input.workModeGuidanceEnabled !== false;
+      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,runtime_log_sync_enabled=?,work_mode_guidance_enabled=?,generation=generation+1,updated_at=? WHERE id=1`)
         .run(
           responseVerificationEnabled ? 1 : 0,
           autoAlignSelection ? 1 : 0,
           strictMode ? 1 : 0,
           runtimeLogSyncEnabled ? 1 : 0,
+          workModeGuidanceEnabled ? 1 : 0,
           stamp,
         );
       audit('admin_client_feature_settings_changed', null, featureSettings());
@@ -383,6 +400,7 @@ export function createClientControlSystem({
     handleAdmin,
     publicConfig,
     featureSettings,
+    modelCatalogGeneration,
     userClientStatus,
     queueUserUpdate,
     queueAllUpdates,

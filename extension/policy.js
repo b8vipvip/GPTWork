@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   networkVerificationEnabled: true,
   firstRequestMode: 'allow_once',
   autoAlignSelection: true,
+  workModeGuidanceEnabled: true,
   preferredReasoning: 'high',
 });
 
@@ -179,6 +180,9 @@ export function normalizeSettings(input) {
     autoAlignSelection: typeof source.autoAlignSelection === 'boolean'
       ? source.autoAlignSelection
       : DEFAULT_SETTINGS.autoAlignSelection,
+    workModeGuidanceEnabled: typeof source.workModeGuidanceEnabled === 'boolean'
+      ? source.workModeGuidanceEnabled
+      : DEFAULT_SETTINGS.workModeGuidanceEnabled,
     preferredReasoning: normalizeReasoningLevel(source.preferredReasoning)
       ?? DEFAULT_SETTINGS.preferredReasoning,
   };

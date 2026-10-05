@@ -242,6 +242,19 @@ export function createAccountSystem({
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS shared_model_catalog_state (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    generation INTEGER NOT NULL DEFAULT 0 CHECK(generation >= 0),
+    updated_at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS shared_model_account_seen (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    model_id TEXT NOT NULL REFERENCES shared_model_catalog(model_id) ON DELETE CASCADE,
+    request_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(request_confirmed IN (0,1)),
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, model_id)
+  ) STRICT;
   CREATE TABLE IF NOT EXISTS account_daily_checkins (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     day_key TEXT NOT NULL,
@@ -277,7 +290,12 @@ export function createAccountSystem({
   }
   ensureColumn('users', 'email_verification_exempt', 'email_verification_exempt INTEGER NOT NULL DEFAULT 0 CHECK(email_verification_exempt IN (0,1))');
   ensureColumn('users', 'user_level', "user_level TEXT NOT NULL DEFAULT 'normal'");
+  ensureColumn('shared_model_catalog', 'enabled', 'enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))');
+  ensureColumn('shared_model_catalog', 'discovered_count', 'discovered_count INTEGER NOT NULL DEFAULT 0 CHECK(discovered_count >= 0)');
   db.prepare("UPDATE users SET user_level='normal' WHERE user_level NOT IN ('normal','deep','heavy') OR user_level IS NULL").run();
+  db.prepare('UPDATE shared_model_catalog SET discovered_count=verified_count WHERE discovered_count=0 AND verified_count>0').run();
+  db.prepare('INSERT OR IGNORE INTO shared_model_catalog_state(id,generation,updated_at) VALUES(1,0,?)').run(nowIso());
+  db.exec('CREATE INDEX IF NOT EXISTS idx_shared_model_account_seen_model ON shared_model_account_seen(model_id,last_seen_at)');
   ensureColumn('memberships', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_orders', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_plans', 'original_price_cents', 'original_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(original_price_cents >= 0)');
@@ -421,40 +439,123 @@ export function createAccountSystem({
     const model = String(value || '').trim().toLowerCase();
     return /^[a-z0-9._:-]{1,128}$/.test(model) && model !== 'auto' ? model : null;
   }
-  function sharedModelCatalog() {
-    return db.prepare(`SELECT model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at
-      FROM shared_model_catalog ORDER BY verified_count DESC,last_seen_at DESC,model_id ASC LIMIT 64`).all()
+  function sharedModelCatalogGeneration() {
+    const row = db.prepare('SELECT generation FROM shared_model_catalog_state WHERE id=1').get();
+    return Math.max(0, Number(row?.generation || 0));
+  }
+  function bumpSharedModelCatalogGeneration() {
+    const stamp = nowIso();
+    db.prepare('UPDATE shared_model_catalog_state SET generation=generation+1,updated_at=? WHERE id=1').run(stamp);
+    return sharedModelCatalogGeneration();
+  }
+  function sharedModelCatalog({ includeDisabled = false } = {}) {
+    const where = includeDisabled ? '' : 'WHERE c.enabled=1';
+    return db.prepare(`SELECT c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.first_seen_at,c.last_seen_at,
+        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id) AS account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.request_confirmed=1) AS verified_account_count
+      FROM shared_model_catalog c ${where}
+      ORDER BY c.enabled DESC,c.verified_count DESC,c.discovered_count DESC,c.last_seen_at DESC,c.model_id ASC LIMIT 256`).all()
       .map((row) => ({
         model: row.model_id,
         label: row.display_name || row.model_id,
         pickerMode: row.picker_mode || null,
+        enabled: Boolean(row.enabled),
+        discoveredCount: Number(row.discovered_count || 0),
         verifiedCount: Number(row.verified_count || 0),
+        accountCount: Number(row.account_count || 0),
+        verifiedAccountCount: Number(row.verified_account_count || 0),
         firstSeenAt: row.first_seen_at,
         lastSeenAt: row.last_seen_at,
       }));
   }
-  function mergeSharedModelCatalog(inputModels) {
+  function mergeSharedModelCatalog(inputModels, userId) {
     const now = nowIso();
-    const rows = Array.isArray(inputModels) ? inputModels.slice(0, 32) : [];
-    const upsert = db.prepare(`INSERT INTO shared_model_catalog
-      (model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at)
-      VALUES(?,?,?,?,?,?)
-      ON CONFLICT(model_id) DO UPDATE SET
-        display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE shared_model_catalog.display_name END,
-        picker_mode=COALESCE(excluded.picker_mode,shared_model_catalog.picker_mode),
-        verified_count=shared_model_catalog.verified_count+1,
+    const rows = Array.isArray(inputModels) ? inputModels.slice(0, 128) : [];
+    const select = db.prepare('SELECT * FROM shared_model_catalog WHERE model_id=?');
+    const insert = db.prepare(`INSERT INTO shared_model_catalog
+      (model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at,enabled,discovered_count)
+      VALUES(?,?,?,?,?,?,1,1)`);
+    const update = db.prepare(`UPDATE shared_model_catalog SET
+      display_name=?,picker_mode=?,verified_count=verified_count+?,discovered_count=discovered_count+1,last_seen_at=?
+      WHERE model_id=?`);
+    const seen = db.prepare(`INSERT INTO shared_model_account_seen(user_id,model_id,request_confirmed,first_seen_at,last_seen_at)
+      VALUES(?,?,?,?,?)
+      ON CONFLICT(user_id,model_id) DO UPDATE SET
+        request_confirmed=MAX(shared_model_account_seen.request_confirmed,excluded.request_confirmed),
         last_seen_at=excluded.last_seen_at`);
     let accepted = 0;
-    for (const item of rows) {
-      if (item?.requestConfirmed !== true) continue;
-      const model = normalizeSharedModelId(item?.model);
-      if (!model) continue;
-      const label = String(item?.label || '').replace(/\s+/g, ' ').trim().slice(0, 120);
-      const pickerMode = ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null;
-      upsert.run(model, label, pickerMode, 1, now, now);
-      accepted += 1;
+    let verifiedAccepted = 0;
+    let catalogChanged = false;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const item of rows) {
+        const model = normalizeSharedModelId(item?.model || item?.rawId);
+        if (!model) continue;
+        const label = String(item?.label || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+        const pickerMode = ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null;
+        const requestConfirmed = item?.requestConfirmed === true;
+        const current = select.get(model);
+        if (!current) {
+          insert.run(model, label, pickerMode, requestConfirmed ? 1 : 0, now, now);
+          catalogChanged = true;
+        } else {
+          const nextLabel = label || current.display_name || '';
+          const nextPickerMode = pickerMode || current.picker_mode || null;
+          if (nextLabel !== current.display_name || nextPickerMode !== (current.picker_mode || null)) catalogChanged = true;
+          update.run(nextLabel, nextPickerMode, requestConfirmed ? 1 : 0, now, model);
+        }
+        seen.run(Number(userId), model, requestConfirmed ? 1 : 0, now, now);
+        accepted += 1;
+        if (requestConfirmed) verifiedAccepted += 1;
+      }
+      if (catalogChanged) bumpSharedModelCatalogGeneration();
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
     }
-    return { accepted, models: sharedModelCatalog() };
+    return {
+      accepted,
+      verifiedAccepted,
+      generation: sharedModelCatalogGeneration(),
+      models: sharedModelCatalog(),
+    };
+  }
+  function updateSharedModelCatalog(modelValue, input = {}) {
+    const model = normalizeSharedModelId(modelValue);
+    if (!model) fail(400, 'INVALID_MODEL', '模型 ID 无效');
+    const current = db.prepare('SELECT * FROM shared_model_catalog WHERE model_id=?').get(model);
+    if (!current) fail(404, 'MODEL_NOT_FOUND', '模型不存在');
+    const label = input.label === undefined
+      ? current.display_name
+      : String(input.label || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const pickerMode = input.pickerMode === undefined
+      ? (current.picker_mode || null)
+      : (['A', 'B'].includes(input.pickerMode) ? input.pickerMode : null);
+    const enabled = input.enabled === undefined ? Boolean(current.enabled) : input.enabled !== false;
+    const changed = label !== current.display_name
+      || pickerMode !== (current.picker_mode || null)
+      || Number(enabled) !== Number(current.enabled);
+    if (changed) {
+      db.prepare('UPDATE shared_model_catalog SET display_name=?,picker_mode=?,enabled=? WHERE model_id=?')
+        .run(label, pickerMode, enabled ? 1 : 0, model);
+      bumpSharedModelCatalogGeneration();
+    }
+    return {
+      generation: sharedModelCatalogGeneration(),
+      models: sharedModelCatalog({ includeDisabled: true }),
+    };
+  }
+  function deleteSharedModelCatalog(modelValue) {
+    const model = normalizeSharedModelId(modelValue);
+    if (!model) fail(400, 'INVALID_MODEL', '模型 ID 无效');
+    const result = db.prepare('DELETE FROM shared_model_catalog WHERE model_id=?').run(model);
+    if (!result.changes) fail(404, 'MODEL_NOT_FOUND', '模型不存在');
+    bumpSharedModelCatalogGeneration();
+    return {
+      generation: sharedModelCatalogGeneration(),
+      models: sharedModelCatalog({ includeDisabled: true }),
+    };
   }
 
   function audit(event, userId = null, detail = {}) {
@@ -1150,14 +1251,22 @@ export function createAccountSystem({
 
       if (path === '/api/v1/account/model-catalog' && req.method === 'GET') {
         requireSession(req);
-        return json(res, 200, { ok: true, models: sharedModelCatalog() }, cors), true;
+        return json(res, 200, {
+          ok: true,
+          generation: sharedModelCatalogGeneration(),
+          models: sharedModelCatalog(),
+        }, cors), true;
       }
 
       if (path === '/api/v1/account/model-catalog' && req.method === 'POST') {
         const session = requireSession(req);
         const input = await bodyJson(req);
-        const merged = mergeSharedModelCatalog(input.models);
-        audit('shared_model_catalog_published', session.user_id, { accepted: merged.accepted });
+        const merged = mergeSharedModelCatalog(input.models, session.user_id);
+        audit('shared_model_catalog_published', session.user_id, {
+          accepted: merged.accepted,
+          verifiedAccepted: merged.verifiedAccepted,
+          generation: merged.generation,
+        });
         return json(res, 200, { ok: true, ...merged }, cors), true;
       }
 
@@ -1353,6 +1462,32 @@ export function createAccountSystem({
     const path = url.pathname;
     if (!path.startsWith('/admin/api/account/')) return false;
     try {
+      if (path === '/admin/api/account/model-catalog' && req.method === 'GET') {
+        return json(res, 200, {
+          ok: true,
+          generation: sharedModelCatalogGeneration(),
+          models: sharedModelCatalog({ includeDisabled: true }),
+        }), true;
+      }
+      if (path === '/admin/api/account/model-catalog' && req.method === 'PUT') {
+        const input = await bodyJson(req);
+        const result = updateSharedModelCatalog(input.model, input);
+        audit('admin_shared_model_updated', null, {
+          model: normalizeSharedModelId(input.model),
+          enabled: input.enabled,
+          pickerMode: input.pickerMode ?? null,
+          generation: result.generation,
+        });
+        return json(res, 200, { ok: true, ...result }), true;
+      }
+      if (path === '/admin/api/account/model-catalog' && req.method === 'DELETE') {
+        const input = await bodyJson(req);
+        const model = normalizeSharedModelId(input.model);
+        const result = deleteSharedModelCatalog(model);
+        audit('admin_shared_model_deleted', null, { model, generation: result.generation });
+        return json(res, 200, { ok: true, ...result }), true;
+      }
+
       if (path === '/admin/api/account/dashboard' && req.method === 'GET') {
         const total = db.prepare('SELECT COUNT(*) AS count FROM users').get().count;
         const verified = db.prepare('SELECT COUNT(*) AS count FROM users WHERE email_verified_at IS NOT NULL').get().count;

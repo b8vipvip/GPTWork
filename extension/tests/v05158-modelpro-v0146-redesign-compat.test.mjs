@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  publishableVerificationResults,
   shouldRetryTransientResponse,
 } from '../vendor/modelpro/model-verification.js';
 
@@ -27,14 +26,16 @@ test('ViewTrack and transient-response compatibility remains present after v0.5.
   assert.match(content, /invalidated_after_debugger_attach/);
   assert.match(background, /account_model_verification_transient_response_retry/);
   assert.match(background, /shouldRetryTransientResponse\(result, \{ maxRetries: 1 \}\)/);
-  assert.match(background, /publishableVerificationResults\(progress\?\.results, normalizeConcreteModelId\)/);
+  assert.doesNotMatch(background, /publishableVerificationResults\(/);
+  assert.match(background, /async function publishAccountModels\(accountCatalog, progress\)/);
+  assert.match(background, /for \(const row of accountCatalog\?\.rows \|\| \[\]\)/);
   const manifest = JSON.parse(manifestText);
   assert.equal(JSON.parse(packageText).version, manifest.version);
   const escapedVersion = manifest.version.replaceAll('.', '\\.');
   assert.match(background, new RegExp(`const RUNTIME_CODE_VERSION = '${escapedVersion}';`));
 });
 
-test('one request-confirmed canceled HTTP 200 turn is retried once and never shared unverified', () => {
+test('one request-confirmed canceled HTTP 200 turn is retried once while discovery upload remains independent', () => {
   const canceled = {
     model: 'gpt-6-luna',
     verified: false,
@@ -47,15 +48,4 @@ test('one request-confirmed canceled HTTP 200 turn is retried once and never sha
   };
   assert.equal(shouldRetryTransientResponse(canceled, { maxRetries: 1 }), true);
   assert.equal(shouldRetryTransientResponse({ ...canceled, retryCount: 1 }, { maxRetries: 1 }), false);
-  assert.deepEqual(publishableVerificationResults([canceled], (value) => value), []);
-
-  const verified = {
-    ...canceled,
-    model: 'gpt-6-sol',
-    verified: true,
-    responseConfirmed: true,
-    responseBodyError: null,
-    responseIssue: null,
-  };
-  assert.deepEqual(publishableVerificationResults([canceled, verified], (value) => value), [verified]);
 });

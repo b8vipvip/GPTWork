@@ -38,10 +38,9 @@ import {
   summarizeVerificationOutcome,
   createModelVerificationHistoryRecord,
   shouldRetryTransientResponse,
-  publishableVerificationResults,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.168';
+const RUNTIME_CODE_VERSION = '0.5.169';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -55,6 +54,8 @@ const MODEL_VERIFICATION_HISTORY_ENABLED_KEY = 'gptworkModelVerificationHistoryE
 const MODEL_VERIFICATION_HISTORY_LIMIT = 50;
 const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
+const SHARED_MODEL_CATALOG_GENERATION_KEY = 'gptworkSharedModelCatalogGenerationV1';
+const SHARED_MODEL_CATALOG_ACCOUNT_KEY = 'gptworkSharedModelCatalogAccountV1';
 const JANK_ISOLATION_KEY = 'gptworkJankIsolationV1';
 
 let nativePort = null;
@@ -77,6 +78,7 @@ const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
 let sharedKnownModelIds = new Set();
+let lastServerModelCatalogGeneration = null;
 let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
@@ -1210,7 +1212,6 @@ async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
   try {
     accountState = await accountClient.heartbeat(windowKeys);
     if (accountState?.authenticated === true) {
-      void syncSharedKnownModels();
       await applyServerFeatureSettings();
     }
   } catch (error) {
@@ -1224,12 +1225,14 @@ async function applyServerFeatureSettings() {
   if (!accountClient.hasSession()) return null;
   try {
     const data = await accountClient.clientControl();
-    const remote = data?.control?.featureSettings;
+    const control = data?.control;
+    const remote = control?.featureSettings;
     if (!remote) return null;
     const nextSettings = normalizeSettings({
       ...currentSettings,
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
       autoAlignSelection: remote.autoAlignSelection !== false,
+      workModeGuidanceEnabled: remote.workModeGuidanceEnabled !== false,
     });
     const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
     const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
@@ -1250,10 +1253,13 @@ async function applyServerFeatureSettings() {
         generation: remote.generation ?? null,
         responseVerificationEnabled: nextSettings.networkVerificationEnabled,
         autoAlignSelection: nextSettings.autoAlignSelection,
+        workModeGuidanceEnabled: nextSettings.workModeGuidanceEnabled,
         strictMode: nextPolicy.strictMode,
         runtimeLogSyncEnabled,
       });
     }
+    lastServerModelCatalogGeneration = Math.max(0, Number(control?.modelCatalogGeneration || 0));
+    await syncSharedKnownModels({ serverGeneration: lastServerModelCatalogGeneration });
     return remote;
   } catch (error) {
     logRuntime('warn', 'settings', 'server_client_settings_fetch_failed', { error: errorText(error) });
@@ -1544,29 +1550,55 @@ async function resolveUnknownCatalogNames(tabId, rows) {
   }
 }
 
-async function syncSharedKnownModels() {
-  if (Date.now() < sharedModelCatalogUnavailableUntil) {
-    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
-    return Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
-  }
+async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalogGeneration, force = false } = {}) {
+  const [storedModels, local] = await Promise.all([
+    chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY),
+    chrome.storage.local.get([SHARED_MODEL_CATALOG_GENERATION_KEY, SHARED_MODEL_CATALOG_ACCOUNT_KEY]),
+  ]);
+  const cached = Array.isArray(storedModels[SHARED_KNOWN_MODELS_KEY]) ? storedModels[SHARED_KNOWN_MODELS_KEY] : [];
+  const accountId = Number(accountState?.user?.id || 0);
+  const syncedAccountId = Number(local[SHARED_MODEL_CATALOG_ACCOUNT_KEY] || 0);
+  const hasSyncedGeneration = Number.isInteger(Number(local[SHARED_MODEL_CATALOG_GENERATION_KEY]));
+  const syncedGeneration = hasSyncedGeneration ? Math.max(0, Number(local[SHARED_MODEL_CATALOG_GENERATION_KEY])) : -1;
+  const requestedGeneration = serverGeneration === null || serverGeneration === undefined
+    ? null
+    : Math.max(0, Number(serverGeneration || 0));
+  const accountChanged = accountId > 0 && syncedAccountId !== accountId;
+  const generationChanged = requestedGeneration !== null && syncedGeneration < requestedGeneration;
+  const needsInitialSync = !hasSyncedGeneration || syncedAccountId <= 0;
+
+  sharedKnownModelIds = new Set(cached.map((item) => normalizeConcreteModelId(item?.model)).filter(Boolean));
+  if (!force && !accountChanged && !generationChanged && !needsInitialSync) return cached;
+  if (Date.now() < sharedModelCatalogUnavailableUntil) return cached;
+
   try {
     const result = await accountClient.sharedModelCatalog();
+    const generation = Math.max(0, Number(result?.generation || 0));
     const models = (Array.isArray(result?.models) ? result.models : [])
       .map((item) => ({
         model: normalizeConcreteModelId(item?.model),
         label: String(item?.label || '').trim().slice(0, 120),
         pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
       }))
       .filter((item) => item.model);
-    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
-    const previous = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
     sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
-    if (JSON.stringify(previous) !== JSON.stringify(models)) {
-      await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: models });
-      logRuntime('info', 'verification', 'shared_model_catalog_synced', { count: models.length, changed: true });
-    }
+    const patch = {};
+    if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
+    if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
+    await chrome.storage.local.set({
+      [SHARED_MODEL_CATALOG_GENERATION_KEY]: generation,
+      [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: accountId,
+    });
+    lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
+    logRuntime('info', 'verification', 'shared_model_catalog_synced', {
+      count: models.length,
+      changed: Object.keys(patch).length > 0,
+      generation,
+      reason: accountChanged ? 'account_first_login' : generationChanged ? 'server_generation_changed' : needsInitialSync ? 'initial_sync' : 'forced',
+    });
     return models;
   } catch (error) {
     const unsupported = Number(error?.status) === 404 || /not found/i.test(errorText(error));
@@ -1574,9 +1606,6 @@ async function syncSharedKnownModels() {
     logRuntime(unsupported ? 'info' : 'warn', 'verification', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
       error: errorText(error), retryAfterMs: unsupported ? 5 * 60 * 1000 : 0,
     });
-    const stored = await chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY);
-    const cached = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
-    sharedKnownModelIds = new Set(cached.map((item) => normalizeConcreteModelId(item?.model)).filter(Boolean));
     return cached;
   }
 }
@@ -1604,15 +1633,35 @@ function mergeAccountCatalogs(...catalogs) {
   return { rows, models: [...models], reasoningLevels: [...reasoningLevels], pickerMode };
 }
 
-async function publishVerifiedModels(progress) {
-  const models = publishableVerificationResults(progress?.results, normalizeConcreteModelId)
-    .map((item) => ({
-      model: normalizeConcreteModelId(item.model),
-      label: String(item.label || item.model).trim().slice(0, 120),
-      pickerMode: ['A', 'B'].includes(item.pickerMode) ? item.pickerMode : null,
-      requestConfirmed: true,
-      responseConfirmed: item.responseConfirmed === true,
-    }));
+async function publishAccountModels(accountCatalog, progress) {
+  const byModel = new Map();
+  for (const row of accountCatalog?.rows || []) {
+    const model = normalizeConcreteModelId(row?.model || row?.rawId);
+    if (!model) continue;
+    byModel.set(model, {
+      model,
+      label: String(row?.label || row?.displayName || model).trim().slice(0, 120),
+      pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : null,
+      requestConfirmed: false,
+      responseConfirmed: false,
+    });
+  }
+  for (const item of progress?.results || []) {
+    const model = normalizeConcreteModelId(item?.model || item?.requestModel || item?.evidenceModel);
+    if (!model) continue;
+    const current = byModel.get(model) || {
+      model,
+      label: String(item?.label || model).trim().slice(0, 120),
+      pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+      requestConfirmed: false,
+      responseConfirmed: false,
+    };
+    current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
+    current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
+    if (!current.pickerMode && ['A', 'B'].includes(item?.pickerMode)) current.pickerMode = item.pickerMode;
+    byModel.set(model, current);
+  }
+  const models = [...byModel.values()].slice(0, 128);
   if (!models.length) return [];
   try {
     const result = await accountClient.publishSharedModels(models);
@@ -1621,12 +1670,27 @@ async function publishVerifiedModels(progress) {
         model: normalizeConcreteModelId(item?.model),
         label: String(item?.label || '').trim().slice(0, 120),
         pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
       }))
       .filter((item) => item.model);
-    await chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared });
-    logRuntime('info', 'verification', 'shared_model_catalog_published', { submitted: models.length, shared: shared.length });
+    const generation = Math.max(0, Number(result?.generation || 0));
+    sharedKnownModelIds = new Set(shared.map((item) => item.model).filter(Boolean));
+    await Promise.all([
+      chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared }),
+      chrome.storage.local.set({
+        [SHARED_MODEL_CATALOG_GENERATION_KEY]: generation,
+        [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: Number(accountState?.user?.id || 0),
+      }),
+    ]);
+    lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
+    logRuntime('info', 'verification', 'shared_model_catalog_published', {
+      submitted: models.length,
+      requestConfirmed: models.filter((item) => item.requestConfirmed).length,
+      shared: shared.length,
+      generation,
+    });
     return shared;
   } catch (error) {
     logRuntime('warn', 'verification', 'shared_model_catalog_publish_failed', { submitted: models.length, error: errorText(error) });
@@ -2201,7 +2265,7 @@ async function autoVerify(tabId) {
     accountCatalog,
     { restoreModel },
   );
-  await publishVerifiedModels(catalogVerification);
+  await publishAccountModels(accountCatalog, catalogVerification);
   state.autoVerification.attempts = catalogVerification.results.map((item, index) => ({
     attempt: index + 1,
     sent: Boolean(item.requestId),
