@@ -1238,6 +1238,7 @@ async function applyServerFeatureSettings() {
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
       autoAlignSelection: remote.autoAlignSelection !== false,
       workModeGuidanceEnabled: remote.workModeGuidanceEnabled !== false,
+      workModeFeatureEnabled: remote.workModeFeatureEnabled !== false,
     });
     const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
     const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
@@ -1259,6 +1260,7 @@ async function applyServerFeatureSettings() {
         responseVerificationEnabled: nextSettings.networkVerificationEnabled,
         autoAlignSelection: nextSettings.autoAlignSelection,
         workModeGuidanceEnabled: nextSettings.workModeGuidanceEnabled,
+        workModeFeatureEnabled: nextSettings.workModeFeatureEnabled,
         strictMode: nextPolicy.strictMode,
         runtimeLogSyncEnabled,
       });
@@ -1866,6 +1868,13 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
 }
 
 async function discoverNativeWorkCandidates(sourceTabId, progress) {
+  if (currentSettings.workModeFeatureEnabled === false) {
+    logRuntime('info', 'verification', 'native_work_catalog_discovery_skipped', {
+      sourceTabId,
+      reason: 'work_feature_disabled',
+    });
+    return networkCandidateCatalog([], 'native-picker-b');
+  }
   const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
   if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
     logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
@@ -2427,23 +2436,36 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   // then uses the same tab-scoped network policy as normal GPTWork use; it does not
   // click or invoke ChatGPT's native Work toggle and does not wait for Picker B.
   if (item.model === 'gpt-5.5') {
-    try {
-      const featureState = await enableWorkModeForVerification(tabId);
-      workActivationPending = featureState?.workModeEnabled === true;
+    if (currentSettings.workModeFeatureEnabled === false) {
+      workActivationPending = false;
       progress.workDiscovery = {
         attempted: false,
         entered: false,
-        reason: workActivationPending ? 'waiting_for_sol_then_network_work' : 'work_runtime_not_enabled',
+        reason: 'work_feature_disabled',
+        runtimeEnabled: false,
       };
-      logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
-        tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
-        source: 'network_work_policy', floorModel: workDefaultModel,
+      logRuntime('info', 'verification', 'verification_work_mode_skipped', {
+        tabId, phase: 'post_gpt_5_5', reason: 'work_feature_disabled',
       });
-    } catch (error) {
-      progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
-      logRuntime('warn', 'verification', 'verification_work_mode_armed', {
-        tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
-      });
+    } else {
+      try {
+        const featureState = await enableWorkModeForVerification(tabId);
+        workActivationPending = featureState?.workModeEnabled === true;
+        progress.workDiscovery = {
+          attempted: false,
+          entered: false,
+          reason: workActivationPending ? 'waiting_for_sol_then_network_work' : 'work_runtime_not_enabled',
+        };
+        logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
+          tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
+          source: 'network_work_policy', floorModel: workDefaultModel,
+        });
+      } catch (error) {
+        progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
+        logRuntime('warn', 'verification', 'verification_work_mode_armed', {
+          tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
+        });
+      }
     }
   }
 
