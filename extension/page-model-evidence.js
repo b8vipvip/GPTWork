@@ -126,7 +126,7 @@
     if (!text) return null;
 
     for (const [family, aliases] of Object.entries(FAMILY_ALIASES)) {
-      if (aliases.some((alias) => aliasMatches(text, alias))) return family;
+      if (aliases.some((alias) => normalizedLabelLower(alias) === text)) return family;
     }
 
     const compact = text.replace(/\s+/g, '-');
