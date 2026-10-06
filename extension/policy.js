@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   firstRequestMode: 'allow_once',
   autoAlignSelection: true,
   workModeGuidanceEnabled: true,
+  workModeFeatureEnabled: true,
   preferredReasoning: 'high',
 });
 
