@@ -19,7 +19,7 @@
   let workModeSelected = false;
   let backgroundAllowed = false;
   let workModeGuidanceEnabled = true;
-  let workModeFeatureEnabled = true;
+  let workModeFeatureEnabled = false;
   let enabled = false;
   let refreshTimer = null;
   let noticeTimer = null;
