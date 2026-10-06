@@ -88,7 +88,7 @@ test('explicit served/resolved/used metadata remains authoritative', () => {
   }
 });
 
-test('ModelPro v0.1.38 preserves Work profile identity from default_model_slug', () => {
+test('default_model_slug is retained as diagnostic profile metadata only', () => {
   const result = extractResponseEvidence({
     body: JSON.stringify({ message: { metadata: {
       resolved_model_slug: 'gpt-5-6',
@@ -100,6 +100,20 @@ test('ModelPro v0.1.38 preserves Work profile identity from default_model_slug',
   assert.equal(result.model, 'gpt-5.6-sol');
   assert.equal(result.defaultModel, 'gpt-6-sol');
   assert.match(result.defaultModelField, /default_model_slug/);
+  assert.equal(result.reasoning, 'high');
+});
+
+test('default_model_slug alone never confirms the served response model', () => {
+  const result = extractResponseEvidence({
+    body: JSON.stringify({ message: { metadata: {
+      default_model_slug: 'gpt-6-astra-wm',
+      thinking_effort: 'high',
+    } } }),
+    mimeType: 'application/json',
+  });
+  assert.equal(result.model, null);
+  assert.equal(result.defaultModel, 'gpt-6-astra');
+  assert.equal(result.conflicts.model, false);
   assert.equal(result.reasoning, 'high');
 });
 
