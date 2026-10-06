@@ -841,21 +841,16 @@ function verificationResponseObservation(tabId, responseEvidence) {
   const target = normalizeConcreteModelId(transaction?.model);
   const observed = normalizeConcreteModelId(responseEvidence?.model);
   const field = String(responseEvidence?.fields?.model || '');
-  const defaultModel = normalizeConcreteModelId(responseEvidence?.defaultModel);
-  const workTarget = Boolean(target && modelTransportId(target) !== target);
-  const workProfileConfirmed = Boolean(workTarget && defaultModel === target);
-  // v0.1.35 raw SSE established the Work contract: Picker-B turns expose the
-  // selected Work profile in default_model_slug (for example gpt-6-sol-wm) while
-  // resolved_model_slug reports the underlying execution family (gpt-5-6). For a
-  // Work target, an exact default_model_slug match is therefore the response-side
-  // identity authority; retain resolved_model_slug separately as backend diagnostics.
+  // Response confirmation is intentionally independent from request rewriting and
+  // Work profile/default metadata. Only a directly observed network response field
+  // with served/resolved/used semantics (or an allowed response header normalized by
+  // network-evidence.js) can confirm the backend model.
   return {
-    model: responseEvidence?.conflicts?.model ? null : (workProfileConfirmed ? target : observed),
-    backendResolvedModel: workProfileConfirmed && observed && observed !== target ? observed : null,
-    downgraded: workProfileConfirmed && observed && observed !== target,
-    reason: workProfileConfirmed ? 'work_profile_confirmed_by_default_model_slug'
-      : target && observed && observed !== target ? 'served_model_mismatch' : null,
-    field: workProfileConfirmed ? responseEvidence?.defaultModelField || 'default_model_slug' : field,
+    model: responseEvidence?.conflicts?.model ? null : observed,
+    backendResolvedModel: observed || null,
+    downgraded: false,
+    reason: target && observed && observed !== target ? 'served_model_mismatch' : null,
+    field,
   };
 }
 
