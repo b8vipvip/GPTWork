@@ -1850,10 +1850,11 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
         reason: errorText(error),
       }));
       last = {
-        entered: response?.ok === true && (response?.attempted === true || response?.alreadySelected === true),
+        entered: response?.ok === true && (response?.confirmed === true || response?.alreadySelected === true),
         reason: response?.reason || null,
         attempted: response?.attempted === true,
         alreadySelected: response?.alreadySelected === true,
+        confirmed: response?.confirmed === true,
       };
       if (last.entered) return last;
     }
