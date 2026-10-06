@@ -423,6 +423,12 @@ document.addEventListener('pointerdown', (event) => {
   function normalizeDisplayedModel(text) {
     if (!text) return null;
     const compact = text.trim().toLowerCase().replace(/\s+/g, '-');
+    // Future official model tiers must be discoverable before the server knows them.
+    // Accept a single exact tier token only when the whole visible label is the model
+    // identity (for example "GPT-7 Nova" -> gpt-7-nova). Longer lifecycle copy such
+    // as "GPT-5.5 Leaving on October 14" cannot satisfy this exact form.
+    const futureTier = compact.match(/^gpt-?(\d+(?:\.\d+)*)-([a-z][a-z0-9]{1,31})(?:-wm)?$/);
+    if (futureTier) return `gpt-${futureTier[1]}-${futureTier[2]}`;
     // ChatGPT may append lifecycle/deprecation copy to a model row (for example,
     // "GPT-5.5 Leaving on October 14"). Only known model-family suffixes belong
     // to the canonical model id; trailing UI copy must not become part of the id.
