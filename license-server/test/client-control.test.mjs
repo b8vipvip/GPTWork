@@ -125,10 +125,11 @@ test('reset account restores registration entitlement baseline and queues accoun
 });
 
 
-test('runtime log server sync is disabled and Work guidance is enabled by default', () => {
+test('runtime log sync is disabled while Work feature and guidance are enabled by default', () => {
   const { system } = fixture();
   const settings = system.featureSettings();
   assert.equal(settings.runtimeLogSyncEnabled, false);
+  assert.equal(settings.workModeFeatureEnabled, true);
   assert.equal(settings.workModeGuidanceEnabled, true);
 });
 
