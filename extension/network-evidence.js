@@ -161,8 +161,6 @@ function inspectObjects(values, mode = 'response') {
       reasoningCandidatePaths: [...new Set(candidates.reasoning.map((candidate) => candidate.path))].slice(-12),
       // Keep diagnostics aligned with direct served-model authority. defaultModel is
       // retained separately only as routing/profile diagnostics.
-      defaultModelCandidatePaths: [...new Set(candidates.defaultModel.map((candidate) => candidate.path))].slice(-12),
-      defaultModelCandidateValues: [...new Set(candidates.defaultModel.map((candidate) => candidate.value))].slice(-12),
       modelCandidateValues: [...new Set(candidates.model
         .filter((candidate) => candidate.score === Math.max(...candidates.model.map((item) => item.score)))
         .map((candidate) => candidate.value))].slice(-12),
