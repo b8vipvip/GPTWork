@@ -17,6 +17,7 @@ test('v0.5.174 server Work feature gate is delivered and enforced across client 
   const featureUi = await read('feature-toggle-controller.js');
   const popup = await read('popup-v0513.html');
   const settings = await read('settings-v0521.html');
+  const policy = await read('policy.js');
 
   assert.match(server, /work_mode_feature_enabled/);
   assert.match(server, /workModeFeatureEnabled/);
@@ -33,10 +34,13 @@ test('v0.5.174 server Work feature gate is delivered and enforced across client 
   assert.match(controller, /workModeFeatureEnabled/);
   assert.match(controller, /if \(!workModeFeatureEnabled\)/);
 
+  assert.match(policy, /workModeFeatureEnabled: typeof source\.workModeFeatureEnabled === 'boolean'/);
+  assert.match(featureUi, /let workFeatureAvailable = false/);
   assert.match(featureUi, /\[data-work-feature\]/);
   assert.match(featureUi, /setWorkFeatureAvailable/);
-  assert.match(popup, /data-work-feature/);
-  assert.match(settings, /data-work-feature/);
+  assert.match(controller, /let workModeFeatureEnabled = false/);
+  assert.match(popup, /data-work-feature hidden/);
+  assert.match(settings, /data-work-feature hidden/);
 });
 
 test('v0.5.174 discovers a future official model tier without server pre-registration', async () => {
