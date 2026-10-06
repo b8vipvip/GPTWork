@@ -1862,17 +1862,37 @@ document.addEventListener('pointerdown', (event) => {
     }) || null;
   }
 
+  function workControlSelected(control) {
+    return Boolean(control) && (
+      control.getAttribute('aria-selected') === 'true'
+      || control.getAttribute('aria-pressed') === 'true'
+      || ['checked', 'selected', 'active'].includes(String(control.getAttribute('data-state') || '').toLowerCase())
+    );
+  }
+
   async function enterVerificationWorkMode() {
     await waitForIdle();
-    const control = verificationWorkControl();
-    if (!control) return { attempted: false, reason: 'work_control_not_found' };
-    const selected = control.getAttribute('aria-selected') === 'true'
-      || control.getAttribute('aria-pressed') === 'true'
-      || ['checked', 'selected', 'active'].includes(String(control.getAttribute('data-state') || '').toLowerCase());
-    if (selected) return { attempted: false, alreadySelected: true, reason: 'already_work' };
-    await trustedPointer(control, 'click', 'verification-work-mode');
-    await new Promise((resolve) => window.setTimeout(resolve, 900));
-    return { attempted: true, reason: 'work_control_clicked' };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const control = verificationWorkControl();
+      if (!control) {
+        await new Promise((resolve) => window.setTimeout(resolve, 240 * attempt));
+        continue;
+      }
+      if (workControlSelected(control)) {
+        return { attempted: attempt > 1, alreadySelected: true, confirmed: true, reason: 'already_work' };
+      }
+      const clicked = await trustedPointer(control, 'click', `verification-work-mode:attempt-${attempt}`);
+      if (!clicked) {
+        await new Promise((resolve) => window.setTimeout(resolve, 260 * attempt));
+        continue;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      const after = verificationWorkControl();
+      if (workControlSelected(after)) {
+        return { attempted: true, alreadySelected: false, confirmed: true, reason: 'work_control_confirmed' };
+      }
+    }
+    return { attempted: true, alreadySelected: false, confirmed: false, reason: 'work_control_not_confirmed' };
   }
 
   async function stopStaleGeneration() {
