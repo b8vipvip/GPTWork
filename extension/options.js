@@ -346,8 +346,13 @@ async function load() {
 
 async function persistModelSelection(changedInput) {
   const lockedModels = [...new Set(concreteSelectedModels())];
-  const stored = await storageGet('policy');
+  const stored = await storageGet(['policy', 'settings']);
   const current = normalizePolicy(stored.policy);
+  const settings = normalizeSettings(stored.settings);
+  if (settings.workModeFeatureEnabled === false) {
+    await patchPolicy({ lockedModels });
+    return;
+  }
   const workDefaultModel = lockedModels.includes(current.workDefaultModel)
     ? current.workDefaultModel
     : lockedModels[0] || current.workDefaultModel;
@@ -402,6 +407,8 @@ function persistFromChange(event) {
     return;
   }
   if (target === elements.workDefaultModel) {
+    const stored = await storageGet('settings');
+    if (normalizeSettings(stored.settings).workModeFeatureEnabled === false) return;
     if (!concreteSelectedModels().includes(target.value)) {
       void load().catch(() => {});
       showMessage('Work 默认模型必须来自锁定模型列表。', 'bad');
