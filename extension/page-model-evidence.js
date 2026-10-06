@@ -130,6 +130,8 @@
     }
 
     const compact = text.replace(/\s+/g, '-');
+    const futureTier = compact.match(/^gpt-?(\d+(?:\.\d+)*)-([a-z][a-z0-9]{1,31})(?:-wm)?$/);
+    if (futureTier) return normalizeModelId(`gpt-${futureTier[1]}-${futureTier[2]}`);
     const compactTier = compact.match(/(?:^|[^a-z0-9])(?:gpt-)?(\d+(?:\.\d+)*)-(astra|pro|sol|terra|luna)(?:-wm)?(?:$|[^a-z0-9])/);
     if (compactTier) return normalizeModelId(`gpt-${compactTier[1]}-${compactTier[2]}`);
     const explicit = compact.match(/(?:^|[^a-z0-9])gpt-?(\d+(?:\.\d+)*)(?=$|[^a-z0-9.])/);
