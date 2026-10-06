@@ -79,6 +79,7 @@ test('normalizes extension-only verification settings independently', () => {
       firstRequestMode: 'block',
       autoAlignSelection: false,
       workModeGuidanceEnabled: true,
+      workModeFeatureEnabled: true,
       preferredReasoning: 'extra-high',
     },
   );
