@@ -184,6 +184,9 @@ export function normalizeSettings(input) {
     workModeGuidanceEnabled: typeof source.workModeGuidanceEnabled === 'boolean'
       ? source.workModeGuidanceEnabled
       : DEFAULT_SETTINGS.workModeGuidanceEnabled,
+    workModeFeatureEnabled: typeof source.workModeFeatureEnabled === 'boolean'
+      ? source.workModeFeatureEnabled
+      : DEFAULT_SETTINGS.workModeFeatureEnabled,
     preferredReasoning: normalizeReasoningLevel(source.preferredReasoning)
       ?? DEFAULT_SETTINGS.preferredReasoning,
   };
