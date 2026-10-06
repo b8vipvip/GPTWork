@@ -407,14 +407,14 @@ function persistFromChange(event) {
     return;
   }
   if (target === elements.workDefaultModel) {
-    const stored = await storageGet('settings');
-    if (normalizeSettings(stored.settings).workModeFeatureEnabled === false) return;
-    if (!concreteSelectedModels().includes(target.value)) {
-      void load().catch(() => {});
-      showMessage('Work 默认模型必须来自锁定模型列表。', 'bad');
-      return;
-    }
-    void queueWrite(() => patchPolicy({ workDefaultModel: target.value })).catch(() => void load().catch(() => {}));
+    void queueWrite(async () => {
+      const stored = await storageGet('settings');
+      if (normalizeSettings(stored.settings).workModeFeatureEnabled === false) return;
+      if (!concreteSelectedModels().includes(target.value)) {
+        throw new Error('Work 默认模型必须来自锁定模型列表。');
+      }
+      await patchPolicy({ workDefaultModel: target.value });
+    }).catch(() => void load().catch(() => {}));
     return;
   }
   // #enabled is owned exclusively by master-ui-controller.js. Its capture-phase
