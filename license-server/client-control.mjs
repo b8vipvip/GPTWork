@@ -69,6 +69,9 @@ export function createClientControlSystem({
   if (!featureColumns.some((column) => column.name === 'work_mode_guidance_enabled')) {
     db.exec('ALTER TABLE client_feature_settings ADD COLUMN work_mode_guidance_enabled INTEGER NOT NULL DEFAULT 1 CHECK(work_mode_guidance_enabled IN (0,1))');
   }
+  if (!featureColumns.some((column) => column.name === 'work_mode_feature_enabled')) {
+    db.exec('ALTER TABLE client_feature_settings ADD COLUMN work_mode_feature_enabled INTEGER NOT NULL DEFAULT 1 CHECK(work_mode_feature_enabled IN (0,1))');
+  }
 
   const waiters = new Map();
   const onlineTtlSeconds = Math.max(90, Number(windowTtlSeconds || DEFAULT_ONLINE_TTL_SECONDS));
@@ -143,6 +146,7 @@ export function createClientControlSystem({
       strictMode: Boolean(row.strict_mode),
       runtimeLogSyncEnabled: Boolean(row.runtime_log_sync_enabled),
       workModeGuidanceEnabled: Boolean(row.work_mode_guidance_enabled),
+      workModeFeatureEnabled: Boolean(row.work_mode_feature_enabled),
       generation: Number(row.generation || 0),
       updatedAt: row.updated_at,
     };
@@ -342,13 +346,17 @@ export function createClientControlSystem({
       const workModeGuidanceEnabled = input.workModeGuidanceEnabled === undefined
         ? current.workModeGuidanceEnabled
         : input.workModeGuidanceEnabled !== false;
-      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,runtime_log_sync_enabled=?,work_mode_guidance_enabled=?,generation=generation+1,updated_at=? WHERE id=1`)
+      const workModeFeatureEnabled = input.workModeFeatureEnabled === undefined
+        ? current.workModeFeatureEnabled
+        : input.workModeFeatureEnabled !== false;
+      db.prepare(`UPDATE client_feature_settings SET response_verification_enabled=?,auto_align_selection=?,strict_mode=?,runtime_log_sync_enabled=?,work_mode_guidance_enabled=?,work_mode_feature_enabled=?,generation=generation+1,updated_at=? WHERE id=1`)
         .run(
           responseVerificationEnabled ? 1 : 0,
           autoAlignSelection ? 1 : 0,
           strictMode ? 1 : 0,
           runtimeLogSyncEnabled ? 1 : 0,
           workModeGuidanceEnabled ? 1 : 0,
+          workModeFeatureEnabled ? 1 : 0,
           stamp,
         );
       audit('admin_client_feature_settings_changed', null, featureSettings());
