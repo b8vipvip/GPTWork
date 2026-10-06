@@ -13,18 +13,14 @@ function loadAdapter() {
   return context.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
 }
 
-test('visible DOM text cannot manufacture arbitrary GPT-5.6 Sol suffix IDs', () => {
+test('exact future-tier labels are accepted while lifecycle copy is rejected', () => {
   const adapter = loadAdapter();
-  for (const label of ['GPT 5.6 S', 'GPT 5.6 So', 'GPT 5.6 Solji', 'GPT 5.6 Soljin', 'GPT 5.6 Solmo']) {
-    const model = adapter.modelFromText(label);
-    assert.notEqual(model, 'gpt-5.6-s');
-    assert.notEqual(model, 'gpt-5.6-so');
-    assert.notEqual(model, 'gpt-5.6-solji');
-    assert.notEqual(model, 'gpt-5.6-soljin');
-    assert.notEqual(model, 'gpt-5.6-solmo');
-  }
+  assert.equal(adapter.modelFromText('GPT 5.6 So'), 'gpt-5.6-so');
+  assert.equal(adapter.modelFromText('GPT 7 Nova'), 'gpt-7-nova');
+  assert.equal(adapter.modelFromText('GPT 8 Orion'), 'gpt-8-orion');
   assert.equal(adapter.modelFromText('GPT-5.6 Sol'), 'gpt-5.6-sol');
   assert.equal(adapter.modelFromText('gpt-5.6-sol-wm'), 'gpt-5.6-sol');
+  assert.equal(adapter.modelFromText('GPT-5.5 Leaving on October 14'), null);
 });
 
 test('persistent discovery is network-authoritative and DOM-only observations are not stored', () => {
@@ -87,7 +83,7 @@ test('auto verification can discover account catalog and use a visible naming fa
   assert.match(backgroundSource, /responseConfirmed/);
   assert.doesNotMatch(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
   assert.match(backgroundSource, /Only a directly observed network response field/);
-  assert.match(networkSource, /default_model_slug is routing\/profile metadata, never served-model proof/);
+  assert.match(networkSource, /must never participate in served-model verification/);
   assert.match(backgroundSource, /getVerificationTransaction\(tabId\)/);
   assert.match(backgroundSource, /fetch_forwarded_request_metadata/);
   assert.doesNotMatch(backgroundSource, /Model selection was not confirmed/);

@@ -31,7 +31,7 @@ test('Work default model remains the real minimum request model when page eviden
   const start = runtime.indexOf('export function requestPolicyForTabSync');
   const end = runtime.indexOf('export function effectivePolicyForTabSync', start);
   const resolver = runtime.slice(start, end);
-  assert.match(resolver, /if \(feature\.workModeEnabled\)/);
+  assert.match(resolver, /if \(workFeatureEnabled && feature\.workModeEnabled\)/);
   assert.match(resolver, /const floor = normalizeConcreteModelId\(basePolicy\.workDefaultModel\) \|\| DEFAULT_WORK_MODEL/);
   assert.match(resolver, /lockedModels = \[selected && isAtLeastWorkFloor\(selected, floor\) \? selected : floor\]/);
 });
