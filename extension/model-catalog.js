@@ -52,6 +52,8 @@
   function normalizeDisplayedModel(text) {
     if (!text) return null;
     const compact = String(text).trim().toLowerCase().replace(/\s+/g, '-');
+    const futureTier = compact.match(/^gpt-?(\d+(?:\.\d+)*)-([a-z][a-z0-9]{1,31})(?:-wm)?$/);
+    if (futureTier) return normalizeModelId(`gpt-${futureTier[1]}-${futureTier[2]}`);
     // Visible DOM text is advisory only. Recognize the established Sol family
     // explicitly, otherwise fall back to the base GPT family. Do not turn
     // arbitrary trailing UI text into a model ID.
