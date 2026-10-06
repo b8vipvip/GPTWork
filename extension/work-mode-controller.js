@@ -19,6 +19,7 @@
   let workModeSelected = false;
   let backgroundAllowed = false;
   let workModeGuidanceEnabled = true;
+  let workModeFeatureEnabled = true;
   let enabled = false;
   let refreshTimer = null;
   let noticeTimer = null;
@@ -27,7 +28,7 @@
   let workDefaultModelLabel = 'GPT-6 Astra';
 
   function syncEnabled() {
-    enabled = Boolean(workModeSelected && backgroundAllowed);
+    enabled = Boolean(workModeFeatureEnabled && workModeSelected && backgroundAllowed);
   }
 
   function normalize(value) {
@@ -227,6 +228,10 @@
 
   function renderWorkStrategy() {
     const host = document.getElementById(MODEL_INDICATOR_ID);
+    if (!workModeFeatureEnabled) {
+      host?.shadowRoot?.querySelector('[data-source="work-strategy"]')?.remove();
+      return;
+    }
     const root = host?.shadowRoot;
     const button = root?.querySelector('button');
     if (!root || !button) return;
@@ -248,6 +253,13 @@
 
   function renderProcessingMode() {
     refreshTimer = null;
+    if (!workModeFeatureEnabled) {
+      document.getElementById(NOTICE_ID)?.remove();
+      const root = document.getElementById(MODEL_INDICATOR_ID)?.shadowRoot;
+      root?.querySelector('[data-source="processing-mode"]')?.remove();
+      root?.querySelector('[data-source="work-strategy"]')?.remove();
+      return;
+    }
     const row = ensureProcessingModeRow();
     if (!row) return;
     renderWorkStrategy();
@@ -278,7 +290,7 @@
   document.addEventListener('click', (event) => {
     // Verification owns Chat/Work mode while probing account capabilities. The user's
     // Work toggle must not switch the page back to Chat during that transaction.
-    if (verificationOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat()) return;
+    if (!workModeFeatureEnabled || verificationOwned || !enabled || !workModeGuidanceEnabled || !isPristineNewChat()) return;
     const control = event.target?.closest?.(MODE_CONTROL_SELECTOR);
     if (!isWorkControl(control)) return;
     showGuidance();
@@ -289,6 +301,7 @@
     if (message?.type === 'GPTLOCK_GUARD_STATE') {
       backgroundAllowed = message.settings?.enabled === true;
       workModeGuidanceEnabled = message.settings?.workModeGuidanceEnabled !== false;
+      workModeFeatureEnabled = message.settings?.workModeFeatureEnabled !== false;
       verificationOwned = message.state?.autoVerification?.running === true;
       syncEnabled();
       scheduleRefresh();
@@ -304,7 +317,7 @@
   });
 
   new MutationObserver((mutations) => {
-    if (!enabled || document.hidden) return;
+    if (!workModeFeatureEnabled || !enabled || document.hidden) return;
     // Do not refresh Work evidence for generic class/state churn. ChatGPT mutates
     // those attributes continuously during streaming, scrolling and window resize.
     // Refresh only when newly-added structural content can actually contain Work UI.
@@ -344,6 +357,7 @@
           && account?.authenticated === true
           && account?.entitlement?.active === true;
         workModeGuidanceEnabled = response.data?.settings?.workModeGuidanceEnabled !== false;
+        workModeFeatureEnabled = response.data?.settings?.workModeFeatureEnabled !== false;
       }
       syncEnabled();
       scheduleRefresh();
