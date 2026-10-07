@@ -44,7 +44,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.177';
+const RUNTIME_CODE_VERSION = '0.5.178';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -3641,6 +3641,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const attached = networkMonitor.isAttached(sender.tab.id) || await networkMonitor.attach(sender.tab.id);
         if (!attached) throw new Error('Debugger is not attached for trusted pointer input');
         return { attached: true };
+      }
+      case 'GPTLOCK_TRUSTED_KEY': {
+        if (!sender.tab?.id) throw new Error('Trusted keyboard input requires a tab');
+        const key = String(message.key || '');
+        if (key !== 'Enter') throw new Error('Unsupported trusted key');
+        logRuntime('info', 'ui-keyboard', 'cdp_dispatch', {
+          tabId: sender.tab.id,
+          source: String(message.source || 'unspecified').slice(0, 100),
+          key,
+          target: message.target ?? null,
+        });
+        await networkMonitor.trustedKey(sender.tab.id, key);
+        return { key };
       }
       case 'GPTLOCK_TRUSTED_POINTER': {
         if (!sender.tab?.id) throw new Error('Trusted pointer input requires a tab');
