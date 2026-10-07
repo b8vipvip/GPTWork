@@ -983,6 +983,41 @@ async function applyNetworkEvidence(tabId, evidence) {
   state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
   if (!masterRuntimeEnabled()) return;
 
+  const discoveryTransaction = verificationTransactionForTab(tabId);
+  if (discoveryTransaction?.model) {
+    // Discover Models owns its own two-stage proof. Raw protocol identities such as
+    // gpt-5.5-thinking and gpt-6-astra-wm are intentionally distinct from the
+    // business model ids used by the ordinary lock policy. Re-running the normal
+    // policy verifier here can therefore turn a successful discovery response into
+    // a false model_not_allowed state. Preserve the response evidence for
+    // waitForNetworkModelEvidence(), but do not let ordinary runtime policy mutate
+    // the discovery transaction's verdict/guard state.
+    state.evidenceIssue = responseEvidence.bodyError
+      ? 'response_body_unavailable'
+      : responseEvidence.conflicts?.model || responseEvidence.conflicts?.reasoning
+        ? 'conflicting_response_metadata'
+        : null;
+    state.lastError = responseEvidence.bodyError || null;
+    logRuntime(
+      responseEvidence.bodyError || responseEvidence.conflicts?.model ? 'warn' : 'info',
+      'discovery',
+      'verification_response_evidence_observed',
+      {
+        tabId,
+        requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
+        verificationModel: discoveryTransaction.model,
+        mode: discoveryTransaction.mode || null,
+        rawResponseModel: normalizeRawProtocolModelId(
+          responseEvidence?.rawModel || responseEvidence?.model,
+        ),
+        responseObserved: successfulConversationResponseEvidence(responseEvidence),
+        diagnostics: responseEvidence.diagnostics ?? null,
+      },
+    );
+    await broadcastTabState(tabId);
+    return;
+  }
+
   // Downstream generation can emit many packets carrying the same served-model
   // metadata. Once this exact request is verified, keep that terminal proof unless a
   // later packet introduces contradictory model/reasoning evidence.
@@ -2850,6 +2885,50 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
+async function resetChatLockVerificationSurface(tabId, ownerTabId, item) {
+  const targetModel = normalizeConcreteModelId(item?.model);
+  logRuntime('info', 'discovery', 'chat_lock_surface_reset_started', {
+    tabId,
+    ownerTabId,
+    model: targetModel,
+    pickerMode: item?.pickerMode || null,
+  });
+
+  await networkMonitor.disableResponseCapture(tabId).catch(() => {});
+  await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
+  const surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
+  if (surface?.ready !== true) {
+    throw new Error(`Chat lock fresh surface not ready: ${surface?.reason || 'unknown'}`);
+  }
+
+  const liveState = ensureTabState(tabId, 'https://chatgpt.com/');
+  resetVerificationAttempt(liveState);
+  if (!liveState.autoVerification?.running) {
+    const ownerState = Number.isInteger(ownerTabId) ? tabStates.get(ownerTabId) : null;
+    const executionState = tabStates.get(tabId);
+    liveState.autoVerification = executionState?.autoVerification || ownerState?.autoVerification || liveState.autoVerification;
+  }
+
+  const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
+  const captureReady = attached
+    ? await networkMonitor.enableResponseCapture(tabId).catch(() => false)
+    : false;
+  if (!attached || !captureReady) {
+    throw new Error('Chat lock fresh surface network capture unavailable');
+  }
+
+  logRuntime('info', 'discovery', 'chat_lock_surface_reset_completed', {
+    tabId,
+    ownerTabId,
+    model: targetModel,
+    pickerMode: item?.pickerMode || null,
+    pathname: surface?.pathname || null,
+    documentVisible: surface?.documentVisible === true,
+  });
+  await broadcastVerificationState(tabId, ownerTabId);
+  return { state: liveState, surface };
+}
+
 async function verifyAccountCatalogModels(
   tabId,
   state,
@@ -2986,7 +3065,7 @@ async function verifyAccountCatalogModels(
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
     state.autoVerification.attempt = index + 1;
-    const transactionStartedAtMs = Date.now();
+    let transactionStartedAtMs = Date.now();
     verificationTransactions.set(Number(tabId), {
       model: item.model || null,
       selectorKey: item.selectorKey || '',
@@ -3013,6 +3092,17 @@ async function verifyAccountCatalogModels(
 
     let abortForPendingTurn = false;
     try {
+      if (chatCompatibility) {
+        const fresh = await resetChatLockVerificationSurface(tabId, ownerTabId, item);
+        state = fresh.state;
+        transactionStartedAtMs = Date.now();
+        const transaction = verificationTransactions.get(Number(tabId));
+        if (transaction) transaction.startedAt = transactionStartedAtMs;
+        resetVerificationAttempt(state);
+        state.autoVerification = fresh.state.autoVerification;
+        await broadcastVerificationState(tabId, ownerTabId);
+      }
+
       const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
       if (!attached) throw new Error(state.monitor?.error || 'Request monitor is not attached');
 
@@ -3070,17 +3160,19 @@ async function verifyAccountCatalogModels(
         throw new Error('ChatGPT response remained non-terminal during model discovery');
       }
 
+      const liveState = ensureTabState(tabId);
+      state = liveState;
       const requestId = networkEvidence?.requestId
-        || state.lastRequest?.requestId
-        || state.lastForwardedRequest?.requestId
+        || liveState.lastRequest?.requestId
+        || liveState.lastForwardedRequest?.requestId
         || null;
       const responseEvidence = networkEvidence?.evidence
-        || (state.lastResponseEvidence?.requestId === requestId ? state.lastResponseEvidence : null);
+        || (liveState.lastResponseEvidence?.requestId === requestId ? liveState.lastResponseEvidence : null);
       const rawRequestModel = normalizeRawProtocolModelId(
-        state.lastRewrite?.transportModelAfter
-          || state.lastRewrite?.transportModelBefore
-          || state.lastRequest?.rawModel
-          || state.lastRequest?.model,
+        liveState.lastRewrite?.transportModelAfter
+          || liveState.lastRewrite?.transportModelBefore
+          || liveState.lastRequest?.rawModel
+          || liveState.lastRequest?.model,
       );
       const rawResponseProtocolModel = normalizeRawProtocolModelId(
         responseEvidence?.rawModel
@@ -3088,8 +3180,8 @@ async function verifyAccountCatalogModels(
           || state.lastResponseEvidence?.model,
       );
       const requestModel = normalizeConcreteModelId(
-        state.lastRewrite?.modelAfter
-          || state.lastRequest?.model
+        liveState.lastRewrite?.modelAfter
+          || liveState.lastRequest?.model
           || rawRequestModel,
       );
       const responseModel = normalizeConcreteModelId(
@@ -3106,13 +3198,13 @@ async function verifyAccountCatalogModels(
       if (chatCompatibility) {
         const expectedTransport = normalizeRawProtocolModelId(item.transportModel);
         const expectedResponse = normalizeRawProtocolModelId(item.expectedResponseModel);
-        const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
+        const rewriteCapturedAtMs = Date.parse(liveState.lastRewrite?.capturedAt || '');
         const authoritativeRewrite = Boolean(
-          state.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
-          && state.lastRewrite?.authorityModel === item.model
+          liveState.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
+          && liveState.lastRewrite?.authorityModel === item.model
           && Number.isFinite(rewriteCapturedAtMs)
           && rewriteCapturedAtMs >= transactionStartedAtMs - 250
-          && !state.lastRewrite?.error
+          && !liveState.lastRewrite?.error
         );
         requestConfirmed = Boolean(
           authoritativeRewrite
