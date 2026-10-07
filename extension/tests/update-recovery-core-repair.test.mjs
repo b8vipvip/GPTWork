@@ -1,3 +1,4 @@
+// [legacy-core-maintenance] v0.5.185 updates frozen background/native updater recovery contracts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
