@@ -75,9 +75,15 @@ test('v0.5.173 never publishes shared model results when zero requests were conf
 
 test('v0.5.173 keeps native Picker-B discovery separate from the verification execution tab', async () => {
   const background = await read('background.js');
-  assert.match(background, /discoverNativeWorkCandidates\(tabId, progress\)/);
-  assert.match(background, /native_work_catalog_discovery_temp_tab_created/);
+  const nativeStart = background.indexOf('async function discoverOfficialWorkModels(sourceTabId, progress)');
+  const nativeEnd = background.indexOf('\nasync function publishAccountModels', nativeStart);
+  const nativeDiscovery = background.slice(nativeStart, nativeEnd);
+
+  assert.ok(nativeStart >= 0 && nativeEnd > nativeStart, 'official Work discovery must remain a separate operation');
+  assert.match(nativeDiscovery, /discoveryTab = await chrome\.tabs\.create\(\{/);
+  assert.match(nativeDiscovery, /discoveryTabId = Number\(discoveryTab\?\.id\)/);
+  assert.match(nativeDiscovery, /official_work_model_discovery_tab_created/);
+  assert.match(nativeDiscovery, /await isolateTabForNativeDiscovery\(discoveryTabId\)/);
   assert.match(background, /verification_surface_tab_created/);
-  assert.match(background, /isolateTabForNativeDiscovery\(discoveryTabId\)/);
   assert.match(background, /isolateTabForVerification\(verificationTabId\)/);
 });
