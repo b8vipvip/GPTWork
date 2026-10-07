@@ -7,8 +7,10 @@ const read = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 test('shared and local discoveries become network-only verification candidates', async () => {
   const background = await read('background.js');
   assert.match(background, /const NETWORK_CANDIDATE_SELECTOR = '__network_candidate__'/);
-  assert.match(background, /mergeCatalog\(networkCandidateCatalog\(sharedCandidates, 'shared-server'\), 'shared-network-candidates'\)/);
-  assert.match(background, /mergeCatalog\(networkCandidateCatalog\(localNetworkCandidates, 'local-network-evidence'\), 'local-network-candidates'\)/);
+  assert.match(background, /const sharedNetworkCatalog = networkCandidateCatalog\(sharedCandidates, 'shared-server'\)/);
+  assert.match(background, /const localNetworkCatalog = networkCandidateCatalog\(localNetworkCandidates, 'local-network-evidence'\)/);
+  assert.match(background, /mergeCatalog\(sharedNetworkCatalog, 'shared-network-candidates'\)/);
+  assert.match(background, /mergeCatalog\(localNetworkCatalog, 'local-network-candidates'\)/);
   assert.match(background, /item\.selectorKey === '__work_transport__' \|\| item\.selectorKey === NETWORK_CANDIDATE_SELECTOR/);
   assert.match(background, /verification_network_candidate_probe/);
 });
