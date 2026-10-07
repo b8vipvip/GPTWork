@@ -2630,43 +2630,17 @@ async function publishAccountModels(accountCatalog, progress) {
 
   try {
     const result = await accountClient.publishSharedModels(models);
-    const shared = (Array.isArray(result?.models) ? result.models : [])
-      .map((item) => ({
-        model: normalizeConcreteModelId(item?.model),
-        label: String(item?.label || '').trim().slice(0, 120),
-        pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
-        nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
-        nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
-        chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
-        chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
-        chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
-        discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
-        verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
-        lastSeenAt: item?.lastSeenAt || null,
-      }))
-      .filter((item) => item.model);
     const generation = Math.max(0, Number(result?.generation || 0));
-    sharedKnownModelIds = new Set(shared.map((item) => item.model).filter(Boolean));
-    sharedModelProtocolMap = new Map(shared
-      .map((item) => ({
-        model: item.model,
-        transport: item.chatTransportModel || (item.pickerMode === 'A' ? item.nativeRequestModel : null),
-      }))
-      .filter((item) => item.model && item.transport)
-      .map((item) => [item.model, item.transport]));
-    rememberProvenPickerBChatModels(shared);
-    await Promise.all([
-      chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared }),
-      chrome.storage.local.set({
-        [SHARED_MODEL_CATALOG_GENERATION_KEY]: generation,
-        [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: Number(accountState?.user?.id || 0),
-      }),
-    ]);
-    lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
+    const shared = await applyClientSharedModelCatalog(result?.models, {
+      generation,
+      accountId: Number(accountState?.user?.id || 0),
+      reason: 'post_discovery_publish',
+    });
     logRuntime('info', 'discovery', 'shared_model_catalog_published', {
       submitted: models.length,
       nativeResponseConfirmed: models.filter((item) => item.nativeResponseConfirmed).length,
       chatLockSupported: models.filter((item) => item.chatLockSupported).length,
+      fourGateEligible: shared.length,
       shared: shared.length,
       generation,
     });
