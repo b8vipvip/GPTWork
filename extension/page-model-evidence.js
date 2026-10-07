@@ -134,8 +134,12 @@
     if (futureTier) return normalizeModelId(`gpt-${futureTier[1]}-${futureTier[2]}`);
     const compactTier = compact.match(/(?:^|[^a-z0-9])(?:gpt-)?(\d+(?:\.\d+)*)-(astra|pro|sol|terra|luna)(?:-wm)?(?:$|[^a-z0-9])/);
     if (compactTier) return normalizeModelId(`gpt-${compactTier[1]}-${compactTier[2]}`);
-    const explicit = compact.match(/(?:^|[^a-z0-9])gpt-?(\d+(?:\.\d+)*)(?=$|[^a-z0-9.])/);
-    return explicit ? normalizeModelId(`gpt-${explicit[1]}`) : null;
+    // A bare family label is valid, but lifecycle/help copy mentioning a model is not.
+    // The redesigned picker also shows GPT-5.5 as "5.5 高" (reasoning suffix).
+    const bareFamily = compact.match(/^gpt-?(\d+(?:\.\d+)*)$/);
+    if (bareFamily) return normalizeModelId(`gpt-${bareFamily[1]}`);
+    const compact55 = compact.match(/^5\.5(?:-(?:高|中|低|high|medium|low|extra-high))?$/);
+    return compact55 ? 'gpt-5.5' : null;
   }
 
   function reasoningFromText(value) {
