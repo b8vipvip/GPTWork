@@ -47,6 +47,25 @@ test('extension publishes the complete discovered account catalog and syncs by a
   assert.doesNotMatch(background, /void syncSharedKnownModels\(\)/);
 });
 
+test('admin model management supports batch delete and recycle-bin restore without contaminating a fresh discovery', () => {
+  assert.match(accountSystem, /CREATE TABLE IF NOT EXISTS shared_model_catalog_trash/);
+  assert.match(accountSystem, /CREATE TABLE IF NOT EXISTS shared_model_account_seen_trash/);
+  assert.match(accountSystem, /function deleteSharedModelCatalogBatch/);
+  assert.match(accountSystem, /function restoreSharedModelCatalogBatch/);
+  assert.match(accountSystem, /DELETE FROM shared_model_catalog WHERE model_id=\?/);
+  assert.match(accountSystem, /INSERT OR REPLACE INTO shared_model_account_seen_trash/);
+  assert.match(accountSystem, /\/admin\/api\/account\/model-catalog\/restore/);
+  assert.match(adminHtml, /模型回收站/);
+  assert.match(adminHtml, /id="selectAllModels"/);
+  assert.match(adminHtml, /id="deleteSelectedModels"/);
+  assert.match(adminHtml, /id="selectAllTrash"/);
+  assert.match(adminHtml, /id="restoreSelectedModels"/);
+  assert.match(adminJs, /JSON\.stringify\(\{models\}\)/);
+  assert.match(adminJs, /data-select-model/);
+  assert.match(adminJs, /data-select-trash/);
+  assert.match(adminJs, /\/admin\/api\/account\/model-catalog\/restore/);
+});
+
 test('admin model management can edit, disable and delete uploaded models', () => {
   assert.match(accountSystem, /\/admin\/api\/account\/model-catalog/);
   assert.match(adminHtml, /<h1>模型管理<\/h1>/);

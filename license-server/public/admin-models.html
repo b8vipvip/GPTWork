@@ -24,15 +24,27 @@
       <section class="card">
         <div class="section-title">
           <div><h2>共享模型目录</h2><p class="muted">所有登录账户发现的模型会自动汇总到这里。新模型或管理变更会提升目录代次，客户端只在首次登录或代次变更时同步一次。</p></div>
-          <div class="section-actions"><span id="generation" class="muted"></span><button id="refreshModels">刷新</button></div>
+          <div class="section-actions"><span id="generation" class="muted"></span><button id="deleteSelectedModels" class="danger" disabled>删除勾选模型</button><button id="refreshModels">刷新</button></div>
         </div>
         <div class="table-wrap">
           <table class="users-table">
-            <thead><tr><th>模型 ID</th><th>显示名称</th><th>Picker</th><th>原生协议</th><th>Chat 锁定协议</th><th>Chat 兼容</th><th>启用</th><th>账户证据</th><th>发现次数</th><th>最后发现</th><th>操作</th></tr></thead>
+            <thead><tr><th><input id="selectAllModels" type="checkbox" aria-label="全选模型"></th><th>模型 ID</th><th>显示名称</th><th>Picker</th><th>原生协议</th><th>Chat 锁定协议</th><th>Chat 兼容</th><th>启用</th><th>账户证据</th><th>发现次数</th><th>最后发现</th><th>操作</th></tr></thead>
             <tbody id="modelsBody"></tbody>
           </table>
         </div>
         <p id="modelsMessage" class="message"></p>
+      </section>
+      <section class="card">
+        <div class="section-title">
+          <div><h2>模型回收站</h2><p class="muted">删除的模型和账户证据会移入回收站，不再参与客户端目录同步。重新“发现模型”会创建全新的活动证据；还原不会覆盖已重新发现的同名活动模型。</p></div>
+          <div class="section-actions"><span id="trashCount" class="muted"></span><button id="restoreSelectedModels" disabled>还原勾选模型</button></div>
+        </div>
+        <div class="table-wrap">
+          <table class="users-table">
+            <thead><tr><th><input id="selectAllTrash" type="checkbox" aria-label="全选回收站模型"></th><th>模型 ID</th><th>显示名称</th><th>Picker</th><th>原生协议</th><th>Chat 锁定协议</th><th>账户证据</th><th>删除时间</th><th>操作</th></tr></thead>
+            <tbody id="trashBody"></tbody>
+          </table>
+        </div>
       </section>
     </div>
   </main>
