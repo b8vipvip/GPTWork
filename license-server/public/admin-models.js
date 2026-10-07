@@ -17,7 +17,7 @@ function render(data){
     <td><input data-field="label" value="${esc(m.label||m.model)}" maxlength="120"></td>
     <td><select data-field="pickerMode"><option value="">—</option><option value="A" ${m.pickerMode==='A'?'selected':''}>A</option><option value="B" ${m.pickerMode==='B'?'selected':''}>B</option></select></td>
     <td><input data-field="enabled" type="checkbox" ${m.enabled!==false?'checked':''}></td>
-    <td>${Number(m.accountCount||0)} / 已验证 ${Number(m.verifiedAccountCount||0)}</td>
+    <td>发现 ${Number(m.accountCount||0)} / 请求 ${Number(m.requestConfirmedAccountCount||0)} / 响应 ${Number(m.verifiedAccountCount||0)}</td>
     <td>${Number(m.discoveredCount||0)}</td>
     <td>${Number(m.verifiedCount||0)}</td>
     <td>${esc(fmt(m.lastSeenAt))}</td>
