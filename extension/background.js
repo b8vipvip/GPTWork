@@ -2896,9 +2896,36 @@ async function resetChatLockVerificationSurface(tabId, ownerTabId, item) {
 
   await networkMonitor.disableResponseCapture(tabId).catch(() => {});
   await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
-  const surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
-  if (surface?.ready !== true) {
-    throw new Error(`Chat lock fresh surface not ready: ${surface?.reason || 'unknown'}`);
+
+  // chrome.tabs.update resolves before the new document/content runtime is guaranteed
+  // to replace the prior /c/:id conversation. Do not let an immediately responsive old
+  // content script satisfy readiness and accidentally run the next lock proof inside
+  // the previous model's conversation.
+  const navigationDeadline = Date.now() + 12000;
+  let rootDocumentObserved = false;
+  let surface = null;
+  do {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    surface = await verificationSurfaceStatus(tabId);
+    let tabPathname = null;
+    try { tabPathname = new URL(tab?.url || '').pathname; } catch {}
+    if (
+      tabPathname === '/'
+      && surface?.pathname === '/'
+      && surface?.contentRuntimeReady === true
+    ) {
+      rootDocumentObserved = true;
+      break;
+    }
+    await sleep(200);
+  } while (Date.now() < navigationDeadline);
+  if (!rootDocumentObserved) {
+    throw new Error('Chat lock fresh root document did not replace the prior conversation');
+  }
+
+  surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
+  if (surface?.ready !== true || surface?.pathname !== '/') {
+    throw new Error(`Chat lock fresh surface not ready: ${surface?.reason || surface?.pathname || 'unknown'}`);
   }
 
   const liveState = ensureTabState(tabId, 'https://chatgpt.com/');
