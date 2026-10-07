@@ -522,8 +522,20 @@ export function createAccountSystem({
     db.prepare('UPDATE shared_model_catalog_state SET generation=generation+1,updated_at=? WHERE id=1').run(stamp);
     return sharedModelCatalogGeneration();
   }
-  function sharedModelCatalog({ includeDisabled = false } = {}) {
-    const where = includeDisabled ? '' : 'WHERE c.enabled=1';
+  function sharedModelCatalog({ includeDisabled = false, clientEligibleOnly = false } = {}) {
+    const filters = [];
+    if (!includeDisabled) filters.push('c.enabled=1');
+    if (clientEligibleOnly) {
+      filters.push(`c.discovered_count>0 AND EXISTS (
+        SELECT 1 FROM shared_model_account_seen eligible
+        WHERE eligible.model_id=c.model_id
+          AND eligible.request_confirmed=1
+          AND eligible.response_confirmed=1
+          AND eligible.chat_lock_request_confirmed=1
+          AND eligible.chat_lock_response_confirmed=1
+      )`);
+    }
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     return db.prepare(`SELECT
         c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
         c.native_request_model,c.native_response_model,c.chat_transport_model,c.chat_response_model,
@@ -531,7 +543,14 @@ export function createAccountSystem({
         (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id) AS account_count,
         (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.request_confirmed=1) AS request_confirmed_account_count,
         (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.response_confirmed=1) AS verified_account_count,
-        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.chat_lock_response_confirmed=1) AS chat_lock_verified_account_count
+        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.chat_lock_request_confirmed=1) AS chat_lock_request_confirmed_account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.chat_lock_response_confirmed=1) AS chat_lock_verified_account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen s
+          WHERE s.model_id=c.model_id
+            AND s.request_confirmed=1
+            AND s.response_confirmed=1
+            AND s.chat_lock_request_confirmed=1
+            AND s.chat_lock_response_confirmed=1) AS client_eligible_account_count
       FROM shared_model_catalog c ${where}
       ORDER BY c.enabled DESC,c.chat_lock_verified_count DESC,c.verified_count DESC,c.discovered_count DESC,c.last_seen_at DESC,c.model_id ASC LIMIT 256`).all()
       .map((row) => ({
@@ -549,7 +568,12 @@ export function createAccountSystem({
         accountCount: Number(row.account_count || 0),
         requestConfirmedAccountCount: Number(row.request_confirmed_account_count || 0),
         verifiedAccountCount: Number(row.verified_account_count || 0),
+        chatLockRequestConfirmedAccountCount: Number(row.chat_lock_request_confirmed_account_count || 0),
         chatLockVerifiedAccountCount: Number(row.chat_lock_verified_account_count || 0),
+        clientEligibleAccountCount: Number(row.client_eligible_account_count || 0),
+        clientEligible: Boolean(row.enabled)
+          && Number(row.discovered_count || 0) > 0
+          && Number(row.client_eligible_account_count || 0) > 0,
         firstSeenAt: row.first_seen_at,
         lastSeenAt: row.last_seen_at,
       }));
@@ -702,7 +726,7 @@ export function createAccountSystem({
       verifiedAccepted,
       chatLockVerifiedAccepted,
       generation: sharedModelCatalogGeneration(),
-      models: sharedModelCatalog(),
+      models: sharedModelCatalog({ clientEligibleOnly: true }),
     };
   }
   function updateSharedModelCatalog(modelValue, input = {}) {
@@ -1564,7 +1588,7 @@ export function createAccountSystem({
         return json(res, 200, {
           ok: true,
           generation: sharedModelCatalogGeneration(),
-          models: sharedModelCatalog(),
+          models: sharedModelCatalog({ clientEligibleOnly: true }),
         }, cors), true;
       }
 
