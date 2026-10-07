@@ -1792,10 +1792,32 @@ document.addEventListener('pointerdown', (event) => {
     }
   }
 
+  const NON_SEND_COMPOSER_ACTION = /open\s+(?:the\s+)?desktop\s+app|desktop\s+app|打开桌面应用|桌面应用|codex(?:\/|\s|$)|deeplink|download\s+app|下载(?:桌面)?应用/i;
+
+  function safeSendButton(element, composer) {
+    if (!element || !composer || !visible(element) || element.disabled || element.getAttribute('aria-disabled') === 'true') return false;
+    const form = composer.closest?.('form');
+    if (form && !form.contains(element)) return false;
+    const linked = element.closest?.('a[href]');
+    const descriptor = [
+      element.getAttribute?.('aria-label'),
+      element.getAttribute?.('title'),
+      element.getAttribute?.('data-testid'),
+      element.getAttribute?.('name'),
+      element.getAttribute?.('formaction'),
+      linked?.getAttribute?.('href'),
+      element.textContent,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return !NON_SEND_COMPOSER_ACTION.test(descriptor);
+  }
+
   function findSendButton() {
+    const composer = findComposer();
+    if (!composer) return null;
+    const scope = composer.closest?.('form') || composer.parentElement || document;
     return SEND_SELECTORS
-      .map((selector) => document.querySelector(selector))
-      .find((element) => element && visible(element) && !element.disabled && element.getAttribute('aria-disabled') !== 'true') || null;
+      .flatMap((selector) => [...scope.querySelectorAll(selector)])
+      .find((element) => safeSendButton(element, composer)) || null;
   }
 
   async function waitUntil(predicate, timeoutMs, intervalMs = 100) {
@@ -1870,6 +1892,19 @@ document.addEventListener('pointerdown', (event) => {
     );
   }
 
+  function verificationWorkSurfaceActive() {
+    const composer = findComposer();
+    const surface = activeComposerSurface();
+    const semanticText = [
+      composer?.getAttribute?.('placeholder'),
+      composer?.getAttribute?.('aria-label'),
+      surface?.getAttribute?.('aria-label'),
+      surface?.querySelector?.('[data-placeholder]')?.getAttribute?.('data-placeholder'),
+      surface?.innerText,
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    return /(?:chatgpt\s*work|使用\s*chatgpt\s*work)/i.test(semanticText);
+  }
+
   async function enterVerificationWorkMode() {
     await waitForIdle();
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1878,7 +1913,7 @@ document.addEventListener('pointerdown', (event) => {
         await new Promise((resolve) => window.setTimeout(resolve, 240 * attempt));
         continue;
       }
-      if (workControlSelected(control)) {
+      if (workControlSelected(control) || verificationWorkSurfaceActive()) {
         return { attempted: attempt > 1, alreadySelected: true, confirmed: true, reason: 'already_work' };
       }
       const clicked = await trustedPointer(control, 'click', `verification-work-mode:attempt-${attempt}`);
@@ -1888,8 +1923,13 @@ document.addEventListener('pointerdown', (event) => {
       }
       await new Promise((resolve) => window.setTimeout(resolve, 900));
       const after = verificationWorkControl();
-      if (workControlSelected(after)) {
-        return { attempted: true, alreadySelected: false, confirmed: true, reason: 'work_control_confirmed' };
+      if (workControlSelected(after) || verificationWorkSurfaceActive()) {
+        return {
+          attempted: true,
+          alreadySelected: false,
+          confirmed: true,
+          reason: workControlSelected(after) ? 'work_control_confirmed' : 'work_surface_confirmed',
+        };
       }
     }
     return { attempted: true, alreadySelected: false, confirmed: false, reason: 'work_control_not_confirmed' };

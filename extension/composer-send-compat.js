@@ -26,15 +26,39 @@
     return String(value || '').trim().length > 0;
   }
 
-  function excludedButton(button) {
-    const descriptor = [
-      button.getAttribute('aria-label'),
-      button.getAttribute('title'),
-      button.getAttribute('data-testid'),
-      button.textContent,
+  const NON_SEND_ACTION = /open\s+(?:the\s+)?desktop\s+app|desktop\s+app|打开桌面应用|桌面应用|codex(?:\/|\s|$)|deeplink|download\s+app|下载(?:桌面)?应用/i;
+
+  function buttonDescriptor(button) {
+    const linked = button?.closest?.('a[href]');
+    return [
+      button?.getAttribute?.('aria-label'),
+      button?.getAttribute?.('title'),
+      button?.getAttribute?.('data-testid'),
+      button?.getAttribute?.('name'),
+      button?.getAttribute?.('formaction'),
+      linked?.getAttribute?.('href'),
+      button?.textContent,
     ].filter(Boolean).join(' ').toLowerCase();
+  }
+
+  function excludedButton(button) {
+    const descriptor = buttonDescriptor(button);
     return /stop|停止|voice|语音|dictat|听写|record|录音|attach|upload|file|附件|添加|model|模型|reason|think|思考/.test(descriptor)
+      || NON_SEND_ACTION.test(descriptor)
       || button.getAttribute('aria-haspopup') === 'menu';
+  }
+
+  function clearUnsafeCompatMarker(button) {
+    if (!button || button.dataset?.[MARKER] !== 'true' || !excludedButton(button)) return false;
+    const originalTestId = button.dataset.modelproOriginalTestid;
+    if (originalTestId) {
+      button.setAttribute('data-testid', originalTestId);
+      delete button.dataset.modelproOriginalTestid;
+    } else if (['send-button', 'composer-submit-button'].includes(String(button.getAttribute('data-testid') || ''))) {
+      button.removeAttribute('data-testid');
+    }
+    delete button.dataset[MARKER];
+    return true;
   }
 
   function scoreButton(button, promptHasValue) {
@@ -65,6 +89,10 @@
     if (!scope) return null;
     const hasText = promptHasText(prompt);
     const buttons = [...scope.querySelectorAll('button')];
+    // ChatGPT can repurpose a composer control after switching into Work. If a
+    // GPTWork-annotated button becomes an "Open desktop app" / Codex deeplink CTA,
+    // remove the compatibility marker before any send-button scoring happens.
+    for (const button of buttons) clearUnsafeCompatMarker(button);
     let best = null;
     let bestScore = -1;
     for (const button of buttons) {
