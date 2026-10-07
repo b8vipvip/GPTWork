@@ -85,7 +85,7 @@ async fn dom_evidence_cannot_become_verified() {
 }
 
 #[tokio::test]
-async fn invalid_policy_is_rejected() {
+async fn empty_model_lock_policy_is_accepted() {
     let (_directory, state) = test_state();
     let token = state.api_token().to_owned();
     let response = api::app(state)
@@ -100,7 +100,7 @@ async fn invalid_policy_is_rejected() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[test]
