@@ -20,7 +20,7 @@ function render(data){
     <td><code>${esc(m.chatTransportModel||'—')}</code><br><small>${esc(m.chatResponseModel||'—')}</small></td>
     <td>${Number(m.chatLockVerifiedCount||0)>0?'✅':'—'} (${Number(m.chatLockVerifiedCount||0)})</td>
     <td><input data-field="enabled" type="checkbox" ${m.enabled!==false?'checked':''}></td>
-    <td>发现 ${Number(m.accountCount||0)} / 原生响应 ${Number(m.verifiedAccountCount||0)} / Chat锁定 ${Number(m.chatLockVerifiedAccountCount||0)}</td>
+    <td>发现 ${Number(m.accountCount||0)} / 请求 ${Number(m.requestConfirmedAccountCount||0)} / 原生响应 ${Number(m.verifiedAccountCount||0)} / Chat锁定 ${Number(m.chatLockVerifiedAccountCount||0)}</td>
     <td>${Number(m.discoveredCount||0)}</td>
     <td>${esc(fmt(m.lastSeenAt))}</td>
     <td><button data-action="save">保存</button> <button data-action="delete" class="danger">删除</button></td>
