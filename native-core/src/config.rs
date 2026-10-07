@@ -47,9 +47,10 @@ impl Policy {
             "推理强度",
         )?;
 
-        if self.locked_models.is_empty() {
-            bail!("lockedModels must contain at least one model / 至少选择一个锁定模型");
-        }
+        // An explicitly empty model list is the canonical "model lock disabled" state.
+        // The extension intentionally reaches this state when the user clears the
+        // server-authoritative catalog before running Discover Models. It must remain
+        // a valid persistent policy rather than being misreported as a Core failure.
         if self.allowed_reasoning_levels.is_empty() {
             bail!("allowedReasoningLevels must contain at least one level / 至少选择一个推理强度");
         }
@@ -375,11 +376,14 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_model_policy() {
+    fn accepts_empty_model_policy_as_disabled_lock() {
         let policy = Policy {
             locked_models: Vec::new(),
             ..Policy::default()
-        };
-        assert!(policy.normalized().is_err());
+        }
+        .normalized()
+        .unwrap();
+        assert!(policy.locked_models.is_empty());
+        assert!(!policy.allowed_reasoning_levels.is_empty());
     }
 }
