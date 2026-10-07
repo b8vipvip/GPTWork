@@ -577,8 +577,12 @@ export function createAccountSystem({
         const chatLockResponseConfirmed = item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true;
         const nativeRequestModel = normalizeSharedModelId(item?.nativeRequestModel);
         const nativeResponseModel = normalizeSharedModelId(item?.nativeResponseModel);
-        const chatTransportModel = normalizeSharedModelId(item?.chatTransportModel);
-        const chatResponseModel = normalizeSharedModelId(item?.chatResponseModel);
+        const chatTransportModel = chatLockResponseConfirmed
+          ? normalizeSharedModelId(item?.chatTransportModel)
+          : null;
+        const chatResponseModel = chatLockResponseConfirmed
+          ? normalizeSharedModelId(item?.chatResponseModel)
+          : null;
         const current = select.get(model);
         const seenBefore = seenSelect.get(Number(userId), model);
 
