@@ -55,7 +55,7 @@ test('v0.5.183 page and popup progress render Picker-B Work active-stage metrics
   assert.match(indicator, /catalog\?\.activeStage/);
   assert.match(indicator, /activeStage\?\.completed/);
   assert.match(indicator, /activeStage\?\.requestConfirmed/);
-  assert.match(indicator, /Picker B/);
+  assert.match(indicator, /activeStage\?\.label/);
 
   const popupStart = popup.indexOf('function renderAutoVerifyProgress');
   const popupEnd = popup.indexOf('function showAutoVerifyToast', popupStart);
