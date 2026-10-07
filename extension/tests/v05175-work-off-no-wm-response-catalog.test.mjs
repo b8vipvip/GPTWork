@@ -4,18 +4,18 @@ import test from 'node:test';
 
 const read = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
-test('v0.5.175 Work-off verification never seeds a Work transport network candidate', async () => {
+test('v0.5.176 protocol model candidates are independent from the GPTWork Work feature gate', async () => {
   const background = await read('background.js');
-  assert.match(background, /function serverWorkFeatureEnabled\(\)/);
-  assert.match(background, /serverFeatureSettingsReady === true && currentSettings\.workModeFeatureEnabled === true/);
-  assert.match(background, /const allowWorkTransport = serverWorkFeatureEnabled\(\)/);
-  assert.match(background, /modelTransportId\(model\) !== model/);
-  assert.match(background, /skippedWorkTransportModels\.push\(model\)/);
-  assert.match(background, /work_transport_candidates_skipped/);
-  assert.match(background, /reason: 'work_feature_disabled'/);
+  const start = background.indexOf('function networkCandidateCatalog');
+  const end = background.indexOf('async function loadTrustedLocalNetworkCandidates', start);
+  const body = background.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(body, /serverWorkFeatureEnabled/);
+  assert.doesNotMatch(body, /work_transport_candidates_skipped/);
+  assert.doesNotMatch(body, /modelTransportId\(model\) !== model/);
 });
 
-test('v0.5.175 page settings remain Work-disabled until live server control is applied', async () => {
+test('server Work settings remain fail-inert for GPTWork runtime features only', async () => {
   const background = await read('background.js');
   assert.match(background, /let serverFeatureSettingsReady = false/);
   assert.match(background, /serverFeatureSettingsReady = true/);
@@ -24,14 +24,16 @@ test('v0.5.175 page settings remain Work-disabled until live server control is a
   assert.match(background, /accountClient\.logout\(\);[\s\S]*serverFeatureSettingsReady = false/);
 });
 
-test('v0.5.175 does not republish a request-only shared candidate as a new discovery', async () => {
+test('model discovery publishes Picker/native evidence rather than request-only server seeds', async () => {
   const background = await read('background.js');
-  assert.match(background, /if \(!existing && !pickerDiscovered && !responseConfirmed\) continue/);
-  assert.match(background, /A shared\/network candidate is not a new discovery merely because Fetch/);
-  assert.match(background, /responseConfirmed: models\.filter\(\(item\) => item\.responseConfirmed\)\.length/);
+  assert.match(background, /Discovery itself never uses server history as/);
+  assert.match(background, /sharedCandidates: \[\]/);
+  assert.match(background, /localNetworkCandidates: \[\]/);
+  assert.match(background, /officialWorkDiscovery/);
+  assert.match(background, /chatLockSupported/);
 });
 
-test('v0.5.175 sync trusts only Picker-discovered or strict response-verified shared models', async () => {
+test('shared catalog still requires Picker discovery or strict response verification', async () => {
   const background = await read('background.js');
   assert.match(background, /item\.verifiedCount > 0 \|\| \['A', 'B'\]\.includes\(item\.pickerMode\)/);
   assert.match(background, /Legacy request-only rows remain/);
