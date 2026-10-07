@@ -34,7 +34,7 @@ test('v0.5.183 mirrors the running discovery state onto the active official Work
   const body = background.slice(start, end);
   assert.match(body, /discoveryState\.autoVerification = sourceState\.autoVerification/);
   assert.match(body, /activeStage = \{[\s\S]*id: 'picker-b-work'/);
-  assert.match(body, /broadcastVerificationState\(sourceTabId, ownerTabId, \[discoveryTabId\]\)/);
+  assert.match(body, /broadcastVerificationTabs\(sourceTabId, ownerTabId, \[discoveryTabId\]\)/);
   assert.match(body, /completed: index \+ 1/);
   assert.match(body, /requestConfirmed: nativeResults\.filter\(\(item\) => item\.nativeRequestConfirmed\)\.length/);
 });
