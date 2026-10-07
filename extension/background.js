@@ -1684,17 +1684,11 @@ function mergeAccountCatalogs(...catalogs) {
 function networkCandidateCatalog(items, source = 'network-candidate') {
   const rows = [];
   const seen = new Set();
-  const skippedWorkTransportModels = [];
-  const allowWorkTransport = serverWorkFeatureEnabled();
   for (const item of Array.isArray(items) ? items : []) {
     const raw = typeof item === 'string' ? item : (item?.model || item?.rawId);
     const model = normalizeConcreteModelId(raw);
     if (!model || seen.has(model)) continue;
     seen.add(model);
-    if (!allowWorkTransport && modelTransportId(model) !== model) {
-      skippedWorkTransportModels.push(model);
-      continue;
-    }
     rows.push({
       model,
       rawId: model,
@@ -1709,7 +1703,6 @@ function networkCandidateCatalog(items, source = 'network-candidate') {
     models: rows.map((row) => row.model),
     reasoningLevels: [],
     pickerMode: null,
-    skippedWorkTransportModels,
   };
 }
 
