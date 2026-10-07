@@ -46,9 +46,11 @@ test('v0.5.123 collector and analyzer preserve causal phase page evidence in the
   assert.match(analyzer, /do not decide from one metric alone/);
 });
 
-test('v0.5.123 retains the verified request and served-model lineage fixes from v0.5.120-v0.5.121', () => {
-  assert.match(monitor, /authorityKind: 'verification-transaction'/);
-  assert.match(monitor, /Fetch\.requestPaused is the terminal request-mutation boundary/);
+
+test('v0.5.123 lineage remains compatible with v0.5.176 discovery authorities', () => {
+  assert.match(monitor, /transaction\?\.mode === 'observe-native'/);
+  assert.match(monitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(monitor, /model-discovery-chat-compat/);
   assert.match(monitor, /function isConversationMetadataEndpoint/);
   assert.match(monitor, /path === '\/backend-api\/conversations'/);
 });

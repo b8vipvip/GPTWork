@@ -56,9 +56,11 @@ test('model automation is composer-scoped and structurally owned', () => {
   assert.match(content, /留在聊天模式/);
 });
 
-test('model verification probe uses trusted send and monitor reattach', () => {
+
+test('model discovery probe uses trusted send and monitor reattach', () => {
   assert.match(content, /await trustedPointer\(sendButton, 'click', 'auto-probe-send'\)/);
-  assert.match(background, /Request lock monitor did not reattach after model selection/);
+  assert.match(background, /Request monitor did not reattach/);
+  assert.match(background, /Response capture did not enable before discovery probe/);
 });
 
 test('v0.5.142 uses the validated ModelPro prompt-bank probe path', () => {
@@ -123,21 +125,17 @@ test('trusted pointer attaches first and revalidates the exact DOM target after 
   assert.match(background, /case 'GPTLOCK_TRUSTED_POINTER_PREPARE'/);
 });
 
-test('verification request-lock mode is owned by an explicit transaction, not migrated tab UI state', () => {
+
+test('model-discovery request authority is owned by explicit native/Chat transactions', () => {
   assert.match(background, /const verificationTransactions = new Map\(\)/);
   assert.match(background, /function verificationTransactionForTab/);
-  assert.match(background, /verificationTransactions\.set\(Number\(tabId\)/);
-  assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
-  assert.match(background, /getVerificationTransaction\(tabId\)/);
-  assert.match(networkMonitor, /effectiveConfiguration\(tabId\)/);
-  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
-  assert.match(networkMonitor, /forceModel: model/);
-  assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
-  assert.doesNotMatch(background, /function autoVerificationModelForTab/);
+  assert.match(background, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(networkMonitor, /transaction\?\.mode === 'observe-native'/);
+  assert.match(networkMonitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(networkMonitor, /\? 'model-discovery-chat-compat'/);
+  assert.match(networkMonitor, /forceTransportModel: transportModel/);
 });
 
-
-// v0.5.86 fresh-chat regression: second layer is not the account catalog.
 test('v0.5.86 does not mistake second-layer intelligence model summaries for the final catalog', () => {
   assert.match(content, /composer intelligence picker can expose two model-labelled rows/);
   assert.match(content, /scope\.matches\?\.\('\[data-testid="composer-intelligence-picker-content"\]'\)/);
@@ -163,7 +161,8 @@ test('v0.5.87 menu cleanup is idempotent and cannot toggle a closed model trigge
   assert.match(closeBody, /picker_close_incomplete/);
 });
 
-test('v0.5.87 progress starts before catalog discovery so discovery failure remains visible', () => {
+
+test('discovery progress starts before live Chat catalog discovery so failures remain visible', () => {
   const verifyStart = background.indexOf('async function autoVerify');
   const verifyEnd = background.indexOf('function diagnosticTabState', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
@@ -173,11 +172,9 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
   assert.match(verifyBody, /autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
-  assert.match(verifyBody, /deferred_until_after_gpt_5_5/);
+  assert.match(verifyBody, /official_work_discovery_pending/);
 });
 
-
-// v0.5.90 explicit legacy-core maintenance: remove quarantine and give execution one causal owner.
 test('v0.5.90 executes only through the active composer model trigger', () => {
   assert.doesNotMatch(content, /MODEL_PICKER_MUTATION_QUARANTINED/);
   assert.match(content, /const valueBearing = menuTriggers\.filter/);
@@ -361,11 +358,11 @@ test('v0.5.105 dynamic catalog converges by stable model identity', () => {
   assert.doesNotMatch(verificationPolicy, /\[model \|\| '', rawModel \|\| '', selectorKey, label\]\.join/);
 });
 
-test('v0.5.105 progress UI separates executed work from growing discovery', () => {
-  assert.match(content, /已执行 · \$\{total\} 已发现/);
-  assert.match(content, /模型验证 · 已执行/);
-});
 
+test('discovery progress UI separates executed work from growing discovery', () => {
+  assert.match(content, /已执行 · \$\{total\} 已发现/);
+  assert.match(content, /发现模型 · 已执行/);
+});
 
 test('v0.5.176 keeps GPT-5.6 Thinking distinct and records performance evidence', () => {
   assert.match(policy, /'gpt-5-6-thinking': 'gpt-5\.6-thinking'/);

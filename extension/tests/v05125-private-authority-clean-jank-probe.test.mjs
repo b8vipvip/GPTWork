@@ -8,14 +8,15 @@ const collector = fs.readFileSync(new URL('../../tools/windows/GPTWork-Jank-Diag
 const control = fs.readFileSync(new URL('../jank-control.js', import.meta.url), 'utf8');
 const content = fs.readFileSync(new URL('../content.js', import.meta.url), 'utf8');
 
-test('v0.5.125 verification bypasses private normal-policy interception at Fetch boundary', () => {
+
+test('v0.5.176 discovery bypasses private normal-policy interception at Fetch boundary', () => {
   assert.match(privateHook, /const terminalVerificationHandler = prototype\.handlePausedRequest/);
   assert.match(privateHook, /this\.verificationTransaction\?\.\(tabId\)/);
   assert.match(privateHook, /verification\?\.model/);
   assert.match(privateHook, /terminalVerificationHandler\.call\(this, tabId, params\)/);
-  assert.match(monitor, /authorityKind: 'verification-transaction'/);
+  assert.match(monitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(monitor, /model-discovery-chat-compat/);
   assert.match(monitor, /fetchRequestId: requestId/);
-  assert.match(monitor, /verification_request_authority_mismatch/);
 });
 
 test('v0.5.125 causal collector does not block its 250ms loop on GPU counters or default WPR', () => {
