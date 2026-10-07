@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.188';
+const RUNTIME_CODE_VERSION = '0.5.189';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2957,50 +2957,102 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
-async function resetChatLockVerificationSurface(tabId, ownerTabId, item) {
+async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedSession) {
   const targetModel = normalizeConcreteModelId(item?.model);
-  logRuntime('info', 'discovery', 'chat_lock_surface_reset_started', {
+  const firstUse = sharedSession?.prepared !== true;
+  logRuntime('info', 'discovery', firstUse
+    ? 'chat_lock_shared_session_prepare_started'
+    : 'chat_lock_shared_session_reuse_started', {
     tabId,
     ownerTabId,
     model: targetModel,
     pickerMode: item?.pickerMode || null,
+    conversationPathname: sharedSession?.conversationPathname || null,
   });
 
+  // Response capture is attempt-scoped even though every Chat-lock proof now shares
+  // one ChatGPT tab and one conversation. Clearing Network state between attempts
+  // prevents the prior turn's stream/handoff evidence from confirming the next model.
   await networkMonitor.disableResponseCapture(tabId).catch(() => {});
-  await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
 
-  // chrome.tabs.update resolves before the new document/content runtime is guaranteed
-  // to replace the prior /c/:id conversation. Do not let an immediately responsive old
-  // content script satisfy readiness and accidentally run the next lock proof inside
-  // the previous model's conversation.
-  const navigationDeadline = Date.now() + 12000;
-  let rootDocumentObserved = false;
   let surface = null;
-  do {
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    surface = await verificationSurfaceStatus(tabId);
-    let tabPathname = null;
-    try { tabPathname = new URL(tab?.url || '').pathname; } catch {}
-    if (
-      tabPathname === '/'
-      && surface?.pathname === '/'
-      && surface?.contentRuntimeReady === true
-    ) {
-      rootDocumentObserved = true;
-      break;
+  if (firstUse) {
+    // Start exactly one clean Chat surface for the whole Chat-lock stage. v0.5.187
+    // navigated here for every model, which created a different conversation per
+    // proof and also invalidated in-flight Fetch interceptions during each reset.
+    await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
+
+    const navigationDeadline = Date.now() + 12000;
+    let rootDocumentObserved = false;
+    do {
+      const tab = await chrome.tabs.get(tabId).catch(() => null);
+      surface = await verificationSurfaceStatus(tabId);
+      let tabPathname = null;
+      try { tabPathname = new URL(tab?.url || '').pathname; } catch {}
+      if (
+        tabPathname === '/'
+        && surface?.pathname === '/'
+        && surface?.contentRuntimeReady === true
+      ) {
+        rootDocumentObserved = true;
+        break;
+      }
+      await sleep(200);
+    } while (Date.now() < navigationDeadline);
+    if (!rootDocumentObserved) {
+      throw new Error('Chat lock shared root document did not become ready');
     }
-    await sleep(200);
-  } while (Date.now() < navigationDeadline);
-  if (!rootDocumentObserved) {
-    throw new Error('Chat lock fresh root document did not replace the prior conversation');
+
+    surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
+    if (surface?.ready !== true || surface?.pathname !== '/') {
+      throw new Error(`Chat lock shared surface not ready: ${surface?.reason || surface?.pathname || 'unknown'}`);
+    }
+
+    if (sharedSession) {
+      sharedSession.prepared = true;
+      sharedSession.startedAt = Date.now();
+      sharedSession.initialPathname = '/';
+    }
+    logRuntime('info', 'discovery', 'chat_lock_shared_session_started', {
+      tabId,
+      ownerTabId,
+      model: targetModel,
+      pickerMode: item?.pickerMode || null,
+      pathname: surface?.pathname || null,
+    });
+  } else {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab || !isChatGptUrl(tab.url || '')) {
+      throw new Error('Chat lock shared tab is no longer available');
+    }
+    surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
+    const pathname = surface?.pathname || (() => {
+      try { return new URL(tab.url || '').pathname; } catch { return null; }
+    })();
+    const supportedPath = pathname === '/' || /^\/c\/[^/?#]+\/?$/.test(String(pathname || ''));
+    if (surface?.ready !== true || !supportedPath) {
+      throw new Error(`Chat lock shared conversation not ready: ${surface?.reason || pathname || 'unknown'}`);
+    }
+    if (
+      sharedSession?.conversationPathname
+      && pathname !== sharedSession.conversationPathname
+    ) {
+      throw new Error(`Chat lock shared conversation changed: ${pathname || 'unknown'}`);
+    }
+    if (sharedSession) sharedSession.reused = Number(sharedSession.reused || 0) + 1;
+    logRuntime('info', 'discovery', 'chat_lock_shared_session_reused', {
+      tabId,
+      ownerTabId,
+      model: targetModel,
+      pickerMode: item?.pickerMode || null,
+      pathname,
+      conversationPathname: sharedSession?.conversationPathname || null,
+      reuseCount: Number(sharedSession?.reused || 0),
+    });
   }
 
-  surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
-  if (surface?.ready !== true || surface?.pathname !== '/') {
-    throw new Error(`Chat lock fresh surface not ready: ${surface?.reason || surface?.pathname || 'unknown'}`);
-  }
-
-  const liveState = ensureTabState(tabId, 'https://chatgpt.com/');
+  const currentTab = await chrome.tabs.get(tabId).catch(() => null);
+  const liveState = ensureTabState(tabId, currentTab?.url || 'https://chatgpt.com/');
   resetVerificationAttempt(liveState);
   if (!liveState.autoVerification?.running) {
     const ownerState = Number.isInteger(ownerTabId) ? tabStates.get(ownerTabId) : null;
@@ -3013,19 +3065,32 @@ async function resetChatLockVerificationSurface(tabId, ownerTabId, item) {
     ? await networkMonitor.enableResponseCapture(tabId).catch(() => false)
     : false;
   if (!attached || !captureReady) {
-    throw new Error('Chat lock fresh surface network capture unavailable');
+    throw new Error('Chat lock shared surface network capture unavailable');
   }
 
-  logRuntime('info', 'discovery', 'chat_lock_surface_reset_completed', {
-    tabId,
-    ownerTabId,
-    model: targetModel,
-    pickerMode: item?.pickerMode || null,
-    pathname: surface?.pathname || null,
-    documentVisible: surface?.documentVisible === true,
-  });
   await broadcastVerificationState(tabId, ownerTabId);
-  return { state: liveState, surface };
+  return { state: liveState, surface, firstUse };
+}
+
+async function pinSharedChatLockConversation(tabId, ownerTabId, sharedSession, item) {
+  if (!sharedSession?.prepared) return null;
+  const surface = await verificationSurfaceStatus(tabId);
+  const pathname = surface?.pathname || null;
+  if (!pathname || !/^\/c\/[^/?#]+\/?$/.test(pathname)) return pathname;
+  if (sharedSession.conversationPathname && sharedSession.conversationPathname !== pathname) {
+    throw new Error(`Chat lock shared conversation changed: ${pathname}`);
+  }
+  if (!sharedSession.conversationPathname) {
+    sharedSession.conversationPathname = pathname;
+    logRuntime('info', 'discovery', 'chat_lock_shared_conversation_pinned', {
+      tabId,
+      ownerTabId,
+      model: normalizeConcreteModelId(item?.model),
+      pickerMode: item?.pickerMode || null,
+      pathname,
+    });
+  }
+  return pathname;
 }
 
 async function verifyAccountCatalogModels(
@@ -3074,6 +3139,13 @@ async function verifyAccountCatalogModels(
   let pickerAChatLockQueued = false;
   let officialWorkDiscoveryDone = false;
   const transientRetryCounts = new Map();
+  const sharedChatLockSession = {
+    prepared: false,
+    startedAt: null,
+    initialPathname: null,
+    conversationPathname: null,
+    reused: 0,
+  };
 
   while (index < queue.length || stablePasses < 2 || !officialWorkDiscoveryDone) {
     if (index >= queue.length) {
@@ -3192,7 +3264,7 @@ async function verifyAccountCatalogModels(
     let abortForPendingTurn = false;
     try {
       if (chatCompatibility) {
-        const fresh = await resetChatLockVerificationSurface(tabId, ownerTabId, item);
+        const fresh = await prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedChatLockSession);
         state = fresh.state;
         transactionStartedAtMs = Date.now();
         const transaction = verificationTransactions.get(Number(tabId));
@@ -3257,6 +3329,10 @@ async function verifyAccountCatalogModels(
       if (effectiveTurnSettled?.settled !== true) {
         abortForPendingTurn = true;
         throw new Error('ChatGPT response remained non-terminal during model discovery');
+      }
+
+      if (chatCompatibility) {
+        await pinSharedChatLockConversation(tabId, ownerTabId, sharedChatLockSession, item);
       }
 
       const liveState = ensureTabState(tabId);
@@ -3508,6 +3584,11 @@ async function verifyAccountCatalogModels(
     discoveryPasses: progress.discoveryPasses,
     stablePasses: progress.stablePasses,
     officialWorkDiscovery: progress.officialWorkDiscovery,
+    sharedChatLockSession: {
+      prepared: sharedChatLockSession.prepared === true,
+      conversationPathname: sharedChatLockSession.conversationPathname || null,
+      reuseCount: Number(sharedChatLockSession.reused || 0),
+    },
     reasoningLevels: progress.reasoningLevels,
     results: progress.results,
   });
