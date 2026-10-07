@@ -19,7 +19,7 @@ test('shared model catalog separates discovery, request confirmation and strict 
   assert.match(accountSystem, /request_confirmed_account_count/);
   assert.match(accountSystem, /verified_account_count/);
   assert.match(accountSystem, /s\.response_confirmed=1/);
-  assert.match(accountSystem, /verified_count=\(/);
+  assert.match(accountSystem, /verified_count=verified_count\+\?/);
   assert.match(accountSystem, /discovered_count=discovered_count\+1/);
   assert.match(accountSystem, /account_count/);
 });
@@ -50,7 +50,7 @@ test('admin model management can edit, disable and delete uploaded models', () =
   assert.match(accountSystem, /\/admin\/api\/account\/model-catalog/);
   assert.match(adminHtml, /<h1>模型管理<\/h1>/);
   assert.match(adminHtml, /账户证据/);
-  assert.match(adminHtml, /响应验证账户/);
+  assert.match(adminHtml, /响应验证次数/);
   assert.match(adminJs, /requestConfirmedAccountCount/);
   assert.match(adminJs, /verifiedAccountCount/);
   assert.match(adminJs, /method:'PUT'/);
@@ -63,9 +63,10 @@ test('v0.5.175 response confirmation is the only shared verification authority',
   assert.match(accountSystem, /response_confirmed INTEGER NOT NULL DEFAULT 0/);
   assert.match(accountSystem, /responseConfirmed = item\?\.responseConfirmed === true/);
   assert.match(accountSystem, /response_confirmed=MAX\(shared_model_account_seen\.response_confirmed,excluded\.response_confirmed\)/);
-  assert.match(accountSystem, /WHERE s\.model_id=\? AND s\.response_confirmed=1/);
+  assert.match(accountSystem, /response_confirmed=MAX\(shared_model_account_seen\.response_confirmed,excluded\.response_confirmed\)/);
+  assert.match(accountSystem, /verified_count=verified_count\+\?/);
+  assert.match(accountSystem, /update\.run\(nextLabel, nextPickerMode, responseConfirmed \? 1 : 0, now, model\)/);
   assert.match(accountSystem, /verifiedAccepted \+= 1/);
-  assert.doesNotMatch(accountSystem, /verified_count=verified_count\+\?/);
 });
 
 test('v0.5.175 migration invalidates legacy request-only verification counts', () => {
