@@ -63,3 +63,17 @@ test('Windows installer stages and atomically commits Core with the extension ge
   assert.match(deinitialize, /RollbackExtensionSwap/);
   assert.match(deinitialize, /RollbackCorePayloadSwap/);
 });
+
+
+test('automatic update keeps extension reload under one background authority', () => {
+  const updaterRust = fs.readFileSync(path.resolve(here, '../../native-core/src/updater.rs'), 'utf8');
+  const repair = fs.readFileSync(path.resolve(here, '../../packaging/windows/Repair-GPTWork.ps1'), 'utf8');
+
+  assert.match(updaterRust, /\/GPTWORKAUTOUPDATE=1/);
+  assert.match(installer, /function IsBackgroundAutoUpdate\(\): Boolean;/);
+  assert.match(installer, /function RepairExtensionReloadArgument\(Param: String\): String;/);
+  assert.match(installer, /-SkipExtensionReload/);
+  assert.match(repair, /\[switch\]\$SkipExtensionReload/);
+  assert.match(repair, /if \(-not \$SkipExtensionReload\)/);
+  assert.match(repair, /扩展重载由后台 updater 单独负责/);
+});
