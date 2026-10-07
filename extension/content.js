@@ -2035,7 +2035,8 @@ document.addEventListener('pointerdown', (event) => {
       actuated,
       alreadySelected: false,
       confirmed: false,
-      reason: actuated ? 'work_control_actuated_unconfirmed' : 'work_control_not_confirmed',
+      reason: 'work_control_not_confirmed',
+      actuationReason: actuated ? 'work_control_actuated_unconfirmed' : null,
       surfaceEvidence: verificationWorkSurfaceEvidence(),
     };
   }

@@ -33,6 +33,7 @@ test('v0.5.180 recognizes current Work composer semantics without relying on tog
   assert.match(content, /projectControl/);
   assert.match(content, /companionControl/);
   assert.match(content, /打开桌面应用/);
-  assert.match(content, /work_control_actuated_unconfirmed/);
+  assert.match(content, /actuationReason: actuated \? 'work_control_actuated_unconfirmed' : null/);
+  assert.match(content, /reason: 'work_control_not_confirmed'/);
   assert.match(content, /surfaceEvidence: verificationWorkSurfaceEvidence\(\)/);
 });
