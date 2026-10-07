@@ -1799,6 +1799,7 @@ document.addEventListener('pointerdown', (event) => {
     const form = composer.closest?.('form');
     if (form && !form.contains(element)) return false;
     const linked = element.closest?.('a[href]');
+    const popup = String(element.getAttribute?.('aria-haspopup') || '').trim().toLowerCase();
     const descriptor = [
       element.getAttribute?.('aria-label'),
       element.getAttribute?.('title'),
@@ -1808,6 +1809,8 @@ document.addEventListener('pointerdown', (event) => {
       linked?.getAttribute?.('href'),
       element.textContent,
     ].filter(Boolean).join(' ').toLowerCase();
+    if (popup && popup !== 'false') return false;
+    if (/select\s+(?:project|workspace)|choose\s+(?:project|workspace)|选择项目|選擇項目|选择工作区|選擇工作區/i.test(descriptor)) return false;
     return !NON_SEND_COMPOSER_ACTION.test(descriptor);
   }
 
@@ -1818,6 +1821,40 @@ document.addEventListener('pointerdown', (event) => {
     return SEND_SELECTORS
       .flatMap((selector) => [...scope.querySelectorAll(selector)])
       .find((element) => safeSendButton(element, composer)) || null;
+  }
+
+  async function trustedEnter(composer, source = 'auto-probe-enter') {
+    if (!composer || !composer.isConnected || !visible(composer)) return false;
+    try { composer.focus?.({ preventScroll: true }); } catch { try { composer.focus?.(); } catch {} }
+    pointerTrace('keyboard_intent', {
+      source,
+      href: location.href,
+      target: compactElementProbe(composer),
+    });
+    try {
+      const result = await sendMessage({
+        type: 'GPTLOCK_TRUSTED_KEY',
+        key: 'Enter',
+        source,
+        target: compactElementProbe(composer),
+      });
+      pointerTrace('keyboard_dispatched', {
+        source,
+        href: location.href,
+        key: 'Enter',
+        target: compactElementProbe(composer),
+      });
+      return result?.key === 'Enter';
+    } catch (error) {
+      pointerTrace('keyboard_failed', {
+        source,
+        href: location.href,
+        key: 'Enter',
+        error: error instanceof Error ? error.message : String(error),
+        target: compactElementProbe(composer),
+      });
+      return false;
+    }
   }
 
   async function waitUntil(predicate, timeoutMs, intervalMs = 100) {
@@ -2003,12 +2040,30 @@ document.addEventListener('pointerdown', (event) => {
       const filled = await waitUntil(() => composerText(composer).includes(composerWitness), 2500, 80);
       if (!filled) throw new Error('Failed to write visible test message / 无法写入可见测试消息');
 
-      const sendButton = await waitUntil(findSendButton, 5000, 100);
-      if (!sendButton) {
-        if (draftPreserved) setComposerText(composer, originalDraft);
-        throw new Error('ChatGPT send button is unavailable / ChatGPT 发送按钮不可用');
+      const sendButton = await waitUntil(findSendButton, 2200, 100);
+      let sendMethod = 'visible_composer_click';
+      if (sendButton) {
+        const clicked = await trustedPointer(sendButton, 'click', 'auto-probe-send');
+        if (!clicked) {
+          if (draftPreserved) setComposerText(composer, originalDraft);
+          throw new Error('ChatGPT send button could not be activated / ChatGPT 发送按钮无法激活');
+        }
+      } else {
+        const keyboardComposer = findComposer();
+        const stillOwnsProbe = Boolean(keyboardComposer && composerText(keyboardComposer).includes(composerWitness));
+        pointerTrace('auto_probe_send_button_unavailable', {
+          href: location.href,
+          composer: compactElementProbe(keyboardComposer),
+          controls: keyboardComposer?.closest?.('form')
+            ? [...keyboardComposer.closest('form').querySelectorAll('button')].filter(visible).slice(0, 20).map(lightElementProbe)
+            : [],
+        });
+        if (!stillOwnsProbe || !await trustedEnter(keyboardComposer, 'auto-probe-enter')) {
+          if (draftPreserved) setComposerText(composer, originalDraft);
+          throw new Error('ChatGPT send control is unavailable / ChatGPT 发送控件不可用');
+        }
+        sendMethod = 'visible_composer_enter';
       }
-      await trustedPointer(sendButton, 'click', 'auto-probe-send');
 
       const sent = await waitUntil(() => {
         const currentComposer = findComposer();
@@ -2031,7 +2086,7 @@ document.addEventListener('pointerdown', (event) => {
       }
       return {
         sent: true,
-        method: 'visible_composer_click',
+        method: sendMethod,
         draftPreserved,
         draftRestored,
         assistantCountBefore,

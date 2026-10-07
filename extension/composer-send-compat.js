@@ -43,9 +43,10 @@
 
   function excludedButton(button) {
     const descriptor = buttonDescriptor(button);
-    return /stop|停止|voice|语音|dictat|听写|record|录音|attach|upload|file|附件|添加|model|模型|reason|think|思考/.test(descriptor)
+    const popup = String(button.getAttribute('aria-haspopup') || '').trim().toLowerCase();
+    return /stop|停止|voice|语音|dictat|听写|record|录音|attach|upload|file|附件|添加|model|模型|reason|think|思考|select\s+(?:project|workspace)|choose\s+(?:project|workspace)|选择项目|選擇項目|选择工作区|選擇工作區/.test(descriptor)
       || NON_SEND_ACTION.test(descriptor)
-      || button.getAttribute('aria-haspopup') === 'menu';
+      || (popup && popup !== 'false');
   }
 
   function clearUnsafeCompatMarker(button) {
@@ -102,12 +103,21 @@
         bestScore = score;
       }
     }
-    // The redesigned composer can expose only an icon button with no historical
-    // data-testid/aria-label. Once prompt text exists, its right-most enabled
-    // composer button is the submit control shown by ChatGPT.
+    // The redesigned Chat composer can expose an unlabeled icon-only submit control.
+    // Keep the compatibility fallback, but only for a non-popup button in the
+    // composer's trailing action zone. Work exposes project/file/plugin controls in
+    // the leading rail; those must never be promoted to send-button.
     if ((!best || bestScore < 45) && hasText) {
+      const scopeRect = scope.getBoundingClientRect?.();
+      const trailingBoundary = scopeRect
+        ? scopeRect.right - Math.max(180, Math.min(260, scopeRect.width * 0.34))
+        : Number.NEGATIVE_INFINITY;
       const fallback = buttons
-        .filter((button) => visible(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true' && !excludedButton(button))
+        .filter((button) => {
+          if (!visible(button) || button.disabled || button.getAttribute('aria-disabled') === 'true' || excludedButton(button)) return false;
+          const rect = button.getBoundingClientRect?.();
+          return !scopeRect || (rect && rect.right >= trailingBoundary);
+        })
         .sort((a, b) => (b.getBoundingClientRect?.().x || 0) - (a.getBoundingClientRect?.().x || 0))[0] || null;
       if (fallback) best = fallback;
     }

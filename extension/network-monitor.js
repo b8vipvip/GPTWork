@@ -398,6 +398,26 @@ export class ChatGptNetworkMonitor {
     return this.attachedTabs.has(tabId);
   }
 
+  async trustedKey(tabId, key = 'Enter') {
+    const normalized = String(key || '');
+    if (normalized !== 'Enter') throw new Error('Unsupported trusted key');
+    const attached = this.isAttached(tabId) || await this.attach(tabId);
+    if (!attached) throw new Error('Debugger is not attached for trusted keyboard input');
+    const target = this.target(tabId);
+    const event = {
+      key: 'Enter',
+      code: 'Enter',
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+      autoRepeat: false,
+      isKeypad: false,
+      modifiers: 0,
+    };
+    await debuggerCall('sendCommand', target, 'Input.dispatchKeyEvent', { type: 'rawKeyDown', ...event });
+    await debuggerCall('sendCommand', target, 'Input.dispatchKeyEvent', { type: 'keyUp', ...event });
+    return true;
+  }
+
   async trustedPointer(tabId, { action = 'click', x, y } = {}) {
     const clientX = Number(x);
     const clientY = Number(y);
