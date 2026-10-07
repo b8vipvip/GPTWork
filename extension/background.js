@@ -37,7 +37,10 @@ import {
   tabFeatureStateSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
-import { ensureContentRuntime } from './content-runtime-recovery.js';
+import {
+  ensureContentRuntime,
+  ensureContentRuntimeDuringLoad,
+} from './content-runtime-recovery.js';
 import {
   createVerificationCatalog,
   summarizeVerificationOutcome,
@@ -1985,6 +1988,8 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
     reason: 'content_runtime_unavailable',
   };
   let recoveryAttempted = false;
+  let loadingRecoveryAttempts = 0;
+  let lastLoadingRecoveryAt = 0;
   do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'verification_tab_closed' };
@@ -2000,9 +2005,7 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
       return { ...last, ready: true, structuralReady: true };
     }
 
-    // If the page really has no receiver after navigation is complete, invoke the
-    // single content-runtime recovery authority once instead of waiting for a
-    // tab-activation/onUpdated race to happen to inject it.
+    // Historical recovery path for a completed navigation.
     if (
       !recoveryAttempted
       && last?.contentRuntimeReady !== true
@@ -2011,6 +2014,46 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
     ) {
       recoveryAttempted = true;
       const recovery = await ensureContentRuntime(tabId, 'verification_surface_wait');
+      if (recovery?.ready === true) {
+        last = await verificationSurfaceStatus(tabId);
+        structuralReady = last?.contentRuntimeReady === true
+          && last?.composerReady === true
+          && last?.modelTriggerReady === true;
+        if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
+          return { ...last, ready: true, structuralReady: true };
+        }
+      }
+    } else if (
+      last?.contentRuntimeReady !== true
+      && tab.status === 'loading'
+      && isChatGptUrl(tab.url || '')
+      && loadingRecoveryAttempts < 3
+      && Date.now() - lastLoadingRecoveryAt >= 700
+    ) {
+      // New verification tabs can remain "loading" for many seconds while ChatGPT's
+      // SPA is already committed and scriptable. The old complete-only gate created a
+      // deadlock: no receiver -> no verification, but recovery was forbidden until a
+      // completion event that might arrive after the verification timeout.
+      loadingRecoveryAttempts += 1;
+      lastLoadingRecoveryAt = Date.now();
+      const recovery = await ensureContentRuntimeDuringLoad(
+        tabId,
+        `verification_surface_loading_${loadingRecoveryAttempts}`,
+      ).catch((error) => ({
+        ready: false,
+        injected: false,
+        reason: 'loading_recovery_failed',
+        error: errorText(error),
+      }));
+      logRuntime(recovery?.ready ? 'info' : 'warn', 'discovery', 'verification_surface_loading_recovery', {
+        tabId,
+        attempt: loadingRecoveryAttempts,
+        tabStatus: tab.status ?? null,
+        ready: recovery?.ready === true,
+        injected: recovery?.injected === true,
+        reason: recovery?.reason || null,
+        error: recovery?.error || null,
+      });
       if (recovery?.ready === true) {
         last = await verificationSurfaceStatus(tabId);
         structuralReady = last?.contentRuntimeReady === true
@@ -2144,6 +2187,8 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
   let last = { entered: false, actuated: false, reason: 'content_runtime_unavailable' };
   let recoveryAttempted = false;
+  let loadingRecoveryAttempts = 0;
+  let lastLoadingRecoveryAt = 0;
   do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'discovery_tab_closed' };
@@ -2175,6 +2220,33 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
     ) {
       recoveryAttempted = true;
       await ensureContentRuntime(tabId, 'official_work_entry_wait').catch(() => null);
+    } else if (
+      tab.status === 'loading'
+      && isChatGptUrl(tab.url || '')
+      && /receiving end does not exist|content_runtime_unavailable/i.test(String(last.reason || ''))
+      && loadingRecoveryAttempts < 3
+      && Date.now() - lastLoadingRecoveryAt >= 700
+    ) {
+      loadingRecoveryAttempts += 1;
+      lastLoadingRecoveryAt = Date.now();
+      const recovery = await ensureContentRuntimeDuringLoad(
+        tabId,
+        `official_work_entry_loading_${loadingRecoveryAttempts}`,
+      ).catch((error) => ({
+        ready: false,
+        injected: false,
+        reason: 'loading_recovery_failed',
+        error: errorText(error),
+      }));
+      logRuntime(recovery?.ready ? 'info' : 'warn', 'discovery', 'official_work_loading_recovery', {
+        tabId,
+        attempt: loadingRecoveryAttempts,
+        tabStatus: tab.status ?? null,
+        ready: recovery?.ready === true,
+        injected: recovery?.injected === true,
+        reason: recovery?.reason || null,
+        error: recovery?.error || null,
+      });
     }
     await sleep(300);
   } while (Date.now() < deadline);
