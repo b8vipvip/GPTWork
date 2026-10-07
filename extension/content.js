@@ -596,8 +596,11 @@ document.addEventListener('pointerdown', (event) => {
     const auto = cachedState?.autoVerification;
     if (auto?.running) {
       const catalog = auto.catalogVerification;
-      const total = Math.max(0, Number(catalog?.total || auto.maxAttempts || 0));
-      const completed = Math.min(total, Math.max(0, Number(catalog?.completed || 0)));
+      const activeStage = catalog?.activeStage && Number(catalog.activeStage.total || 0) > 0
+        ? catalog.activeStage
+        : null;
+      const total = Math.max(0, Number(activeStage?.total ?? catalog?.total ?? auto.maxAttempts ?? 0));
+      const completed = Math.min(total, Math.max(0, Number(activeStage?.completed ?? catalog?.completed ?? 0)));
       let progressHost = document.getElementById('gptlock-verification-progress-host');
       if (!progressHost) {
         progressHost = document.createElement('div');
@@ -609,19 +612,29 @@ document.addEventListener('pointerdown', (event) => {
       }
       positionVerificationProgressHost(progressHost);
       const progress = progressHost.shadowRoot.querySelector('.model-verification-progress');
-      const label = catalog?.currentLabel || catalog?.currentModel || '正在发现账户模型…';
-      const verified = Math.max(0, Number(catalog?.verified || 0));
-      const requestConfirmed = Math.max(0, Number(catalog?.requestConfirmed || 0));
+      const label = activeStage?.currentLabel
+        || catalog?.currentLabel
+        || catalog?.currentModel
+        || '正在发现账户模型…';
+      const verified = Math.max(0, Number(activeStage?.verified ?? catalog?.verified ?? 0));
+      const requestConfirmed = Math.max(0, Number(activeStage?.requestConfirmed ?? catalog?.requestConfirmed ?? 0));
       progress.querySelector('.current span').textContent = label;
       // The catalog intentionally grows after real turns. Make that explicit instead
       // of presenting a changing denominator as if verification restarted.
-      progress.querySelector('.execution').textContent = total ? `${completed} 已执行 · ${total} 已发现` : '正在发现…';
+      const stageLabel = activeStage?.label || null;
+      progress.querySelector('.execution').textContent = total
+        ? activeStage
+          ? `${completed} / ${total} · ${stageLabel || 'Picker B · ChatGPT Work'}`
+          : `${completed} 已执行 · ${total} 已发现`
+        : '正在发现…';
       progress.querySelector('.verified').textContent = total ? `${verified} / ${total}` : '…';
       progress.querySelector('.requested').textContent = total ? `${requestConfirmed} / ${total}` : '…';
       const bar = progress.querySelector('progress');
       bar.max = Math.max(1, total);
       bar.value = completed;
-      button.textContent = `GPTWork · 发现模型 · 已执行 ${completed} · 已发现 ${total}`;
+      button.textContent = activeStage
+        ? `GPTWork · 发现模型 · ${activeStage.label} ${completed}/${total}`
+        : `GPTWork · 发现模型 · 已执行 ${completed} · 已发现 ${total}`;
       button.dataset.tone = 'wait';
       button.title = '发现模型正在进行；执行进度与验证成功分开统计。响应/流模型元数据优先用于验证，请求模型保留为请求确认。';
       return;
@@ -1130,6 +1143,10 @@ document.addEventListener('pointerdown', (event) => {
     ) || [])].filter(visible);
     return [...new Set(rows)].filter((row) => {
       const descriptor = rowModelDescriptor(row);
+      const accessibleName = String(
+        row.getAttribute?.('aria-label') || row.getAttribute?.('title') || ''
+      ).trim();
+      if (/^(?:select model|choose model|选择模型|選擇模型|모델 선택)$/i.test(accessibleName)) return false;
       const signal = descriptor.values.join(' ');
       // Reasoning rows can repeat the active model name (for example
       // "GPT-5.6 Luna 高"). They are not additional account models. Require

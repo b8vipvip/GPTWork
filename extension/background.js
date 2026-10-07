@@ -45,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.182';
+const RUNTIME_CODE_VERSION = '0.5.183';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -382,6 +382,7 @@ function ensureTabState(tabId, url = '') {
     const nextContextKey = contextKey(url);
     const preserveVerificationState = Boolean(
       state.autoVerification?.running
+        || verificationTransactionForTab(tabId)
         || (state.autoVerification && !state.contextKey.startsWith('conversation:') && nextContextKey.startsWith('conversation:')),
     );
     if (preserveVerificationState) {
@@ -1768,6 +1769,16 @@ async function broadcastVerificationState(executionTabId, ownerTabId) {
   }
 }
 
+async function broadcastVerificationTabs(executionTabId, ownerTabId, additionalTabIds = []) {
+  await broadcastVerificationState(executionTabId, ownerTabId);
+  const already = new Set([Number(executionTabId), Number(ownerTabId)].filter(Number.isInteger));
+  for (const tabId of Array.isArray(additionalTabIds) ? additionalTabIds.map(Number) : []) {
+    if (!Number.isInteger(tabId) || already.has(tabId)) continue;
+    already.add(tabId);
+    await broadcastTabState(tabId);
+  }
+}
+
 async function verificationSurfaceStatus(tabId) {
   return sendTabMessage(tabId, { type: 'GPTLOCK_VERIFICATION_SURFACE_STATUS' }).catch((error) => ({
     ok: false,
@@ -2040,6 +2051,7 @@ async function waitForNetworkModelEvidence(
 }
 
 async function discoverOfficialWorkModels(sourceTabId, progress) {
+  const ownerTabId = Number.isInteger(progress?.ownerTabId) ? progress.ownerTabId : sourceTabId;
   const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
   if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
     logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
@@ -2063,6 +2075,14 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     discoveryTabId = Number(discoveryTab?.id);
     if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary official Work discovery tab was not created');
     await isolateTabForNativeDiscovery(discoveryTabId);
+
+    const sourceState = ensureTabState(sourceTabId, sourceTab.url || 'https://chatgpt.com/');
+    const discoveryState = ensureTabState(discoveryTabId, discoveryTab.url || 'https://chatgpt.com/');
+    discoveryState.windowId = sourceTab.windowId;
+    if (sourceState.autoVerification?.running === true) {
+      discoveryState.autoVerification = sourceState.autoVerification;
+    }
+    await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
 
     logRuntime('info', 'discovery', 'official_work_model_discovery_tab_created', {
       sourceTabId,
@@ -2103,8 +2123,6 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
       });
     }
 
-    const state = ensureTabState(discoveryTabId, discoveryTab.url || 'https://chatgpt.com/');
-    state.windowId = sourceTab.windowId;
     const attached = await networkMonitor.attach(discoveryTabId);
     const responseCaptureReady = attached
       ? await networkMonitor.enableResponseCapture(discoveryTabId).catch(() => false)
@@ -2161,7 +2179,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         startedAt: Date.now(),
       });
       try {
-        resetVerificationAttempt(state);
+        resetVerificationAttempt(ensureTabState(discoveryTabId));
         const probe = await sendVerificationReasoningProbe(
           discoveryTabId,
           'GPTWork 发现模型 · Official Work bootstrap',
@@ -2195,11 +2213,34 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
 
     const nativeResults = [];
     const rows = discovered.rows.map((row) => ({ ...row, pickerMode: 'B', discoverySource: 'official-work-picker-b' }));
+    progress.activeStage = {
+      id: 'picker-b-work',
+      label: 'Picker B · ChatGPT Work',
+      total: rows.length,
+      completed: 0,
+      verified: 0,
+      requestConfirmed: 0,
+      currentModel: null,
+      currentLabel: '正在验证 Picker B（Work）',
+    };
+    await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
       const model = normalizeConcreteModelId(row?.model || row?.rawId);
       if (!model) continue;
-      resetVerificationAttempt(state);
+      const liveStateBefore = ensureTabState(discoveryTabId);
+      resetVerificationAttempt(liveStateBefore);
+      progress.activeStage = {
+        ...progress.activeStage,
+        completed: index,
+        verified: nativeResults.filter((item) => item.nativeVerified).length,
+        requestConfirmed: nativeResults.filter((item) => item.nativeRequestConfirmed).length,
+        currentModel: model,
+        currentLabel: String(row.label || model),
+      };
+      progress.currentModel = model;
+      progress.currentSelectorKey = String(row.selectorKey || '');
+      progress.currentLabel = String(row.label || model);
       const startedAtMs = Date.now();
       verificationTransactions.set(discoveryTabId, {
         model,
@@ -2208,6 +2249,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         label: String(row.label || model),
         startedAt: startedAtMs,
       });
+      await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
       logRuntime('info', 'discovery', 'official_work_model_native_started', {
         sourceTabId,
         discoveryTabId,
@@ -2253,13 +2295,14 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
             timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
           }).catch(() => null),
         ]);
+        const liveState = ensureTabState(discoveryTabId);
         const rawRequestModel = normalizeRawProtocolModelId(
-          state.lastRewrite?.transportModelAfter
-            || state.lastRewrite?.transportModelBefore
-            || state.lastRequest?.rawModel,
+          liveState.lastRewrite?.transportModelAfter
+            || liveState.lastRewrite?.transportModelBefore
+            || liveState.lastRequest?.rawModel,
         );
         const responseEvidence = networkEvidence?.evidence
-          || (state.lastResponseEvidence?.requestId === networkEvidence?.requestId ? state.lastResponseEvidence : null);
+          || (liveState.lastResponseEvidence?.requestId === networkEvidence?.requestId ? liveState.lastResponseEvidence : null);
         const rawResponseModel = normalizeRawProtocolModelId(
           responseEvidence?.rawModel
             || responseEvidence?.model,
@@ -2293,7 +2336,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
               ? 'request_transport+response_stream'
               : null,
           nativeVerified,
-          requestId: networkEvidence?.requestId || state.lastRequest?.requestId || null,
+          requestId: networkEvidence?.requestId || liveState.lastRequest?.requestId || null,
         };
         nativeResults.push(result);
         logRuntime(nativeVerified ? 'info' : 'warn', 'discovery', 'official_work_model_native_verified', {
@@ -2327,6 +2370,17 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         });
       } finally {
         verificationTransactions.delete(discoveryTabId);
+        progress.activeStage = {
+          ...progress.activeStage,
+          completed: index + 1,
+          verified: nativeResults.filter((item) => item.nativeVerified).length,
+          requestConfirmed: nativeResults.filter((item) => item.nativeRequestConfirmed).length,
+          currentModel: null,
+          currentLabel: index + 1 < rows.length
+            ? '准备验证下一个 Picker B（Work）'
+            : 'Picker B（Work）验证完成',
+        };
+        await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
       }
     }
 
@@ -2348,6 +2402,11 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         nativeVerificationBasis: item.nativeVerificationBasis || null,
       }));
 
+    progress.activeStage = null;
+    progress.currentModel = null;
+    progress.currentSelectorKey = null;
+    progress.currentLabel = null;
+    await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
     logRuntime(nativeResults.length ? 'info' : 'warn', 'discovery', 'official_work_model_discovery_completed', {
       sourceTabId,
       discoveryTabId,
@@ -2693,6 +2752,7 @@ async function verifyAccountCatalogModels(
     shared: Array.isArray(sharedCandidates) ? sharedCandidates.length : 0,
     localNetwork: Array.isArray(localNetworkCandidates) ? localNetworkCandidates.length : 0,
   };
+  progress.ownerTabId = Number.isInteger(ownerTabId) ? ownerTabId : tabId;
 
   mergeCatalog(accountCatalog, 'chat-picker-a');
   await broadcastVerificationState(tabId, ownerTabId);
