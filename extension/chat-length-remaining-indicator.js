@@ -41,11 +41,9 @@
   function normalizeModelId(value) {
     const model = String(value ?? '').trim().toLowerCase();
     if (!model) return null;
-    if (
-      model === 'gpt-5.6-sol-wm'
-      || model === 'gpt-5-6'
-      || model === 'gpt-5-6-thinking'
-    ) return 'gpt-5.6-sol';
+    if (model === 'gpt-5.6-sol-wm') return 'gpt-5.6-sol';
+    if (model === 'gpt-5-6-thinking') return 'gpt-5.6-thinking';
+    if (model === 'gpt-5-6') return 'gpt-5.6';
     return /^[a-z0-9._:-]{1,128}$/.test(model) ? model : null;
   }
 
