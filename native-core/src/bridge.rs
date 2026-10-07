@@ -325,7 +325,10 @@ mod tests {
             }),
         );
         assert_eq!(response["ok"], true);
-        assert!(response["data"]["policy"]["lockedModels"].as_array().unwrap().is_empty());
+        assert!(response["data"]["policy"]["lockedModels"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         assert!(state.policy().unwrap().0.locked_models.is_empty());
     }
 
