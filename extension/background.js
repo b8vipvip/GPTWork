@@ -67,6 +67,7 @@ let nativePort = null;
 let requestSequence = 0;
 let currentPolicy = DEFAULT_POLICY;
 let currentSettings = DEFAULT_SETTINGS;
+let serverFeatureSettingsReady = false;
 let localEnabledOverride = null;
 let coreConnection = { connected: false, error: null };
 let initializeTask = null;
@@ -88,6 +89,10 @@ let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
   return localEnabledOverride === true && currentSettings.enabled === true && !diagnosticRuntimeSuspended;
+}
+
+function serverWorkFeatureEnabled() {
+  return serverFeatureSettingsReady === true && currentSettings.workModeFeatureEnabled === true;
 }
 
 async function masterStorageEnabled() {
@@ -400,12 +405,15 @@ function accountAllowsState(state) {
 }
 
 function effectiveSettingsForState(state) {
+  const workModeFeatureEnabled = serverWorkFeatureEnabled();
   const verification = verificationTransactionForTab(state?.tabId);
   if (verification) {
     // Model verification is an isolated measurement transaction. User Work/model-lock
     // switches must not block the fixed probe or alter the model ChatGPT actually sends.
+    // Work availability remains server-authoritative even during verification.
     return {
       ...currentSettings,
+      workModeFeatureEnabled,
       enabled: true,
       networkVerificationEnabled: true,
       autoAlignSelection: false,
@@ -413,6 +421,7 @@ function effectiveSettingsForState(state) {
   }
   return {
     ...currentSettings,
+    workModeFeatureEnabled,
     enabled: Boolean(
       currentSettings.enabled
         && accountAllowsState(state)
@@ -1201,6 +1210,7 @@ async function configureOpenTabs() {
 
 async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
   if (!accountClient.hasSession()) {
+    serverFeatureSettingsReady = false;
     accountState = accountClient.snapshot();
     if (reconfigure) await configureOpenTabs();
     return accountState;
@@ -1228,6 +1238,7 @@ async function applyServerFeatureSettings() {
     const control = data?.control;
     const remote = control?.featureSettings;
     if (!remote) return null;
+    serverFeatureSettingsReady = true;
     const nextSettings = normalizeSettings({
       ...currentSettings,
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
@@ -1643,7 +1654,7 @@ function networkCandidateCatalog(items, source = 'network-candidate') {
   const rows = [];
   const seen = new Set();
   const skippedWorkTransportModels = [];
-  const allowWorkTransport = currentSettings.workModeFeatureEnabled !== false;
+  const allowWorkTransport = serverWorkFeatureEnabled();
   for (const item of Array.isArray(items) ? items : []) {
     const raw = typeof item === 'string' ? item : (item?.model || item?.rawId);
     const model = normalizeConcreteModelId(raw);
@@ -1875,7 +1886,7 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
 }
 
 async function discoverNativeWorkCandidates(sourceTabId, progress) {
-  if (currentSettings.workModeFeatureEnabled === false) {
+  if (!serverWorkFeatureEnabled()) {
     logRuntime('info', 'verification', 'native_work_catalog_discovery_skipped', {
       sourceTabId,
       reason: 'work_feature_disabled',
@@ -2464,7 +2475,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   // then uses the same tab-scoped network policy as normal GPTWork use; it does not
   // click or invoke ChatGPT's native Work toggle and does not wait for Picker B.
   if (item.model === 'gpt-5.5') {
-    if (currentSettings.workModeFeatureEnabled === false) {
+    if (!serverWorkFeatureEnabled()) {
       workActivationPending = false;
       progress.workDiscovery = {
         attempted: false,
@@ -3243,6 +3254,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GPTLOCK_ACCOUNT_LOGOUT': {
         accountState = await accountClient.logout();
+        serverFeatureSettingsReady = false;
         await configureOpenTabs();
         return accountState;
       }
