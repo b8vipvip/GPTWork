@@ -258,7 +258,8 @@ test('v0.5.176 keeps trusted Picker selection for Chat-native models and raw pro
 
 test('v0.5.97 accepts the exact owned catalog radio state as selection acknowledgement', () => {
   assert.match(content, /candidate\.getAttribute\('data-state'\) === 'checked'/);
-  assert.match(content, /return collectObservation\(\)\.model === desired/);
+  assert.match(content, /if \(collectObservation\(\)\.model === desired\) return true/);
+  assert.match(content, /pickerSelectedModelSummary\(modern\.picker, desired\)/);
   assert.match(content, /verification_model_selection_confirmed/);
 });
 
