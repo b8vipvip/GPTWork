@@ -12,8 +12,9 @@ test('Work policy has a configurable floor and preserves eligible page models', 
   assert.doesNotMatch(runtime, /isAtLeastSol\(/);
 });
 
-test('failed Work discovery cannot be reported as a fully verified account', () => {
-  assert.match(background, /catalogVerification\?\.workDiscovery\?\.attempted === true/);
-  assert.match(background, /catalogVerification\.workDiscovery\.entered !== true/);
-  assert.match(background, /finalReason = 'work_model_discovery_incomplete'/);
+
+test('failed official Work discovery cannot be reported as a fully verified account', () => {
+  assert.match(background, /catalogVerification\?\.officialWorkDiscovery\?\.attempted === true/);
+  assert.match(background, /catalogVerification\.officialWorkDiscovery\.entered !== true/);
+  assert.match(background, /finalReason = 'official_work_model_discovery_incomplete'/);
 });

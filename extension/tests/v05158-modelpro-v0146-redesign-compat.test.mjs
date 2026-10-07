@@ -7,7 +7,8 @@ import {
 
 const r = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
-test('ViewTrack and transient-response compatibility remains present after v0.5.158', async () => {
+
+test('ViewTrack and bounded transient-response retry remain compatible with v0.5.176 discovery', async () => {
   const [background, content, vendor, source, manifestText, packageText] = await Promise.all([
     r('background.js'), r('content.js'), r('vendor/modelpro/model-verification.js'),
     r('vendor/modelpro/MODELPRO_SOURCE.json'), r('manifest.json'), r('package.json'),
@@ -24,11 +25,10 @@ test('ViewTrack and transient-response compatibility remains present after v0.5.
   assert.match(content, /function redesignedModelViewOpener\(picker\)/);
   assert.match(content, /model-picker-redesign-model-view/);
   assert.match(content, /invalidated_after_debugger_attach/);
-  assert.match(background, /account_model_verification_transient_response_retry/);
-  assert.match(background, /shouldRetryTransientResponse\(result, \{ maxRetries: 1 \}\)/);
+  assert.match(background, /const transientRetryCounts = new Map\(\)/);
+  assert.match(background, /!chatCompatibility && shouldRetryTransientResponse\(result, \{ maxRetries: 1 \}\)/);
   assert.doesNotMatch(background, /publishableVerificationResults\(/);
   assert.match(background, /async function publishAccountModels\(accountCatalog, progress\)/);
-  assert.match(background, /for \(const row of accountCatalog\?\.rows \|\| \[\]\)/);
   const manifest = JSON.parse(manifestText);
   assert.equal(JSON.parse(packageText).version, manifest.version);
   const escapedVersion = manifest.version.replaceAll('.', '\\.');

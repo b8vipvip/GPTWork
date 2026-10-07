@@ -21,17 +21,19 @@ test('settings source derives Work default choices from locked models', async ()
   assert.match(options, /patchPolicy\(\{ workDefaultModel: target\.value \}\)/);
 });
 
-test('request policy and verification both consume the configured Work default', async () => {
+
+test('runtime Work policy consumes the configured default while discovery remains source-first', async () => {
   const [runtime, background] = await Promise.all([read('tab-feature-runtime.js'), read('background.js')]);
   assert.match(runtime, /basePolicy\.workDefaultModel/);
   assert.match(runtime, /isAtLeastWorkFloor\(selected, floor\) \? selected : floor/);
-  assert.match(background, /const workDefaultModel = workBootstrapModelForTab\(tabId\)/);
-  assert.match(background, /function workBootstrapModelForTab\(tabId\) \{\s*const policy = effectivePolicyForTabSync\(tabId\);\s*return normalizeConcreteModelId\(policy\.workDefaultModel\)/);
-  assert.match(background, /selectorKey: '__work_transport__'/);
-  assert.doesNotMatch(background.slice(
+  const block = background.slice(
     background.indexOf('async function verifyAccountCatalogModels'),
     background.indexOf('function modelVerificationHistoryRecord'),
-  ), /model: 'gpt-6-astra'/);
+  );
+  assert.match(block, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.match(block, /picker-b-chat-compatibility/);
+  assert.doesNotMatch(block, /workBootstrapModelForTab\(tabId\)/);
+  assert.doesNotMatch(block, /selectorKey: '__work_transport__'/);
 });
 
 test('content indicator exposes the active Work strategy', async () => {
