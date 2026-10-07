@@ -3740,7 +3740,7 @@ async function autoVerify(tabId) {
       catalogFailed: 0,
       checks: {
         coreChecked: coreCheck.checked === true,
-      coreConnected: coreCheck.checked ? coreCheck.connected === true : null,
+        coreConnected: coreCheck.checked ? coreCheck.connected === true : null,
         coreError: coreCheck.error ?? null,
         monitorAttached,
         responseCaptureEnabled,
