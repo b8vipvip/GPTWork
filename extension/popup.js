@@ -133,7 +133,7 @@ function autoReasonText(auto) {
   const reasons = {
     confirmed_model_mismatch: '响应明确确认了不允许的模型。',
     reasoning_not_exposed: '模型已确认，但 ChatGPT 未暴露推理强度元数据。',
-    model_not_exposed: '正式请求已经锁定，但流式响应和会话详情都没有暴露可验证模型元数据。',
+    model_not_exposed: '正式请求已经锁定，但流式响应和会话详情都没有暴露可发现模型元数据。',
     downstream_model_not_exposed: '已跟踪 handoff 后续流，但尚未从嵌套流元数据中解析出模型。',
     response_verification_timeout: '等待响应确认超时。',
     response_model_evidence_incomplete: '逐模型执行已经完成，但仍有模型只取得请求确认，响应/流未暴露可核验模型字段。',
@@ -262,12 +262,12 @@ function render(state) {
   };
   let [title, detail, tone] = states[guard?.status] || ['无活动状态 / No active state', '请打开 chatgpt.com 后重试。', 'off'];
   if (auto?.running) {
-    title = `模型验证中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Model verification`;
+    title = `发现模型中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Model discovery`;
     detail = '正在等待本次真实聊天响应；如果响应证据不足，程序会自动跟踪 handoff 后续流并最多再发送一次测试消息。';
     tone = 'wait';
   } else if (auto?.completedAt && autoApplies) {
     if (autoEvidenceConfirmed && auto.outcome === 'verified') {
-      title = '模型验证通过 / Verified';
+      title = '发现模型通过 / Verified';
       detail = `已完成 ${auto.attempts?.length || 1} 次尝试；后端流响应元数据确认 ${auto.responseModel} · ${auto.responseReasoning}。后续无模型字段的流帧不会抹掉这条已确认结果。`;
       tone = 'good';
     } else {
@@ -277,14 +277,14 @@ function render(state) {
       const verified = Number(catalog.verified || 0);
       const requested = Number(catalog.requestConfirmed || 0);
       title = auto.outcome === 'partial'
-        ? '模型验证部分完成 / Partial verification'
-        : '模型验证未完全确认 / Model verification incomplete';
-      detail = `执行进度 ${completed}/${total}；验证成功 ${verified}/${total}；请求确认 ${requested}/${total}。 ${autoReasonText(auto) || '证据仍不足。'}`;
+        ? '发现模型部分完成 / Partial verification'
+        : '发现模型未完全确认 / Model discovery incomplete';
+      detail = `执行进度 ${completed}/${total}；发现并验证成功 ${verified}/${total}；请求确认 ${requested}/${total}。 ${autoReasonText(auto) || '证据仍不足。'}`;
       tone = auto.outcome === 'model_mismatch' ? 'bad' : 'wait';
     }
   }
   const reasonDetails = {
-    model_missing: '当前响应帧未暴露可验证模型字段；不能单独据此推翻同一轮此前已经确认的后端证据。',
+    model_missing: '当前响应帧未暴露可发现模型字段；不能单独据此推翻同一轮此前已经确认的后端证据。',
     reasoning_missing: '当前响应帧未暴露可验证推理强度字段；不能单独据此推翻同一轮此前已经确认的后端证据。',
     response_body_read_failed: '浏览器未能读取本次响应体；请求锁定不受影响。',
     response_model_not_exposed: 'ChatGPT 当前响应帧未暴露模型元数据。',
@@ -361,20 +361,20 @@ elements.popupPreferredReasoning?.addEventListener('change', async () => {
 });
 
 elements.autoVerify.addEventListener('click', () => {
-  elements.message.textContent = '正在进行模型验证；最终模型以正式请求网络元数据为准 / Model verification is running…';
+  elements.message.textContent = '正在进行发现模型；最终模型以正式请求网络元数据为准 / Model discovery is running…';
   elements.autoVerify.disabled = true;
   void sendMessage({ type: 'GPTLOCK_AUTO_VERIFY' })
     .then(async (result) => {
       await load();
       if (result.outcome === 'verified') {
-        showAutoVerifyToast(`模型验证完成：执行 ${result.catalogTotal || 0}/${result.catalogTotal || 0}；验证成功 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal || 0}。`);
+        showAutoVerifyToast(`发现模型完成：执行 ${result.catalogTotal || 0}/${result.catalogTotal || 0}；发现并验证成功 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal || 0}。`);
       } else if (result.outcome === 'model_verified_reasoning_unconfirmed') {
-        showAutoVerifyToast(`模型验证完成：模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；响应推理元数据未完全暴露。`);
+        showAutoVerifyToast(`发现模型完成：模型目录 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；响应推理元数据未完全暴露。`);
       } else {
-        showAutoVerifyToast(`模型验证完成：执行 ${result.catalogTotal || 0}/${result.catalogTotal || 0}；验证成功 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal || 0}。原因：${result.reason || 'metadata_incomplete'}。`);
+        showAutoVerifyToast(`发现模型完成：执行 ${result.catalogTotal || 0}/${result.catalogTotal || 0}；发现并验证成功 ${result.catalogVerified || 0}/${result.catalogTotal || 0}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal || 0}。原因：${result.reason || 'metadata_incomplete'}。`);
       }
     })
-    .catch((error) => { showAutoVerifyToast(`模型验证失败 / Model verification failed: ${error.message}`); })
+    .catch((error) => { showAutoVerifyToast(`发现模型失败 / Model discovery failed: ${error.message}`); })
     .finally(() => { elements.autoVerify.disabled = false; });
 });
 
