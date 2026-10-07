@@ -286,15 +286,33 @@ export function createAccountSystem({
 
   function ensureColumn(table, column, definition) {
     const columns = db.prepare(`PRAGMA table_info(${table})`).all();
-    if (!columns.some((item) => item.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    if (columns.some((item) => item.name === column)) return false;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+    return true;
   }
   ensureColumn('users', 'email_verification_exempt', 'email_verification_exempt INTEGER NOT NULL DEFAULT 0 CHECK(email_verification_exempt IN (0,1))');
   ensureColumn('users', 'user_level', "user_level TEXT NOT NULL DEFAULT 'normal'");
   ensureColumn('shared_model_catalog', 'enabled', 'enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))');
   ensureColumn('shared_model_catalog', 'discovered_count', 'discovered_count INTEGER NOT NULL DEFAULT 0 CHECK(discovered_count >= 0)');
+  const responseConfirmedAdded = ensureColumn(
+    'shared_model_account_seen',
+    'response_confirmed',
+    'response_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(response_confirmed IN (0,1))',
+  );
   db.prepare("UPDATE users SET user_level='normal' WHERE user_level NOT IN ('normal','deep','heavy') OR user_level IS NULL").run();
   db.prepare('UPDATE shared_model_catalog SET discovered_count=verified_count WHERE discovered_count=0 AND verified_count>0').run();
   db.prepare('INSERT OR IGNORE INTO shared_model_catalog_state(id,generation,updated_at) VALUES(1,0,?)').run(nowIso());
+  if (responseConfirmedAdded) {
+    // v0.5.174 and earlier counted request rewrite confirmation as model verification.
+    // Reset that legacy counter: from v0.5.175 onward verified_count is derived only
+    // from strict backend response confirmation.
+    db.prepare(`UPDATE shared_model_catalog
+      SET verified_count=(
+        SELECT COUNT(*) FROM shared_model_account_seen s
+        WHERE s.model_id=shared_model_catalog.model_id AND s.response_confirmed=1
+      )`).run();
+    db.prepare('UPDATE shared_model_catalog_state SET generation=generation+1,updated_at=? WHERE id=1').run(nowIso());
+  }
   db.exec('CREATE INDEX IF NOT EXISTS idx_shared_model_account_seen_model ON shared_model_account_seen(model_id,last_seen_at)');
   ensureColumn('memberships', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_orders', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
@@ -452,7 +470,8 @@ export function createAccountSystem({
     const where = includeDisabled ? '' : 'WHERE c.enabled=1';
     return db.prepare(`SELECT c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.first_seen_at,c.last_seen_at,
         (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id) AS account_count,
-        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.request_confirmed=1) AS verified_account_count
+        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.request_confirmed=1) AS request_confirmed_account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id AND s.response_confirmed=1) AS verified_account_count
       FROM shared_model_catalog c ${where}
       ORDER BY c.enabled DESC,c.verified_count DESC,c.discovered_count DESC,c.last_seen_at DESC,c.model_id ASC LIMIT 256`).all()
       .map((row) => ({
@@ -463,6 +482,7 @@ export function createAccountSystem({
         discoveredCount: Number(row.discovered_count || 0),
         verifiedCount: Number(row.verified_count || 0),
         accountCount: Number(row.account_count || 0),
+        requestConfirmedAccountCount: Number(row.request_confirmed_account_count || 0),
         verifiedAccountCount: Number(row.verified_account_count || 0),
         firstSeenAt: row.first_seen_at,
         lastSeenAt: row.last_seen_at,
@@ -476,13 +496,21 @@ export function createAccountSystem({
       (model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at,enabled,discovered_count)
       VALUES(?,?,?,?,?,?,1,1)`);
     const update = db.prepare(`UPDATE shared_model_catalog SET
-      display_name=?,picker_mode=?,verified_count=verified_count+?,discovered_count=discovered_count+1,last_seen_at=?
+      display_name=?,picker_mode=?,discovered_count=discovered_count+1,last_seen_at=?
       WHERE model_id=?`);
-    const seen = db.prepare(`INSERT INTO shared_model_account_seen(user_id,model_id,request_confirmed,first_seen_at,last_seen_at)
-      VALUES(?,?,?,?,?)
+    const seenSelect = db.prepare('SELECT request_confirmed,response_confirmed FROM shared_model_account_seen WHERE user_id=? AND model_id=?');
+    const seen = db.prepare(`INSERT INTO shared_model_account_seen(user_id,model_id,request_confirmed,response_confirmed,first_seen_at,last_seen_at)
+      VALUES(?,?,?,?,?,?)
       ON CONFLICT(user_id,model_id) DO UPDATE SET
         request_confirmed=MAX(shared_model_account_seen.request_confirmed,excluded.request_confirmed),
+        response_confirmed=MAX(shared_model_account_seen.response_confirmed,excluded.response_confirmed),
         last_seen_at=excluded.last_seen_at`);
+    const recomputeVerified = db.prepare(`UPDATE shared_model_catalog SET
+      verified_count=(
+        SELECT COUNT(*) FROM shared_model_account_seen s
+        WHERE s.model_id=? AND s.response_confirmed=1
+      )
+      WHERE model_id=?`);
     let accepted = 0;
     let verifiedAccepted = 0;
     let catalogChanged = false;
@@ -494,19 +522,25 @@ export function createAccountSystem({
         const label = String(item?.label || '').replace(/\s+/g, ' ').trim().slice(0, 120);
         const pickerMode = ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null;
         const requestConfirmed = item?.requestConfirmed === true;
+        const responseConfirmed = item?.responseConfirmed === true;
         const current = select.get(model);
+        const seenBefore = seenSelect.get(Number(userId), model);
         if (!current) {
-          insert.run(model, label, pickerMode, requestConfirmed ? 1 : 0, now, now);
+          insert.run(model, label, pickerMode, 0, now, now);
           catalogChanged = true;
         } else {
           const nextLabel = label || current.display_name || '';
           const nextPickerMode = pickerMode || current.picker_mode || null;
           if (nextLabel !== current.display_name || nextPickerMode !== (current.picker_mode || null)) catalogChanged = true;
-          update.run(nextLabel, nextPickerMode, requestConfirmed ? 1 : 0, now, model);
+          update.run(nextLabel, nextPickerMode, now, model);
         }
-        seen.run(Number(userId), model, requestConfirmed ? 1 : 0, now, now);
+        seen.run(Number(userId), model, requestConfirmed ? 1 : 0, responseConfirmed ? 1 : 0, now, now);
+        recomputeVerified.run(model, model);
+        if ((!seenBefore?.request_confirmed && requestConfirmed) || (!seenBefore?.response_confirmed && responseConfirmed)) {
+          catalogChanged = true;
+        }
         accepted += 1;
-        if (requestConfirmed) verifiedAccepted += 1;
+        if (responseConfirmed) verifiedAccepted += 1;
       }
       if (catalogChanged) bumpSharedModelCatalogGeneration();
       db.exec('COMMIT');
