@@ -72,7 +72,10 @@ test('client settings expose the server-controlled Work guidance behavior switch
 test('model management is a dedicated admin surface for uploaded catalog entries', () => {
   assert.match(modelAdminHtml, /data-admin-page="models"/);
   assert.match(modelAdminHtml, /共享模型目录/);
-  assert.match(modelAdminHtml, /发现账户/);
+  assert.match(modelAdminHtml, /账户证据/);
+  assert.match(modelAdminHtml, /响应验证次数/);
+  assert.match(modelAdminJs, /requestConfirmedAccountCount/);
+  assert.match(modelAdminJs, /verifiedAccountCount/);
   assert.match(modelAdminJs, /\/admin\/api\/account\/model-catalog/);
   assert.match(modelAdminJs, /method:'PUT'/);
   assert.match(modelAdminJs, /method:'DELETE'/);
