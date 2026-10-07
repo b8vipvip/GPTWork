@@ -41,13 +41,19 @@ async function liveRecoveryReadiness(status, snapshot) {
   // extension reload with the pre-update version and was keeping a stale error card
   // visible even after GET_STATE already reported the new Core online.
   const nativeStatus = liveState?.nativeStatus || stored?.nativeStatus || {};
-  const coreReady = nativeStatus.connected === true && compareVersions(nativeStatus.version, targetVersion) >= 0;
-  if (!coreReady) return { ready: false, coreReady, nativeVersion: nativeStatus.version ?? null };
+  const nativeConnected = nativeStatus.connected === true;
+  const nativeVersion = nativeConnected ? nativeStatus.version ?? null : null;
+  const lastKnownNativeVersion = nativeStatus.lastKnownVersion
+    ?? (!nativeConnected ? nativeStatus.version ?? null : nativeVersion);
+  const coreReady = nativeConnected && compareVersions(nativeVersion, targetVersion) >= 0;
+  if (!coreReady) {
+    return { ready: false, coreReady, nativeVersion, lastKnownNativeVersion };
+  }
 
   // If GPTWork was enabled before the update, recovery is not complete while the master
   // gate is still off. This prevents a stale Core version alone from falsely clearing UI.
   if (status?.originalMasterEnabled === true && stored?.gptworkEnabledLocal !== true) {
-    return { ready: false, coreReady, nativeVersion: nativeStatus.version ?? null };
+    return { ready: false, coreReady, nativeVersion, lastKnownNativeVersion };
   }
 
   const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' }).catch(() => []);
@@ -73,7 +79,8 @@ async function liveRecoveryReadiness(status, snapshot) {
   return {
     ready: pendingContentTabs.length === 0 && pendingMonitorTabs.length === 0,
     coreReady,
-    nativeVersion: nativeStatus.version ?? null,
+    nativeVersion,
+    lastKnownNativeVersion,
     pendingContentTabs,
     pendingMonitorTabs,
   };
@@ -167,12 +174,20 @@ function renderRecoveryGuide(status) {
   const currentVersion = chrome.runtime.getManifest().version;
   const targetVersion = String(status?.targetVersion || currentVersion);
   const nativeVersion = snapshot?.nativeVersion ? String(snapshot.nativeVersion) : null;
+  const lastKnownNativeVersion = snapshot?.lastKnownNativeVersion
+    ? String(snapshot.lastKnownNativeVersion)
+    : null;
   const pendingContent = Array.isArray(snapshot?.pendingContentTabs) ? snapshot.pendingContentTabs.length : 0;
   const pendingMonitor = Array.isArray(snapshot?.pendingMonitorTabs) ? snapshot.pendingMonitorTabs.length : 0;
   if (title) title.textContent = '更新已安装，需要最后一步 / Recovery action required';
   if (!detail) return;
   if (snapshot?.coreReady === false) {
-    detail.textContent = `扩展 ${currentVersion} 已加载，但恢复检查仍看到本地 Core ${nativeVersion || '未就绪'}（目标 ${targetVersion}）。先点“再次自动重新加载 GPTWork”；如果仍显示旧 Core，请重新运行正式安装器。仅在扩展管理页重新加载不能升级本地 Core。`;
+    const history = lastKnownNativeVersion
+      ? `；上次成功连接版本为 ${lastKnownNativeVersion}`
+      : '';
+    detail.textContent = nativeVersion
+      ? `扩展 ${currentVersion} 已加载，但本次实时 Core 握手得到 ${nativeVersion}（目标 ${targetVersion}）${history}。先点“再次自动重新加载 GPTWork”；若实时握手仍低于目标版本，请重新运行正式安装器。`
+      : `扩展 ${currentVersion} 已加载，但当前没有成功连接到本地 Core（目标 ${targetVersion}${history}）。这里不会再把历史版本当作当前版本。先点“再次自动重新加载 GPTWork”；如果仍无法实时连接，请重新运行正式安装器修复 Core/Native Messaging。`;
     return;
   }
   const pendingText = pendingContent || pendingMonitor
