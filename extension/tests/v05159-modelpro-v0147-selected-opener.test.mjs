@@ -31,5 +31,11 @@ test('v0.5.159 Select-model ViewTrack authority remains present after later Mode
   assert.ok(navStart >= 0 && navEnd > navStart);
   const navigation = content.slice(navStart, navEnd);
   assert.match(navigation, /picker-redesign-model-view-unresolved/);
-  assert.match(navigation, /return \{ trigger, picker, opener: modelViewOpener, submenu: null, rows: \[\], pageContext, pickerMode: 'A' \};/);
+  assert.match(navigation, /return \{ trigger, picker, opener: modelViewOpener, submenu: null, rows: \[\], pageContext, pickerMode: null \};/);
+  assert.match(navigation, /picker-mode-b-redesigned-owned-model-list/);
+  assert.doesNotMatch(
+    navigation.slice(navigation.indexOf('picker-redesign-model-view-unresolved')),
+    /modelPickerPointer\(modelViewOpener,[^)]*model-picker-submenu/,
+    'after the owned Select-model navigation becomes unresolved, GPTWork must return instead of clicking that control again',
+  );
 });

@@ -1346,36 +1346,63 @@ document.addEventListener('pointerdown', (event) => {
       });
       const navigated = await modelPickerPointer(modelViewOpener, 'click', 'model-picker-redesign-model-view');
       if (navigated) {
-        redesignedDirectRows = await waitUntil(() => {
+        const redesignedResolution = await waitUntil(() => {
           // The exact accessible Select-model ViewToggle just established causal ownership.
-          // ViewTrack can keep the newly selected model panel underneath a transient overlay,
-          // so the final semantic rows may temporarily fail elementFromPoint() even though
-          // they are the exact default Chat pair in this same owned picker. Final selection
-          // already uses the semantic DOM row and request/response metadata is terminal proof.
-          const rows = defaultChatDirectModelRows(picker, { requireInteraction: false });
-          return rows.length === 2 ? rows : null;
-        }, 2600, 80) || [];
-        if (redesignedDirectRows.length === 2) {
-          pickerTopologyProbe('picker-mode-a-redesigned-model-view', {
+          // Chat's current model view is the exact default pair (5.6 Sol + 5.5). Official
+          // Work uses the same ViewTrack shell, but its selected model panel expands in-place
+          // to the account catalog (for example GPT-6/Astra/Terra/Luna rows). Treat that
+          // expanded owned list as Picker B instead of falling through as an empty Picker A.
+          const chatRows = defaultChatDirectModelRows(picker, { requireInteraction: false });
+          if (chatRows.length === 2) return { pickerMode: 'A', rows: chatRows };
+
+          const ownedRows = distinctModelRows(picker);
+          const ownedModels = new Set(
+            ownedRows.map((row) => rowModelDescriptor(row).model || rowModelDescriptor(row).rawId).filter(Boolean)
+          );
+          const exactChatPair = ownedModels.size === 2
+            && ownedModels.has('gpt-5.5')
+            && ownedModels.has('gpt-5.6-sol');
+          if (ownedRows.length >= 2 && !exactChatPair) {
+            return { pickerMode: 'B', rows: ownedRows };
+          }
+          return null;
+        }, 3600, 80);
+
+        if (redesignedResolution?.rows?.length) {
+          const resolvedMode = redesignedResolution.pickerMode === 'B' ? 'B' : 'A';
+          const stage = resolvedMode === 'B'
+            ? 'picker-mode-b-redesigned-owned-model-list'
+            : 'picker-mode-a-redesigned-model-view';
+          pickerTopologyProbe(stage, {
             pageContext,
-            pickerMode: 'A',
+            pickerMode: resolvedMode,
             ownedPicker: compactElementProbe(picker),
-            modelRows: redesignedDirectRows.map((row) => ({
+            modelRows: redesignedResolution.rows.map((row) => ({
               element: compactElementProbe(row),
               descriptor: rowModelDescriptor(row),
             })),
           });
-          return { trigger, picker, opener: null, submenu: picker, rows: redesignedDirectRows, pageContext, pickerMode: 'A' };
+          return {
+            trigger,
+            picker,
+            opener: null,
+            submenu: picker,
+            rows: redesignedResolution.rows,
+            pageContext,
+            pickerMode: resolvedMode,
+          };
         }
-        // A dispatched ViewTrack navigation owns this attempt. Never fall through
-        // to modelSubmenuOpener and click the same Select-model toggle a second time.
+
+        // A dispatched ViewTrack navigation owns this attempt. Never click the same
+        // Select-model toggle twice. Also do not label an unresolved transition as
+        // Picker A: discovery must be free to retry until the owned model panel settles.
         pickerTopologyProbe('picker-redesign-model-view-unresolved', {
           pageContext,
-          pickerMode: 'A',
+          pickerMode: null,
           opener: compactElementProbe(modelViewOpener),
           ownedPicker: compactElementProbe(picker),
         });
-        return { trigger, picker, opener: modelViewOpener, submenu: null, rows: [], pageContext, pickerMode: 'A' };
+        return { trigger, picker, opener: modelViewOpener, submenu: null, rows: [], pageContext, pickerMode: null };
       }
     }
 
