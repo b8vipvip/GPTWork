@@ -254,7 +254,8 @@ export class ChatGptNetworkMonitor {
         ? 'model-discovery-chat-compat'
         : 'verification-transaction',
       authorityModel: model,
-      authorityRequestModel: transportModel || model,
+      authorityRequestModel: model,
+      authorityTransportModel: transportModel,
       authorityStartedAt: Number(transaction?.startedAt) || null,
     };
   }
@@ -654,16 +655,23 @@ export class ChatGptNetworkMonitor {
           authorityKind: configuration.authorityKind,
           authorityModel: configuration.authorityModel,
           authorityRequestModel: configuration.authorityRequestModel,
+          authorityTransportModel: configuration.authorityTransportModel,
           authorityStartedAt: configuration.authorityStartedAt,
         });
         return;
       }
       rewrite = rewriteConversationPostData(postData, configuration);
+      const actualAuthorityModel = configuration.authorityKind === 'model-discovery-chat-compat'
+        ? rewrite.transportModelAfter
+        : rewrite.modelAfter;
+      const expectedAuthorityModel = configuration.authorityKind === 'model-discovery-chat-compat'
+        ? configuration.authorityTransportModel
+        : configuration.authorityRequestModel;
       if (
         ['verification-transaction', 'model-discovery-chat-compat'].includes(configuration.authorityKind)
-        && rewrite.modelAfter !== configuration.authorityRequestModel
+        && actualAuthorityModel !== expectedAuthorityModel
       ) {
-        const detail = `verification_request_authority_mismatch:${rewrite.modelAfter || 'none'}!=${configuration.authorityRequestModel}`;
+        const detail = `verification_request_authority_mismatch:${actualAuthorityModel || 'none'}!=${expectedAuthorityModel || 'none'}`;
         this.onRewrite?.(tabId, {
           endpoint,
           requestId: params.networkId ? String(params.networkId) : null,
@@ -680,6 +688,7 @@ export class ChatGptNetworkMonitor {
           authorityKind: configuration.authorityKind,
           authorityModel: configuration.authorityModel,
           authorityRequestModel: configuration.authorityRequestModel,
+          authorityTransportModel: configuration.authorityTransportModel,
           authorityStartedAt: configuration.authorityStartedAt,
           error: detail,
         });
@@ -703,6 +712,7 @@ export class ChatGptNetworkMonitor {
         authorityKind: configuration.authorityKind,
         authorityModel: configuration.authorityModel,
         authorityRequestModel: configuration.authorityRequestModel,
+        authorityTransportModel: configuration.authorityTransportModel,
         authorityStartedAt: configuration.authorityStartedAt,
       });
     } catch (error) {
