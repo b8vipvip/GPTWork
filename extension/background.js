@@ -1901,38 +1901,58 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   return { ...last, entered: false, reason: last?.reason || 'native_work_surface_not_ready' };
 }
 
-async function discoverNativeWorkCandidates(sourceTabId, progress) {
-  if (!serverWorkFeatureEnabled()) {
-    logRuntime('info', 'verification', 'native_work_catalog_discovery_skipped', {
-      sourceTabId,
-      reason: 'work_feature_disabled',
-    });
-    return networkCandidateCatalog([], 'native-picker-b');
+async function waitForNetworkModelEvidence(tabId, startedAtMs, timeoutMs = AUTO_VERIFY_RESPONSE_TIMEOUT_MS) {
+  const deadline = Date.now() + Math.max(1500, Number(timeoutMs || 0));
+  let requestId = null;
+  while (Date.now() < deadline) {
+    const state = ensureTabState(tabId);
+    const requestTime = Date.parse(state.lastRequest?.capturedAt || '');
+    if (
+      state.lastRequest?.requestId
+      && Number.isFinite(requestTime)
+      && requestTime >= startedAtMs - 1500
+    ) requestId = state.lastRequest.requestId;
+
+    const evidence = state.lastResponseEvidence;
+    if (
+      requestId
+      && evidence?.requestId === requestId
+      && !evidence?.conflicts?.model
+      && (evidence?.rawModel || evidence?.model)
+    ) {
+      return { timedOut: false, requestId, evidence };
+    }
+    await sleep(150);
   }
+  return { timedOut: true, requestId, evidence: null };
+}
+
+async function discoverOfficialWorkModels(sourceTabId, progress) {
   const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
   if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
-    logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+    logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
       sourceTabId,
       reason: 'source_tab_unavailable',
     });
-    return networkCandidateCatalog([], 'native-picker-b');
+    return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
   }
 
   const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
   const restoreActiveTabId = Number(activeTabs?.[0]?.id) || null;
   let discoveryTab = null;
   let activatedForReadiness = false;
+  let discoveryTabId = null;
   try {
     discoveryTab = await chrome.tabs.create({
       windowId: sourceTab.windowId,
       url: 'https://chatgpt.com/',
       active: false,
     });
-    const discoveryTabId = Number(discoveryTab?.id);
-    if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary discovery tab was not created');
+    discoveryTabId = Number(discoveryTab?.id);
+    if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary official Work discovery tab was not created');
     await isolateTabForNativeDiscovery(discoveryTabId);
 
-    logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_created', {
+    logRuntime('info', 'discovery', 'official_work_model_discovery_tab_created', {
       sourceTabId,
       discoveryTabId,
       active: false,
@@ -1940,26 +1960,32 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
 
     let enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 9000);
     if (enter?.entered !== true) {
-      // Some ChatGPT builds defer top-level controls while a tab is hidden. Activate
-      // only as a bounded fallback, then restore the user's previously active tab.
       await chrome.tabs.update(discoveryTabId, { active: true }).catch(() => null);
       activatedForReadiness = true;
-      logRuntime('info', 'verification', 'native_work_catalog_discovery_activation_fallback', {
+      logRuntime('info', 'discovery', 'official_work_model_discovery_activation_fallback', {
         sourceTabId,
         discoveryTabId,
-        reason: enter?.reason || 'work_control_not_ready_in_background',
+        reason: enter?.reason || 'official_work_control_not_ready_in_background',
       });
       enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
     }
 
     if (enter?.entered !== true) {
-      logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+      logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
         sourceTabId,
         discoveryTabId,
-        reason: enter?.reason || 'work_control_not_found',
+        reason: enter?.reason || 'official_work_control_not_found',
       });
-      return networkCandidateCatalog([], 'native-picker-b');
+      return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
     }
+
+    const state = ensureTabState(discoveryTabId, discoveryTab.url || 'https://chatgpt.com/');
+    state.windowId = sourceTab.windowId;
+    const attached = await networkMonitor.attach(discoveryTabId);
+    const responseCaptureReady = attached
+      ? await networkMonitor.enableResponseCapture(discoveryTabId).catch(() => false)
+      : false;
+    if (!attached || !responseCaptureReady) throw new Error('Official Work network capture unavailable');
 
     const scanForPickerB = async (timeoutMs) => {
       const deadline = Date.now() + timeoutMs;
@@ -1973,57 +1999,218 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
       return latest;
     };
 
-    let discovered = null;
-    let bootstrapSent = false;
     await sleep(700);
-    discovered = await scanForPickerB(3600);
-
+    let discovered = await scanForPickerB(3600);
+    let bootstrapSent = false;
     if (discovered?.pickerMode !== 'B') {
-      const probe = await sendVerificationReasoningProbe(
-        discoveryTabId,
-        'GPTWork 模型目录发现',
-        Math.max(1, Number(progress.completed || 0) + 1),
-        Math.max(1, Number(progress.total || 1)),
-      );
-      bootstrapSent = probe?.sent === true;
-      if (bootstrapSent) {
-        await sendTabMessage(discoveryTabId, {
-          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
-          assistantCountBefore: probe.assistantCountBefore ?? 0,
-          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
-        }).catch(() => null);
-        discovered = await scanForPickerB(6000);
+      verificationTransactions.set(discoveryTabId, {
+        model: 'gpt-5.6-sol',
+        mode: 'observe-native',
+        selectorKey: '__official_work_bootstrap__',
+        label: 'Official Work bootstrap',
+        startedAt: Date.now(),
+      });
+      try {
+        resetVerificationAttempt(state);
+        const probe = await sendVerificationReasoningProbe(
+          discoveryTabId,
+          'GPTWork 发现模型 · Official Work bootstrap',
+          1,
+          1,
+        );
+        bootstrapSent = probe?.sent === true;
+        if (bootstrapSent) {
+          await sendTabMessage(discoveryTabId, {
+            type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+            assistantCountBefore: probe.assistantCountBefore ?? 0,
+            timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+          }).catch(() => null);
+          discovered = await scanForPickerB(6000);
+        }
+      } finally {
+        verificationTransactions.delete(discoveryTabId);
       }
     }
 
-    const candidates = discovered?.pickerMode === 'B'
-      ? networkCandidateCatalog(discovered.rows, 'native-picker-b')
-      : networkCandidateCatalog([], 'native-picker-b');
-    logRuntime(candidates.rows.length ? 'info' : 'warn', 'verification', 'native_work_catalog_discovery_completed', {
+    if (discovered?.pickerMode !== 'B' || !Array.isArray(discovered?.rows) || !discovered.rows.length) {
+      logRuntime('warn', 'discovery', 'official_work_picker_b_empty', {
+        sourceTabId,
+        discoveryTabId,
+        entered: true,
+        bootstrapSent,
+        pickerMode: discovered?.pickerMode ?? null,
+      });
+      return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
+    }
+
+    const nativeResults = [];
+    const rows = discovered.rows.map((row) => ({ ...row, pickerMode: 'B', discoverySource: 'official-work-picker-b' }));
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const model = normalizeConcreteModelId(row?.model || row?.rawId);
+      if (!model) continue;
+      resetVerificationAttempt(state);
+      const startedAtMs = Date.now();
+      verificationTransactions.set(discoveryTabId, {
+        model,
+        mode: 'observe-native',
+        selectorKey: String(row.selectorKey || ''),
+        label: String(row.label || model),
+        startedAt: startedAtMs,
+      });
+      try {
+        const selectionResponse = await sendTabMessage(discoveryTabId, {
+          type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+          model,
+          selectorKey: row.selectorKey,
+          label: row.label,
+        });
+        const selection = selectionResponse?.result || {};
+        if (selection.selectionAttempted !== true) throw new Error('Official Work Picker-B model selection was not activated');
+
+        await sleep(1200);
+        const reattached = await networkMonitor.attach(discoveryTabId);
+        if (!reattached || !await networkMonitor.enableResponseCapture(discoveryTabId)) {
+          throw new Error('Official Work response capture did not re-enable');
+        }
+        const probe = await sendVerificationReasoningProbe(
+          discoveryTabId,
+          'GPTWork 发现模型 · Official Work native',
+          index + 1,
+          rows.length,
+        );
+        if (!probe?.sent) throw new Error('Official Work discovery probe was not sent');
+
+        const [networkEvidence, settled] = await Promise.all([
+          waitForNetworkModelEvidence(discoveryTabId, startedAtMs),
+          sendTabMessage(discoveryTabId, {
+            type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+            assistantCountBefore: probe.assistantCountBefore ?? 0,
+            timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+          }).catch(() => null),
+        ]);
+        const rawRequestModel = normalizeRawProtocolModelId(
+          state.lastRewrite?.transportModelAfter
+            || state.lastRewrite?.transportModelBefore
+            || state.lastRequest?.rawModel,
+        );
+        const rawResponseModel = normalizeRawProtocolModelId(
+          networkEvidence?.evidence?.rawModel
+            || state.lastResponseEvidence?.rawModel
+            || state.lastResponseEvidence?.model,
+        );
+        const nativeRequestConfirmed = Boolean(rawRequestModel);
+        const nativeResponseConfirmed = Boolean(rawResponseModel);
+        const nativeVerified = selection.selectionAttempted === true
+          && nativeRequestConfirmed
+          && nativeResponseConfirmed
+          && settled?.settled === true;
+
+        const result = {
+          model,
+          label: String(row.label || model),
+          selectorKey: String(row.selectorKey || ''),
+          pickerMode: 'B',
+          discoverySource: 'official-work-picker-b',
+          nativeRequestModel: rawRequestModel,
+          nativeResponseModel: rawResponseModel,
+          nativeRequestConfirmed,
+          nativeResponseConfirmed,
+          nativeVerified,
+          requestId: networkEvidence?.requestId || state.lastRequest?.requestId || null,
+        };
+        nativeResults.push(result);
+        logRuntime(nativeVerified ? 'info' : 'warn', 'discovery', 'official_work_model_native_verified', {
+          sourceTabId,
+          discoveryTabId,
+          index: index + 1,
+          total: rows.length,
+          ...result,
+        });
+      } catch (error) {
+        nativeResults.push({
+          model,
+          label: String(row.label || model),
+          selectorKey: String(row.selectorKey || ''),
+          pickerMode: 'B',
+          discoverySource: 'official-work-picker-b',
+          nativeRequestModel: null,
+          nativeResponseModel: null,
+          nativeRequestConfirmed: false,
+          nativeResponseConfirmed: false,
+          nativeVerified: false,
+          error: errorText(error),
+        });
+        logRuntime('warn', 'discovery', 'official_work_model_native_failed', {
+          sourceTabId,
+          discoveryTabId,
+          index: index + 1,
+          total: rows.length,
+          model,
+          error: errorText(error),
+        });
+      } finally {
+        verificationTransactions.delete(discoveryTabId);
+      }
+    }
+
+    const chatRows = nativeResults
+      .filter((item) => item.nativeVerified && item.nativeRequestModel)
+      .map((item) => ({
+        model: item.model,
+        rawId: item.model,
+        label: item.label,
+        selectorKey: '__picker_b_chat_lock__',
+        pickerMode: 'B',
+        discoverySource: 'official-work-picker-b',
+        transportModel: item.nativeRequestModel,
+        expectedResponseModel: item.nativeResponseModel,
+        nativeRequestModel: item.nativeRequestModel,
+        nativeResponseModel: item.nativeResponseModel,
+        nativeResponseConfirmed: item.nativeResponseConfirmed,
+      }));
+
+    logRuntime(nativeResults.length ? 'info' : 'warn', 'discovery', 'official_work_model_discovery_completed', {
       sourceTabId,
       discoveryTabId,
       entered: true,
       bootstrapSent,
-      pickerMode: discovered?.pickerMode ?? null,
-      candidates: candidates.models,
-      candidateCount: candidates.rows.length,
+      pickerMode: 'B',
+      models: nativeResults.map((item) => item.model),
+      nativeVerified: nativeResults.filter((item) => item.nativeVerified).length,
+      candidateCount: nativeResults.length,
     });
-    return candidates;
+    return {
+      pickerMode: 'B',
+      rows,
+      models: nativeResults.map((item) => item.model),
+      reasoningLevels: discovered.reasoningLevels || [],
+      nativeResults,
+      chatCandidates: {
+        pickerMode: 'B',
+        rows: chatRows,
+        models: chatRows.map((item) => item.model),
+        reasoningLevels: discovered.reasoningLevels || [],
+      },
+    };
   } catch (error) {
-    logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+    logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
       sourceTabId,
-      discoveryTabId: Number(discoveryTab?.id) || null,
+      discoveryTabId,
       reason: errorText(error),
     });
-    return networkCandidateCatalog([], 'native-picker-b');
+    return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
   } finally {
-    const discoveryTabId = Number(discoveryTab?.id) || null;
+    if (Number.isInteger(discoveryTabId)) {
+      await networkMonitor.disableResponseCapture(discoveryTabId).catch(() => {});
+      await networkMonitor.detach(discoveryTabId).catch(() => {});
+    }
     if (activatedForReadiness && restoreActiveTabId && restoreActiveTabId !== discoveryTabId) {
       await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
     }
-    if (discoveryTabId) await chrome.tabs.remove(discoveryTabId).catch(() => null);
-    if (discoveryTabId) {
-      logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_closed', {
+    if (Number.isInteger(discoveryTabId)) await chrome.tabs.remove(discoveryTabId).catch(() => null);
+    if (Number.isInteger(discoveryTabId)) {
+      logRuntime('info', 'discovery', 'official_work_model_discovery_tab_closed', {
         sourceTabId,
         discoveryTabId,
         restoredActiveTabId: activatedForReadiness ? restoreActiveTabId : null,
