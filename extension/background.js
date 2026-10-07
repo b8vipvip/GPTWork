@@ -2901,7 +2901,15 @@ async function verifyAccountCatalogModels(
     const pickerAChatLock = item.selectorKey === '__picker_a_chat_lock__';
     const pickerBChatLock = item.selectorKey === '__picker_b_chat_lock__';
     const chatCompatibility = pickerAChatLock || pickerBChatLock;
-    const chatLockEventPrefix = pickerAChatLock ? 'picker_a_chat_lock' : 'picker_b_chat_compatibility';
+    const chatLockStartedEvent = pickerAChatLock
+      ? 'picker_a_chat_lock_started'
+      : 'picker_b_chat_compatibility_started';
+    const chatLockCompletedEvent = pickerAChatLock
+      ? 'picker_a_chat_lock_completed'
+      : 'picker_b_chat_compatibility_completed';
+    const chatLockFailedEvent = pickerAChatLock
+      ? 'picker_a_chat_lock_failed'
+      : 'picker_b_chat_compatibility_failed';
     const pickerNative = !chatCompatibility && ['A', 'B'].includes(item.pickerMode);
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
@@ -2920,7 +2928,7 @@ async function verifyAccountCatalogModels(
     await broadcastVerificationState(tabId, ownerTabId);
 
     logRuntime('info', 'discovery', chatCompatibility
-      ? `${chatLockEventPrefix}_started`
+      ? chatLockStartedEvent
       : 'chat_picker_model_native_started', {
       tabId,
       index: index + 1,
@@ -3141,7 +3149,7 @@ async function verifyAccountCatalogModels(
       else progress.failed += 1;
 
       logRuntime(verified ? 'info' : 'warn', 'discovery', chatCompatibility
-        ? `${chatLockEventPrefix}_completed`
+        ? chatLockCompletedEvent
         : 'chat_picker_model_native_completed', {
         tabId,
         index: index + 1,
@@ -3175,7 +3183,7 @@ async function verifyAccountCatalogModels(
         error: errorText(error),
       });
       logRuntime('warn', 'discovery', chatCompatibility
-        ? `${chatLockEventPrefix}_failed`
+        ? chatLockFailedEvent
         : 'chat_picker_model_native_failed', {
         tabId,
         index: index + 1,
