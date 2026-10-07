@@ -496,7 +496,7 @@ export function createAccountSystem({
       (model_id,display_name,picker_mode,verified_count,first_seen_at,last_seen_at,enabled,discovered_count)
       VALUES(?,?,?,?,?,?,1,1)`);
     const update = db.prepare(`UPDATE shared_model_catalog SET
-      display_name=?,picker_mode=?,discovered_count=discovered_count+1,last_seen_at=?
+      display_name=?,picker_mode=?,verified_count=verified_count+?,discovered_count=discovered_count+1,last_seen_at=?
       WHERE model_id=?`);
     const seenSelect = db.prepare('SELECT request_confirmed,response_confirmed FROM shared_model_account_seen WHERE user_id=? AND model_id=?');
     const seen = db.prepare(`INSERT INTO shared_model_account_seen(user_id,model_id,request_confirmed,response_confirmed,first_seen_at,last_seen_at)
@@ -505,12 +505,6 @@ export function createAccountSystem({
         request_confirmed=MAX(shared_model_account_seen.request_confirmed,excluded.request_confirmed),
         response_confirmed=MAX(shared_model_account_seen.response_confirmed,excluded.response_confirmed),
         last_seen_at=excluded.last_seen_at`);
-    const recomputeVerified = db.prepare(`UPDATE shared_model_catalog SET
-      verified_count=(
-        SELECT COUNT(*) FROM shared_model_account_seen s
-        WHERE s.model_id=? AND s.response_confirmed=1
-      )
-      WHERE model_id=?`);
     let accepted = 0;
     let verifiedAccepted = 0;
     let catalogChanged = false;
@@ -526,16 +520,15 @@ export function createAccountSystem({
         const current = select.get(model);
         const seenBefore = seenSelect.get(Number(userId), model);
         if (!current) {
-          insert.run(model, label, pickerMode, 0, now, now);
+          insert.run(model, label, pickerMode, responseConfirmed ? 1 : 0, now, now);
           catalogChanged = true;
         } else {
           const nextLabel = label || current.display_name || '';
           const nextPickerMode = pickerMode || current.picker_mode || null;
           if (nextLabel !== current.display_name || nextPickerMode !== (current.picker_mode || null)) catalogChanged = true;
-          update.run(nextLabel, nextPickerMode, now, model);
+          update.run(nextLabel, nextPickerMode, responseConfirmed ? 1 : 0, now, model);
         }
         seen.run(Number(userId), model, requestConfirmed ? 1 : 0, responseConfirmed ? 1 : 0, now, now);
-        recomputeVerified.run(model, model);
         if ((!seenBefore?.request_confirmed && requestConfirmed) || (!seenBefore?.response_confirmed && responseConfirmed)) {
           catalogChanged = true;
         }
