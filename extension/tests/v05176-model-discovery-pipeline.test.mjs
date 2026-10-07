@@ -90,10 +90,16 @@ test('v0.5.176 discovery does not use server history as candidate seed', async (
 test('v0.5.176 normal model locking consumes only proven Picker-B Chat transport', async () => {
   const background = await read('background.js');
   const evidence = await read('network-evidence.js');
-  assert.match(background, /item\.chatTransportModel \|\| \(item\.pickerMode === 'A' \? item\.nativeRequestModel : null\)/);
+  assert.match(background, /let sharedPickerBChatModelIds = new Set\(\)/);
+  assert.match(background, /item\?\.pickerMode === 'B' && normalizeRawProtocolModelId\(item\?\.chatTransportModel\)/);
+  assert.match(background, /sharedPickerBChatModelIds\.has\(model\) && sharedModelProtocolMap\.has\(model\)/);
+  assert.match(background, /feature\.modelLockEnabled === true && feature\.workModeEnabled !== true/);
+  assert.match(background, /forceModel: crossModePickerB/);
+  assert.match(background, /forceTransportModel: crossModeTransport/);
   assert.match(background, /if \(item\?\.chatLockSupported === true\)/);
   assert.match(background, /modelTransportMap: Object\.fromEntries\(sharedModelProtocolMap\)/);
-  assert.match(evidence, /modelTransportId\(targetModel, configuration\.modelTransportMap\)/);
+  assert.match(evidence, /const forcedTransport = normalizeRawProtocolModelId\(configuration\.forceTransportModel\)/);
+  assert.match(evidence, /forcedTransport\s*\? forcedTransport/);
 });
 
 test('v0.5.176 server persists native and Chat compatibility protocol evidence', async () => {

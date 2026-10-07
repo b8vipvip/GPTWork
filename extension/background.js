@@ -34,6 +34,7 @@ import {
   isolateTabForNativeDiscovery,
   isolateTabForVerification,
   tabFeatureEnabledSync,
+  tabFeatureStateSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 import {
@@ -86,7 +87,15 @@ let accountState = { authenticated: false, authorized: false, allowedWindowKeys:
 let sharedModelCatalogUnavailableUntil = 0;
 let sharedKnownModelIds = new Set();
 let sharedModelProtocolMap = new Map();
+let sharedPickerBChatModelIds = new Set();
 let lastServerModelCatalogGeneration = null;
+
+function rememberProvenPickerBChatModels(items) {
+  sharedPickerBChatModelIds = new Set((Array.isArray(items) ? items : [])
+    .filter((item) => item?.pickerMode === 'B' && normalizeRawProtocolModelId(item?.chatTransportModel))
+    .map((item) => normalizeConcreteModelId(item?.model))
+    .filter(Boolean));
+}
 let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
@@ -449,7 +458,7 @@ function beginWorkBootstrapTransaction(tabId, source) {
   if (!model) throw new Error('Work bootstrap model is unavailable');
   verificationTransactions.set(normalizedTabId, {
     model,
-    selectorKey: '__work_transport__',
+    selectorKey: '__work_bootstrap__',
     label: 'Work bootstrap',
     startedAt: Date.now(),
     kind: 'work-bootstrap',
@@ -469,9 +478,23 @@ function runtimePolicyForTabSync(tabId) {
   const pageModel = normalizeConcreteModelId(state?.pageObservation?.model);
   const policy = requestPolicyForTabSync(tabId, pageModel);
   const transaction = verificationTransactionForTab(tabId);
-  return transaction?.model
-    ? normalizePolicy({ ...policy, lockedModels: [transaction.model] })
-    : policy;
+  if (transaction?.model) {
+    return normalizePolicy({ ...policy, lockedModels: [transaction.model] });
+  }
+
+  // Picker B is absent from ordinary Chat's picker. If Model Lock targets B, promote
+  // it only after discovery has proved the exact raw transport works in Chat.
+  const feature = tabFeatureStateSync(tabId);
+  if (feature.modelLockEnabled === true && feature.workModeEnabled !== true && policy.lockedModels.length === 0) {
+    const effective = effectivePolicyForTabSync(tabId);
+    const crossModePickerB = effective.lockedModels.find((model) =>
+      sharedPickerBChatModelIds.has(model) && sharedModelProtocolMap.has(model)
+    ) || null;
+    if (crossModePickerB) {
+      return normalizePolicy({ ...policy, lockedModels: [crossModePickerB] });
+    }
+  }
+  return policy;
 }
 
 function guardFor(state) {
@@ -1009,6 +1032,15 @@ async function applyNetworkEvidence(tabId, evidence) {
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
+    const feature = tabFeatureStateSync(tabId);
+    const crossModePickerB = feature.modelLockEnabled === true && feature.workModeEnabled !== true
+      ? policy.lockedModels.find((model) =>
+        sharedPickerBChatModelIds.has(model) && sharedModelProtocolMap.has(model)
+      ) || null
+      : null;
+    const crossModeTransport = crossModePickerB
+      ? normalizeRawProtocolModelId(sharedModelProtocolMap.get(crossModePickerB))
+      : null;
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
@@ -1016,12 +1048,16 @@ const networkMonitor = new ChatGptNetworkMonitor({
       preserveModel: false,
       preserveReasoning: false,
       bypassRewrite: false,
-      forceModel: null,
+      // Normal Chat may lock Picker B only through a transport proven by the
+      // official-Work native probe plus the Chat compatibility probe.
+      forceModel: crossModePickerB,
+      forceTransportModel: crossModeTransport,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
       knownModels: [...sharedKnownModelIds],
       modelTransportMap: Object.fromEntries(sharedModelProtocolMap),
     };
   },
+
   getVerificationTransaction(tabId) {
     const transaction = verificationTransactionForTab(tabId);
     if (!transaction?.model) return null;
@@ -1600,6 +1636,7 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
     }))
     .filter((item) => item.model && item.transport)
     .map((item) => [item.model, item.transport]));
+  rememberProvenPickerBChatModels(cached);
   if (!force && !accountChanged && !generationChanged && !needsInitialSync) return cached;
   if (Date.now() < sharedModelCatalogUnavailableUntil) return cached;
 
@@ -1633,6 +1670,7 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
       }))
       .filter((item) => item.model && item.transport)
       .map((item) => [item.model, item.transport]));
+    rememberProvenPickerBChatModels(models);
     const patch = {};
     if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
     if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
@@ -2345,6 +2383,7 @@ async function publishAccountModels(accountCatalog, progress) {
       }))
       .filter((item) => item.model && item.transport)
       .map((item) => [item.model, item.transport]));
+    rememberProvenPickerBChatModels(shared);
     await Promise.all([
       chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared }),
       chrome.storage.local.set({
@@ -2497,7 +2536,6 @@ async function verifyAccountCatalogModels(
   accountCatalog,
   { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {},
 ) {
-  const workDefaultModel = workBootstrapModelForTab(tabId);
   // v0.5.176 model discovery is source-first. Server history and previous local
   // network candidates are diagnostic inputs only; they never seed a discovery run.
   const catalog = createVerificationCatalog({
@@ -2528,7 +2566,6 @@ async function verifyAccountCatalogModels(
   await broadcastVerificationState(tabId, ownerTabId);
   logRuntime(queue.length ? 'info' : 'warn', 'discovery', 'model_discovery_started', {
     tabId,
-    workDefaultModel,
     chatPickerModels: queue.map((item) => item.model || item.label),
     ignoredSeedCandidates: progress.ignoredSeedCandidates,
   });
