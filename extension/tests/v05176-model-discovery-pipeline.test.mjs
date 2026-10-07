@@ -38,9 +38,15 @@ test('v0.5.176 discovers Picker B in official ChatGPT Work independently from GP
   const bodyStart = background.indexOf('async function discoverOfficialWorkModels');
   const bodyEnd = background.indexOf('async function publishAccountModels', bodyStart);
   const body = background.slice(bodyStart, bodyEnd);
+  const enterStart = background.indexOf('async function enterNativeWorkOnDiscoveryTab');
+  const enterEnd = background.indexOf('async function waitForNetworkModelEvidence', enterStart);
+  const enterBody = background.slice(enterStart, enterEnd);
 
   assert.ok(bodyStart >= 0 && bodyEnd > bodyStart);
-  assert.match(body, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+  assert.ok(enterStart >= 0 && enterEnd > enterStart);
+  assert.match(body, /enterNativeWorkOnDiscoveryTab\(discoveryTabId,/);
+  assert.match(enterBody, /type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE'/);
+  assert.match(enterBody, /response\?\.confirmed === true \|\| response\?\.alreadySelected === true/);
   assert.match(body, /isolateTabForNativeDiscovery\(discoveryTabId\)/);
   assert.match(body, /mode: 'observe-native'/);
   assert.match(body, /official_work_model_native_verified/);
