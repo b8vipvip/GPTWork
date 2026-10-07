@@ -8,7 +8,7 @@ const manifest = JSON.parse(await readFile(new URL('../manifest.json', import.me
 test('Work controller is inert until current-tab selection and background gate allow it', () => {
   assert.match(source, /let workModeSelected = false/);
   assert.match(source, /let backgroundAllowed = false/);
-  assert.match(source, /enabled = Boolean\(workModeSelected && backgroundAllowed\)/);
+  assert.match(source, /enabled = Boolean\(workModeFeatureEnabled && workModeSelected && backgroundAllowed\)/);
   assert.match(source, /GPTWORK_TAB_FEATURE_GET/);
   assert.match(source, /GPTWORK_TAB_FEATURE_STATE/);
   assert.match(source, /accountWindowAllowed/);
@@ -22,7 +22,7 @@ test('new-chat Work clicks are guided back to Chat only when Work handling is en
   assert.match(source, /switchBackToChat/);
   assert.match(source, /WORK_LABEL/);
   assert.match(source, /CHAT_LABEL/);
-  assert.match(source, /verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
+  assert.match(source, /!workModeFeatureEnabled \|\| verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
   assert.match(source, /message\.settings\?\.workModeGuidanceEnabled !== false/);
   assert.match(source, /response\.data\?\.settings\?\.workModeGuidanceEnabled !== false/);
 });
@@ -69,5 +69,5 @@ test('v0.5.108 Work evidence scans are suspended when inactive and ignore stream
 test('v0.5.109 user Work guidance yields authority to automatic verification', () => {
   assert.match(source, /let verificationOwned = false/);
   assert.match(source, /message\.state\?\.autoVerification\?\.running === true/);
-  assert.match(source, /if \(verificationOwned \|\| !enabled/);
+  assert.match(source, /if \(!workModeFeatureEnabled \|\| verificationOwned \|\| !enabled/);
 });

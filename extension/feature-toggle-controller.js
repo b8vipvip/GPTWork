@@ -4,11 +4,13 @@ const workToggle = document.getElementById('workModeEnabled');
 const modelToggle = document.getElementById('modelLockEnabled');
 const messageNode = document.getElementById('message') || document.getElementById('formMessage');
 const scopeNode = document.getElementById('featureScope');
+const workFeatureNodes = [...document.querySelectorAll('[data-work-feature]')];
 const STATE_TIMEOUT_MS = 5000;
 
 let busy = false;
 let currentTabId = null;
 let currentAccount = { authenticated: false, entitlement: { active: false } };
+let workFeatureAvailable = false;
 let lastFeatureState = null;
 let refreshTimer = null;
 let reconcileGeneration = 0;
@@ -42,9 +44,15 @@ function showEntitlementRequired() {
   showMessage('当前使用时长已到期，请签到、分享或升级后再启用此功能。', 'bad');
 }
 
+function setWorkFeatureAvailable(value) {
+  workFeatureAvailable = value !== false;
+  for (const node of workFeatureNodes) node.hidden = !workFeatureAvailable;
+  if (!workFeatureAvailable && workToggle) workToggle.checked = false;
+}
+
 function setBusy(value) {
   busy = Boolean(value);
-  if (workToggle) workToggle.disabled = busy || !Number.isInteger(currentTabId);
+  if (workToggle) workToggle.disabled = !workFeatureAvailable || busy || !Number.isInteger(currentTabId);
   if (modelToggle) modelToggle.disabled = busy || !Number.isInteger(currentTabId);
 }
 
@@ -108,6 +116,7 @@ async function reconcile() {
     const snapshot = await withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: targetTabId }));
     if (generation !== reconcileGeneration || targetTabId !== currentTabId) return snapshot;
     currentAccount = snapshot?.account || currentAccount;
+    setWorkFeatureAvailable(snapshot?.workModeFeatureEnabled !== false && snapshot?.settings?.workModeFeatureEnabled !== false);
     syncVisibleToggles(snapshot?.featureState);
     setBusy(false);
     return snapshot;
@@ -122,6 +131,11 @@ async function reconcile() {
 
 async function changeFeature(kind, desired) {
   if (busy || !Number.isInteger(currentTabId)) return;
+  if (kind === 'work' && !workFeatureAvailable) {
+    showMessage('服务端已关闭 Work 模式功能。', 'bad');
+    if (workToggle) workToggle.checked = false;
+    return;
+  }
   const target = kind === 'work' ? workToggle : modelToggle;
   const previous = !desired;
   const targetTabId = currentTabId;
@@ -143,7 +157,10 @@ async function changeFeature(kind, desired) {
   } catch (error) {
     if (target) target.checked = previous;
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
-    if (error?.code === 'WINDOW_QUOTA_EXCEEDED' || error?.message === '当前账户并发窗口超限') {
+    if (error?.code === 'WORK_FEATURE_DISABLED') {
+      setWorkFeatureAvailable(false);
+      showMessage('服务端已关闭 Work 模式功能。', 'bad');
+    } else if (error?.code === 'WINDOW_QUOTA_EXCEEDED' || error?.message === '当前账户并发窗口超限') {
       showQuotaMessage();
     } else if (error?.code === 'AUTH_REQUIRED') {
       promptAuthentication();

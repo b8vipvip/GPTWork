@@ -42,7 +42,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.173';
+const RUNTIME_CODE_VERSION = '0.5.174';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -841,21 +841,16 @@ function verificationResponseObservation(tabId, responseEvidence) {
   const target = normalizeConcreteModelId(transaction?.model);
   const observed = normalizeConcreteModelId(responseEvidence?.model);
   const field = String(responseEvidence?.fields?.model || '');
-  const defaultModel = normalizeConcreteModelId(responseEvidence?.defaultModel);
-  const workTarget = Boolean(target && modelTransportId(target) !== target);
-  const workProfileConfirmed = Boolean(workTarget && defaultModel === target);
-  // v0.1.35 raw SSE established the Work contract: Picker-B turns expose the
-  // selected Work profile in default_model_slug (for example gpt-6-sol-wm) while
-  // resolved_model_slug reports the underlying execution family (gpt-5-6). For a
-  // Work target, an exact default_model_slug match is therefore the response-side
-  // identity authority; retain resolved_model_slug separately as backend diagnostics.
+  // Response confirmation is intentionally independent from request rewriting and
+  // Work profile/default metadata. Only a directly observed network response field
+  // with served/resolved/used semantics (or an allowed response header normalized by
+  // network-evidence.js) can confirm the backend model.
   return {
-    model: responseEvidence?.conflicts?.model ? null : (workProfileConfirmed ? target : observed),
-    backendResolvedModel: workProfileConfirmed && observed && observed !== target ? observed : null,
-    downgraded: workProfileConfirmed && observed && observed !== target,
-    reason: workProfileConfirmed ? 'work_profile_confirmed_by_default_model_slug'
-      : target && observed && observed !== target ? 'served_model_mismatch' : null,
-    field: workProfileConfirmed ? responseEvidence?.defaultModelField || 'default_model_slug' : field,
+    model: responseEvidence?.conflicts?.model ? null : observed,
+    backendResolvedModel: observed || null,
+    downgraded: false,
+    reason: target && observed && observed !== target ? 'served_model_mismatch' : null,
+    field,
   };
 }
 
@@ -1238,6 +1233,7 @@ async function applyServerFeatureSettings() {
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
       autoAlignSelection: remote.autoAlignSelection !== false,
       workModeGuidanceEnabled: remote.workModeGuidanceEnabled !== false,
+      workModeFeatureEnabled: remote.workModeFeatureEnabled !== false,
     });
     const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
     const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
@@ -1259,6 +1255,7 @@ async function applyServerFeatureSettings() {
         responseVerificationEnabled: nextSettings.networkVerificationEnabled,
         autoAlignSelection: nextSettings.autoAlignSelection,
         workModeGuidanceEnabled: nextSettings.workModeGuidanceEnabled,
+        workModeFeatureEnabled: nextSettings.workModeFeatureEnabled,
         strictMode: nextPolicy.strictMode,
         runtimeLogSyncEnabled,
       });
@@ -1853,10 +1850,11 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
         reason: errorText(error),
       }));
       last = {
-        entered: response?.ok === true && (response?.attempted === true || response?.alreadySelected === true),
+        entered: response?.ok === true && (response?.confirmed === true || response?.alreadySelected === true),
         reason: response?.reason || null,
         attempted: response?.attempted === true,
         alreadySelected: response?.alreadySelected === true,
+        confirmed: response?.confirmed === true,
       };
       if (last.entered) return last;
     }
@@ -1866,6 +1864,13 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
 }
 
 async function discoverNativeWorkCandidates(sourceTabId, progress) {
+  if (currentSettings.workModeFeatureEnabled === false) {
+    logRuntime('info', 'verification', 'native_work_catalog_discovery_skipped', {
+      sourceTabId,
+      reason: 'work_feature_disabled',
+    });
+    return networkCandidateCatalog([], 'native-picker-b');
+  }
   const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
   if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
     logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
@@ -2427,23 +2432,36 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   // then uses the same tab-scoped network policy as normal GPTWork use; it does not
   // click or invoke ChatGPT's native Work toggle and does not wait for Picker B.
   if (item.model === 'gpt-5.5') {
-    try {
-      const featureState = await enableWorkModeForVerification(tabId);
-      workActivationPending = featureState?.workModeEnabled === true;
+    if (currentSettings.workModeFeatureEnabled === false) {
+      workActivationPending = false;
       progress.workDiscovery = {
         attempted: false,
         entered: false,
-        reason: workActivationPending ? 'waiting_for_sol_then_network_work' : 'work_runtime_not_enabled',
+        reason: 'work_feature_disabled',
+        runtimeEnabled: false,
       };
-      logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
-        tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
-        source: 'network_work_policy', floorModel: workDefaultModel,
+      logRuntime('info', 'verification', 'verification_work_mode_skipped', {
+        tabId, phase: 'post_gpt_5_5', reason: 'work_feature_disabled',
       });
-    } catch (error) {
-      progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
-      logRuntime('warn', 'verification', 'verification_work_mode_armed', {
-        tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
-      });
+    } else {
+      try {
+        const featureState = await enableWorkModeForVerification(tabId);
+        workActivationPending = featureState?.workModeEnabled === true;
+        progress.workDiscovery = {
+          attempted: false,
+          entered: false,
+          reason: workActivationPending ? 'waiting_for_sol_then_network_work' : 'work_runtime_not_enabled',
+        };
+        logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
+          tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
+          source: 'network_work_policy', floorModel: workDefaultModel,
+        });
+      } catch (error) {
+        progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
+        logRuntime('warn', 'verification', 'verification_work_mode_armed', {
+          tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
+        });
+      }
     }
   }
 

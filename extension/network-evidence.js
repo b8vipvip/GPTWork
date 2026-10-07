@@ -16,7 +16,6 @@ const MODEL_KEYS = new Set([
   'served_model',
   'served_model_slug',
   'used_model_slug',
-  'default_model_slug',
   'model',
 ]);
 const SERVED_MODEL_KEYS = new Set([
@@ -27,7 +26,7 @@ const SERVED_MODEL_KEYS = new Set([
   'served_model',
   'served_model_slug',
 ]);
-const FALLBACK_MODEL_KEYS = new Set(['default_model_slug']);
+const DIAGNOSTIC_MODEL_KEYS = new Set(['default_model_slug']);
 const REASONING_KEYS = new Set([
   'reasoning_effort',
   'reasoningeffort',
@@ -93,10 +92,9 @@ function pathScore(path, key, kind, mode = 'response') {
     // and MUST NOT become served-model proof (v0.5.126 field evidence showed it
     // falsely reporting Sol for an Astra request).
     if (SERVED_MODEL_KEYS.has(key)) return 150;
-    // default_model_slug is only Work-profile identity when it lives on the
-    // assistant message metadata contract observed by ModelPro v0.1.38.
-    // Generic downstream defaults remain diagnostic-only.
-    if (key === 'default_model_slug' && normalizedPath.includes('message') && normalizedPath.includes('metadata')) return 110;
+    // default_model_slug is routing/profile metadata, never served-model proof.
+    // It is collected separately for diagnostics and MUST NOT influence response
+    // confirmation, even for Work transport.
     return 0;
   }
   return metadata ? 115 : path.length <= 3 ? 95 : 0;
@@ -119,6 +117,10 @@ function collectCandidates(value, candidates, path = [], depth = 0, mode = 'resp
       const score = pathScore(path, key, 'model', mode);
       if (model && score > 0) candidates.model.push({ value: model, score, path: nextPath.join('.') });
     }
+    if (DIAGNOSTIC_MODEL_KEYS.has(key)) {
+      const model = modelFrom(child);
+      if (model) candidates.defaultModel.push({ value: model, score: 1, path: nextPath.join('.') });
+    }
     if (REASONING_KEYS.has(key)) {
       const reasoning = reasoningFrom(child);
       const score = pathScore(path, key, 'reasoning');
@@ -140,11 +142,11 @@ function selectCandidate(candidates) {
 }
 
 function inspectObjects(values, mode = 'response') {
-  const candidates = { model: [], reasoning: [] };
+  const candidates = { model: [], defaultModel: [], reasoning: [] };
   for (const value of values) collectCandidates(value, candidates, [], 0, mode);
   const model = selectCandidate(candidates.model);
   const reasoning = selectCandidate(candidates.reasoning);
-  const defaultModel = selectCandidate(candidates.model.filter((candidate) => canonicalKey(candidate.path.split('.').at(-1) || '') === 'default_model_slug'));
+  const defaultModel = selectCandidate(candidates.defaultModel);
   return {
     model: model.value,
     defaultModel: defaultModel.value,
@@ -157,9 +159,8 @@ function inspectObjects(values, mode = 'response') {
       reasoningCandidateCount: candidates.reasoning.length,
       modelCandidatePaths: [...new Set(candidates.model.map((candidate) => candidate.path))].slice(-12),
       reasoningCandidatePaths: [...new Set(candidates.reasoning.map((candidate) => candidate.path))].slice(-12),
-      // Keep diagnostics aligned with the selected served-model authority. We retain
-      // defaultModel separately for Work-profile identity, so weaker default metadata
-      // must not pollute the served-model candidate value set.
+      // Keep diagnostics aligned with direct served-model authority. defaultModel is
+      // retained separately only as routing/profile diagnostics.
       modelCandidateValues: [...new Set(candidates.model
         .filter((candidate) => candidate.score === Math.max(...candidates.model.map((item) => item.score)))
         .map((candidate) => candidate.value))].slice(-12),

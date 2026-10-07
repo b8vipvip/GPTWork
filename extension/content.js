@@ -423,6 +423,12 @@ document.addEventListener('pointerdown', (event) => {
   function normalizeDisplayedModel(text) {
     if (!text) return null;
     const compact = text.trim().toLowerCase().replace(/\s+/g, '-');
+    // Future official model tiers must be discoverable before the server knows them.
+    // Accept a single exact tier token only when the whole visible label is the model
+    // identity (for example "GPT-7 Nova" -> gpt-7-nova). Longer lifecycle copy such
+    // as "GPT-5.5 Leaving on October 14" cannot satisfy this exact form.
+    const futureTier = compact.match(/^gpt-?(\d+(?:\.\d+)*)-([a-z][a-z0-9]{1,31})(?:-wm)?$/);
+    if (futureTier) return `gpt-${futureTier[1]}-${futureTier[2]}`;
     // ChatGPT may append lifecycle/deprecation copy to a model row (for example,
     // "GPT-5.5 Leaving on October 14"). Only known model-family suffixes belong
     // to the canonical model id; trailing UI copy must not become part of the id.
@@ -1856,17 +1862,37 @@ document.addEventListener('pointerdown', (event) => {
     }) || null;
   }
 
+  function workControlSelected(control) {
+    return Boolean(control) && (
+      control.getAttribute('aria-selected') === 'true'
+      || control.getAttribute('aria-pressed') === 'true'
+      || ['checked', 'selected', 'active'].includes(String(control.getAttribute('data-state') || '').toLowerCase())
+    );
+  }
+
   async function enterVerificationWorkMode() {
     await waitForIdle();
-    const control = verificationWorkControl();
-    if (!control) return { attempted: false, reason: 'work_control_not_found' };
-    const selected = control.getAttribute('aria-selected') === 'true'
-      || control.getAttribute('aria-pressed') === 'true'
-      || ['checked', 'selected', 'active'].includes(String(control.getAttribute('data-state') || '').toLowerCase());
-    if (selected) return { attempted: false, alreadySelected: true, reason: 'already_work' };
-    await trustedPointer(control, 'click', 'verification-work-mode');
-    await new Promise((resolve) => window.setTimeout(resolve, 900));
-    return { attempted: true, reason: 'work_control_clicked' };
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const control = verificationWorkControl();
+      if (!control) {
+        await new Promise((resolve) => window.setTimeout(resolve, 240 * attempt));
+        continue;
+      }
+      if (workControlSelected(control)) {
+        return { attempted: attempt > 1, alreadySelected: true, confirmed: true, reason: 'already_work' };
+      }
+      const clicked = await trustedPointer(control, 'click', `verification-work-mode:attempt-${attempt}`);
+      if (!clicked) {
+        await new Promise((resolve) => window.setTimeout(resolve, 260 * attempt));
+        continue;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      const after = verificationWorkControl();
+      if (workControlSelected(after)) {
+        return { attempted: true, alreadySelected: false, confirmed: true, reason: 'work_control_confirmed' };
+      }
+    }
+    return { attempted: true, alreadySelected: false, confirmed: false, reason: 'work_control_not_confirmed' };
   }
 
   async function stopStaleGeneration() {

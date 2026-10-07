@@ -1,4 +1,4 @@
-import { normalizeConcreteModelId, normalizePolicy, prioritizeModels } from './policy.js';
+import { normalizeConcreteModelId, normalizePolicy, normalizeSettings, prioritizeModels } from './policy.js';
 import { appendRuntimeLog } from './runtime-log.js';
 import { scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
@@ -35,6 +35,7 @@ let basePolicy = normalizePolicy(null);
 let modelLockSelection = [];
 let discoveredModels = [];
 let masterEnabled = false;
+let workFeatureEnabled = true;
 let initialized = false;
 let initializePromise = null;
 let selectionWriteInFlight = false;
@@ -202,18 +203,29 @@ export async function initializeTabFeatureRuntime() {
         LEGACY_MODEL_LOCK_KEY,
         MASTER_KEY,
       ]),
-      chrome.storage.sync.get(['policy', MODEL_SELECTION_KEY, DISCOVERED_MODELS_KEY]),
+      chrome.storage.sync.get(['policy', 'settings', MODEL_SELECTION_KEY, DISCOVERED_MODELS_KEY]),
       chrome.tabs.query({ url: 'https://chatgpt.com/*' }),
     ]);
 
     for (const tab of tabs) rememberTabWindow(tab);
     await migrateLegacySession(sessionStored, tabs);
     basePolicy = normalizePolicy(syncStored.policy);
+    workFeatureEnabled = normalizeSettings(syncStored.settings).workModeFeatureEnabled !== false;
     modelLockSelection = normalizeModels(syncStored[MODEL_SELECTION_KEY]);
     discoveredModels = normalizeModels(syncStored[DISCOVERED_MODELS_KEY]);
     masterEnabled = localStored[MASTER_KEY] === true;
     await restoreExplicitModelSelectionForMigration(localStored);
     await migrateLegacyFlags(localStored, tabs);
+    if (!workFeatureEnabled) {
+      let workStateChanged = false;
+      for (const [tabId, value] of states.entries()) {
+        if (value?.workModeEnabled === true) {
+          states.set(tabId, normalizeState({ ...value, workModeEnabled: false }));
+          workStateChanged = true;
+        }
+      }
+      if (workStateChanged) await persistStates();
+    }
     initialized = true;
   })().finally(() => {
     initializePromise = null;
@@ -224,7 +236,9 @@ export async function initializeTabFeatureRuntime() {
 export function tabFeatureStateSync(tabId) {
   const id = Number(tabId);
   if (!Number.isInteger(id)) return normalizeState(null);
-  return normalizeState(states.has(id) ? states.get(id) : DEFAULT_TAB_FEATURE_STATE);
+  const state = normalizeState(states.has(id) ? states.get(id) : DEFAULT_TAB_FEATURE_STATE);
+  if (!workFeatureEnabled) state.workModeEnabled = false;
+  return state;
 }
 
 export async function getTabFeatureState(tabId) {
@@ -237,6 +251,11 @@ export async function getTabFeatureState(tabId) {
 // synthesize a ChatGPT message. Once GPT-5.5 is finished, verification enables Work
 // here so the subsequent catalog discovery runs under the real Work feature contract.
 export async function enableWorkModeForVerification(tabId) {
+  if (!workFeatureEnabled) {
+    const featureState = await getTabFeatureState(tabId);
+    log('verification_work_mode_skipped', { tabId: Number(tabId), reason: 'work_feature_disabled' });
+    return featureState;
+  }
   const featureState = await setTabFeatureState(tabId, { workModeEnabled: true });
   await pushFeatureState(Number(tabId), featureState);
   log('verification_work_mode_enabled', { tabId: Number(tabId), workModeEnabled: true });
@@ -280,7 +299,7 @@ export function requestPolicyForTabSync(tabId, pageModel) {
   // silently disable Work: when no concrete page model is available, use the configured
   // Work default directly. When the page selection is concrete, preserve it only if it
   // is at least as capable as the configured floor.
-  if (feature.workModeEnabled) {
+  if (workFeatureEnabled && feature.workModeEnabled) {
     const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
     lockedModels = [selected && isAtLeastWorkFloor(selected, floor) ? selected : floor];
   } else if (feature.modelLockEnabled) {
@@ -295,7 +314,7 @@ export function requestPolicyForTabSync(tabId, pageModel) {
 export function effectivePolicyForTabSync(tabId) {
   const feature = masterEnabled ? tabFeatureStateSync(tabId) : normalizeState(null);
   const active = [];
-  if (feature.workModeEnabled) active.push(...workModels());
+  if (workFeatureEnabled && feature.workModeEnabled) active.push(...workModels());
   if (feature.modelLockEnabled) {
     active.push(...(modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels)));
   }
@@ -318,7 +337,11 @@ async function setTabFeatureState(tabId, patch) {
   await initializeTabFeatureRuntime();
   const id = Number(tabId);
   if (!Number.isInteger(id)) throw Object.assign(new Error('没有打开的 ChatGPT 标签页'), { code: 'NO_CHATGPT_TAB' });
+  if (patch?.workModeEnabled === true && !workFeatureEnabled) {
+    throw Object.assign(new Error('服务端已关闭 Work 模式功能'), { code: 'WORK_FEATURE_DISABLED' });
+  }
   const next = normalizeState({ ...DEFAULT_TAB_FEATURE_STATE, ...states.get(id), ...patch });
+  if (!workFeatureEnabled) next.workModeEnabled = false;
   states.set(id, next);
   await persistStates();
   log('tab_feature_changed', { tabId: id, ...next });
@@ -394,7 +417,7 @@ async function backgroundState(tabId) {
   return {
     account,
     accountWindowAllowed: accountAllowsWindow(account, windowId),
-    settings: { enabled: masterEnabled },
+    settings: { enabled: masterEnabled, workModeFeatureEnabled: workFeatureEnabled },
   };
 }
 
@@ -471,6 +494,7 @@ async function featureSnapshot(tabId) {
     accountWindowAllowed: Number.isInteger(tabId) ? state?.accountWindowAllowed !== false : true,
     windowQuotaExceeded: quotaExceeded(state, tabId),
     masterEnabled,
+    workModeFeatureEnabled: workFeatureEnabled,
   };
 }
 
@@ -482,11 +506,12 @@ async function disabledMasterSnapshot(tabId) {
     windowId,
     featureState,
     policy: Number.isInteger(tabId) ? effectivePolicyForTabSync(tabId) : basePolicy,
-    settings: { enabled: false },
+    settings: { enabled: false, workModeFeatureEnabled: workFeatureEnabled },
     account: null,
     accountWindowAllowed: true,
     windowQuotaExceeded: false,
     masterEnabled: false,
+    workModeFeatureEnabled: workFeatureEnabled,
   };
 }
 
@@ -614,6 +639,20 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes[MODEL_SELECTION_KEY]) {
     modelLockSelection = normalizeModels(changes[MODEL_SELECTION_KEY].newValue);
     changed = true;
+  }
+  if (changes.settings) {
+    const nextWorkFeatureEnabled = normalizeSettings(changes.settings.newValue).workModeFeatureEnabled !== false;
+    if (nextWorkFeatureEnabled !== workFeatureEnabled) {
+      workFeatureEnabled = nextWorkFeatureEnabled;
+      if (!workFeatureEnabled) {
+        for (const [tabId, value] of states.entries()) {
+          states.set(tabId, normalizeState({ ...value, workModeEnabled: false }));
+        }
+        void persistStates().catch(() => {});
+      }
+      log('work_feature_availability_changed', { enabled: workFeatureEnabled });
+      changed = true;
+    }
   }
   if (changes[DISCOVERED_MODELS_KEY]) {
     discoveredModels = normalizeModels(changes[DISCOVERED_MODELS_KEY].newValue);
