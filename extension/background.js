@@ -438,8 +438,8 @@ function verificationTransactionForTab(tabId) {
 
 function workBootstrapModelForTab(tabId) {
   const policy = effectivePolicyForTabSync(tabId);
-  return normalizeConcreteModelId(policy.lockedModels?.[0])
-    ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0]);
+  return normalizeConcreteModelId(policy.workDefaultModel)
+    ?? normalizeConcreteModelId(DEFAULT_POLICY.workDefaultModel);
 }
 
 function beginWorkBootstrapTransaction(tabId, source) {
@@ -449,7 +449,7 @@ function beginWorkBootstrapTransaction(tabId, source) {
   if (!model) throw new Error('Work bootstrap model is unavailable');
   verificationTransactions.set(normalizedTabId, {
     model,
-    selectorKey: '__work_bootstrap__',
+    selectorKey: '__work_transport__',
     label: 'Work bootstrap',
     startedAt: Date.now(),
     kind: 'work-bootstrap',
@@ -2497,6 +2497,7 @@ async function verifyAccountCatalogModels(
   accountCatalog,
   { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {},
 ) {
+  const workDefaultModel = workBootstrapModelForTab(tabId);
   // v0.5.176 model discovery is source-first. Server history and previous local
   // network candidates are diagnostic inputs only; they never seed a discovery run.
   const catalog = createVerificationCatalog({
@@ -2527,6 +2528,7 @@ async function verifyAccountCatalogModels(
   await broadcastVerificationState(tabId, ownerTabId);
   logRuntime(queue.length ? 'info' : 'warn', 'discovery', 'model_discovery_started', {
     tabId,
+    workDefaultModel,
     chatPickerModels: queue.map((item) => item.model || item.label),
     ignoredSeedCandidates: progress.ignoredSeedCandidates,
   });

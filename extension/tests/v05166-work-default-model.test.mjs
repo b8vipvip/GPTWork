@@ -26,6 +26,7 @@ test('request policy and verification both consume the configured Work default',
   assert.match(runtime, /basePolicy\.workDefaultModel/);
   assert.match(runtime, /isAtLeastWorkFloor\(selected, floor\) \? selected : floor/);
   assert.match(background, /const workDefaultModel = workBootstrapModelForTab\(tabId\)/);
+  assert.match(background, /function workBootstrapModelForTab\(tabId\) \{\s*const policy = effectivePolicyForTabSync\(tabId\);\s*return normalizeConcreteModelId\(policy\.workDefaultModel\)/);
   assert.match(background, /selectorKey: '__work_transport__'/);
   assert.doesNotMatch(background.slice(
     background.indexOf('async function verifyAccountCatalogModels'),
