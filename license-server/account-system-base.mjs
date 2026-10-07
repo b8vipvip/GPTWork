@@ -728,6 +728,7 @@ export function createAccountSystem({
     return {
       generation: sharedModelCatalogGeneration(),
       models: sharedModelCatalog({ includeDisabled: true }),
+      trash: sharedModelCatalogTrash(),
     };
   }
   function normalizeSharedModelList(values) {
@@ -819,6 +820,10 @@ export function createAccountSystem({
         chat_transport_model,chat_response_model,chat_lock_request_confirmed,chat_lock_response_confirmed,
         first_seen_at,last_seen_at
       ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const recomputeCounts = db.prepare(`UPDATE shared_model_catalog SET
+      verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.response_confirmed=1),
+      chat_lock_verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.chat_lock_response_confirmed=1)
+      WHERE model_id=?`);
     const deleteTrashEvidence = db.prepare('DELETE FROM shared_model_account_seen_trash WHERE model_id=?');
     const deleteTrash = db.prepare('DELETE FROM shared_model_catalog_trash WHERE model_id=?');
     const restored = [];
@@ -844,6 +849,7 @@ export function createAccountSystem({
             row.first_seen_at,row.last_seen_at,
           );
         }
+        recomputeCounts.run(model,model,model);
         deleteTrashEvidence.run(model);
         deleteTrash.run(model);
         restored.push(model);

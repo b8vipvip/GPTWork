@@ -52,6 +52,8 @@ test('admin model management supports batch delete and recycle-bin restore witho
   assert.match(accountSystem, /CREATE TABLE IF NOT EXISTS shared_model_account_seen_trash/);
   assert.match(accountSystem, /function deleteSharedModelCatalogBatch/);
   assert.match(accountSystem, /function restoreSharedModelCatalogBatch/);
+  assert.match(accountSystem, /recomputeCounts\.run\(model,model,model\)/);
+  assert.match(accountSystem, /trash: sharedModelCatalogTrash\(\)/);
   assert.match(accountSystem, /DELETE FROM shared_model_catalog WHERE model_id=\?/);
   assert.match(accountSystem, /INSERT OR REPLACE INTO shared_model_account_seen_trash/);
   assert.match(accountSystem, /\/admin\/api\/account\/model-catalog\/restore/);
