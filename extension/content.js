@@ -24,6 +24,11 @@
     '.ProseMirror[contenteditable="true"]',
   ];
   const SEND_SELECTORS = [
+    // Current ChatGPT Work exposes the real submit control as:
+    // <button type="submit" aria-label="发送" data-testid="send-button">.
+    // Prefer native submit semantics before any compatibility annotation/fallback.
+    'button[type="submit"][aria-label="发送"]',
+    'button[type="submit"][aria-label="Send" i]',
     'button[data-testid="send-button"]',
     'button[data-testid="composer-submit-button"]',
     'button[aria-label="Send prompt"]',

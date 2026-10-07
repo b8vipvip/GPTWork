@@ -37,6 +37,7 @@ import {
   tabFeatureStateSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
+import { ensureContentRuntime } from './content-runtime-recovery.js';
 import {
   createVerificationCatalog,
   summarizeVerificationOutcome,
@@ -44,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.178';
+const RUNTIME_CODE_VERSION = '0.5.179';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1791,18 +1792,44 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
     documentVisible: false,
     reason: 'content_runtime_unavailable',
   };
+  let recoveryAttempted = false;
   do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'verification_tab_closed' };
-    if (tab.status === 'complete') {
-      last = await verificationSurfaceStatus(tabId);
-      const structuralReady = last?.contentRuntimeReady === true
-        && last?.composerReady === true
-        && last?.modelTriggerReady === true;
-      if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
-        return { ...last, ready: true, structuralReady: true };
+
+    // ChatGPT is an SPA: the composer/content runtime can be fully usable while
+    // chrome.tabs still reports status="loading". Never gate the page handshake on
+    // tab.status === "complete"; the page runtime itself is the readiness authority.
+    last = await verificationSurfaceStatus(tabId);
+    let structuralReady = last?.contentRuntimeReady === true
+      && last?.composerReady === true
+      && last?.modelTriggerReady === true;
+    if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
+      return { ...last, ready: true, structuralReady: true };
+    }
+
+    // If the page really has no receiver after navigation is complete, invoke the
+    // single content-runtime recovery authority once instead of waiting for a
+    // tab-activation/onUpdated race to happen to inject it.
+    if (
+      !recoveryAttempted
+      && last?.contentRuntimeReady !== true
+      && tab.status === 'complete'
+      && isChatGptUrl(tab.url || '')
+    ) {
+      recoveryAttempted = true;
+      const recovery = await ensureContentRuntime(tabId, 'verification_surface_wait');
+      if (recovery?.ready === true) {
+        last = await verificationSurfaceStatus(tabId);
+        structuralReady = last?.contentRuntimeReady === true
+          && last?.composerReady === true
+          && last?.modelTriggerReady === true;
+        if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
+          return { ...last, ready: true, structuralReady: true };
+        }
       }
     }
+
     await sleep(250);
   } while (Date.now() < deadline);
   return {
