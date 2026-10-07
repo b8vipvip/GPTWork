@@ -310,6 +310,26 @@ mod tests {
     }
 
     #[test]
+    fn set_policy_accepts_an_empty_model_lock() {
+        let state = state();
+        let response = handle_message(
+            &state,
+            json!({
+                "id": "empty-lock",
+                "type": "set_policy",
+                "policy": {
+                    "lockedModels": [],
+                    "allowedReasoningLevels": ["high"],
+                    "strictMode": true
+                }
+            }),
+        );
+        assert_eq!(response["ok"], true);
+        assert!(response["data"]["policy"]["lockedModels"].as_array().unwrap().is_empty());
+        assert!(state.policy().unwrap().0.locked_models.is_empty());
+    }
+
+    #[test]
     fn verification_accepts_policy_override_without_persisting_it() {
         let state = state();
         let before = state.policy().unwrap().0;
