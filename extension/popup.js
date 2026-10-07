@@ -50,19 +50,18 @@ function lockModelLabel(id, stored = null) {
     || id;
 }
 
-function popupModelIds(stored, policy) {
-  return [...new Set([
-    ...KNOWN_MODELS.map((model) => model.id),
-    ...(Array.isArray(stored?.discoveredModels) ? stored.discoveredModels : []),
-    ...(Array.isArray(stored?.gptworkSharedKnownModelsV1) ? stored.gptworkSharedKnownModelsV1.map((item) => item?.model) : []),
-    ...policy.lockedModels,
-  ].map(normalizeConcreteModelId).filter(Boolean))];
+function popupModelIds(stored) {
+  return [...new Set(
+    (Array.isArray(stored?.gptworkSharedKnownModelsV1) ? stored.gptworkSharedKnownModelsV1 : [])
+      .map((item) => normalizeConcreteModelId(item?.model))
+      .filter(Boolean),
+  )];
 }
 
 function renderPopupLockEditor(stored, policy, settings) {
   if (!elements.popupModelChoices || !elements.popupPreferredReasoning) return;
   elements.popupModelChoices.replaceChildren();
-  for (const model of popupModelIds(stored, policy)) {
+  for (const model of popupModelIds(stored)) {
     const row = document.createElement('label');
     row.className = 'popup-lock-choice';
     const input = document.createElement('input');
