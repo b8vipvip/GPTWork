@@ -1,9 +1,12 @@
 export const MODELPRO_VERIFICATION_SCHEMA_VERSION = 1;
 
 export function catalogIdentity({ model, rawModel, selectorKey, label } = {}) {
+  const selector = String(selectorKey || '').trim().toLowerCase();
+  if (selector === '__picker_a_chat_lock__' || selector === '__picker_b_chat_lock__') {
+    return `chat-lock:${selector}:${model || rawModel || String(label || '').trim().toLowerCase()}`;
+  }
   if (model) return `model:${model}`;
   if (rawModel) return `raw:${rawModel}`;
-  const selector = String(selectorKey || '').trim().toLowerCase();
   if (selector) return `selector:${selector}`;
   return `label:${String(label || '').trim().toLowerCase()}`;
 }

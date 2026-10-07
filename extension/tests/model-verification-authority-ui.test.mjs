@@ -258,7 +258,8 @@ test('v0.5.176 keeps trusted Picker selection for Chat-native models and raw pro
 
 test('v0.5.97 accepts the exact owned catalog radio state as selection acknowledgement', () => {
   assert.match(content, /candidate\.getAttribute\('data-state'\) === 'checked'/);
-  assert.match(content, /return collectObservation\(\)\.model === desired/);
+  assert.match(content, /if \(collectObservation\(\)\.model === desired\) return true/);
+  assert.match(content, /pickerSelectedModelSummary\(modern\.picker, desired\)/);
   assert.match(content, /verification_model_selection_confirmed/);
 });
 
@@ -387,7 +388,7 @@ test('v0.5.108 shares verified model metadata without treating it as account acc
   assert.match(background, /shared_model_catalog_published/);
   assert.match(background, /requestConfirmed === true/);
   assert.match(verificationPolicy, /pickerModes/);
-  assert.match(catalogOptions, /当前账户仍需验证/);
+  assert.match(catalogOptions, /Server shared catalog · 4\/4 verified/);
 });
 
 test('v0.5.176 protocol normalizer preserves GPT-5.5 instant identity separately', () => {
