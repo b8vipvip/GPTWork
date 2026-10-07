@@ -1,6 +1,7 @@
 import {
   modelTransportId,
   normalizeModelId,
+  normalizeRawProtocolModelId,
   normalizeReasoningLevel,
   prioritizeModels,
 } from './policy.js';
@@ -68,9 +69,14 @@ function canonicalKey(value) {
   return String(value).trim().toLowerCase().replace(/[-.]/g, '_');
 }
 
-function modelFrom(value) {
+function rawModelFrom(value) {
   if (typeof value !== 'string') return null;
-  return normalizeModelId(value);
+  return normalizeRawProtocolModelId(value);
+}
+
+function modelFrom(value) {
+  const raw = rawModelFrom(value);
+  return raw ? normalizeModelId(raw) : null;
 }
 
 function reasoningFrom(value) {
@@ -113,13 +119,15 @@ function collectCandidates(value, candidates, path = [], depth = 0, mode = 'resp
     const key = canonicalKey(rawKey);
     const nextPath = [...path, rawKey];
     if (MODEL_KEYS.has(key)) {
-      const model = modelFrom(child);
+      const rawModel = rawModelFrom(child);
+      const model = rawModel ? normalizeModelId(rawModel) : null;
       const score = pathScore(path, key, 'model', mode);
-      if (model && score > 0) candidates.model.push({ value: model, score, path: nextPath.join('.') });
+      if (model && score > 0) candidates.model.push({ value: model, rawValue: rawModel, score, path: nextPath.join('.') });
     }
     if (DIAGNOSTIC_MODEL_KEYS.has(key)) {
-      const model = modelFrom(child);
-      if (model) candidates.defaultModel.push({ value: model, score: 1, path: nextPath.join('.') });
+      const rawModel = rawModelFrom(child);
+      const model = rawModel ? normalizeModelId(rawModel) : null;
+      if (model) candidates.defaultModel.push({ value: model, rawValue: rawModel, score: 1, path: nextPath.join('.') });
     }
     if (REASONING_KEYS.has(key)) {
       const reasoning = reasoningFrom(child);
@@ -133,12 +141,19 @@ function collectCandidates(value, candidates, path = [], depth = 0, mode = 'resp
 }
 
 function selectCandidate(candidates) {
-  if (!candidates.length) return { value: null, conflict: false, path: null };
+  if (!candidates.length) return { value: null, rawValue: null, conflict: false, path: null };
   const bestScore = Math.max(...candidates.map((candidate) => candidate.score));
   const best = candidates.filter((candidate) => candidate.score === bestScore);
   const bestValues = [...new Set(best.map((candidate) => candidate.value))];
-  if (bestValues.length !== 1) return { value: null, conflict: true, path: null };
-  return { value: bestValues[0], conflict: false, path: best[best.length - 1].path };
+  if (bestValues.length !== 1) return { value: null, rawValue: null, conflict: true, path: null };
+  const sameValue = best.filter((candidate) => candidate.value === bestValues[0]);
+  const rawValues = [...new Set(sameValue.map((candidate) => candidate.rawValue).filter(Boolean))];
+  return {
+    value: bestValues[0],
+    rawValue: rawValues.length === 1 ? rawValues[0] : sameValue.at(-1)?.rawValue ?? null,
+    conflict: false,
+    path: sameValue.at(-1)?.path ?? null,
+  };
 }
 
 function inspectObjects(values, mode = 'response') {
@@ -149,7 +164,9 @@ function inspectObjects(values, mode = 'response') {
   const defaultModel = selectCandidate(candidates.defaultModel);
   return {
     model: model.value,
+    rawModel: model.rawValue,
     defaultModel: defaultModel.value,
+    rawDefaultModel: defaultModel.rawValue,
     defaultModelField: defaultModel.path,
     reasoning: reasoning.value,
     conflicts: { model: model.conflict, reasoning: reasoning.conflict },
@@ -164,6 +181,10 @@ function inspectObjects(values, mode = 'response') {
       modelCandidateValues: [...new Set(candidates.model
         .filter((candidate) => candidate.score === Math.max(...candidates.model.map((item) => item.score)))
         .map((candidate) => candidate.value))].slice(-12),
+      rawModelCandidateValues: [...new Set(candidates.model
+        .filter((candidate) => candidate.score === Math.max(...candidates.model.map((item) => item.score)))
+        .map((candidate) => candidate.rawValue)
+        .filter(Boolean))].slice(-12),
       reasoningCandidateValues: [...new Set(candidates.reasoning.map((candidate) => candidate.value))].slice(-12),
     },
   };
@@ -349,13 +370,16 @@ function normalizeHeaders(headers) {
 export function extractHeaderEvidence(headers) {
   const normalized = normalizeHeaders(headers);
   let model = null;
+  let rawModel = null;
   let modelHeader = null;
   let reasoning = null;
   let reasoningHeader = null;
   for (const name of MODEL_HEADERS) {
-    const value = modelFrom(normalized.get(name));
+    const rawValue = rawModelFrom(normalized.get(name));
+    const value = rawValue ? normalizeModelId(rawValue) : null;
     if (value) {
       model = value;
+      rawModel = rawValue;
       modelHeader = name;
       break;
     }
@@ -370,6 +394,7 @@ export function extractHeaderEvidence(headers) {
   }
   return {
     model,
+    rawModel,
     reasoning,
     conflicts: { model: false, reasoning: false },
     fields: { model: modelHeader, reasoning: reasoningHeader },
@@ -385,7 +410,9 @@ function mergeEvidence(headerEvidence, bodyEvidence) {
   ) || headerEvidence.conflicts.reasoning || bodyEvidence.conflicts.reasoning;
   return {
     model: modelConflict ? null : headerEvidence.model || bodyEvidence.model,
+    rawModel: modelConflict ? null : headerEvidence.rawModel || bodyEvidence.rawModel || null,
     defaultModel: bodyEvidence.defaultModel || null,
+    rawDefaultModel: bodyEvidence.rawDefaultModel || null,
     defaultModelField: bodyEvidence.defaultModelField || null,
     reasoning: reasoningConflict ? null : headerEvidence.reasoning || bodyEvidence.reasoning,
     conflicts: { model: modelConflict, reasoning: reasoningConflict },
@@ -476,11 +503,14 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   const forceKnownModel = Boolean(forcedModel && knownModels.has(forcedModel));
   const targetModel = forceKnownModel ? forcedModel : pageSelectedKnown ? result.modelBefore : lockedModels[0];
   const preserveModel = configuration.preserveModel === true || (!forceKnownModel && pageSelectedKnown);
+  const forcedTransport = normalizeRawProtocolModelId(configuration.forceTransportModel);
   const targetTransport = preserveModel
     ? parsed.model
-    : result.modelBefore === targetModel
-      ? parsed.model
-      : modelTransportId(targetModel);
+    : forcedTransport
+      ? forcedTransport
+      : result.modelBefore === targetModel
+        ? parsed.model
+        : modelTransportId(targetModel, configuration.modelTransportMap);
   if (!targetTransport) {
     result.reason = 'locked_model_invalid';
     return result;
