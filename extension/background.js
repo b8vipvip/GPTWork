@@ -2402,7 +2402,8 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           nativeRequestModel: rawRequestModel,
           nativeResponseModel: rawResponseModel,
           nativeRequestConfirmed,
-          nativeResponseConfirmed,
+          nativeResponseConfirmed: nativeVerified,
+          nativeResponseMetadataConfirmed: nativeResponseConfirmed,
           nativeResponseObserved,
           nativeResponseCompatible,
           nativeVerificationBasis: nativeResponseConfirmed
@@ -2576,9 +2577,13 @@ async function publishAccountModels(accountCatalog, progress) {
     if (!current) continue;
     current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel) || current.nativeRequestModel;
     current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel) || current.nativeResponseModel;
-    current.nativeResponseConfirmed = current.nativeResponseConfirmed || item?.nativeResponseConfirmed === true;
+    current.nativeResponseConfirmed = current.nativeResponseConfirmed
+      || item?.nativeResponseConfirmed === true
+      || item?.nativeVerified === true;
     current.requestConfirmed = current.requestConfirmed || item?.nativeRequestConfirmed === true;
-    current.responseConfirmed = current.responseConfirmed || item?.nativeResponseConfirmed === true;
+    current.responseConfirmed = current.responseConfirmed
+      || item?.nativeResponseConfirmed === true
+      || item?.nativeVerified === true;
   }
 
   for (const item of progress?.results || []) {
