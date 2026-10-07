@@ -45,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.184';
+const RUNTIME_CODE_VERSION = '0.5.185';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -616,9 +616,27 @@ async function writeNativeStatus(patch) {
     lastError: null,
     lastSeenAt: null,
     lastVerification: null,
+    lastKnownVersion: nativeStatus.lastKnownVersion ?? nativeStatus.version ?? null,
     ...nativeStatus,
     ...patch,
   };
+  const connectivityExplicit = Object.hasOwn(patch, 'connected');
+  const versionExplicit = Object.hasOwn(patch, 'version');
+
+  // version is live connection evidence, never a historical cache. Previous builds
+  // kept the last successful version when a Native Messaging connection failed, which
+  // made update recovery report an old Core as if it were the currently running binary.
+  // Preserve history separately and clear live version truth whenever the connection
+  // is lost or a new connection has not completed get_status.
+  if (connectivityExplicit && patch.connected !== true) {
+    next.lastKnownVersion = nativeStatus.version ?? nativeStatus.lastKnownVersion ?? null;
+    next.version = null;
+  } else if (connectivityExplicit && patch.connected === true && !versionExplicit) {
+    next.lastKnownVersion = nativeStatus.version ?? nativeStatus.lastKnownVersion ?? null;
+    next.version = null;
+  }
+  if (versionExplicit && patch.version) next.lastKnownVersion = patch.version;
+
   if (Object.hasOwn(patch, 'lastError')) next.errorCode = classifyNativeError(patch.lastError);
   await chrome.storage.local.set({ nativeStatus: next });
   if (
@@ -663,6 +681,8 @@ async function markNativeStopped() {
       nativeStatus: {
         ...nativeStatus,
         connected: false,
+        version: null,
+        lastKnownVersion: nativeStatus.version ?? nativeStatus.lastKnownVersion ?? null,
         lastError: null,
         errorCode: null,
       },
@@ -1435,6 +1455,33 @@ export async function initializeAfterCurrentTask({ refreshMasterFromStorage = fa
   if (refreshMasterFromStorage) await refreshMasterRuntimeStateFromStorage();
   if (!masterRuntimeEnabled()) return;
   await initialize();
+}
+
+export async function probeNativeCoreForUpdateRecovery() {
+  await refreshMasterRuntimeStateFromStorage();
+  if (!masterRuntimeEnabled()) {
+    return { connected: false, version: null, error: 'master_disabled' };
+  }
+  try {
+    const status = await sendNative('get_status');
+    await writeNativeStatus({
+      connected: true,
+      lastError: null,
+      lastSeenAt: new Date().toISOString(),
+      lastVerification: status?.lastVerification ?? null,
+      policyRevision: status?.policyRevision,
+      version: status?.version ?? null,
+    });
+    logRuntime('info', 'update', 'update_recovery_core_probe_succeeded', {
+      version: status?.version ?? null,
+    });
+    return { connected: true, version: status?.version ?? null, status, error: null };
+  } catch (error) {
+    const detail = errorText(error);
+    await writeNativeStatus({ connected: false, lastError: detail });
+    logRuntime('warn', 'update', 'update_recovery_core_probe_failed', { error: detail });
+    return { connected: false, version: null, status: null, error: detail };
+  }
 }
 
 async function activeTabId() {

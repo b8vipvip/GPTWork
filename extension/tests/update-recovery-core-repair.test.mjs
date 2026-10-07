@@ -1,3 +1,4 @@
+// [legacy-core-maintenance] v0.5.185 updates frozen background/native updater recovery contracts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -13,8 +14,11 @@ test('manual reconnect waits for an in-flight initialization before retrying', (
 test('post-update recovery explicitly reconnects through the background lifecycle authority', () => {
   assert.match(updater, /update_reconnect_after_reload_failed/);
   assert.match(updater, /initializeAfterCurrentTask\(\{ refreshMasterFromStorage: true \}\)/);
+  assert.match(updater, /probeNativeCoreForUpdateRecovery/);
+  assert.match(updater, /Recovery truth must come from a fresh Native Messaging round trip/);
   assert.match(updater, /reloadOpenExtensionPages\(chromeApi\)/);
   assert.match(background, /refreshMasterRuntimeStateFromStorage/);
+  assert.match(background, /export async function probeNativeCoreForUpdateRecovery/);
   assert.doesNotMatch(updater, /runtime\.sendMessage\(message/);
 });
 
@@ -29,4 +33,13 @@ test('core repair checks an existing native install before opening the installer
 test('popup follows live nativeStatus changes after update recovery', () => {
   assert.match(popup, /changes\.nativeStatus\?\.newValue/);
   assert.match(popup, /render\(\{ \.\.\.lastState, nativeStatus: changes\.nativeStatus\.newValue \}\)/);
+});
+
+
+test('disconnected native status cannot masquerade as the currently installed Core version', () => {
+  assert.match(background, /lastKnownVersion: nativeStatus\.lastKnownVersion \?\? nativeStatus\.version \?\? null/);
+  assert.match(background, /next\.version = null/);
+  assert.match(background, /lastKnownVersion: nativeStatus\.version \?\? nativeStatus\.lastKnownVersion \?\? null/);
+  assert.match(updater, /lastKnownNativeVersion/);
+  assert.match(updater, /nativeVersion = freshCore\?\.connected === true \? freshCore\.version \?\? null : null/);
 });

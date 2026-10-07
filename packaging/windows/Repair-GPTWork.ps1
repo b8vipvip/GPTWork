@@ -12,7 +12,10 @@ param(
 
     [Parameter(Mandatory = $false)]
     [ValidateSet('All', 'Chrome', 'Edge')]
-    [string]$Browser = 'All'
+    [string]$Browser = 'All',
+
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipExtensionReload
 )
 
 $ErrorActionPreference = 'Stop'
@@ -204,8 +207,15 @@ function Request-ExtensionGenerationReload {
     Start-Sleep -Milliseconds 900
 }
 
-if ($Browser -in @('All', 'Chrome')) { Request-ExtensionGenerationReload -TargetBrowser 'Chrome' }
-if ($Browser -in @('All', 'Edge')) { Request-ExtensionGenerationReload -TargetBrowser 'Edge' }
+if (-not $SkipExtensionReload) {
+    if ($Browser -in @('All', 'Chrome')) { Request-ExtensionGenerationReload -TargetBrowser 'Chrome' }
+    if ($Browser -in @('All', 'Edge')) { Request-ExtensionGenerationReload -TargetBrowser 'Edge' }
+}
 
 Write-Host 'GPTWork 浏览器连接及 Native Messaging 往返通信已修复并验证 / browser connection and round trip verified.' -ForegroundColor Green
-Write-Host '若浏览器正在运行，安装器已请求整套扩展代际重载；无需让旧 service worker 与新文件混跑 / running browsers were asked to reload the whole extension generation.'
+if ($SkipExtensionReload) {
+    Write-Host '自动更新模式：扩展重载由后台 updater 单独负责，安装器不会创建第二个 reload 权威 / auto-update mode: extension reload remains owned by the background updater.'
+}
+else {
+    Write-Host '若浏览器正在运行，安装器已请求整套扩展代际重载；无需让旧 service worker 与新文件混跑 / running browsers were asked to reload the whole extension generation.'
+}

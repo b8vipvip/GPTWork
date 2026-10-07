@@ -201,7 +201,7 @@ fn windows_installer_arguments(install_root: &Path, installer_log: &Path) -> Res
     let install_root = windows_shell_path(install_root)?;
     let installer_log = windows_shell_path(installer_log)?;
     Ok(format!(
-        "/SUPPRESSMSGBOXES /NORESTART /VERYSILENT /DIR=\"{install_root}\" /LOG=\"{installer_log}\""
+        "/SUPPRESSMSGBOXES /NORESTART /VERYSILENT /GPTWORKAUTOUPDATE=1 /DIR=\"{install_root}\" /LOG=\"{installer_log}\""
     ))
 }
 
@@ -524,6 +524,7 @@ mod tests {
         let installer_log = install_root.join(UPDATE_INSTALLER_LOG_NAME);
         let arguments = windows_installer_arguments(install_root, &installer_log).unwrap();
         assert!(arguments.contains("/VERYSILENT"));
+        assert!(arguments.contains("/GPTWORKAUTOUPDATE=1"));
         assert!(arguments.contains("/DIR=\"C:\\Users\\test\\AppData\\Local\\GPTWork\""));
         assert!(arguments.contains("update-installer.log"));
     }
