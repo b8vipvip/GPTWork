@@ -307,9 +307,8 @@ async function applyState(state) {
     const policy = normalizePolicy(state.policy);
     const settings = normalizeSettings(state.settings);
 
-    for (const model of policy.lockedModels) {
-      if (!knownModelIds.has(model)) renderDiscoveredChoice(model, true);
-    }
+    // Model choices are owned by model-catalog-options.js and come only from
+    // the server four-gate shared catalog. Never re-inject stale policy/discovery rows.
     setSelected('model', policy.lockedModels);
     setSelected('reasoning', policy.allowedReasoningLevels);
     const mode = document.querySelector(`input[name="mode"][value="${policy.strictMode}"]`);
