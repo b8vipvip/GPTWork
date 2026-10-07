@@ -2210,6 +2210,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
       total: rows.length,
       completed: 0,
       verified: 0,
+      requestConfirmed: 0,
       currentModel: null,
       currentLabel: '正在验证 Picker B（Work）',
     };
@@ -2224,6 +2225,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
         ...progress.activeStage,
         completed: index,
         verified: nativeResults.filter((item) => item.nativeVerified).length,
+        requestConfirmed: nativeResults.filter((item) => item.nativeRequestConfirmed).length,
         currentModel: model,
         currentLabel: String(row.label || model),
       };
@@ -2363,6 +2365,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
           ...progress.activeStage,
           completed: index + 1,
           verified: nativeResults.filter((item) => item.nativeVerified).length,
+          requestConfirmed: nativeResults.filter((item) => item.nativeRequestConfirmed).length,
           currentModel: null,
           currentLabel: index + 1 < rows.length
             ? '准备验证下一个 Picker B（Work）'
