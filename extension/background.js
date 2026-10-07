@@ -2221,41 +2221,94 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
 
 async function publishAccountModels(accountCatalog, progress) {
   const byModel = new Map();
-  for (const row of accountCatalog?.rows || []) {
-    const model = normalizeConcreteModelId(row?.model || row?.rawId);
-    if (!model) continue;
-    byModel.set(model, {
+  const ensure = (modelValue, seed = {}) => {
+    const model = normalizeConcreteModelId(modelValue);
+    if (!model) return null;
+    const current = byModel.get(model) || {
       model,
-      label: String(row?.label || row?.displayName || model).trim().slice(0, 120),
-      pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : null,
+      label: String(seed.label || model).trim().slice(0, 120),
+      pickerMode: ['A', 'B'].includes(seed.pickerMode) ? seed.pickerMode : null,
       requestConfirmed: false,
       responseConfirmed: false,
+      nativeRequestModel: null,
+      nativeResponseModel: null,
+      nativeResponseConfirmed: false,
+      chatTransportModel: null,
+      chatResponseModel: null,
+      chatLockRequestConfirmed: false,
+      chatLockResponseConfirmed: false,
+      chatLockSupported: false,
+      discoverySource: seed.discoverySource || null,
+    };
+    if (!current.pickerMode && ['A', 'B'].includes(seed.pickerMode)) current.pickerMode = seed.pickerMode;
+    if (seed.label) current.label = String(seed.label).trim().slice(0, 120);
+    if (seed.discoverySource) current.discoverySource = seed.discoverySource;
+    byModel.set(model, current);
+    return current;
+  };
+
+  for (const row of accountCatalog?.rows || []) {
+    ensure(row?.model || row?.rawId, {
+      label: row?.label || row?.displayName,
+      pickerMode: row?.pickerMode,
+      discoverySource: row?.discoverySource || 'chat-picker-a',
     });
   }
+
+  for (const item of progress?.officialWorkDiscovery?.nativeResults || []) {
+    const current = ensure(item?.model, {
+      label: item?.label,
+      pickerMode: 'B',
+      discoverySource: 'official-work-picker-b',
+    });
+    if (!current) continue;
+    current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel) || current.nativeRequestModel;
+    current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel) || current.nativeResponseModel;
+    current.nativeResponseConfirmed = current.nativeResponseConfirmed || item?.nativeResponseConfirmed === true;
+    current.requestConfirmed = current.requestConfirmed || item?.nativeRequestConfirmed === true;
+    current.responseConfirmed = current.responseConfirmed || item?.nativeResponseConfirmed === true;
+  }
+
   for (const item of progress?.results || []) {
     const model = normalizeConcreteModelId(item?.model || item?.requestModel || item?.evidenceModel);
     if (!model) continue;
-    const pickerDiscovered = ['A', 'B'].includes(item?.pickerMode);
-    const responseConfirmed = item?.responseConfirmed === true;
-    const existing = byModel.get(model);
-    // A shared/network candidate is not a new discovery merely because Fetch
-    // rewrote the outgoing request. Re-publish it only when this account saw it
-    // in a real Picker or the backend directly confirmed it in response metadata.
-    if (!existing && !pickerDiscovered && !responseConfirmed) continue;
-    const current = existing || {
-      model,
-      label: String(item?.label || model).trim().slice(0, 120),
-      pickerMode: pickerDiscovered ? item.pickerMode : null,
-      requestConfirmed: false,
-      responseConfirmed: false,
-    };
+    const current = ensure(model, {
+      label: item?.label,
+      pickerMode: item?.pickerMode,
+      discoverySource: item?.discoverySource,
+    });
+    if (!current) continue;
+
     current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
-    current.responseConfirmed = current.responseConfirmed || responseConfirmed;
-    if (!current.pickerMode && pickerDiscovered) current.pickerMode = item.pickerMode;
-    byModel.set(model, current);
+    current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
+    current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel)
+      || normalizeRawProtocolModelId(item?.rawRequestModel)
+      || current.nativeRequestModel;
+    current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel)
+      || (!item?.chatLockRequestConfirmed ? normalizeRawProtocolModelId(item?.rawResponseModel) : null)
+      || current.nativeResponseModel;
+    current.nativeResponseConfirmed = current.nativeResponseConfirmed
+      || item?.nativeResponseConfirmed === true
+      || (item?.pickerMode === 'A' && item?.responseConfirmed === true);
+
+    if (item?.chatLockRequestConfirmed === true || item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true) {
+      current.chatTransportModel = normalizeRawProtocolModelId(item?.chatTransportModel)
+        || normalizeRawProtocolModelId(item?.rawRequestModel)
+        || current.chatTransportModel;
+      current.chatResponseModel = normalizeRawProtocolModelId(item?.chatResponseModel)
+        || normalizeRawProtocolModelId(item?.rawResponseModel)
+        || current.chatResponseModel;
+      current.chatLockRequestConfirmed = current.chatLockRequestConfirmed || item?.chatLockRequestConfirmed === true;
+      current.chatLockResponseConfirmed = current.chatLockResponseConfirmed || item?.chatLockResponseConfirmed === true;
+      current.chatLockSupported = current.chatLockSupported || item?.chatLockSupported === true;
+    }
   }
-  const models = [...byModel.values()].slice(0, 128);
+
+  const models = [...byModel.values()]
+    .filter((item) => item.pickerMode || item.nativeResponseConfirmed || item.chatLockSupported)
+    .slice(0, 128);
   if (!models.length) return [];
+
   try {
     const result = await accountClient.publishSharedModels(models);
     const shared = (Array.isArray(result?.models) ? result.models : [])
@@ -2263,6 +2316,11 @@ async function publishAccountModels(accountCatalog, progress) {
         model: normalizeConcreteModelId(item?.model),
         label: String(item?.label || '').trim().slice(0, 120),
         pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
+        nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
+        chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
+        chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
+        chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
         discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
@@ -2270,6 +2328,9 @@ async function publishAccountModels(accountCatalog, progress) {
       .filter((item) => item.model);
     const generation = Math.max(0, Number(result?.generation || 0));
     sharedKnownModelIds = new Set(shared.map((item) => item.model).filter(Boolean));
+    sharedModelProtocolMap = new Map(shared
+      .filter((item) => item.model && (item.chatTransportModel || item.nativeRequestModel))
+      .map((item) => [item.model, item.chatTransportModel || item.nativeRequestModel]));
     await Promise.all([
       chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared }),
       chrome.storage.local.set({
@@ -2278,16 +2339,19 @@ async function publishAccountModels(accountCatalog, progress) {
       }),
     ]);
     lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
-    logRuntime('info', 'verification', 'shared_model_catalog_published', {
+    logRuntime('info', 'discovery', 'shared_model_catalog_published', {
       submitted: models.length,
-      requestConfirmed: models.filter((item) => item.requestConfirmed).length,
-      responseConfirmed: models.filter((item) => item.responseConfirmed).length,
+      nativeResponseConfirmed: models.filter((item) => item.nativeResponseConfirmed).length,
+      chatLockSupported: models.filter((item) => item.chatLockSupported).length,
       shared: shared.length,
       generation,
     });
     return shared;
   } catch (error) {
-    logRuntime('warn', 'verification', 'shared_model_catalog_publish_failed', { submitted: models.length, error: errorText(error) });
+    logRuntime('warn', 'discovery', 'shared_model_catalog_publish_failed', {
+      submitted: models.length,
+      error: errorText(error),
+    });
     return [];
   }
 }
