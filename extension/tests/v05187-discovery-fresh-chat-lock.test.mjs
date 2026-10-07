@@ -1,4 +1,4 @@
-// [legacy-core-maintenance] v0.5.187 discovery isolation from runtime lock policy.
+// [legacy-core-maintenance] synchronized for v0.5.187 discovery isolation from runtime lock policy.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
