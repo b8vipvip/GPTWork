@@ -45,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.179';
+const RUNTIME_CODE_VERSION = '0.5.180';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1950,24 +1950,39 @@ async function closeVerificationExecutionTab(session) {
 
 async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
-  let last = { entered: false, reason: 'content_runtime_unavailable' };
+  let last = { entered: false, actuated: false, reason: 'content_runtime_unavailable' };
+  let recoveryAttempted = false;
   do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'discovery_tab_closed' };
-    if (tab.status === 'complete') {
-      const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
-        ok: false,
-        attempted: false,
-        reason: errorText(error),
-      }));
-      last = {
-        entered: response?.ok === true && (response?.confirmed === true || response?.alreadySelected === true),
-        reason: response?.reason || null,
-        attempted: response?.attempted === true,
-        alreadySelected: response?.alreadySelected === true,
-        confirmed: response?.confirmed === true,
-      };
-      if (last.entered) return last;
+
+    // As with the verification surface, ChatGPT's SPA can accept content-runtime
+    // messages before chrome.tabs reports status="complete". Ask the page directly.
+    const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
+      ok: false,
+      attempted: false,
+      actuated: false,
+      reason: errorText(error),
+    }));
+    last = {
+      entered: response?.ok === true && (response?.confirmed === true || response?.alreadySelected === true),
+      reason: response?.reason || null,
+      attempted: response?.attempted === true,
+      actuated: response?.actuated === true,
+      alreadySelected: response?.alreadySelected === true,
+      confirmed: response?.confirmed === true,
+      surfaceEvidence: response?.surfaceEvidence || null,
+    };
+    if (last.entered || last.actuated) return last;
+
+    if (
+      !recoveryAttempted
+      && tab.status === 'complete'
+      && isChatGptUrl(tab.url || '')
+      && /receiving end does not exist|content_runtime_unavailable/i.test(String(last.reason || ''))
+    ) {
+      recoveryAttempted = true;
+      await ensureContentRuntime(tabId, 'official_work_entry_wait').catch(() => null);
     }
     await sleep(300);
   } while (Date.now() < deadline);
@@ -2043,13 +2058,25 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
       enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
     }
 
-    if (enter?.entered !== true) {
+    if (enter?.entered !== true && enter?.actuated !== true) {
       logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
         sourceTabId,
         discoveryTabId,
         reason: enter?.reason || 'official_work_control_not_found',
       });
       return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
+    }
+
+    // The current ChatGPT home toggle does not expose aria-selected/aria-pressed/data-state
+    // on its Work button. A trusted click is therefore only an actuation witness. Picker-B
+    // topology is the authoritative proof that the official Work surface actually opened.
+    if (enter?.entered !== true && enter?.actuated === true) {
+      logRuntime('info', 'discovery', 'official_work_control_actuated_unconfirmed', {
+        sourceTabId,
+        discoveryTabId,
+        reason: enter?.reason || 'work_control_actuated_unconfirmed',
+        surfaceEvidence: enter?.surfaceEvidence || null,
+      });
     }
 
     const state = ensureTabState(discoveryTabId, discoveryTab.url || 'https://chatgpt.com/');
@@ -2074,6 +2101,32 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
 
     await sleep(700);
     let discovered = await scanForPickerB(3600);
+    if (
+      discovered?.pickerMode === 'B'
+      && Array.isArray(discovered?.rows)
+      && discovered.rows.length
+      && enter?.entered !== true
+    ) {
+      enter = { ...enter, entered: true, confirmed: true, reason: 'picker_b_topology_confirmed' };
+      logRuntime('info', 'discovery', 'official_work_surface_confirmed_by_picker_b', {
+        sourceTabId,
+        discoveryTabId,
+        candidateCount: discovered.rows.length,
+        models: discovered.rows.map((row) => normalizeConcreteModelId(row?.model || row?.rawId)).filter(Boolean),
+      });
+    }
+
+    if (enter?.entered !== true && discovered?.pickerMode !== 'B') {
+      logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
+        sourceTabId,
+        discoveryTabId,
+        reason: 'work_surface_not_confirmed_by_picker_b',
+        controlReason: enter?.reason || null,
+        pickerMode: discovered?.pickerMode ?? null,
+      });
+      return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
+    }
+
     let bootstrapSent = false;
     if (discovered?.pickerMode !== 'B') {
       verificationTransactions.set(discoveryTabId, {
@@ -2109,7 +2162,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
       logRuntime('warn', 'discovery', 'official_work_picker_b_empty', {
         sourceTabId,
         discoveryTabId,
-        entered: true,
+        entered: enter?.entered === true,
         bootstrapSent,
         pickerMode: discovered?.pickerMode ?? null,
       });
@@ -2246,7 +2299,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     logRuntime(nativeResults.length ? 'info' : 'warn', 'discovery', 'official_work_model_discovery_completed', {
       sourceTabId,
       discoveryTabId,
-      entered: true,
+      entered: enter?.entered === true,
       bootstrapSent,
       pickerMode: 'B',
       models: nativeResults.map((item) => item.model),

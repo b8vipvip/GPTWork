@@ -1934,21 +1934,67 @@ document.addEventListener('pointerdown', (event) => {
     );
   }
 
-  function verificationWorkSurfaceActive() {
+  function verificationWorkSurfaceEvidence() {
     const composer = findComposer();
-    const surface = activeComposerSurface();
-    const semanticText = [
-      composer?.getAttribute?.('placeholder'),
-      composer?.getAttribute?.('aria-label'),
-      surface?.getAttribute?.('aria-label'),
-      surface?.querySelector?.('[data-placeholder]')?.getAttribute?.('data-placeholder'),
-      surface?.innerText,
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-    return /(?:chatgpt\s*work|使用\s*chatgpt\s*work)/i.test(semanticText);
+    if (!composer) return { active: false, namedWork: false, projectControl: false, companionControl: false };
+
+    const roots = [];
+    let node = composer;
+    for (let depth = 0; node && depth < 7; depth += 1, node = node.parentElement) {
+      if (!visible(node)) continue;
+      const rect = node.getBoundingClientRect?.();
+      if (!rect || rect.height > 360 || rect.width > 1400) continue;
+      roots.push(node);
+    }
+
+    const semanticParts = [];
+    for (const root of roots) {
+      semanticParts.push(
+        root.getAttribute?.('placeholder'),
+        root.getAttribute?.('aria-label'),
+        root.getAttribute?.('data-placeholder'),
+        root.querySelector?.('[data-placeholder]')?.getAttribute?.('data-placeholder'),
+        root.innerText,
+      );
+    }
+    semanticParts.push(
+      composer.getAttribute?.('placeholder'),
+      composer.getAttribute?.('aria-label'),
+      composer.getAttribute?.('data-placeholder'),
+    );
+    const semanticText = semanticParts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const namedWork = /(?:chatgpt\s*work|使用\s*chatgpt\s*work)/i.test(semanticText);
+
+    const controlLabels = roots.flatMap((root) =>
+      [...root.querySelectorAll('button,[role="button"],a,[aria-label]')]
+        .filter(visible)
+        .map((element) => normalizedPickerLabel(element))
+        .filter(Boolean)
+    );
+    const projectControl = controlLabels.some((value) =>
+      /(?:选择|選擇|select|choose)\s*(?:项目|項目|project|workspace)/i.test(value)
+    );
+    const companionControl = controlLabels.some((value) =>
+      /(?:打开桌面应用|開啟桌面應用|open\s+(?:the\s+)?desktop\s+app|插件|plugin|文件|files?)/i.test(value)
+    );
+
+    return {
+      active: namedWork || (projectControl && companionControl),
+      namedWork,
+      projectControl,
+      companionControl,
+      semanticText: semanticText.slice(0, 320),
+      controlLabels: [...new Set(controlLabels)].slice(0, 20),
+    };
+  }
+
+  function verificationWorkSurfaceActive() {
+    return verificationWorkSurfaceEvidence().active;
   }
 
   async function enterVerificationWorkMode() {
     await waitForIdle();
+    let actuated = false;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       const control = verificationWorkControl();
       if (!control) {
@@ -1956,9 +2002,17 @@ document.addEventListener('pointerdown', (event) => {
         continue;
       }
       if (workControlSelected(control) || verificationWorkSurfaceActive()) {
-        return { attempted: attempt > 1, alreadySelected: true, confirmed: true, reason: 'already_work' };
+        return {
+          attempted: attempt > 1,
+          actuated,
+          alreadySelected: true,
+          confirmed: true,
+          reason: 'already_work',
+          surfaceEvidence: verificationWorkSurfaceEvidence(),
+        };
       }
       const clicked = await trustedPointer(control, 'click', `verification-work-mode:attempt-${attempt}`);
+      if (clicked) actuated = true;
       if (!clicked) {
         await new Promise((resolve) => window.setTimeout(resolve, 260 * attempt));
         continue;
@@ -1968,13 +2022,22 @@ document.addEventListener('pointerdown', (event) => {
       if (workControlSelected(after) || verificationWorkSurfaceActive()) {
         return {
           attempted: true,
+          actuated,
           alreadySelected: false,
           confirmed: true,
           reason: workControlSelected(after) ? 'work_control_confirmed' : 'work_surface_confirmed',
+          surfaceEvidence: verificationWorkSurfaceEvidence(),
         };
       }
     }
-    return { attempted: true, alreadySelected: false, confirmed: false, reason: 'work_control_not_confirmed' };
+    return {
+      attempted: true,
+      actuated,
+      alreadySelected: false,
+      confirmed: false,
+      reason: actuated ? 'work_control_actuated_unconfirmed' : 'work_control_not_confirmed',
+      surfaceEvidence: verificationWorkSurfaceEvidence(),
+    };
   }
 
   async function stopStaleGeneration() {
