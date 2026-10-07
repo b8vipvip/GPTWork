@@ -2413,15 +2413,19 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {}) {
-  const workDefaultModel = workBootstrapModelForTab(tabId);
-  // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
-  // browser, Work activation, request interception and response evidence adapters.
+async function verifyAccountCatalogModels(
+  tabId,
+  state,
+  accountCatalog,
+  { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {},
+) {
+  // v0.5.176 model discovery is source-first. Server history and previous local
+  // network candidates are diagnostic inputs only; they never seed a discovery run.
   const catalog = createVerificationCatalog({
     normalizeModel: normalizeConcreteModelId,
     onMerged: ({ phase, added, total, reasoningLevels }) => {
       state.autoVerification.maxAttempts = total;
-      logRuntime('info', 'verification', 'account_model_catalog_merged', {
+      logRuntime('info', 'discovery', 'model_discovery_catalog_merged', {
         tabId, phase, added, total, reasoningLevels,
       });
     },
@@ -2429,47 +2433,62 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   const { queue, knownKeys, progress } = catalog;
   state.autoVerification.catalogVerification = progress;
   const mergeCatalog = catalog.merge;
-  let workActivationPending = false;
+  progress.officialWorkDiscovery = {
+    attempted: false,
+    entered: false,
+    pickerMode: null,
+    nativeResults: [],
+    chatCompatibilityCandidates: 0,
+  };
+  progress.ignoredSeedCandidates = {
+    shared: Array.isArray(sharedCandidates) ? sharedCandidates.length : 0,
+    localNetwork: Array.isArray(localNetworkCandidates) ? localNetworkCandidates.length : 0,
+  };
 
-  mergeCatalog(accountCatalog, 'initial');
-  const sharedNetworkCatalog = networkCandidateCatalog(sharedCandidates, 'shared-server');
-  const localNetworkCatalog = networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence');
-  mergeCatalog(sharedNetworkCatalog, 'shared-network-candidates');
-  mergeCatalog(localNetworkCatalog, 'local-network-candidates');
-  const skippedWorkTransportModels = [...new Set([
-    ...(sharedNetworkCatalog.skippedWorkTransportModels || []),
-    ...(localNetworkCatalog.skippedWorkTransportModels || []),
-  ])];
-  if (skippedWorkTransportModels.length) {
-    logRuntime('info', 'verification', 'work_transport_candidates_skipped', {
-      tabId,
-      reason: 'work_feature_disabled',
-      models: skippedWorkTransportModels,
-    });
-  }
+  mergeCatalog(accountCatalog, 'chat-picker-a');
   await broadcastVerificationState(tabId, ownerTabId);
-  logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
-    tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
+  logRuntime(queue.length ? 'info' : 'warn', 'discovery', 'model_discovery_started', {
+    tabId,
+    chatPickerModels: queue.map((item) => item.model || item.label),
+    ignoredSeedCandidates: progress.ignoredSeedCandidates,
   });
 
   let index = 0;
   let stablePasses = 0;
+  let officialWorkDiscoveryDone = false;
   const transientRetryCounts = new Map();
-  while (index < queue.length || stablePasses < 2) {
+
+  while (index < queue.length || stablePasses < 2 || !officialWorkDiscoveryDone) {
     if (index >= queue.length) {
+      if (!officialWorkDiscoveryDone) {
+        const officialWork = await discoverOfficialWorkModels(tabId, progress);
+        officialWorkDiscoveryDone = true;
+        progress.officialWorkDiscovery = {
+          attempted: true,
+          entered: officialWork?.nativeResults?.length > 0 || officialWork?.rows?.length > 0,
+          pickerMode: officialWork?.pickerMode ?? null,
+          nativeResults: Array.isArray(officialWork?.nativeResults) ? officialWork.nativeResults : [],
+          chatCompatibilityCandidates: Number(officialWork?.chatCandidates?.rows?.length || 0),
+        };
+        const added = mergeCatalog(officialWork?.chatCandidates, 'picker-b-chat-compatibility');
+        if (added) stablePasses = 0;
+        await broadcastVerificationState(tabId, ownerTabId);
+        if (index < queue.length) continue;
+      }
+
       const rediscovered = await discoverAccountCatalog(tabId);
       progress.discoveryPasses += 1;
-      const added = mergeCatalog(rediscovered, 'settle');
+      const added = mergeCatalog(rediscovered, 'chat-picker-a-settle');
       stablePasses = added ? 0 : stablePasses + 1;
       progress.stablePasses = stablePasses;
       await broadcastVerificationState(tabId, ownerTabId);
-      if (index >= queue.length && stablePasses < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 650));
-      }
+      if (index >= queue.length && stablePasses < 2) await sleep(650);
       continue;
     }
 
     const item = queue[index];
+    const chatCompatibility = item.selectorKey === '__picker_b_chat_lock__';
+    const pickerNative = !chatCompatibility && ['A', 'B'].includes(item.pickerMode);
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
@@ -2479,188 +2498,258 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       model: item.model || null,
       selectorKey: item.selectorKey || '',
       label: item.label || '',
+      mode: chatCompatibility ? 'force-transport' : 'observe-native',
+      transportModel: chatCompatibility ? item.transportModel : null,
       startedAt: transactionStartedAtMs,
     });
     resetVerificationAttempt(state);
     await broadcastVerificationState(tabId, ownerTabId);
-    logRuntime('info', 'verification', 'account_model_verification_model_started', {
-      tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
+
+    logRuntime('info', 'discovery', chatCompatibility
+      ? 'picker_b_chat_compatibility_started'
+      : 'chat_picker_model_native_started', {
+      tabId,
+      index: index + 1,
+      total: queue.length,
+      model: item.model,
+      selectorKey: item.selectorKey,
+      label: item.label,
+      transportModel: item.transportModel || null,
+      expectedResponseModel: item.expectedResponseModel || null,
     });
 
     let abortForPendingTurn = false;
     try {
       const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
-      if (!attached) throw new Error(state.monitor?.error || 'Request lock monitor is not attached');
-      if (item.pickerMode === 'B' && item.model) {
-        const freshB = await reacquirePickerBForModel(tabId, item.model, progress);
-        const freshRow = (freshB?.rows || []).find((row) => normalizeConcreteModelId(row?.model || row?.rawId) === item.model);
-        if (freshRow) {
-          item.selectorKey = String(freshRow.selectorKey || item.selectorKey || '');
-          item.label = String(freshRow.label || item.label || '');
-        }
-      }
-      const transportOnly = item.selectorKey === '__work_transport__' || item.selectorKey === NETWORK_CANDIDATE_SELECTOR;
-      let selectionResponse = null;
-      let selection = { selectionAttempted: false, observation: state.pageObservation || null };
-      if (!transportOnly) {
-        selectionResponse = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, selectorKey: item.selectorKey, label: item.label });
-        selection = selectionResponse?.result || {};
-      }
-      if (selection.selectionAttempted !== true && item.pickerMode === 'B' && item.model) {
-        const freshB = await reacquirePickerBForModel(tabId, item.model, progress);
-        const freshRow = (freshB?.rows || []).find((row) => normalizeConcreteModelId(row?.model || row?.rawId) === item.model);
-        if (freshRow) {
-          item.selectorKey = String(freshRow.selectorKey || item.selectorKey || '');
-          item.label = String(freshRow.label || item.label || '');
-          selectionResponse = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, selectorKey: item.selectorKey, label: item.label });
-          selection = selectionResponse?.result || {};
-        }
-      }
-      if (!transportOnly && selection.selectionAttempted !== true) throw new Error('Model selection control was not activated');
-      if (transportOnly) {
-        logRuntime(
-          'info',
-          'verification',
-          item.selectorKey === NETWORK_CANDIDATE_SELECTOR ? 'verification_network_candidate_probe' : 'verification_hidden_work_transport_probe',
-          { tabId, model: item.model, selectorKey: item.selectorKey },
-        );
-      }
+      if (!attached) throw new Error(state.monitor?.error || 'Request monitor is not attached');
 
-      // Picker B updates ChatGPT's Work model state asynchronously. v0.1.34 proved
-      // that sending in the same task can leave the native conversation body on the
-      // previous GPT-5.6 Sol model even though the B row is already checked. Give the
-      // page state a bounded settle window before arming/sending the verification turn.
-      if (item.pickerMode === 'B') {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        logRuntime('info', 'verification', 'picker_b_selection_settled_before_probe', {
-          tabId,
+      let selection = { selectionAttempted: false, observation: state.pageObservation || null };
+      if (pickerNative) {
+        const selectionResponse = await sendTabMessage(tabId, {
+          type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
           model: item.model,
-          settleMs: 1200,
+          selectorKey: item.selectorKey,
+          label: item.label,
         });
+        selection = selectionResponse?.result || {};
+        if (selection.selectionAttempted !== true) throw new Error('Chat Picker model selection control was not activated');
+        await sleep(700);
       }
 
       const reattached = await networkMonitor.attach(tabId);
-      if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
-      // A Work bootstrap/navigation can detach CDP and clears responseCaptureTabs.
-      // Fetch-only reattach is insufficient: verification needs the same Network
-      // lifecycle for the requestId and its terminal response. Re-enable it for
-      // every model immediately before the probe.
-      const responseCaptureReady = await networkMonitor.enableResponseCapture(tabId);
-      if (!responseCaptureReady) throw new Error('Response capture did not re-enable before verification probe');
-      const probe = await sendVerificationReasoningProbe(tabId, 'GPTWork 模型验证', index + 1, queue.length);
-      if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
-      const attemptStartedMs = Date.now() - 1500;
-      const [waited, turnSettled] = await Promise.all([
-        waitForAttemptVerification(tabId, attemptStartedMs),
+      if (!reattached) throw new Error(state.monitor?.error || 'Request monitor did not reattach');
+      if (!await networkMonitor.enableResponseCapture(tabId)) {
+        throw new Error('Response capture did not enable before discovery probe');
+      }
+
+      const probe = await sendVerificationReasoningProbe(
+        tabId,
+        chatCompatibility ? 'GPTWork 发现模型 · Picker B Chat compatibility' : 'GPTWork 发现模型 · Chat native',
+        index + 1,
+        queue.length,
+      );
+      if (!probe?.sent) throw new Error('Model discovery probe was not sent');
+
+      const [networkEvidence, turnSettled] = await Promise.all([
+        waitForNetworkModelEvidence(tabId, transactionStartedAtMs),
         sendTabMessage(tabId, {
           type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
           assistantCountBefore: probe.assistantCountBefore ?? 0,
           timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
         }),
       ]);
+
       let effectiveTurnSettled = turnSettled;
       if (effectiveTurnSettled?.settled !== true) {
         effectiveTurnSettled = await recoverStaleVerificationTurn(tabId, probe.assistantCountBefore ?? 0);
       }
       if (effectiveTurnSettled?.settled !== true) {
         abortForPendingTurn = true;
-        throw new Error('ChatGPT response remained non-terminal after 3 reload recoveries and stop-button recovery');
+        throw new Error('ChatGPT response remained non-terminal during model discovery');
       }
-      // The body forwarded at Fetch.requestPaused is the sole request-confirmation
-      // authority. Network.requestWillBeSent may expose the page's pre-interception
-      // body, so keep it only as diagnostic evidence. Response/stream metadata remains
-      // the independent backend-served-model authority.
-      const forwardedRequestId = state.lastForwardedRequest?.requestId ?? null;
-      const requestId = state.lastRequest?.requestId ?? forwardedRequestId;
-      const networkObservedRequestModel = normalizeConcreteModelId(state.lastRequest?.model);
-      const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
-      const authoritativeRewrite = Boolean(
-        item.model
-        && state.lastRewrite?.authorityKind === 'verification-transaction'
-        && state.lastRewrite?.authorityModel === item.model
-        && Number.isFinite(rewriteCapturedAtMs)
-        && rewriteCapturedAtMs >= transactionStartedAtMs - 250
-        && !state.lastRewrite?.error
+
+      const requestId = networkEvidence?.requestId
+        || state.lastRequest?.requestId
+        || state.lastForwardedRequest?.requestId
+        || null;
+      const responseEvidence = networkEvidence?.evidence
+        || (state.lastResponseEvidence?.requestId === requestId ? state.lastResponseEvidence : null);
+      const rawRequestModel = normalizeRawProtocolModelId(
+        state.lastRewrite?.transportModelAfter
+          || state.lastRewrite?.transportModelBefore
+          || state.lastRequest?.rawModel
+          || state.lastRequest?.model,
       );
-      const requestModel = item.model
-        ? (authoritativeRewrite ? normalizeConcreteModelId(state.lastRewrite?.modelAfter) : null)
-        : networkObservedRequestModel;
-      const responseEvidence = state.lastResponseEvidence?.requestId === requestId
-        ? state.lastResponseEvidence
-        : null;
-      // Keep the response observation for mismatch/default diagnostics, but never
-      // promote it directly to completion proof. The strict verifier may intentionally
-      // downgrade this raw candidate.
-      const responseObservation = verificationResponseObservation(tabId, responseEvidence);
-      const rawResponseModel = normalizeConcreteModelId(responseObservation.model);
-      const expectedVerificationRequestId = requestId ? `cdp-${tabId}-${requestId}` : null;
-      const terminalVerification = state.lastVerification?.verdict === 'verified'
-        && expectedVerificationRequestId
-        && state.lastVerification?.requestId === expectedVerificationRequestId
-        ? state.lastVerification
-        : null;
-      const responseModel = normalizeConcreteModelId(terminalVerification?.model);
-      const requestConfirmed = item.model
-        ? Boolean(authoritativeRewrite) && (
-          requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
-        )
-        : Boolean(requestModel);
-      const responseConfirmed = Boolean(terminalVerification) && (item.model
-        ? responseModel === item.model || Boolean(item.rawModel && responseModel === item.rawModel)
-        : Boolean(responseModel));
-      const requestMismatch = Boolean(item.model && authoritativeRewrite && requestModel) && !requestConfirmed;
-      const verified = Boolean(requestId) && requestConfirmed && responseConfirmed && !requestMismatch;
-      const evidenceModel = responseModel || (requestConfirmed ? requestModel : null);
-      const evidenceSource = responseModel
-        ? 'network_response_metadata'
-        : requestConfirmed
-          ? (item.model ? 'fetch_forwarded_request_metadata' : 'network_request_metadata')
-          : null;
+      const rawResponseProtocolModel = normalizeRawProtocolModelId(
+        responseEvidence?.rawModel
+          || state.lastResponseEvidence?.rawModel
+          || state.lastResponseEvidence?.model,
+      );
+      const requestModel = normalizeConcreteModelId(
+        state.lastRewrite?.modelAfter
+          || state.lastRequest?.model
+          || rawRequestModel,
+      );
+      const responseModel = normalizeConcreteModelId(
+        responseEvidence?.model
+          || rawResponseProtocolModel,
+      );
+
+      let requestConfirmed = false;
+      let responseConfirmed = false;
+      let verified = false;
+      let evidenceSource = null;
+      let responseIssue = null;
+
+      if (chatCompatibility) {
+        const expectedTransport = normalizeRawProtocolModelId(item.transportModel);
+        const expectedResponse = normalizeRawProtocolModelId(item.expectedResponseModel);
+        const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
+        const authoritativeRewrite = Boolean(
+          state.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
+          && state.lastRewrite?.authorityModel === item.model
+          && Number.isFinite(rewriteCapturedAtMs)
+          && rewriteCapturedAtMs >= transactionStartedAtMs - 250
+          && !state.lastRewrite?.error
+        );
+        requestConfirmed = Boolean(
+          authoritativeRewrite
+          && expectedTransport
+          && rawRequestModel === expectedTransport
+        );
+        responseConfirmed = Boolean(
+          expectedResponse
+          && rawResponseProtocolModel
+          && rawResponseProtocolModel === expectedResponse
+        );
+        responseIssue = responseConfirmed
+          ? null
+          : rawResponseProtocolModel
+            ? 'chat_mode_response_differs_from_official_work'
+            : 'chat_mode_response_model_missing';
+        verified = Boolean(requestId && requestConfirmed && responseConfirmed);
+        evidenceSource = responseConfirmed
+          ? 'network_response_metadata'
+          : requestConfirmed
+            ? 'fetch_forwarded_request_metadata'
+            : null;
+      } else {
+        requestConfirmed = Boolean(selection.selectionAttempted && rawRequestModel);
+        responseConfirmed = Boolean(rawResponseProtocolModel);
+        verified = Boolean(
+          requestId
+          && selection.selectionAttempted
+          && requestConfirmed
+          && responseConfirmed
+        );
+        responseIssue = responseConfirmed ? null : 'native_response_model_missing';
+        evidenceSource = responseConfirmed
+          ? 'network_response_metadata'
+          : requestConfirmed
+            ? 'network_request_metadata'
+            : null;
+      }
+
       const retryKey = catalog.identity(item);
       const retryCount = transientRetryCounts.get(retryKey) || 0;
       const result = {
-        model: item.model || requestModel, rawModel: item.rawModel || requestModel,
-        selectorKey: item.selectorKey, label: item.label, verified,
-        selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
-        requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel,
+        model: item.model || requestModel,
+        rawModel: item.rawModel || item.model || requestModel,
+        selectorKey: item.selectorKey,
+        label: item.label,
+        pickerMode: item.pickerMode || null,
+        discoverySource: item.discoverySource || null,
+        verified,
+        selected: pickerNative ? selection.selectionAttempted === true : false,
+        requestConfirmed,
+        responseConfirmed,
+        requestId,
+        requestModel,
+        rawRequestModel,
+        responseModel,
+        rawResponseModel: rawResponseProtocolModel,
+        evidenceModel: responseModel || requestModel || item.model || null,
         responseReasoning: responseEvidence?.reasoning ?? null,
-        responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
-        responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
+        responseVerdict: responseConfirmed ? 'verified' : 'unverified',
+        responseIssue,
         responseHttpStatus: Number(responseEvidence?.diagnostics?.httpStatus || 0),
         responseBodyError: responseEvidence?.bodyError ?? null,
-        retryCount,
-        pickerMode: item.pickerMode || null,
         evidenceSource,
-        timedOut: waited.timedOut, turnSettled: true, observation: selection.observation || null,
+        timedOut: networkEvidence?.timedOut === true,
+        turnSettled: true,
+        observation: selection.observation || null,
+        nativeRequestModel: chatCompatibility
+          ? normalizeRawProtocolModelId(item.nativeRequestModel)
+          : rawRequestModel,
+        nativeResponseModel: chatCompatibility
+          ? normalizeRawProtocolModelId(item.nativeResponseModel)
+          : rawResponseProtocolModel,
+        nativeResponseConfirmed: chatCompatibility
+          ? item.nativeResponseConfirmed === true
+          : responseConfirmed,
+        chatTransportModel: chatCompatibility ? rawRequestModel : null,
+        chatResponseModel: chatCompatibility ? rawResponseProtocolModel : null,
+        chatLockRequestConfirmed: chatCompatibility ? requestConfirmed : false,
+        chatLockResponseConfirmed: chatCompatibility ? responseConfirmed : false,
+        chatLockSupported: chatCompatibility ? verified : false,
+        retryCount,
       };
-      if (shouldRetryTransientResponse(result, { maxRetries: 1 })) {
+
+      if (!chatCompatibility && shouldRetryTransientResponse(result, { maxRetries: 1 })) {
         transientRetryCounts.set(retryKey, retryCount + 1);
-        logRuntime('warn', 'verification', 'account_model_verification_transient_response_retry', {
-          tabId, index: index + 1, total: queue.length, model: result.model,
-          requestId: result.requestId, responseHttpStatus: result.responseHttpStatus,
-          responseBodyError: result.responseBodyError, responseIssue: result.responseIssue,
-          retryCount: retryCount + 1, maxRetries: 1,
-        });
         verificationTransactions.delete(Number(tabId));
         await broadcastVerificationState(tabId, ownerTabId);
         await sleep(650);
         continue;
       }
+
       progress.results.push(result);
       if (requestConfirmed) progress.requestConfirmed += 1;
-      if (verified) progress.verified += 1; else progress.failed += 1;
-      logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
-        tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
-        selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed, responseConfirmed,
-        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel: result.evidenceModel,
-        responseVerdict: result.responseVerdict, responseIssue: result.responseIssue,
-        evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
+      if (verified) progress.verified += 1;
+      else progress.failed += 1;
+
+      logRuntime(verified ? 'info' : 'warn', 'discovery', chatCompatibility
+        ? 'picker_b_chat_compatibility_completed'
+        : 'chat_picker_model_native_completed', {
+        tabId,
+        index: index + 1,
+        total: queue.length,
+        model: result.model,
+        pickerMode: result.pickerMode,
+        verified,
+        requestConfirmed,
+        responseConfirmed,
+        rawRequestModel,
+        rawResponseModel: rawResponseProtocolModel,
+        nativeRequestModel: result.nativeRequestModel,
+        nativeResponseModel: result.nativeResponseModel,
+        chatLockSupported: result.chatLockSupported,
+        responseIssue,
+        evidenceSource,
       });
     } catch (error) {
       progress.failed += 1;
-      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, pickerMode: item.pickerMode || null, verified: false, error: errorText(error) });
-      logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
-        tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
+      progress.results.push({
+        model: item.model,
+        selectorKey: item.selectorKey,
+        label: item.label,
+        pickerMode: item.pickerMode || null,
+        discoverySource: item.discoverySource || null,
+        nativeRequestModel: item.nativeRequestModel || null,
+        nativeResponseModel: item.nativeResponseModel || null,
+        nativeResponseConfirmed: item.nativeResponseConfirmed === true,
+        chatTransportModel: item.transportModel || null,
+        verified: false,
+        error: errorText(error),
+      });
+      logRuntime('warn', 'discovery', chatCompatibility
+        ? 'picker_b_chat_compatibility_failed'
+        : 'chat_picker_model_native_failed', {
+        tabId,
+        index: index + 1,
+        total: queue.length,
+        model: item.model,
+        error: errorText(error),
       });
     }
 
@@ -2670,131 +2759,55 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     await broadcastVerificationState(tabId, ownerTabId);
 
     if (abortForPendingTurn) {
-      logRuntime('warn', 'verification', 'account_model_verification_aborted_pending_response', { tabId, index, total: queue.length });
+      logRuntime('warn', 'discovery', 'model_discovery_aborted_pending_response', {
+        tabId, index, total: queue.length,
+      });
       break;
     }
 
-    // GPT-5.5 finishes in the visible Chat/Picker-A phase. Work verification
-  // then uses the same tab-scoped network policy as normal GPTWork use; it does not
-  // click or invoke ChatGPT's native Work toggle and does not wait for Picker B.
-  if (item.model === 'gpt-5.5') {
-    if (!serverWorkFeatureEnabled()) {
-      workActivationPending = false;
-      progress.workDiscovery = {
-        attempted: false,
-        entered: false,
-        reason: 'work_feature_disabled',
-        runtimeEnabled: false,
-      };
-      logRuntime('info', 'verification', 'verification_work_mode_skipped', {
-        tabId, phase: 'post_gpt_5_5', reason: 'work_feature_disabled',
-      });
-    } else {
-      try {
-        const featureState = await enableWorkModeForVerification(tabId);
-        workActivationPending = featureState?.workModeEnabled === true;
-        progress.workDiscovery = {
-          attempted: false,
-          entered: false,
-          reason: workActivationPending ? 'waiting_for_sol_then_network_work' : 'work_runtime_not_enabled',
-        };
-        logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
-          tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
-          source: 'network_work_policy', floorModel: workDefaultModel,
-        });
-      } catch (error) {
-        progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
-        logRuntime('warn', 'verification', 'verification_work_mode_armed', {
-          tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
-        });
-      }
-    }
-  }
-
-  // Once Chat A's Sol turn is proven, native Work is entered only as a bounded
-  // discovery transaction. Picker-B rows are converted immediately into network-only
-  // candidates and the page returns to Chat. Normal GPTWork Work execution remains
-  // independent of ChatGPT's native Work UI.
-  if (item.model === 'gpt-5.6-sol' && workActivationPending) {
-    const completedSol = progress.results.at(-1);
-    if (completedSol?.verified === true) {
-      const nativeCandidates = await discoverNativeWorkCandidates(tabId, progress);
-      const addedFromNative = mergeCatalog(nativeCandidates, 'native-picker-b-discovery');
-
-      // The configured Work default is a network candidate even when the page does
-      // not expose it. Request/response evidence remains the terminal authority.
-      const networkWorkCatalog = {
-        pickerMode: null,
-        reasoningLevels: [],
-        rows: [{
-          model: workDefaultModel,
-          rawId: workDefaultModel,
-          label: `Work Default · ${workDefaultModel}`,
-          selectorKey: '__work_transport__',
-          pickerMode: null,
-        }],
-      };
-      const addedFromWork = mergeCatalog(networkWorkCatalog, 'work-network');
-      progress.workDiscovery = {
-        attempted: true,
-        entered: true,
-        reason: 'network_work_catalog_seeded',
-        runtimeEnabled: true,
-        source: 'network_work_transport',
-        pickerMode: null,
-        added: addedFromWork,
-        nativeDiscovered: addedFromNative,
-        floorModel: workDefaultModel,
-      };
-      logRuntime('info', 'verification', 'verification_work_mode_transition', {
-        tabId, phase: 'post_gpt_5_6_sol', entered: true,
-        source: 'network_work_transport', reason: 'network_work_catalog_seeded',
-        pickerMode: null, added: addedFromWork, nativeDiscovered: addedFromNative, floorModel: workDefaultModel,
-      });
-      if (addedFromWork) stablePasses = 0;
+    if (!chatCompatibility) {
+      const rediscovered = await discoverAccountCatalog(tabId);
+      progress.discoveryPasses += 1;
+      const added = mergeCatalog(rediscovered, 'chat-picker-a-post-turn');
+      stablePasses = added ? 0 : stablePasses + 1;
+      progress.stablePasses = stablePasses;
       await broadcastVerificationState(tabId, ownerTabId);
-    } else {
-      progress.workDiscovery = {
-        attempted: false,
-        entered: false,
-        reason: 'deferred_until_sol_verified',
-        runtimeEnabled: true,
-        source: 'network_work_policy',
-        floorModel: workDefaultModel,
-      };
     }
-    workActivationPending = false;
-  }
-
-    // A completed verified turn is already sufficient to rediscover the catalog.
-    // Never send an extra "unlock" turn after Sol. v0.1.16 showed that this extra
-    // turn runs outside verificationTransactions, so the copied GPTWork normal
-    // policy rewrites an exact Sol request into gpt-6-astra-wm. The recovery path
-    // then reloads the page while that turn is generating, which is the direct
-    // source of ChatGPT's "连接已中断。正在等待完整回复" state.
-    const rediscovered = await discoverAccountCatalog(tabId);
-    progress.discoveryPasses += 1;
-    const added = mergeCatalog(rediscovered, 'post-turn');
-    stablePasses = added ? 0 : stablePasses + 1;
-    progress.stablePasses = stablePasses;
-    await broadcastVerificationState(tabId, ownerTabId);
   }
 
   verificationTransactions.delete(Number(tabId));
   progress.currentModel = null;
   progress.currentSelectorKey = null;
   progress.currentLabel = null;
-  if (restoreModel && queue.some((item) => item.model === restoreModel)) {
-    try { await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: restoreModel, label: restoreModel }); }
-    catch (error) {
-      logRuntime('warn', 'verification', 'account_model_verification_restore_failed', { tabId, model: restoreModel, error: errorText(error) });
+
+  if (restoreModel && queue.some((item) => item.model === restoreModel && item.pickerMode === 'A')) {
+    try {
+      await sendTabMessage(tabId, {
+        type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+        model: restoreModel,
+        label: restoreModel,
+      });
+    } catch (error) {
+      logRuntime('warn', 'discovery', 'model_discovery_restore_failed', {
+        tabId,
+        model: restoreModel,
+        error: errorText(error),
+      });
     }
   }
-  logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
-    tabId, total: progress.total, uniqueModels: knownKeys.size, requestConfirmed: progress.requestConfirmed,
-    verified: progress.verified, failed: progress.failed,
-    discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
-    reasoningLevels: progress.reasoningLevels, results: progress.results,
+
+  logRuntime(progress.failed ? 'warn' : 'info', 'discovery', 'model_discovery_completed', {
+    tabId,
+    total: progress.total,
+    uniqueModels: knownKeys.size,
+    requestConfirmed: progress.requestConfirmed,
+    verified: progress.verified,
+    failed: progress.failed,
+    discoveryPasses: progress.discoveryPasses,
+    stablePasses: progress.stablePasses,
+    officialWorkDiscovery: progress.officialWorkDiscovery,
+    reasoningLevels: progress.reasoningLevels,
+    results: progress.results,
   });
   await broadcastVerificationState(tabId, ownerTabId);
   return progress;
