@@ -33,8 +33,11 @@ test('model discovery publishes Picker/native evidence rather than request-only 
   assert.match(background, /chatLockSupported/);
 });
 
-test('shared catalog still requires Picker discovery or strict response verification', async () => {
+test('shared catalog requires the server four-gate client eligibility contract', async () => {
   const background = await read('background.js');
-  assert.match(background, /item\.verifiedCount > 0 \|\| \['A', 'B'\]\.includes\(item\.pickerMode\)/);
-  assert.match(background, /Legacy request-only rows remain/);
+  assert.match(background, /function sharedModelClientEligible/);
+  assert.match(background, /requestConfirmedAccountCount/);
+  assert.match(background, /verifiedAccountCount/);
+  assert.match(background, /chatLockVerifiedAccountCount/);
+  assert.match(background, /fourGateOnly: true/);
 });
