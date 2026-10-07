@@ -1,3 +1,4 @@
+// legacy-core-maintenance synchronized after PR label is present.
 // Runtime regression: v0.5.182 Work Picker-B requests were real, but URL migration left the verifier reading a stale state object.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
