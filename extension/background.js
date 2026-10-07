@@ -45,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.181';
+const RUNTIME_CODE_VERSION = '0.5.182';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1989,7 +1989,24 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   return { ...last, entered: false, reason: last?.reason || 'native_work_surface_not_ready' };
 }
 
-async function waitForNetworkModelEvidence(tabId, startedAtMs, timeoutMs = AUTO_VERIFY_RESPONSE_TIMEOUT_MS) {
+function successfulConversationResponseEvidence(evidence) {
+  if (!evidence || evidence?.conflicts?.model) return false;
+  const status = Number(evidence?.diagnostics?.httpStatus || evidence?.status || 0);
+  const parsedObjectCount = Number(evidence?.diagnostics?.parsedObjectCount || 0);
+  const streamCaptureBytes = Number(evidence?.diagnostics?.streamCaptureBytes || 0);
+  const rawBodyLength = typeof evidence?.rawResponseBody === 'string' ? evidence.rawResponseBody.length : 0;
+  return status >= 200
+    && status < 300
+    && !evidence?.bodyError
+    && (parsedObjectCount > 0 || streamCaptureBytes > 0 || rawBodyLength > 0);
+}
+
+async function waitForNetworkModelEvidence(
+  tabId,
+  startedAtMs,
+  timeoutMs = AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+  { allowModelMissing = false } = {},
+) {
   const deadline = Date.now() + Math.max(1500, Number(timeoutMs || 0));
   let requestId = null;
   while (Date.now() < deadline) {
@@ -2002,11 +2019,18 @@ async function waitForNetworkModelEvidence(tabId, startedAtMs, timeoutMs = AUTO_
     ) requestId = state.lastRequest.requestId;
 
     const evidence = state.lastResponseEvidence;
-    if (
+    const matchingResponse = Boolean(
       requestId
       && evidence?.requestId === requestId
       && !evidence?.conflicts?.model
-      && (evidence?.rawModel || evidence?.model)
+    );
+    if (
+      matchingResponse
+      && (
+        evidence?.rawModel
+        || evidence?.model
+        || (allowModelMissing && successfulConversationResponseEvidence(evidence))
+      )
     ) {
       return { timedOut: false, requestId, evidence };
     }
@@ -2184,6 +2208,15 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         label: String(row.label || model),
         startedAt: startedAtMs,
       });
+      logRuntime('info', 'discovery', 'official_work_model_native_started', {
+        sourceTabId,
+        discoveryTabId,
+        index: index + 1,
+        total: rows.length,
+        model,
+        label: String(row.label || model),
+        selectorKey: String(row.selectorKey || ''),
+      });
       try {
         const selectionResponse = await sendTabMessage(discoveryTabId, {
           type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
@@ -2208,7 +2241,12 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         if (!probe?.sent) throw new Error('Official Work discovery probe was not sent');
 
         const [networkEvidence, settled] = await Promise.all([
-          waitForNetworkModelEvidence(discoveryTabId, startedAtMs),
+          waitForNetworkModelEvidence(
+            discoveryTabId,
+            startedAtMs,
+            AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+            { allowModelMissing: true },
+          ),
           sendTabMessage(discoveryTabId, {
             type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
             assistantCountBefore: probe.assistantCountBefore ?? 0,
@@ -2220,16 +2258,21 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
             || state.lastRewrite?.transportModelBefore
             || state.lastRequest?.rawModel,
         );
+        const responseEvidence = networkEvidence?.evidence
+          || (state.lastResponseEvidence?.requestId === networkEvidence?.requestId ? state.lastResponseEvidence : null);
         const rawResponseModel = normalizeRawProtocolModelId(
-          networkEvidence?.evidence?.rawModel
-            || state.lastResponseEvidence?.rawModel
-            || state.lastResponseEvidence?.model,
+          responseEvidence?.rawModel
+            || responseEvidence?.model,
         );
         const nativeRequestConfirmed = Boolean(rawRequestModel);
         const nativeResponseConfirmed = Boolean(rawResponseModel);
+        const nativeResponseObserved = successfulConversationResponseEvidence(responseEvidence);
+        const nativeResponseCompatible = !rawResponseModel
+          || normalizeConcreteModelId(rawResponseModel) === model;
         const nativeVerified = selection.selectionAttempted === true
           && nativeRequestConfirmed
-          && nativeResponseConfirmed
+          && nativeResponseObserved
+          && nativeResponseCompatible
           && settled?.settled === true;
 
         const result = {
@@ -2242,6 +2285,13 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           nativeResponseModel: rawResponseModel,
           nativeRequestConfirmed,
           nativeResponseConfirmed,
+          nativeResponseObserved,
+          nativeResponseCompatible,
+          nativeVerificationBasis: nativeResponseConfirmed
+            ? 'request_transport+response_model'
+            : nativeResponseObserved
+              ? 'request_transport+response_stream'
+              : null,
           nativeVerified,
           requestId: networkEvidence?.requestId || state.lastRequest?.requestId || null,
         };
@@ -2294,6 +2344,8 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         nativeRequestModel: item.nativeRequestModel,
         nativeResponseModel: item.nativeResponseModel,
         nativeResponseConfirmed: item.nativeResponseConfirmed,
+        nativeResponseObserved: item.nativeResponseObserved === true,
+        nativeVerificationBasis: item.nativeVerificationBasis || null,
       }));
 
     logRuntime(nativeResults.length ? 'info' : 'warn', 'discovery', 'official_work_model_discovery_completed', {
@@ -2748,7 +2800,12 @@ async function verifyAccountCatalogModels(
       if (!probe?.sent) throw new Error('Model discovery probe was not sent');
 
       const [networkEvidence, turnSettled] = await Promise.all([
-        waitForNetworkModelEvidence(tabId, transactionStartedAtMs),
+        waitForNetworkModelEvidence(
+          tabId,
+          transactionStartedAtMs,
+          AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+          { allowModelMissing: chatCompatibility },
+        ),
         sendTabMessage(tabId, {
           type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
           assistantCountBefore: probe.assistantCountBefore ?? 0,
@@ -2814,22 +2871,26 @@ async function verifyAccountCatalogModels(
           && expectedTransport
           && rawRequestModel === expectedTransport
         );
-        responseConfirmed = Boolean(
-          expectedResponse
-          && rawResponseProtocolModel
-          && rawResponseProtocolModel === expectedResponse
-        );
+
+        const responseObserved = successfulConversationResponseEvidence(responseEvidence);
+        const explicitResponseCompatible = !rawResponseProtocolModel
+          || (expectedResponse
+            ? rawResponseProtocolModel === expectedResponse
+            : normalizeConcreteModelId(rawResponseProtocolModel) === item.model);
+        responseConfirmed = Boolean(responseObserved && explicitResponseCompatible);
         responseIssue = responseConfirmed
           ? null
-          : rawResponseProtocolModel
+          : rawResponseProtocolModel && !explicitResponseCompatible
             ? 'chat_mode_response_differs_from_official_work'
-            : 'chat_mode_response_model_missing';
+            : 'chat_mode_response_not_observed';
         verified = Boolean(requestId && requestConfirmed && responseConfirmed);
-        evidenceSource = responseConfirmed
+        evidenceSource = rawResponseProtocolModel && responseConfirmed
           ? 'network_response_metadata'
-          : requestConfirmed
-            ? 'fetch_forwarded_request_metadata'
-            : null;
+          : responseObserved
+            ? 'network_response_stream'
+            : requestConfirmed
+              ? 'fetch_forwarded_request_metadata'
+              : null;
       } else {
         requestConfirmed = Boolean(selection.selectionAttempted && rawRequestModel);
         responseConfirmed = Boolean(rawResponseProtocolModel);
@@ -2889,6 +2950,9 @@ async function verifyAccountCatalogModels(
         chatLockRequestConfirmed: chatCompatibility ? requestConfirmed : false,
         chatLockResponseConfirmed: chatCompatibility ? responseConfirmed : false,
         chatLockSupported: chatCompatibility ? verified : false,
+        chatVerificationBasis: chatCompatibility
+          ? (rawResponseProtocolModel ? 'forced_transport+response_model' : 'forced_transport+response_stream')
+          : null,
         retryCount,
       };
 
