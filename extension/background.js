@@ -378,7 +378,7 @@ function ensureTabState(tabId, url = '') {
       const previousContextKey = state.contextKey;
       state.url = url;
       state.contextKey = nextContextKey;
-      logRuntime('info', 'verification', 'auto_verify_context_migrated', {
+      logRuntime('info', 'discovery', 'auto_verify_context_migrated', {
         tabId,
         previousContextKey,
         nextContextKey,
@@ -959,7 +959,7 @@ async function applyNetworkEvidence(tabId, evidence) {
         selectedModelEvidenceReason: modelObservation.reason,
       };
       state.lastEvidenceDiagnostics = responseEvidence.diagnostics;
-      logRuntime('info', 'verification', 'backend_model_resolution_observed', {
+      logRuntime('info', 'discovery', 'backend_model_resolution_observed', {
         tabId,
         verificationModel: verificationTransactionForTab(tabId)?.model ?? null,
         backendResolvedModel: modelObservation.backendResolvedModel,
@@ -979,7 +979,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       ? 'conflicting_response_metadata'
       : null);
     state.phase = result.verdict;
-    logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'verification', 'response_evaluated', {
+    logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'discovery', 'response_evaluated', {
       tabId,
       requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       verdict: result.verdict,
@@ -996,7 +996,7 @@ async function applyNetworkEvidence(tabId, evidence) {
     state.phase = 'error';
     state.evidenceIssue = 'verification_request_failed';
     state.lastError = errorText(error);
-    logRuntime('error', 'verification', 'response_evaluation_failed', {
+    logRuntime('error', 'discovery', 'response_evaluation_failed', {
       tabId,
       requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       error: state.lastError,
@@ -1093,7 +1093,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     if (verification?.model && rewrite.authorityKind !== 'verification-transaction') {
       state.lastError = 'verification_request_missing_terminal_authority';
       state.phase = 'error';
-      logRuntime('error', 'verification', 'verification_request_generation_or_authority_mismatch', {
+      logRuntime('error', 'discovery', 'verification_request_generation_or_authority_mismatch', {
         tabId,
         verificationModel: verification.model,
         rewriteAuthorityKind: rewrite.authorityKind ?? null,
@@ -1563,10 +1563,10 @@ async function resolveUnknownCatalogNames(tabId, rows) {
       for (const item of mappings) next[item.raw] = { canonical: item.canonical, displayName: item.displayName, learnedAt: new Date().toISOString() };
       await chrome.storage.sync.set({ gptworkModelNameMappingsV1: next });
     }
-    logRuntime('info', 'verification', 'model_name_fallback_completed', { tabId, rawIds, mappings });
+    logRuntime('info', 'discovery', 'model_name_fallback_completed', { tabId, rawIds, mappings });
     return mappings;
   } catch (error) {
-    logRuntime('warn', 'verification', 'model_name_fallback_failed', { tabId, rawIds, error: errorText(error) });
+    logRuntime('warn', 'discovery', 'model_name_fallback_failed', { tabId, rawIds, error: errorText(error) });
     return [];
   }
 }
@@ -1639,7 +1639,7 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
       [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: accountId,
     });
     lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
-    logRuntime('info', 'verification', 'shared_model_catalog_synced', {
+    logRuntime('info', 'discovery', 'shared_model_catalog_synced', {
       count: models.length,
       changed: Object.keys(patch).length > 0,
       generation,
@@ -1649,7 +1649,7 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
   } catch (error) {
     const unsupported = Number(error?.status) === 404 || /not found/i.test(errorText(error));
     if (unsupported) sharedModelCatalogUnavailableUntil = Date.now() + 5 * 60 * 1000;
-    logRuntime(unsupported ? 'info' : 'warn', 'verification', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
+    logRuntime(unsupported ? 'info' : 'warn', 'discovery', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
       error: errorText(error), retryAfterMs: unsupported ? 5 * 60 * 1000 : 0,
     });
     return cached;
@@ -1801,7 +1801,7 @@ async function createVerificationExecutionTab(sourceTabId) {
     if (!Number.isInteger(verificationTabId)) throw new Error('Temporary verification tab was not created');
 
     await isolateTabForVerification(verificationTabId);
-    logRuntime('info', 'verification', 'verification_surface_tab_created', {
+    logRuntime('info', 'discovery', 'verification_surface_tab_created', {
       sourceTabId,
       verificationTabId,
       active: false,
@@ -1811,7 +1811,7 @@ async function createVerificationExecutionTab(sourceTabId) {
     if (surface?.ready !== true || surface?.documentVisible !== true) {
       await chrome.tabs.update(verificationTabId, { active: true }).catch(() => null);
       activatedForReadiness = true;
-      logRuntime('info', 'verification', 'verification_surface_activation_fallback', {
+      logRuntime('info', 'discovery', 'verification_surface_activation_fallback', {
         sourceTabId,
         verificationTabId,
         reason: surface?.reason || (surface?.structuralReady ? 'document_hidden' : 'surface_not_ready_in_background'),
@@ -1831,7 +1831,7 @@ async function createVerificationExecutionTab(sourceTabId) {
       };
     }
 
-    logRuntime('info', 'verification', 'verification_surface_ready', {
+    logRuntime('info', 'discovery', 'verification_surface_ready', {
       sourceTabId,
       verificationTabId,
       composerReady: surface.composerReady === true,
@@ -1855,7 +1855,7 @@ async function createVerificationExecutionTab(sourceTabId) {
     if (Number.isInteger(verificationTabId)) {
       await chrome.tabs.remove(verificationTabId).catch(() => null);
     }
-    logRuntime('warn', 'verification', 'verification_surface_tab_create_failed', {
+    logRuntime('warn', 'discovery', 'verification_surface_tab_create_failed', {
       sourceTabId,
       verificationTabId,
       error: errorText(error),
@@ -1880,7 +1880,7 @@ async function closeVerificationExecutionTab(session) {
   }
   if (Number.isInteger(verificationTabId)) {
     await chrome.tabs.remove(verificationTabId).catch(() => null);
-    logRuntime('info', 'verification', 'verification_surface_tab_closed', {
+    logRuntime('info', 'discovery', 'verification_surface_tab_closed', {
       sourceTabId: Number(session?.sourceTabId) || null,
       verificationTabId,
       restoredActiveTabId: session?.activatedForReadiness === true ? restoreActiveTabId : null,
@@ -2389,7 +2389,7 @@ async function discoverAccountCatalog(tabId) {
     // promoted to discoveredModels by model-catalog.js only after the per-model probe
     // produces trusted network request/response metadata.
     const nameMappings = await resolveUnknownCatalogNames(tabId, rows);
-    logRuntime(models.length ? 'info' : 'warn', 'verification', 'account_model_catalog_discovered', {
+    logRuntime(models.length ? 'info' : 'warn', 'discovery', 'account_model_catalog_discovered', {
       tabId,
       models,
       reasoningLevels,
@@ -2403,7 +2403,7 @@ async function discoverAccountCatalog(tabId) {
     const pickerMode = result?.catalog?.pickerMode ?? null;
     return { models, reasoningLevels, rows: rows.map((row) => ({ ...row, pickerMode })), nameMappings, pickerMode };
   } catch (error) {
-    logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
+    logRuntime('warn', 'discovery', 'account_model_catalog_discovery_failed', {
       tabId,
       error: errorText(error),
     });
@@ -2413,7 +2413,7 @@ async function discoverAccountCatalog(tabId) {
 
 async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    logRuntime('warn', 'verification', 'verification_stale_generation_reload', { tabId, attempt, maxAttempts: 3 });
+    logRuntime('warn', 'discovery', 'verification_stale_generation_reload', { tabId, attempt, maxAttempts: 3 });
     await chrome.tabs.reload(tabId);
     await new Promise((resolve) => setTimeout(resolve, 3000));
     const settled = await sendTabMessage(tabId, {
@@ -2422,7 +2422,7 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
       timeoutMs: 3500,
     }).catch(() => null);
     if (settled?.settled === true || settled?.stillGenerating === false) {
-      logRuntime('info', 'verification', 'verification_stale_generation_recovered', { tabId, attempt, method: 'reload' });
+      logRuntime('info', 'discovery', 'verification_stale_generation_recovered', { tabId, attempt, method: 'reload' });
       return { settled: true, method: 'reload', attempt };
     }
   }
@@ -2434,7 +2434,7 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
     timeoutMs: 3500,
   }).catch(() => null);
   const ok = stopped?.stopped === true && (settled?.settled === true || settled?.stillGenerating === false);
-  logRuntime(ok ? 'info' : 'warn', 'verification', 'verification_stale_generation_recovered', {
+  logRuntime(ok ? 'info' : 'warn', 'discovery', 'verification_stale_generation_recovered', {
     tabId, method: 'stop-button', stopped: stopped?.stopped === true, settled: Boolean(ok),
   });
   return { settled: Boolean(ok), method: 'stop-button', stopped: stopped?.stopped === true };
@@ -2475,7 +2475,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   progress.discoveryPasses += 1;
   const hasDesired = () => (catalog?.rows || []).some((row) => normalizeConcreteModelId(row?.model || row?.rawId) === desiredModel);
   if (catalog?.pickerMode === 'B' && hasDesired()) return catalog;
-  logRuntime('info', 'verification', 'picker_b_reacquire_started', { tabId, desiredModel, observedPickerMode: catalog?.pickerMode ?? null });
+  logRuntime('info', 'discovery', 'picker_b_reacquire_started', { tabId, desiredModel, observedPickerMode: catalog?.pickerMode ?? null });
   const workBootstrap = beginWorkBootstrapTransaction(tabId, 'picker-b-reacquire');
   try {
     const probe = await sendVerificationReasoningProbe(tabId, 'work-mode-b-reacquire', progress.completed + 1, progress.total);
@@ -2492,7 +2492,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
     if (catalog?.pickerMode === 'B' && hasDesired()) break;
     await sleep(500);
   } while (Date.now() < deadline);
-  logRuntime(hasDesired() ? 'info' : 'warn', 'verification', 'picker_b_reacquire_completed', { tabId, desiredModel, pickerMode: catalog?.pickerMode ?? null, available: hasDesired() });
+  logRuntime(hasDesired() ? 'info' : 'warn', 'discovery', 'picker_b_reacquire_completed', { tabId, desiredModel, pickerMode: catalog?.pickerMode ?? null, available: hasDesired() });
   return catalog;
 }
 
@@ -2954,7 +2954,7 @@ async function autoVerify(tabId) {
   sourceState.lastError = null;
   resetVerificationAttempt(sourceState);
   sourceState.autoVerification = autoVerification;
-  logRuntime('info', 'verification', 'auto_verify_started', { tabId: sourceTabId, pageContext, execution: 'isolated_tab' });
+  logRuntime('info', 'discovery', 'auto_verify_started', { tabId: sourceTabId, pageContext, execution: 'isolated_tab' });
   await broadcastTabState(sourceTabId);
 
   let session = null;
@@ -3002,7 +3002,7 @@ async function autoVerify(tabId) {
     try {
       await persistModelVerificationHistory(sourceTabId, autoVerification);
     } catch (historyError) {
-      logRuntime('warn', 'verification', 'model_verification_history_write_failed', {
+      logRuntime('warn', 'discovery', 'model_verification_history_write_failed', {
         tabId: sourceTabId,
         error: errorText(historyError),
       });
@@ -3012,7 +3012,7 @@ async function autoVerify(tabId) {
     } else {
       await broadcastTabState(sourceTabId);
     }
-    logRuntime('warn', 'verification', 'auto_verify_infrastructure_failed', {
+    logRuntime('warn', 'discovery', 'auto_verify_infrastructure_failed', {
       tabId: sourceTabId,
       executionTabId: autoVerification.executionTabId,
       reason,
@@ -3135,7 +3135,7 @@ async function autoVerify(tabId) {
     if (catalogVerification.requestConfirmed > 0) {
       await publishAccountModels(accountCatalog, catalogVerification);
     } else {
-      logRuntime('warn', 'verification', 'shared_model_catalog_publish_skipped', {
+      logRuntime('warn', 'discovery', 'shared_model_catalog_publish_skipped', {
         tabId,
         sourceTabId,
         reason: 'zero_request_confirmed',
@@ -3175,11 +3175,11 @@ async function autoVerify(tabId) {
       finalReason = 'verification_infrastructure_no_requests_confirmed';
       autoVerification.infrastructureFailure = true;
     } else if (
-      catalogVerification?.workDiscovery?.attempted === true
-      && catalogVerification.workDiscovery.entered !== true
+      catalogVerification?.officialWorkDiscovery?.attempted === true
+      && catalogVerification.officialWorkDiscovery.entered !== true
     ) {
       finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
-      finalReason = 'work_model_discovery_incomplete';
+      finalReason = 'official_work_model_discovery_incomplete';
     }
 
     autoVerification.running = false;
@@ -3202,12 +3202,12 @@ async function autoVerify(tabId) {
     try {
       await persistModelVerificationHistory(sourceTabId, autoVerification);
     } catch (error) {
-      logRuntime('warn', 'verification', 'model_verification_history_write_failed', { tabId: sourceTabId, error: errorText(error) });
+      logRuntime('warn', 'discovery', 'model_verification_history_write_failed', { tabId: sourceTabId, error: errorText(error) });
     }
     await networkMonitor.disableResponseCapture(tabId);
     await broadcastVerificationState(tabId, sourceTabId);
 
-    logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'verification', 'auto_verify_completed', {
+    logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'discovery', 'auto_verify_completed', {
       tabId: sourceTabId,
       executionTabId: tabId,
       outcome: finalOutcome,
@@ -3787,7 +3787,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         state.lastError = null;
         state.evidenceIssue = null;
         state.autoVerification = null;
-        logRuntime('info', 'verification', 'legacy_probe_reset', { tabId });
+        logRuntime('info', 'discovery', 'legacy_probe_reset', { tabId });
         await broadcastTabState(tabId);
         return publicTabState(state);
       }
@@ -3798,7 +3798,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
         const existingTask = autoVerificationTasks.get(tabId);
         if (existingTask) {
-          logRuntime('info', 'verification', 'auto_verify_duplicate_joined', {
+          logRuntime('info', 'discovery', 'auto_verify_duplicate_joined', {
             tabId,
             running: Boolean(state.autoVerification?.running),
           });
