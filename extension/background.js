@@ -2839,11 +2839,55 @@ async function verifyAccountCatalogModels(
 
   let index = 0;
   let stablePasses = 0;
+  let pickerAChatLockQueued = false;
   let officialWorkDiscoveryDone = false;
   const transientRetryCounts = new Map();
 
   while (index < queue.length || stablePasses < 2 || !officialWorkDiscoveryDone) {
     if (index >= queue.length) {
+      if (!pickerAChatLockQueued) {
+        pickerAChatLockQueued = true;
+        const pickerAChatRows = progress.results
+          .filter((item) => (
+            item?.pickerMode === 'A'
+            && item?.selectorKey !== '__picker_a_chat_lock__'
+            && item?.verified === true
+            && normalizeRawProtocolModelId(item?.rawRequestModel || item?.nativeRequestModel)
+          ))
+          .map((item) => ({
+            model: normalizeConcreteModelId(item.model),
+            rawId: normalizeConcreteModelId(item.model),
+            label: item.label || item.model,
+            selectorKey: '__picker_a_chat_lock__',
+            pickerMode: 'A',
+            discoverySource: 'chat-picker-a',
+            transportModel: normalizeRawProtocolModelId(item.rawRequestModel || item.nativeRequestModel),
+            expectedResponseModel: normalizeRawProtocolModelId(item.rawResponseModel || item.nativeResponseModel),
+            nativeRequestModel: normalizeRawProtocolModelId(item.rawRequestModel || item.nativeRequestModel),
+            nativeResponseModel: normalizeRawProtocolModelId(item.rawResponseModel || item.nativeResponseModel),
+            nativeResponseConfirmed: item.responseConfirmed === true,
+          }))
+          .filter((item) => item.model && item.transportModel);
+        progress.pickerAChatLockCandidates = pickerAChatRows.length;
+        const pickerAAdded = mergeCatalog({
+          pickerMode: 'A',
+          rows: pickerAChatRows,
+          models: pickerAChatRows.map((item) => item.model),
+          reasoningLevels: [],
+        }, 'picker-a-chat-lock');
+        logRuntime('info', 'discovery', 'picker_a_chat_lock_queued', {
+          tabId,
+          candidates: pickerAChatRows.length,
+          added: pickerAAdded,
+          models: pickerAChatRows.map((item) => item.model),
+        });
+        if (pickerAAdded) {
+          stablePasses = 0;
+          await broadcastVerificationState(tabId, ownerTabId);
+          continue;
+        }
+      }
+
       if (!officialWorkDiscoveryDone) {
         const officialWork = await discoverOfficialWorkModels(tabId, progress);
         officialWorkDiscoveryDone = true;
@@ -2871,7 +2915,10 @@ async function verifyAccountCatalogModels(
     }
 
     const item = queue[index];
-    const chatCompatibility = item.selectorKey === '__picker_b_chat_lock__';
+    const pickerAChatLock = item.selectorKey === '__picker_a_chat_lock__';
+    const pickerBChatLock = item.selectorKey === '__picker_b_chat_lock__';
+    const chatCompatibility = pickerAChatLock || pickerBChatLock;
+    const chatLockEventPrefix = pickerAChatLock ? 'picker_a_chat_lock' : 'picker_b_chat_compatibility';
     const pickerNative = !chatCompatibility && ['A', 'B'].includes(item.pickerMode);
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
@@ -2890,7 +2937,7 @@ async function verifyAccountCatalogModels(
     await broadcastVerificationState(tabId, ownerTabId);
 
     logRuntime('info', 'discovery', chatCompatibility
-      ? 'picker_b_chat_compatibility_started'
+      ? `${chatLockEventPrefix}_started`
       : 'chat_picker_model_native_started', {
       tabId,
       index: index + 1,
@@ -2928,7 +2975,11 @@ async function verifyAccountCatalogModels(
 
       const probe = await sendVerificationReasoningProbe(
         tabId,
-        chatCompatibility ? 'GPTWork 发现模型 · Picker B Chat compatibility' : 'GPTWork 发现模型 · Chat native',
+        pickerAChatLock
+          ? 'GPTWork 发现模型 · Picker A Chat lock'
+          : pickerBChatLock
+            ? 'GPTWork 发现模型 · Picker B Chat compatibility'
+            : 'GPTWork 发现模型 · Chat native',
         index + 1,
         queue.length,
       );
@@ -3016,7 +3067,9 @@ async function verifyAccountCatalogModels(
         responseIssue = responseConfirmed
           ? null
           : rawResponseProtocolModel && !explicitResponseCompatible
-            ? 'chat_mode_response_differs_from_official_work'
+            ? pickerAChatLock
+              ? 'picker_a_chat_lock_response_mismatch'
+              : 'chat_mode_response_differs_from_official_work'
             : 'chat_mode_response_not_observed';
         verified = Boolean(requestId && requestConfirmed && responseConfirmed);
         evidenceSource = rawResponseProtocolModel && responseConfirmed
@@ -3105,7 +3158,7 @@ async function verifyAccountCatalogModels(
       else progress.failed += 1;
 
       logRuntime(verified ? 'info' : 'warn', 'discovery', chatCompatibility
-        ? 'picker_b_chat_compatibility_completed'
+        ? `${chatLockEventPrefix}_completed`
         : 'chat_picker_model_native_completed', {
         tabId,
         index: index + 1,
@@ -3139,7 +3192,7 @@ async function verifyAccountCatalogModels(
         error: errorText(error),
       });
       logRuntime('warn', 'discovery', chatCompatibility
-        ? 'picker_b_chat_compatibility_failed'
+        ? `${chatLockEventPrefix}_failed`
         : 'chat_picker_model_native_failed', {
         tabId,
         index: index + 1,
