@@ -78,7 +78,7 @@ function normalizeKnownFamily(model) {
 
 export function normalizeRawProtocolModelId(value) {
   const raw = String(value ?? '').trim().toLowerCase();
-  if (!/^[a-z0-9._:-]{1,128}$/.test(raw) || raw === 'auto') return null;
+  if (!/^[a-z0-9._:-]{1,128}$/.test(raw)) return null;
   return PROTOCOL_ID_NORMALIZATIONS[raw] ?? raw;
 }
 
