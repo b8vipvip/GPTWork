@@ -2598,15 +2598,19 @@ async function publishAccountModels(accountCatalog, progress) {
 
     current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
     current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
-    current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel)
-      || normalizeRawProtocolModelId(item?.rawRequestModel)
-      || current.nativeRequestModel;
-    current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel)
-      || (!item?.chatLockRequestConfirmed ? normalizeRawProtocolModelId(item?.rawResponseModel) : null)
-      || current.nativeResponseModel;
-    current.nativeResponseConfirmed = current.nativeResponseConfirmed
-      || item?.nativeResponseConfirmed === true
-      || (item?.pickerMode === 'A' && item?.responseConfirmed === true);
+    const chatLockResult = item?.selectorKey === '__picker_a_chat_lock__'
+      || item?.selectorKey === '__picker_b_chat_lock__';
+    if (!chatLockResult) {
+      current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel)
+        || normalizeRawProtocolModelId(item?.rawRequestModel)
+        || current.nativeRequestModel;
+      current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel)
+        || normalizeRawProtocolModelId(item?.rawResponseModel)
+        || current.nativeResponseModel;
+      current.nativeResponseConfirmed = current.nativeResponseConfirmed
+        || item?.nativeResponseConfirmed === true
+        || (item?.pickerMode === 'A' && item?.responseConfirmed === true);
+    }
 
     if (item?.chatLockRequestConfirmed === true || item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true) {
       current.chatLockRequestConfirmed = current.chatLockRequestConfirmed || item?.chatLockRequestConfirmed === true;
