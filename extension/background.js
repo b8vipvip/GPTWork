@@ -1762,13 +1762,21 @@ async function loadTrustedLocalNetworkCandidates() {
     .map((model) => ({ model, label: model }));
 }
 
-async function broadcastVerificationState(executionTabId, ownerTabId, additionalTabIds = []) {
-  const tabIds = [...new Set([
-    Number(executionTabId),
-    Number(ownerTabId),
-    ...(Array.isArray(additionalTabIds) ? additionalTabIds.map(Number) : []),
-  ].filter(Number.isInteger))];
-  for (const tabId of tabIds) await broadcastTabState(tabId);
+async function broadcastVerificationState(executionTabId, ownerTabId) {
+  await broadcastTabState(executionTabId);
+  if (Number.isInteger(ownerTabId) && ownerTabId !== executionTabId) {
+    await broadcastTabState(ownerTabId);
+  }
+}
+
+async function broadcastVerificationTabs(executionTabId, ownerTabId, additionalTabIds = []) {
+  await broadcastVerificationState(executionTabId, ownerTabId);
+  const already = new Set([Number(executionTabId), Number(ownerTabId)].filter(Number.isInteger));
+  for (const tabId of Array.isArray(additionalTabIds) ? additionalTabIds.map(Number) : []) {
+    if (!Number.isInteger(tabId) || already.has(tabId)) continue;
+    already.add(tabId);
+    await broadcastTabState(tabId);
+  }
 }
 
 async function verificationSurfaceStatus(tabId) {
@@ -2042,7 +2050,8 @@ async function waitForNetworkModelEvidence(
   return { timedOut: true, requestId, evidence: null };
 }
 
-async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = sourceTabId) {
+async function discoverOfficialWorkModels(sourceTabId, progress) {
+  const ownerTabId = Number.isInteger(progress?.ownerTabId) ? progress.ownerTabId : sourceTabId;
   const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
   if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
     logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
@@ -2073,7 +2082,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
     if (sourceState.autoVerification?.running === true) {
       discoveryState.autoVerification = sourceState.autoVerification;
     }
-    await broadcastVerificationState(sourceTabId, ownerTabId, [discoveryTabId]);
+    await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
 
     logRuntime('info', 'discovery', 'official_work_model_discovery_tab_created', {
       sourceTabId,
@@ -2214,7 +2223,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
       currentModel: null,
       currentLabel: '正在验证 Picker B（Work）',
     };
-    await broadcastVerificationState(sourceTabId, ownerTabId, [discoveryTabId]);
+    await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
       const model = normalizeConcreteModelId(row?.model || row?.rawId);
@@ -2240,7 +2249,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
         label: String(row.label || model),
         startedAt: startedAtMs,
       });
-      await broadcastVerificationState(sourceTabId, ownerTabId, [discoveryTabId]);
+      await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
       logRuntime('info', 'discovery', 'official_work_model_native_started', {
         sourceTabId,
         discoveryTabId,
@@ -2371,7 +2380,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
             ? '准备验证下一个 Picker B（Work）'
             : 'Picker B（Work）验证完成',
         };
-        await broadcastVerificationState(sourceTabId, ownerTabId, [discoveryTabId]);
+        await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
       }
     }
 
@@ -2397,7 +2406,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress, ownerTabId = so
     progress.currentModel = null;
     progress.currentSelectorKey = null;
     progress.currentLabel = null;
-    await broadcastVerificationState(sourceTabId, ownerTabId, [discoveryTabId]);
+    await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
     logRuntime(nativeResults.length ? 'info' : 'warn', 'discovery', 'official_work_model_discovery_completed', {
       sourceTabId,
       discoveryTabId,
@@ -2743,6 +2752,7 @@ async function verifyAccountCatalogModels(
     shared: Array.isArray(sharedCandidates) ? sharedCandidates.length : 0,
     localNetwork: Array.isArray(localNetworkCandidates) ? localNetworkCandidates.length : 0,
   };
+  progress.ownerTabId = Number.isInteger(ownerTabId) ? ownerTabId : tabId;
 
   mergeCatalog(accountCatalog, 'chat-picker-a');
   await broadcastVerificationState(tabId, ownerTabId);
@@ -2760,7 +2770,7 @@ async function verifyAccountCatalogModels(
   while (index < queue.length || stablePasses < 2 || !officialWorkDiscoveryDone) {
     if (index >= queue.length) {
       if (!officialWorkDiscoveryDone) {
-        const officialWork = await discoverOfficialWorkModels(tabId, progress, ownerTabId);
+        const officialWork = await discoverOfficialWorkModels(tabId, progress);
         officialWorkDiscoveryDone = true;
         progress.officialWorkDiscovery = {
           attempted: true,
