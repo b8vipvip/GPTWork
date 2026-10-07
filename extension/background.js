@@ -1377,6 +1377,12 @@ async function performInitialize() {
   });
   accountState = await accountClient.initialize();
   await ensureConfiguration();
+  await syncSharedKnownModelsAfterRuntimeUpdate(manifestVersion).catch((error) => {
+    logRuntime('warn', 'discovery', 'shared_model_catalog_version_sync_failed', {
+      version: manifestVersion,
+      error: errorText(error),
+    });
+  });
   if (!masterRuntimeEnabled()) {
     await stopBackgroundRuntime('initialize_master_disabled');
     await configureOpenTabs();
@@ -3849,6 +3855,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GPTLOCK_ACCOUNT_LOGIN': {
         accountState = await accountClient.login(message.email, message.password, message.replaceDeviceRecordIds);
         await refreshAccountHeartbeat();
+        const models = await syncSharedKnownModels({ force: true });
+        await chrome.storage.local.set({
+          [SHARED_MODEL_CATALOG_SYNC_VERSION_KEY]: chrome.runtime.getManifest().version,
+        });
+        logRuntime('info', 'discovery', 'shared_model_catalog_login_sync_completed', {
+          accountId: Number(accountState?.user?.id || 0),
+          count: models.length,
+        });
         return accountState;
       }
       case 'GPTLOCK_ACCOUNT_FORGOT_PASSWORD':
