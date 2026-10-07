@@ -1592,7 +1592,9 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
   sharedModelProtocolMap = new Map(cached
     .map((item) => ({
       model: normalizeConcreteModelId(item?.model),
-      transport: normalizeRawProtocolModelId(item?.chatTransportModel || item?.nativeRequestModel),
+      transport: normalizeRawProtocolModelId(
+        item?.chatTransportModel || (item?.pickerMode === 'A' ? item?.nativeRequestModel : null),
+      ),
     }))
     .filter((item) => item.model && item.transport)
     .map((item) => [item.model, item.transport]));
@@ -1623,8 +1625,12 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
       .filter((item) => item.verifiedCount > 0 || ['A', 'B'].includes(item.pickerMode));
     sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
     sharedModelProtocolMap = new Map(models
-      .filter((item) => item.model && (item.chatTransportModel || item.nativeRequestModel))
-      .map((item) => [item.model, item.chatTransportModel || item.nativeRequestModel]));
+      .map((item) => ({
+        model: item.model,
+        transport: item.chatTransportModel || (item.pickerMode === 'A' ? item.nativeRequestModel : null),
+      }))
+      .filter((item) => item.model && item.transport)
+      .map((item) => [item.model, item.transport]));
     const patch = {};
     if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
     if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
@@ -2299,15 +2305,17 @@ async function publishAccountModels(accountCatalog, progress) {
       || (item?.pickerMode === 'A' && item?.responseConfirmed === true);
 
     if (item?.chatLockRequestConfirmed === true || item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true) {
-      current.chatTransportModel = normalizeRawProtocolModelId(item?.chatTransportModel)
-        || normalizeRawProtocolModelId(item?.rawRequestModel)
-        || current.chatTransportModel;
-      current.chatResponseModel = normalizeRawProtocolModelId(item?.chatResponseModel)
-        || normalizeRawProtocolModelId(item?.rawResponseModel)
-        || current.chatResponseModel;
       current.chatLockRequestConfirmed = current.chatLockRequestConfirmed || item?.chatLockRequestConfirmed === true;
       current.chatLockResponseConfirmed = current.chatLockResponseConfirmed || item?.chatLockResponseConfirmed === true;
       current.chatLockSupported = current.chatLockSupported || item?.chatLockSupported === true;
+      if (item?.chatLockSupported === true) {
+        current.chatTransportModel = normalizeRawProtocolModelId(item?.chatTransportModel)
+          || normalizeRawProtocolModelId(item?.rawRequestModel)
+          || current.chatTransportModel;
+        current.chatResponseModel = normalizeRawProtocolModelId(item?.chatResponseModel)
+          || normalizeRawProtocolModelId(item?.rawResponseModel)
+          || current.chatResponseModel;
+      }
     }
   }
 
@@ -2336,8 +2344,12 @@ async function publishAccountModels(accountCatalog, progress) {
     const generation = Math.max(0, Number(result?.generation || 0));
     sharedKnownModelIds = new Set(shared.map((item) => item.model).filter(Boolean));
     sharedModelProtocolMap = new Map(shared
-      .filter((item) => item.model && (item.chatTransportModel || item.nativeRequestModel))
-      .map((item) => [item.model, item.chatTransportModel || item.nativeRequestModel]));
+      .map((item) => ({
+        model: item.model,
+        transport: item.chatTransportModel || (item.pickerMode === 'A' ? item.nativeRequestModel : null),
+      }))
+      .filter((item) => item.model && item.transport)
+      .map((item) => [item.model, item.transport]));
     await Promise.all([
       chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared }),
       chrome.storage.local.set({
