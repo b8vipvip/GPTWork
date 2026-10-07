@@ -623,7 +623,9 @@ document.addEventListener('pointerdown', (event) => {
       // of presenting a changing denominator as if verification restarted.
       const stageLabel = activeStage?.label || null;
       progress.querySelector('.execution').textContent = total
-        ? `${completed} / ${total}${stageLabel ? ` · ${stageLabel}` : ''}`
+        ? activeStage
+          ? `${completed} / ${total} · ${stageLabel || 'Picker B · ChatGPT Work'}`
+          : `${completed} 已执行 · ${total} 已发现`
         : '正在发现…';
       progress.querySelector('.verified').textContent = total ? `${verified} / ${total}` : '…';
       progress.querySelector('.requested').textContent = total ? `${requestConfirmed} / ${total}` : '…';
