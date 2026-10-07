@@ -1,3 +1,4 @@
+// Runtime regression: 2026-10-07 Work popup exposed an expanded account model catalog after Select model.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
