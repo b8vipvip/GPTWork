@@ -14,7 +14,10 @@ import {
   suspendContentRecovery,
 } from './content-runtime-recovery.js';
 import { tabFeatureEnabledSync } from './tab-feature-runtime.js';
-import { initializeAfterCurrentTask } from './background.js';
+import {
+  initializeAfterCurrentTask,
+  probeNativeCoreForUpdateRecovery,
+} from './background.js';
 
 export const RELEASE_NOTIFICATION_URL = 'https://gptlock.mv3.cn/site/api/releases/notifications';
 export const CLIENT_UPDATE_POLICY_URL = 'https://gptlock.mv3.cn/site/api/client-update/config';
@@ -367,15 +370,26 @@ async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
     .filter((tab) => Number.isInteger(tab?.id) && tab.status !== 'loading' && tabFeatureEnabledSync(tab.id))
     .map((tab) => tab.id);
   const pendingMonitorTabs = expectedMonitorTabs.filter((tabId) => !attached.has(tabId));
+
+  // Recovery truth must come from a fresh Native Messaging round trip owned by the
+  // background lifecycle, never from a version cached before the installer ran.
+  const freshCore = await probeNativeCoreForUpdateRecovery().catch((error) => ({
+    connected: false,
+    version: null,
+    error: errorText(error),
+  }));
   const stored = await chromeApi.storage.local.get(NATIVE_STATUS_KEY);
   const nativeStatus = stored?.[NATIVE_STATUS_KEY] || null;
-  const coreReady = nativeStatus?.connected === true
-    && compareVersions(nativeStatus?.version, targetVersion) >= 0;
+  const nativeVersion = freshCore?.connected === true ? freshCore.version ?? null : null;
+  const coreReady = freshCore?.connected === true
+    && compareVersions(nativeVersion, targetVersion) >= 0;
 
   return {
     ready: coreReady && pendingContentTabs.length === 0 && pendingMonitorTabs.length === 0,
     coreReady,
-    nativeVersion: nativeStatus?.version ?? null,
+    nativeVersion,
+    lastKnownNativeVersion: nativeStatus?.lastKnownVersion ?? null,
+    nativeProbeError: freshCore?.error ?? null,
     tabCount: tabs.length,
     readyContentCount: readyTabs.length,
     pendingContentTabs,
@@ -497,7 +511,9 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
     const pending = last.pendingContentTabs.length + last.pendingMonitorTabs.length;
     const percent = last.coreReady ? (pending > 0 ? 97 : 99) : 95;
     const detail = !last.coreReady
-      ? '等待本地核心连接'
+      ? last.lastKnownNativeVersion
+        ? `等待本地核心实时连接（上次连接版本 ${last.lastKnownNativeVersion}）`
+        : '等待本地核心实时连接'
       : last.pendingContentTabs.length
         ? `等待 ${last.pendingContentTabs.length} 个页面运行时`
         : `等待 ${last.pendingMonitorTabs.length} 个请求锁定器`;
