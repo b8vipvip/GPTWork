@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   modelTransportId,
   normalizeConcreteModelId,
+  normalizeRawProtocolModelId,
   normalizePolicy,
   normalizeReasoningLevel,
   normalizeSettings,
@@ -84,6 +85,7 @@ const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
 let sharedKnownModelIds = new Set();
+let sharedModelProtocolMap = new Map();
 let lastServerModelCatalogGeneration = null;
 let diagnosticRuntimeSuspended = false;
 
@@ -828,7 +830,9 @@ function mergeResponseEvidence(state, evidence) {
     requestId,
     capturedAt: evidence?.capturedAt ?? previous?.capturedAt ?? new Date().toISOString(),
     model: modelConflict ? null : evidence?.model || previousModel || null,
+    rawModel: evidence?.rawModel || previous?.rawModel || null,
     defaultModel: evidence?.defaultModel || previous?.defaultModel || null,
+    rawDefaultModel: evidence?.rawDefaultModel || previous?.rawDefaultModel || null,
     defaultModelField: evidence?.defaultModelField || previous?.defaultModelField || null,
     reasoning: reasoningConflict ? null : evidence?.reasoning || previous?.reasoning || null,
     conflicts: { model: modelConflict, reasoning: reasoningConflict },
@@ -856,6 +860,7 @@ function verificationResponseObservation(tabId, responseEvidence) {
   // network-evidence.js) can confirm the backend model.
   return {
     model: responseEvidence?.conflicts?.model ? null : observed,
+    rawModel: responseEvidence?.conflicts?.model ? null : normalizeRawProtocolModelId(responseEvidence?.rawModel),
     backendResolvedModel: observed || null,
     downgraded: false,
     reason: target && observed && observed !== target ? 'served_model_mismatch' : null,
@@ -1014,6 +1019,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       forceModel: null,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
       knownModels: [...sharedKnownModelIds],
+      modelTransportMap: Object.fromEntries(sharedModelProtocolMap),
     };
   },
   getVerificationTransaction(tabId) {
@@ -1021,6 +1027,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
     if (!transaction?.model) return null;
     return {
       model: transaction.model,
+      mode: transaction.mode || 'force-model',
+      transportModel: normalizeRawProtocolModelId(transaction.transportModel),
       startedAt: transaction.startedAt ?? null,
     };
   },
@@ -1592,6 +1600,11 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
         model: normalizeConcreteModelId(item?.model),
         label: String(item?.label || '').trim().slice(0, 120),
         pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
+        nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
+        chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
+        chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
+        chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
         discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
@@ -1602,6 +1615,9 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
       // visible to server administrators but cannot seed client verification.
       .filter((item) => item.verifiedCount > 0 || ['A', 'B'].includes(item.pickerMode));
     sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
+    sharedModelProtocolMap = new Map(models
+      .filter((item) => item.model && (item.chatTransportModel || item.nativeRequestModel))
+      .map((item) => [item.model, item.chatTransportModel || item.nativeRequestModel]));
     const patch = {};
     if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
     if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
