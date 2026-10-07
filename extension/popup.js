@@ -186,18 +186,24 @@ async function renderStoredUpdateStatus() {
 
 function renderAutoVerifyProgress(auto) {
   const catalog = auto?.catalogVerification;
-  const running = Boolean(auto?.running && catalog && Number(catalog.total || 0) > 0);
+  const activeStage = catalog?.activeStage && Number(catalog.activeStage.total || 0) > 0
+    ? catalog.activeStage
+    : null;
+  const total = Math.max(0, Number(activeStage?.total ?? catalog?.total ?? 0));
+  const running = Boolean(auto?.running && catalog && total > 0);
   if (!elements.autoVerifyProgress) return;
   elements.autoVerifyProgress.hidden = !running;
   if (!running) return;
-  const total = Math.max(1, Number(catalog.total || 0));
-  const completed = Math.max(0, Math.min(total, Number(catalog.completed || 0)));
-  const percent = Math.round((completed / total) * 100);
+  const safeTotal = Math.max(1, total);
+  const completed = Math.max(0, Math.min(safeTotal, Number(activeStage?.completed ?? catalog.completed ?? 0)));
+  const percent = Math.round((completed / safeTotal) * 100);
   elements.autoVerifyProgressBar.value = percent;
-  elements.autoVerifyProgressText.textContent = `${completed} / ${total}`;
-  elements.autoVerifyProgressTitle.textContent = catalog.currentLabel
-    ? `正在验证：${catalog.currentLabel}`
-    : '正在验证账户全部可用模型';
+  elements.autoVerifyProgressText.textContent = `${completed} / ${safeTotal}`;
+  const currentLabel = activeStage?.currentLabel || catalog.currentLabel || catalog.currentModel || null;
+  const stageLabel = activeStage?.label || null;
+  elements.autoVerifyProgressTitle.textContent = currentLabel
+    ? `${stageLabel ? `${stageLabel} · ` : ''}正在验证：${currentLabel}`
+    : stageLabel || '正在验证账户全部可用模型';
 }
 
 function showAutoVerifyToast(text) {
@@ -262,8 +268,13 @@ function render(state) {
   };
   let [title, detail, tone] = states[guard?.status] || ['无活动状态 / No active state', '请打开 chatgpt.com 后重试。', 'off'];
   if (auto?.running) {
-    title = `发现模型中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Model discovery`;
-    detail = '正在等待本次真实聊天响应；如果响应证据不足，程序会自动跟踪 handoff 后续流并最多再发送一次测试消息。';
+    const stage = auto.catalogVerification?.activeStage;
+    title = stage
+      ? `发现模型中 · ${stage.label} ${Number(stage.completed || 0)}/${Number(stage.total || 0)}`
+      : `发现模型中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Model discovery`;
+    detail = stage?.id === 'picker-b-work'
+      ? '正在 ChatGPT Work 页面逐个真实验证 Picker B；Work 全部完成后才会回到普通 Chat 进行第二轮强制锁定验证。'
+      : '正在等待本次真实聊天响应；如果响应证据不足，程序会自动跟踪 handoff 后续流并最多再发送一次测试消息。';
     tone = 'wait';
   } else if (auto?.completedAt && autoApplies) {
     if (autoEvidenceConfirmed && auto.outcome === 'verified') {
