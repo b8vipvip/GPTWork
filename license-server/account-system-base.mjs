@@ -252,6 +252,37 @@ export function createAccountSystem({
     generation INTEGER NOT NULL DEFAULT 0 CHECK(generation >= 0),
     updated_at TEXT NOT NULL
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS shared_model_catalog_trash (
+    model_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL DEFAULT '',
+    picker_mode TEXT,
+    native_request_model TEXT,
+    native_response_model TEXT,
+    chat_transport_model TEXT,
+    chat_response_model TEXT,
+    verified_count INTEGER NOT NULL DEFAULT 0 CHECK(verified_count >= 0),
+    chat_lock_verified_count INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_verified_count >= 0),
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+    discovered_count INTEGER NOT NULL DEFAULT 0 CHECK(discovered_count >= 0),
+    deleted_at TEXT NOT NULL
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS shared_model_account_seen_trash (
+    user_id INTEGER NOT NULL,
+    model_id TEXT NOT NULL,
+    request_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(request_confirmed IN (0,1)),
+    response_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(response_confirmed IN (0,1)),
+    native_request_model TEXT,
+    native_response_model TEXT,
+    chat_transport_model TEXT,
+    chat_response_model TEXT,
+    chat_lock_request_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_request_confirmed IN (0,1)),
+    chat_lock_response_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_response_confirmed IN (0,1)),
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, model_id)
+  ) STRICT;
   CREATE TABLE IF NOT EXISTS shared_model_account_seen (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     model_id TEXT NOT NULL REFERENCES shared_model_catalog(model_id) ON DELETE CASCADE,
@@ -337,6 +368,8 @@ export function createAccountSystem({
     db.prepare('UPDATE shared_model_catalog_state SET generation=generation+1,updated_at=? WHERE id=1').run(nowIso());
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_shared_model_account_seen_model ON shared_model_account_seen(model_id,last_seen_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_shared_model_account_seen_trash_model ON shared_model_account_seen_trash(model_id,last_seen_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_shared_model_catalog_trash_deleted ON shared_model_catalog_trash(deleted_at)');
   ensureColumn('memberships', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_orders', 'plan_snapshot_json', "plan_snapshot_json TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('membership_plans', 'original_price_cents', 'original_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(original_price_cents >= 0)');
@@ -522,6 +555,39 @@ export function createAccountSystem({
       }));
   }
 
+  function sharedModelCatalogTrash() {
+    return db.prepare(`SELECT
+        c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
+        c.native_request_model,c.native_response_model,c.chat_transport_model,c.chat_response_model,
+        c.first_seen_at,c.last_seen_at,c.deleted_at,
+        (SELECT COUNT(*) FROM shared_model_account_seen_trash s WHERE s.model_id=c.model_id) AS account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen_trash s WHERE s.model_id=c.model_id AND s.request_confirmed=1) AS request_confirmed_account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen_trash s WHERE s.model_id=c.model_id AND s.response_confirmed=1) AS verified_account_count,
+        (SELECT COUNT(*) FROM shared_model_account_seen_trash s WHERE s.model_id=c.model_id AND s.chat_lock_response_confirmed=1) AS chat_lock_verified_account_count
+      FROM shared_model_catalog_trash c
+      ORDER BY c.deleted_at DESC,c.model_id ASC LIMIT 256`).all()
+      .map((row) => ({
+        model: row.model_id,
+        label: row.display_name || row.model_id,
+        pickerMode: row.picker_mode || null,
+        nativeRequestModel: row.native_request_model || null,
+        nativeResponseModel: row.native_response_model || null,
+        chatTransportModel: row.chat_transport_model || null,
+        chatResponseModel: row.chat_response_model || null,
+        enabled: Boolean(row.enabled),
+        discoveredCount: Number(row.discovered_count || 0),
+        verifiedCount: Number(row.verified_count || 0),
+        chatLockVerifiedCount: Number(row.chat_lock_verified_count || 0),
+        accountCount: Number(row.account_count || 0),
+        requestConfirmedAccountCount: Number(row.request_confirmed_account_count || 0),
+        verifiedAccountCount: Number(row.verified_account_count || 0),
+        chatLockVerifiedAccountCount: Number(row.chat_lock_verified_account_count || 0),
+        firstSeenAt: row.first_seen_at,
+        lastSeenAt: row.last_seen_at,
+        deletedAt: row.deleted_at,
+      }));
+  }
+
   function mergeSharedModelCatalog(inputModels, userId) {
     const now = nowIso();
     const rows = Array.isArray(inputModels) ? inputModels.slice(0, 128) : [];
@@ -662,17 +728,143 @@ export function createAccountSystem({
     return {
       generation: sharedModelCatalogGeneration(),
       models: sharedModelCatalog({ includeDisabled: true }),
+      trash: sharedModelCatalogTrash(),
     };
   }
-  function deleteSharedModelCatalog(modelValue) {
-    const model = normalizeSharedModelId(modelValue);
-    if (!model) fail(400, 'INVALID_MODEL', '模型 ID 无效');
-    const result = db.prepare('DELETE FROM shared_model_catalog WHERE model_id=?').run(model);
-    if (!result.changes) fail(404, 'MODEL_NOT_FOUND', '模型不存在');
-    bumpSharedModelCatalogGeneration();
+  function normalizeSharedModelList(values) {
+    const raw = Array.isArray(values) ? values : [values];
+    return [...new Set(raw.slice(0, 256).map(normalizeSharedModelId).filter(Boolean))];
+  }
+
+  function deleteSharedModelCatalogBatch(modelValues) {
+    const models = normalizeSharedModelList(modelValues);
+    if (!models.length) fail(400, 'INVALID_MODELS', '请选择至少一个有效模型');
+    const selectCatalog = db.prepare('SELECT * FROM shared_model_catalog WHERE model_id=?');
+    const selectEvidence = db.prepare('SELECT * FROM shared_model_account_seen WHERE model_id=? ORDER BY user_id');
+    const saveTrash = db.prepare(`INSERT INTO shared_model_catalog_trash(
+        model_id,display_name,picker_mode,native_request_model,native_response_model,chat_transport_model,chat_response_model,
+        verified_count,chat_lock_verified_count,first_seen_at,last_seen_at,enabled,discovered_count,deleted_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(model_id) DO UPDATE SET
+        display_name=excluded.display_name,picker_mode=excluded.picker_mode,
+        native_request_model=excluded.native_request_model,native_response_model=excluded.native_response_model,
+        chat_transport_model=excluded.chat_transport_model,chat_response_model=excluded.chat_response_model,
+        verified_count=excluded.verified_count,chat_lock_verified_count=excluded.chat_lock_verified_count,
+        first_seen_at=excluded.first_seen_at,last_seen_at=excluded.last_seen_at,enabled=excluded.enabled,
+        discovered_count=excluded.discovered_count,deleted_at=excluded.deleted_at`);
+    const clearTrashEvidence = db.prepare('DELETE FROM shared_model_account_seen_trash WHERE model_id=?');
+    const saveTrashEvidence = db.prepare(`INSERT OR REPLACE INTO shared_model_account_seen_trash(
+        user_id,model_id,request_confirmed,response_confirmed,native_request_model,native_response_model,
+        chat_transport_model,chat_response_model,chat_lock_request_confirmed,chat_lock_response_confirmed,
+        first_seen_at,last_seen_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const deleteActive = db.prepare('DELETE FROM shared_model_catalog WHERE model_id=?');
+    const deleted = [];
+    const missing = [];
+    const deletedAt = nowIso();
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const model of models) {
+        const current = selectCatalog.get(model);
+        if (!current) { missing.push(model); continue; }
+        saveTrash.run(
+          current.model_id,current.display_name,current.picker_mode,current.native_request_model,current.native_response_model,
+          current.chat_transport_model,current.chat_response_model,current.verified_count,current.chat_lock_verified_count,
+          current.first_seen_at,current.last_seen_at,current.enabled,current.discovered_count,deletedAt,
+        );
+        clearTrashEvidence.run(model);
+        for (const row of selectEvidence.all(model)) {
+          saveTrashEvidence.run(
+            row.user_id,row.model_id,row.request_confirmed,row.response_confirmed,row.native_request_model,row.native_response_model,
+            row.chat_transport_model,row.chat_response_model,row.chat_lock_request_confirmed,row.chat_lock_response_confirmed,
+            row.first_seen_at,row.last_seen_at,
+          );
+        }
+        deleteActive.run(model);
+        deleted.push(model);
+      }
+      if (deleted.length) bumpSharedModelCatalogGeneration();
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
     return {
+      deleted, missing,
       generation: sharedModelCatalogGeneration(),
       models: sharedModelCatalog({ includeDisabled: true }),
+      trash: sharedModelCatalogTrash(),
+    };
+  }
+
+  function deleteSharedModelCatalog(modelValue) {
+    const result = deleteSharedModelCatalogBatch([modelValue]);
+    if (!result.deleted.length) fail(404, 'MODEL_NOT_FOUND', '模型不存在');
+    return result;
+  }
+
+  function restoreSharedModelCatalogBatch(modelValues) {
+    const models = normalizeSharedModelList(modelValues);
+    if (!models.length) fail(400, 'INVALID_MODELS', '请选择至少一个有效模型');
+    const selectTrash = db.prepare('SELECT * FROM shared_model_catalog_trash WHERE model_id=?');
+    const selectActive = db.prepare('SELECT model_id FROM shared_model_catalog WHERE model_id=?');
+    const selectTrashEvidence = db.prepare('SELECT * FROM shared_model_account_seen_trash WHERE model_id=? ORDER BY user_id');
+    const userExists = db.prepare('SELECT id FROM users WHERE id=?');
+    const restoreCatalog = db.prepare(`INSERT INTO shared_model_catalog(
+        model_id,display_name,picker_mode,native_request_model,native_response_model,chat_transport_model,chat_response_model,
+        verified_count,chat_lock_verified_count,first_seen_at,last_seen_at,enabled,discovered_count
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const restoreEvidence = db.prepare(`INSERT OR REPLACE INTO shared_model_account_seen(
+        user_id,model_id,request_confirmed,response_confirmed,native_request_model,native_response_model,
+        chat_transport_model,chat_response_model,chat_lock_request_confirmed,chat_lock_response_confirmed,
+        first_seen_at,last_seen_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const recomputeCounts = db.prepare(`UPDATE shared_model_catalog SET
+      verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.response_confirmed=1),
+      chat_lock_verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.chat_lock_response_confirmed=1)
+      WHERE model_id=?`);
+    const deleteTrashEvidence = db.prepare('DELETE FROM shared_model_account_seen_trash WHERE model_id=?');
+    const deleteTrash = db.prepare('DELETE FROM shared_model_catalog_trash WHERE model_id=?');
+    const restored = [];
+    const missing = [];
+    const skippedActive = [];
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const model of models) {
+        const trash = selectTrash.get(model);
+        if (!trash) { missing.push(model); continue; }
+        if (selectActive.get(model)) { skippedActive.push(model); continue; }
+        restoreCatalog.run(
+          trash.model_id,trash.display_name,trash.picker_mode,trash.native_request_model,trash.native_response_model,
+          trash.chat_transport_model,trash.chat_response_model,trash.verified_count,trash.chat_lock_verified_count,
+          trash.first_seen_at,trash.last_seen_at,trash.enabled,trash.discovered_count,
+        );
+        for (const row of selectTrashEvidence.all(model)) {
+          if (!userExists.get(row.user_id)) continue;
+          restoreEvidence.run(
+            row.user_id,row.model_id,row.request_confirmed,row.response_confirmed,row.native_request_model,row.native_response_model,
+            row.chat_transport_model,row.chat_response_model,row.chat_lock_request_confirmed,row.chat_lock_response_confirmed,
+            row.first_seen_at,row.last_seen_at,
+          );
+        }
+        recomputeCounts.run(model,model,model);
+        deleteTrashEvidence.run(model);
+        deleteTrash.run(model);
+        restored.push(model);
+      }
+      if (restored.length) bumpSharedModelCatalogGeneration();
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+    return {
+      restored, missing, skippedActive,
+      generation: sharedModelCatalogGeneration(),
+      models: sharedModelCatalog({ includeDisabled: true }),
+      trash: sharedModelCatalogTrash(),
     };
   }
 
@@ -1585,6 +1777,7 @@ export function createAccountSystem({
           ok: true,
           generation: sharedModelCatalogGeneration(),
           models: sharedModelCatalog({ includeDisabled: true }),
+          trash: sharedModelCatalogTrash(),
         }), true;
       }
       if (path === '/admin/api/account/model-catalog' && req.method === 'PUT') {
@@ -1600,9 +1793,21 @@ export function createAccountSystem({
       }
       if (path === '/admin/api/account/model-catalog' && req.method === 'DELETE') {
         const input = await bodyJson(req);
-        const model = normalizeSharedModelId(input.model);
-        const result = deleteSharedModelCatalog(model);
-        audit('admin_shared_model_deleted', null, { model, generation: result.generation });
+        const requested = Array.isArray(input.models) ? input.models : [input.model];
+        const result = deleteSharedModelCatalogBatch(requested);
+        if (!result.deleted.length && requested.length === 1) fail(404, 'MODEL_NOT_FOUND', '模型不存在');
+        audit('admin_shared_models_deleted', null, {
+          models: result.deleted, missing: result.missing, generation: result.generation,
+        });
+        return json(res, 200, { ok: true, ...result }), true;
+      }
+      if (path === '/admin/api/account/model-catalog/restore' && req.method === 'POST') {
+        const input = await bodyJson(req);
+        const requested = Array.isArray(input.models) ? input.models : [input.model];
+        const result = restoreSharedModelCatalogBatch(requested);
+        audit('admin_shared_models_restored', null, {
+          models: result.restored, missing: result.missing, skippedActive: result.skippedActive, generation: result.generation,
+        });
         return json(res, 200, { ok: true, ...result }), true;
       }
 
