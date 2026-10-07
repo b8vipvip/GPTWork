@@ -87,6 +87,11 @@ export function createVerificationCatalog({
         label,
         pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : catalog?.pickerMode || null,
         discoverySource: String(row?.discoverySource || phase || '').trim().slice(0, 80) || null,
+        transportModel: row?.transportModel || null,
+        expectedResponseModel: row?.expectedResponseModel || null,
+        nativeRequestModel: row?.nativeRequestModel || null,
+        nativeResponseModel: row?.nativeResponseModel || null,
+        nativeResponseConfirmed: row?.nativeResponseConfirmed === true,
       };
       const key = identity(candidate);
       if (knownKeys.has(key)) {
@@ -106,6 +111,11 @@ export function createVerificationCatalog({
           const existingPriority = locatorPriority(existing);
           const candidatePriority = locatorPriority(candidate);
           existing.rawModel = rawModel || existing.rawModel;
+          existing.transportModel = candidate.transportModel || existing.transportModel;
+          existing.expectedResponseModel = candidate.expectedResponseModel || existing.expectedResponseModel;
+          existing.nativeRequestModel = candidate.nativeRequestModel || existing.nativeRequestModel;
+          existing.nativeResponseModel = candidate.nativeResponseModel || existing.nativeResponseModel;
+          existing.nativeResponseConfirmed = candidate.nativeResponseConfirmed || existing.nativeResponseConfirmed;
           if (candidatePriority >= existingPriority) {
             existing.selectorKey = selectorKey || existing.selectorKey;
             existing.label = label || existing.label;
