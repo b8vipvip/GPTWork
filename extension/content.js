@@ -873,13 +873,19 @@ document.addEventListener('pointerdown', (event) => {
 
   function verificationSurfaceStatus() {
     const composer = findComposer();
-    const trigger = composerIntelligenceTrigger();
     const composerReady = Boolean(composer);
-    const modelTriggerReady = Boolean(trigger);
     const documentVisible = document.visibilityState === 'visible';
-    const structuralReady = composerReady && modelTriggerReady;
+
+    // Page readiness has exactly one owner and one contract: a responding content
+    // runtime with the active ChatGPT composer. The model picker belongs to the later
+    // discovery transaction and must never veto page readiness. Keep its presence only
+    // as diagnostics so a picker problem is reported by model discovery, not as
+    // "this is not a usable ChatGPT page".
+    const modelTriggerReady = Boolean(composerIntelligenceTrigger());
+    const structuralReady = composerReady;
+    const ready = structuralReady && documentVisible;
     return {
-      ready: structuralReady && documentVisible,
+      ready,
       structuralReady,
       contentRuntimeReady: true,
       composerReady,
@@ -888,6 +894,11 @@ document.addEventListener('pointerdown', (event) => {
       visibilityState: document.visibilityState,
       pathname: location.pathname,
       href: location.href,
+      reason: ready
+        ? null
+        : !composerReady
+          ? 'composer_not_ready'
+          : 'document_hidden',
     };
   }
 

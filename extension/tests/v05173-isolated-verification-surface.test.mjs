@@ -12,7 +12,9 @@ test('v0.5.173 exposes a strict verification-surface preflight', async () => {
   assert.match(content, /modelTriggerReady/);
   assert.match(content, /documentVisible/);
   assert.match(content, /GPTLOCK_VERIFICATION_SURFACE_STATUS/);
-  assert.match(content, /ready: structuralReady && documentVisible/);
+  assert.match(content, /const structuralReady = composerReady;/);
+  assert.match(content, /const ready = structuralReady && documentVisible;/);
+  assert.doesNotMatch(content, /structuralReady\s*=\s*composerReady\s*&&\s*modelTriggerReady/);
 });
 
 test('v0.5.173 creates one isolated verification execution tab instead of using the owner tab', async () => {

@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.189';
+const RUNTIME_CODE_VERSION = '0.5.190';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1976,6 +1976,16 @@ async function verificationSurfaceStatus(tabId) {
   }));
 }
 
+function verificationSurfaceAccepted(surface, requireVisible) {
+  // The content runtime is the sole authority for page readiness. Background never
+  // reconstructs readiness from individual DOM diagnostics (composer/model trigger/
+  // visibility), which previously created a second decision layer and let a missing
+  // picker trigger misclassify a real ChatGPT page as infrastructure-unavailable.
+  return requireVisible
+    ? surface?.ready === true
+    : surface?.structuralReady === true;
+}
+
 async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = true } = {}) {
   const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
   let last = {
@@ -1994,18 +2004,16 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'verification_tab_closed' };
 
-    // ChatGPT is an SPA: the composer/content runtime can be fully usable while
-    // chrome.tabs still reports status="loading". Never gate the page handshake on
-    // tab.status === "complete"; the page runtime itself is the readiness authority.
+    // ChatGPT is an SPA: trust the live page runtime, not Chrome's loading state and
+    // not a second background-side reconstruction of DOM readiness.
     last = await verificationSurfaceStatus(tabId);
-    let structuralReady = last?.contentRuntimeReady === true
-      && last?.composerReady === true
-      && last?.modelTriggerReady === true;
-    if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
-      return { ...last, ready: true, structuralReady: true };
+    if (verificationSurfaceAccepted(last, requireVisible)) {
+      return { ...last, ready: true };
     }
 
-    // Historical recovery path for a completed navigation.
+    // Recovery has one job only: restore a missing content runtime. It does not decide
+    // whether the composer or model picker is valid; those decisions stay with their
+    // stage owners in content.js.
     if (
       !recoveryAttempted
       && last?.contentRuntimeReady !== true
@@ -2016,11 +2024,8 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
       const recovery = await ensureContentRuntime(tabId, 'verification_surface_wait');
       if (recovery?.ready === true) {
         last = await verificationSurfaceStatus(tabId);
-        structuralReady = last?.contentRuntimeReady === true
-          && last?.composerReady === true
-          && last?.modelTriggerReady === true;
-        if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
-          return { ...last, ready: true, structuralReady: true };
+        if (verificationSurfaceAccepted(last, requireVisible)) {
+          return { ...last, ready: true };
         }
       }
     } else if (
@@ -2030,10 +2035,6 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
       && loadingRecoveryAttempts < 3
       && Date.now() - lastLoadingRecoveryAt >= 700
     ) {
-      // New verification tabs can remain "loading" for many seconds while ChatGPT's
-      // SPA is already committed and scriptable. The old complete-only gate created a
-      // deadlock: no receiver -> no verification, but recovery was forbidden until a
-      // completion event that might arrive after the verification timeout.
       loadingRecoveryAttempts += 1;
       lastLoadingRecoveryAt = Date.now();
       const recovery = await ensureContentRuntimeDuringLoad(
@@ -2056,11 +2057,8 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
       });
       if (recovery?.ready === true) {
         last = await verificationSurfaceStatus(tabId);
-        structuralReady = last?.contentRuntimeReady === true
-          && last?.composerReady === true
-          && last?.modelTriggerReady === true;
-        if (structuralReady && (!requireVisible || last?.documentVisible === true)) {
-          return { ...last, ready: true, structuralReady: true };
+        if (verificationSurfaceAccepted(last, requireVisible)) {
+          return { ...last, ready: true };
         }
       }
     }
@@ -2070,7 +2068,7 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
   return {
     ...last,
     ready: false,
-    structuralReady: Boolean(last?.contentRuntimeReady && last?.composerReady && last?.modelTriggerReady),
+    structuralReady: last?.structuralReady === true,
     reason: last?.reason || 'verification_surface_not_ready',
   };
 }
@@ -3659,7 +3657,7 @@ async function autoVerify(tabId) {
 
   let session = null;
   let state = null;
-  let coreCheck = { connected: false, error: null };
+  let coreCheck = { checked: false, connected: null, error: null };
   let monitorAttached = false;
   let responseCaptureEnabled = false;
   let streamCaptureStarted = false;
@@ -3718,7 +3716,8 @@ async function autoVerify(tabId) {
       reason,
       error: error ? errorText(error) : null,
       verificationSurface: autoVerification.verificationSurface,
-      coreConnected: coreCheck.connected === true,
+      coreChecked: coreCheck.checked === true,
+      coreConnected: coreCheck.checked ? coreCheck.connected === true : null,
       monitorAttached,
       responseCaptureEnabled,
       ...details,
@@ -3740,7 +3739,8 @@ async function autoVerify(tabId) {
       catalogVerified: 0,
       catalogFailed: 0,
       checks: {
-        coreConnected: coreCheck.connected === true,
+        coreChecked: coreCheck.checked === true,
+        coreConnected: coreCheck.checked ? coreCheck.connected === true : null,
         coreError: coreCheck.error ?? null,
         monitorAttached,
         responseCaptureEnabled,
@@ -3773,7 +3773,10 @@ async function autoVerify(tabId) {
       });
     }
 
-    coreCheck = await refreshNativeCore({ tolerateFailure: true });
+    coreCheck = {
+      checked: true,
+      ...(await refreshNativeCore({ tolerateFailure: true })),
+    };
     if (coreCheck.connected !== true) {
       return await finishInfrastructureFailure('verification_core_unavailable', coreCheck.error || 'native_core_unavailable');
     }
