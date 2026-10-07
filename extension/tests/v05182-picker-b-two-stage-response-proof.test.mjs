@@ -1,3 +1,4 @@
+// Two-stage runtime regression from v0.5.181: Work response can be valid while resolved_model_slug is absent.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
