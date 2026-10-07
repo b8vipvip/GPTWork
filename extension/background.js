@@ -45,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.185';
+const RUNTIME_CODE_VERSION = '0.5.186';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -726,9 +726,11 @@ function connectNative() {
         pending.resolve(message.data);
       } else {
         const error = new Error(message.error?.messageZhCn || message.error?.messageEn || 'Native request failed');
+        error.code = message.error?.code || 'native_request_failed';
+        error.nativeRequestType = pending.type;
         logRuntime('error', 'native', 'request_failed', {
           type: pending.type,
-          code: message.error?.code ?? null,
+          code: error.code,
           error: error.message,
         });
         pending.reject(error);
@@ -806,11 +808,16 @@ async function syncRuntimeLogsToNative() {
   return nativeLogSyncQueue;
 }
 
+function isNativeApplicationRequestError(error) {
+  return error?.code === 'request_failed' || error?.code === 'native_request_failed';
+}
+
 async function syncPolicy() {
   const result = await sendNative('set_policy', { policy: toNativePolicy(currentPolicy) });
   await writeNativeStatus({
     connected: true,
     lastError: null,
+    lastPolicyError: null,
     lastSeenAt: new Date().toISOString(),
     policyRevision: result.revision,
   });
@@ -1356,17 +1363,34 @@ async function refreshNativeCore({ tolerateFailure = false } = {}) {
   }
   try {
     await sendNative('ping');
-    await syncPolicy();
+    let policySyncError = null;
+    try {
+      await syncPolicy();
+    } catch (error) {
+      if (!isNativeApplicationRequestError(error)) throw error;
+      policySyncError = errorText(error);
+      await writeNativeStatus({
+        connected: true,
+        lastError: null,
+        lastPolicyError: policySyncError,
+        lastSeenAt: new Date().toISOString(),
+      });
+      logRuntime('warn', 'native', 'policy_sync_rejected_core_still_connected', {
+        error: policySyncError,
+        code: error?.code ?? null,
+      });
+    }
     const status = await sendNative('get_status');
     await writeNativeStatus({
       connected: true,
       lastError: null,
+      lastPolicyError: policySyncError,
       lastSeenAt: new Date().toISOString(),
       lastVerification: status.lastVerification ?? null,
       policyRevision: status.policyRevision,
       version: status.version,
     });
-    return { connected: true, error: null, status };
+    return { connected: true, error: null, policySyncError, status };
   } catch (error) {
     const detail = errorText(error);
     await writeNativeStatus({ connected: false, lastError: detail });
@@ -3818,6 +3842,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 function applyConfigurationChange({ policyChanged = false, settingsChanged = false, localEnabledChanged = false } = {}) {
   if (policyChanged && masterRuntimeEnabled()) {
     void syncPolicy().catch(async (error) => {
+      if (isNativeApplicationRequestError(error)) {
+        await writeNativeStatus({
+          connected: true,
+          lastError: null,
+          lastPolicyError: errorText(error),
+          lastSeenAt: new Date().toISOString(),
+        });
+        logRuntime('warn', 'native', 'policy_sync_rejected_core_still_connected', {
+          error: errorText(error),
+          code: error?.code ?? null,
+        });
+        return;
+      }
       await writeNativeStatus({ connected: false, lastError: errorText(error) });
     });
   }
