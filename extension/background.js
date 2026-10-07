@@ -1079,7 +1079,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // legitimately omit Network.requestWillBeSent's networkId at this boundary, so
     // retain the forwarded request as first-class verification evidence instead of
     // waiting forever for a Network requestId that may never be correlated.
-    if (rewrite.authorityKind === 'verification-transaction' && rewrite.modelAfter && !rewrite.error) {
+    const discoveryAuthority = ['verification-transaction', 'model-discovery-native', 'model-discovery-chat-compat']
+      .includes(rewrite.authorityKind);
+    if (discoveryAuthority && rewrite.modelAfter && !rewrite.error) {
       state.lastForwardedRequest = {
         capturedAt,
         requestId: rewrite.requestId ?? null,
@@ -1090,7 +1092,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       };
     }
     const verification = verificationTransactionForTab(tabId);
-    if (verification?.model && rewrite.authorityKind !== 'verification-transaction') {
+    if (verification?.model && !discoveryAuthority) {
       state.lastError = 'verification_request_missing_terminal_authority';
       state.phase = 'error';
       logRuntime('error', 'discovery', 'verification_request_generation_or_authority_mismatch', {
