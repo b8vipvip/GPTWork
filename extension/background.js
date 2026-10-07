@@ -45,7 +45,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.183';
+const RUNTIME_CODE_VERSION = '0.5.184';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -61,6 +61,7 @@ const LOCAL_ENABLED_KEY = 'gptworkEnabledLocal';
 const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
 const SHARED_MODEL_CATALOG_GENERATION_KEY = 'gptworkSharedModelCatalogGenerationV1';
 const SHARED_MODEL_CATALOG_ACCOUNT_KEY = 'gptworkSharedModelCatalogAccountV1';
+const SHARED_MODEL_CATALOG_SYNC_VERSION_KEY = 'gptworkSharedModelCatalogSyncVersionV1';
 const LOCAL_DISCOVERED_MODELS_KEY = 'discoveredModels';
 const LOCAL_DISCOVERED_EVIDENCE_KEY = 'discoveredModelEvidence';
 const NETWORK_CANDIDATE_SELECTOR = '__network_candidate__';
@@ -1611,12 +1612,93 @@ async function resolveUnknownCatalogNames(tabId, rows) {
   }
 }
 
+function sharedModelClientEligible(item) {
+  if (item?.clientEligible === true || Number(item?.clientEligibleAccountCount || 0) > 0) return true;
+  return Number(item?.discoveredCount || 0) > 0
+    && Number(item?.requestConfirmedAccountCount || 0) > 0
+    && Number(item?.verifiedAccountCount || 0) > 0
+    && Number(item?.chatLockVerifiedAccountCount || 0) > 0;
+}
+
+function normalizeClientSharedModels(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      model: normalizeConcreteModelId(item?.model),
+      label: String(item?.label || '').trim().slice(0, 120),
+      pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+      nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
+      nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
+      chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
+      chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
+      discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
+      requestConfirmedAccountCount: Math.max(0, Number(item?.requestConfirmedAccountCount || 0)),
+      verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
+      verifiedAccountCount: Math.max(0, Number(item?.verifiedAccountCount || 0)),
+      chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
+      chatLockVerifiedAccountCount: Math.max(0, Number(item?.chatLockVerifiedAccountCount || 0)),
+      clientEligibleAccountCount: Math.max(0, Number(item?.clientEligibleAccountCount || 0)),
+      clientEligible: item?.clientEligible === true,
+      lastSeenAt: item?.lastSeenAt || null,
+    }))
+    .filter((item) => item.model && sharedModelClientEligible(item));
+}
+
+async function applyClientSharedModelCatalog(rawModels, {
+  generation = 0,
+  accountId = Number(accountState?.user?.id || 0),
+  reason = 'sync',
+} = {}) {
+  const stored = await chrome.storage.sync.get([SHARED_KNOWN_MODELS_KEY, 'policy']);
+  const previous = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
+  const models = normalizeClientSharedModels(rawModels);
+  const allowed = new Set(models.map((item) => item.model));
+  const policy = normalizePolicy(stored.policy);
+  const lockedModels = policy.lockedModels.filter((model) => allowed.has(model));
+  const workDefaultModel = allowed.has(policy.workDefaultModel)
+    ? policy.workDefaultModel
+    : lockedModels[0] || models[0]?.model || policy.workDefaultModel;
+  const nextPolicy = normalizePolicy({ ...policy, lockedModels, workDefaultModel });
+
+  const patch = {};
+  if (JSON.stringify(previous) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
+  if (JSON.stringify(policy) !== JSON.stringify(nextPolicy)) patch.policy = nextPolicy;
+  if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
+  currentPolicy = nextPolicy;
+
+  sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
+  sharedModelProtocolMap = new Map(models
+    .map((item) => ({
+      model: item.model,
+      transport: item.chatTransportModel,
+    }))
+    .filter((item) => item.model && item.transport)
+    .map((item) => [item.model, item.transport]));
+  rememberProvenPickerBChatModels(models);
+
+  await chrome.storage.local.set({
+    [SHARED_MODEL_CATALOG_GENERATION_KEY]: Math.max(0, Number(generation || 0)),
+    [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: accountId,
+  });
+  lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, Math.max(0, Number(generation || 0)));
+  logRuntime('info', 'discovery', 'shared_model_catalog_client_applied', {
+    count: models.length,
+    previousCount: previous.length,
+    lockedBefore: policy.lockedModels.length,
+    lockedAfter: nextPolicy.lockedModels.length,
+    prunedLockedModels: policy.lockedModels.filter((model) => !allowed.has(model)),
+    generation: Math.max(0, Number(generation || 0)),
+    reason,
+  });
+  return models;
+}
+
 async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalogGeneration, force = false } = {}) {
   const [storedModels, local] = await Promise.all([
     chrome.storage.sync.get(SHARED_KNOWN_MODELS_KEY),
     chrome.storage.local.get([SHARED_MODEL_CATALOG_GENERATION_KEY, SHARED_MODEL_CATALOG_ACCOUNT_KEY]),
   ]);
-  const cached = Array.isArray(storedModels[SHARED_KNOWN_MODELS_KEY]) ? storedModels[SHARED_KNOWN_MODELS_KEY] : [];
+  const cachedRaw = Array.isArray(storedModels[SHARED_KNOWN_MODELS_KEY]) ? storedModels[SHARED_KNOWN_MODELS_KEY] : [];
+  const cached = normalizeClientSharedModels(cachedRaw);
   const accountId = Number(accountState?.user?.id || 0);
   const syncedAccountId = Number(local[SHARED_MODEL_CATALOG_ACCOUNT_KEY] || 0);
   const hasSyncedGeneration = Number.isInteger(Number(local[SHARED_MODEL_CATALOG_GENERATION_KEY]));
@@ -1628,63 +1710,37 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
   const generationChanged = requestedGeneration !== null && syncedGeneration < requestedGeneration;
   const needsInitialSync = !hasSyncedGeneration || syncedAccountId <= 0;
 
-  sharedKnownModelIds = new Set(cached.map((item) => normalizeConcreteModelId(item?.model)).filter(Boolean));
+  sharedKnownModelIds = new Set(cached.map((item) => item.model).filter(Boolean));
   sharedModelProtocolMap = new Map(cached
-    .map((item) => ({
-      model: normalizeConcreteModelId(item?.model),
-      transport: normalizeRawProtocolModelId(
-        item?.chatTransportModel || (item?.pickerMode === 'A' ? item?.nativeRequestModel : null),
-      ),
-    }))
+    .map((item) => ({ model: item.model, transport: item.chatTransportModel }))
     .filter((item) => item.model && item.transport)
     .map((item) => [item.model, item.transport]));
   rememberProvenPickerBChatModels(cached);
-  if (!force && !accountChanged && !generationChanged && !needsInitialSync) return cached;
+
+  if (!force && !accountChanged && !generationChanged && !needsInitialSync) {
+    if (JSON.stringify(cachedRaw) !== JSON.stringify(cached)) {
+      return applyClientSharedModelCatalog(cached, {
+        generation: syncedGeneration,
+        accountId,
+        reason: 'cached_four_gate_cleanup',
+      });
+    }
+    return cached;
+  }
   if (Date.now() < sharedModelCatalogUnavailableUntil) return cached;
 
   try {
     const result = await accountClient.sharedModelCatalog();
     const generation = Math.max(0, Number(result?.generation || 0));
-    const models = (Array.isArray(result?.models) ? result.models : [])
-      .map((item) => ({
-        model: normalizeConcreteModelId(item?.model),
-        label: String(item?.label || '').trim().slice(0, 120),
-        pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
-        nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
-        nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
-        chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
-        chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
-        chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
-        discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
-        verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
-        lastSeenAt: item?.lastSeenAt || null,
-      }))
-      .filter((item) => item.model)
-      // Propagate only models backed by a real Picker discovery or at least one
-      // strict backend response confirmation. Legacy request-only rows remain
-      // visible to server administrators but cannot seed client verification.
-      .filter((item) => item.verifiedCount > 0 || ['A', 'B'].includes(item.pickerMode));
-    sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
-    sharedModelProtocolMap = new Map(models
-      .map((item) => ({
-        model: item.model,
-        transport: item.chatTransportModel || (item.pickerMode === 'A' ? item.nativeRequestModel : null),
-      }))
-      .filter((item) => item.model && item.transport)
-      .map((item) => [item.model, item.transport]));
-    rememberProvenPickerBChatModels(models);
-    const patch = {};
-    if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
-    if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
-    await chrome.storage.local.set({
-      [SHARED_MODEL_CATALOG_GENERATION_KEY]: generation,
-      [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: accountId,
+    const models = await applyClientSharedModelCatalog(result?.models, {
+      generation,
+      accountId,
+      reason: accountChanged ? 'account_first_login' : generationChanged ? 'server_generation_changed' : needsInitialSync ? 'initial_sync' : 'forced',
     });
-    lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
     logRuntime('info', 'discovery', 'shared_model_catalog_synced', {
       count: models.length,
-      changed: Object.keys(patch).length > 0,
       generation,
+      fourGateOnly: true,
       reason: accountChanged ? 'account_first_login' : generationChanged ? 'server_generation_changed' : needsInitialSync ? 'initial_sync' : 'forced',
     });
     return models;
@@ -1696,6 +1752,19 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
     });
     return cached;
   }
+}
+
+async function syncSharedKnownModelsAfterRuntimeUpdate(manifestVersion) {
+  if (accountState?.authenticated !== true) return [];
+  const local = await chrome.storage.local.get(SHARED_MODEL_CATALOG_SYNC_VERSION_KEY);
+  if (local[SHARED_MODEL_CATALOG_SYNC_VERSION_KEY] === manifestVersion) return [];
+  const models = await syncSharedKnownModels({ force: true });
+  await chrome.storage.local.set({ [SHARED_MODEL_CATALOG_SYNC_VERSION_KEY]: manifestVersion });
+  logRuntime('info', 'discovery', 'shared_model_catalog_version_sync_completed', {
+    version: manifestVersion,
+    count: models.length,
+  });
+  return models;
 }
 
 function mergeAccountCatalogs(...catalogs) {
