@@ -84,7 +84,7 @@ Name: "{group}\GPTWork 卡顿日志本地分析"; Filename: "{sys}\WindowsPowerS
 Name: "{group}\卸载 GPTWork"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"" -Browser {code:SelectedBrowserArgument} -ChromeStoreExtensionId ""{#ChromeStoreExtensionId}"" -EdgeStoreExtensionId ""{#EdgeStoreExtensionId}"""; Description: "验证所选浏览器连接 / Verify selected browser connection"; Flags: postinstall runhidden waituntilterminated
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\tools\Repair-GPTWork.ps1"" -Browser {code:SelectedBrowserArgument} -ChromeStoreExtensionId ""{#ChromeStoreExtensionId}"" -EdgeStoreExtensionId ""{#EdgeStoreExtensionId}"" {code:RepairExtensionReloadArgument}"; Description: "验证所选浏览器连接 / Verify selected browser connection"; Flags: postinstall runhidden waituntilterminated
 
 [Code]
 var
@@ -154,6 +154,22 @@ begin
     Result := 'Chrome'
   else
     Result := 'Edge';
+end;
+
+function IsBackgroundAutoUpdate(): Boolean;
+var
+  Mode: String;
+begin
+  Mode := Lowercase(ExpandConstant('{param:GPTWORKAUTOUPDATE|0}'));
+  Result := (Mode = '1') or (Mode = 'true') or (Mode = 'yes');
+end;
+
+function RepairExtensionReloadArgument(Param: String): String;
+begin
+  if IsBackgroundAutoUpdate then
+    Result := '-SkipExtensionReload'
+  else
+    Result := '';
 end;
 
 function PauseNativeManifest(FileName: String; var WasPaused: Boolean): Boolean;
