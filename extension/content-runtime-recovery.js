@@ -82,11 +82,11 @@ async function contentRuntimeConfirmedMissing(tabId) {
   return !(await contentRuntimeReady(tabId));
 }
 
-async function currentRecoverableTab(tabId) {
+async function currentRecoverableTab(tabId, { allowLoading = false } = {}) {
   try {
     const tab = await chrome.tabs.get(tabId);
     if (!isChatGptUrl(tab?.url || '')) return { tab: null, reason: 'outside_scope' };
-    if (tab.status === 'loading') return { tab: null, reason: 'tab_loading' };
+    if (tab.status === 'loading' && !allowLoading) return { tab: null, reason: 'tab_loading' };
     return { tab, reason: null };
   } catch (error) {
     return {
@@ -97,10 +97,11 @@ async function currentRecoverableTab(tabId) {
   }
 }
 
-export async function ensureContentRuntime(tabId, reason = 'unspecified') {
+async function ensureContentRuntimeInternal(tabId, reason = 'unspecified', { allowLoading = false } = {}) {
   if (recoverySuspended) return { ready: false, injected: false, reason: recoverySuspendReason || 'recovery_suspended' };
   if (!Number.isInteger(tabId)) return { ready: false, injected: false, reason: 'invalid_tab' };
-  if (recoveryByTab.has(tabId)) return recoveryByTab.get(tabId);
+  const recoveryKey = `${tabId}:${allowLoading ? 'loading-ok' : 'complete-only'}`;
+  if (recoveryByTab.has(recoveryKey)) return recoveryByTab.get(recoveryKey);
 
   const task = (async () => {
     if (recoverySuspended) return { ready: false, injected: false, reason: recoverySuspendReason || 'recovery_suspended' };
@@ -108,7 +109,7 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       return { ready: false, injected: false, reason: 'master_disabled' };
     }
 
-    const initial = await currentRecoverableTab(tabId);
+    const initial = await currentRecoverableTab(tabId, { allowLoading });
     if (!initial.tab) {
       if (initial.reason === 'tab_loading') {
         log('info', 'content_recovery_deferred_loading', { tabId, reason });
@@ -129,7 +130,7 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
     if (!await masterRuntimeEnabled()) {
       return { ready: false, injected: false, reason: 'master_disabled' };
     }
-    const beforeInjection = await currentRecoverableTab(tabId);
+    const beforeInjection = await currentRecoverableTab(tabId, { allowLoading });
     if (!beforeInjection.tab) {
       return {
         ready: false,
@@ -143,6 +144,7 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       tabId,
       reason,
       status: beforeInjection.tab.status ?? null,
+      allowLoading,
       extensionVersion: chrome.runtime.getManifest().version,
     });
 
@@ -169,7 +171,7 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
       if (!await masterRuntimeEnabled()) {
         return { ready: false, injected: true, reason: 'master_disabled' };
       }
-      const current = await currentRecoverableTab(tabId);
+      const current = await currentRecoverableTab(tabId, { allowLoading });
       if (!current.tab) {
         return { ready: false, injected: true, reason: current.reason };
       }
@@ -182,10 +184,18 @@ export async function ensureContentRuntime(tabId, reason = 'unspecified') {
 
     log('error', 'content_runtime_injected_but_unreachable', { tabId, reason });
     return { ready: false, injected: true, reason: 'receiver_unreachable' };
-  })().finally(() => recoveryByTab.delete(tabId));
+  })().finally(() => recoveryByTab.delete(recoveryKey));
 
-  recoveryByTab.set(tabId, task);
+  recoveryByTab.set(recoveryKey, task);
   return task;
+}
+
+export async function ensureContentRuntime(tabId, reason = 'unspecified') {
+  return ensureContentRuntimeInternal(tabId, reason, { allowLoading: false });
+}
+
+export async function ensureContentRuntimeDuringLoad(tabId, reason = 'verification_loading') {
+  return ensureContentRuntimeInternal(tabId, reason, { allowLoading: true });
 }
 
 export function suspendContentRecovery(reason = 'runtime_quiescing') {
