@@ -42,7 +42,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.174';
+const RUNTIME_CODE_VERSION = '0.5.175';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -67,6 +67,7 @@ let nativePort = null;
 let requestSequence = 0;
 let currentPolicy = DEFAULT_POLICY;
 let currentSettings = DEFAULT_SETTINGS;
+let serverFeatureSettingsReady = false;
 let localEnabledOverride = null;
 let coreConnection = { connected: false, error: null };
 let initializeTask = null;
@@ -88,6 +89,10 @@ let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
   return localEnabledOverride === true && currentSettings.enabled === true && !diagnosticRuntimeSuspended;
+}
+
+function serverWorkFeatureEnabled() {
+  return serverFeatureSettingsReady === true && currentSettings.workModeFeatureEnabled === true;
 }
 
 async function masterStorageEnabled() {
@@ -400,12 +405,15 @@ function accountAllowsState(state) {
 }
 
 function effectiveSettingsForState(state) {
+  const workModeFeatureEnabled = serverWorkFeatureEnabled();
   const verification = verificationTransactionForTab(state?.tabId);
   if (verification) {
     // Model verification is an isolated measurement transaction. User Work/model-lock
     // switches must not block the fixed probe or alter the model ChatGPT actually sends.
+    // Work availability remains server-authoritative even during verification.
     return {
       ...currentSettings,
+      workModeFeatureEnabled,
       enabled: true,
       networkVerificationEnabled: true,
       autoAlignSelection: false,
@@ -413,6 +421,7 @@ function effectiveSettingsForState(state) {
   }
   return {
     ...currentSettings,
+    workModeFeatureEnabled,
     enabled: Boolean(
       currentSettings.enabled
         && accountAllowsState(state)
@@ -1201,6 +1210,7 @@ async function configureOpenTabs() {
 
 async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
   if (!accountClient.hasSession()) {
+    serverFeatureSettingsReady = false;
     accountState = accountClient.snapshot();
     if (reconfigure) await configureOpenTabs();
     return accountState;
@@ -1228,6 +1238,7 @@ async function applyServerFeatureSettings() {
     const control = data?.control;
     const remote = control?.featureSettings;
     if (!remote) return null;
+    serverFeatureSettingsReady = true;
     const nextSettings = normalizeSettings({
       ...currentSettings,
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
@@ -1585,7 +1596,11 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
       }))
-      .filter((item) => item.model);
+      .filter((item) => item.model)
+      // Propagate only models backed by a real Picker discovery or at least one
+      // strict backend response confirmation. Legacy request-only rows remain
+      // visible to server administrators but cannot seed client verification.
+      .filter((item) => item.verifiedCount > 0 || ['A', 'B'].includes(item.pickerMode));
     sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
     const patch = {};
     if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
@@ -1638,11 +1653,17 @@ function mergeAccountCatalogs(...catalogs) {
 function networkCandidateCatalog(items, source = 'network-candidate') {
   const rows = [];
   const seen = new Set();
+  const skippedWorkTransportModels = [];
+  const allowWorkTransport = serverWorkFeatureEnabled();
   for (const item of Array.isArray(items) ? items : []) {
     const raw = typeof item === 'string' ? item : (item?.model || item?.rawId);
     const model = normalizeConcreteModelId(raw);
     if (!model || seen.has(model)) continue;
     seen.add(model);
+    if (!allowWorkTransport && modelTransportId(model) !== model) {
+      skippedWorkTransportModels.push(model);
+      continue;
+    }
     rows.push({
       model,
       rawId: model,
@@ -1657,6 +1678,7 @@ function networkCandidateCatalog(items, source = 'network-candidate') {
     models: rows.map((row) => row.model),
     reasoningLevels: [],
     pickerMode: null,
+    skippedWorkTransportModels,
   };
 }
 
@@ -1864,7 +1886,7 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
 }
 
 async function discoverNativeWorkCandidates(sourceTabId, progress) {
-  if (currentSettings.workModeFeatureEnabled === false) {
+  if (!serverWorkFeatureEnabled()) {
     logRuntime('info', 'verification', 'native_work_catalog_discovery_skipped', {
       sourceTabId,
       reason: 'work_feature_disabled',
@@ -2010,16 +2032,23 @@ async function publishAccountModels(accountCatalog, progress) {
   for (const item of progress?.results || []) {
     const model = normalizeConcreteModelId(item?.model || item?.requestModel || item?.evidenceModel);
     if (!model) continue;
-    const current = byModel.get(model) || {
+    const pickerDiscovered = ['A', 'B'].includes(item?.pickerMode);
+    const responseConfirmed = item?.responseConfirmed === true;
+    const existing = byModel.get(model);
+    // A shared/network candidate is not a new discovery merely because Fetch
+    // rewrote the outgoing request. Re-publish it only when this account saw it
+    // in a real Picker or the backend directly confirmed it in response metadata.
+    if (!existing && !pickerDiscovered && !responseConfirmed) continue;
+    const current = existing || {
       model,
       label: String(item?.label || model).trim().slice(0, 120),
-      pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+      pickerMode: pickerDiscovered ? item.pickerMode : null,
       requestConfirmed: false,
       responseConfirmed: false,
     };
     current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
-    current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
-    if (!current.pickerMode && ['A', 'B'].includes(item?.pickerMode)) current.pickerMode = item.pickerMode;
+    current.responseConfirmed = current.responseConfirmed || responseConfirmed;
+    if (!current.pickerMode && pickerDiscovered) current.pickerMode = item.pickerMode;
     byModel.set(model, current);
   }
   const models = [...byModel.values()].slice(0, 128);
@@ -2049,6 +2078,7 @@ async function publishAccountModels(accountCatalog, progress) {
     logRuntime('info', 'verification', 'shared_model_catalog_published', {
       submitted: models.length,
       requestConfirmed: models.filter((item) => item.requestConfirmed).length,
+      responseConfirmed: models.filter((item) => item.responseConfirmed).length,
       shared: shared.length,
       generation,
     });
@@ -2199,8 +2229,21 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   let workActivationPending = false;
 
   mergeCatalog(accountCatalog, 'initial');
-  mergeCatalog(networkCandidateCatalog(sharedCandidates, 'shared-server'), 'shared-network-candidates');
-  mergeCatalog(networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence'), 'local-network-candidates');
+  const sharedNetworkCatalog = networkCandidateCatalog(sharedCandidates, 'shared-server');
+  const localNetworkCatalog = networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence');
+  mergeCatalog(sharedNetworkCatalog, 'shared-network-candidates');
+  mergeCatalog(localNetworkCatalog, 'local-network-candidates');
+  const skippedWorkTransportModels = [...new Set([
+    ...(sharedNetworkCatalog.skippedWorkTransportModels || []),
+    ...(localNetworkCatalog.skippedWorkTransportModels || []),
+  ])];
+  if (skippedWorkTransportModels.length) {
+    logRuntime('info', 'verification', 'work_transport_candidates_skipped', {
+      tabId,
+      reason: 'work_feature_disabled',
+      models: skippedWorkTransportModels,
+    });
+  }
   await broadcastVerificationState(tabId, ownerTabId);
   logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
     tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
@@ -2432,7 +2475,7 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   // then uses the same tab-scoped network policy as normal GPTWork use; it does not
   // click or invoke ChatGPT's native Work toggle and does not wait for Picker B.
   if (item.model === 'gpt-5.5') {
-    if (currentSettings.workModeFeatureEnabled === false) {
+    if (!serverWorkFeatureEnabled()) {
       workActivationPending = false;
       progress.workDiscovery = {
         attempted: false,
@@ -3211,6 +3254,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GPTLOCK_ACCOUNT_LOGOUT': {
         accountState = await accountClient.logout();
+        serverFeatureSettingsReady = false;
         await configureOpenTabs();
         return accountState;
       }
