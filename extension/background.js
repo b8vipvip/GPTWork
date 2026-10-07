@@ -1589,6 +1589,13 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
   const needsInitialSync = !hasSyncedGeneration || syncedAccountId <= 0;
 
   sharedKnownModelIds = new Set(cached.map((item) => normalizeConcreteModelId(item?.model)).filter(Boolean));
+  sharedModelProtocolMap = new Map(cached
+    .map((item) => ({
+      model: normalizeConcreteModelId(item?.model),
+      transport: normalizeRawProtocolModelId(item?.chatTransportModel || item?.nativeRequestModel),
+    }))
+    .filter((item) => item.model && item.transport)
+    .map((item) => [item.model, item.transport]));
   if (!force && !accountChanged && !generationChanged && !needsInitialSync) return cached;
   if (Date.now() < sharedModelCatalogUnavailableUntil) return cached;
 
@@ -3085,18 +3092,19 @@ async function autoVerify(tabId) {
     state.lastError = page.error;
     await broadcastVerificationState(tabId, sourceTabId);
 
-    const [sharedKnownModels, localNetworkCandidates] = await Promise.all([
-      syncSharedKnownModels(),
-      loadTrustedLocalNetworkCandidates(),
-    ]);
-    autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-    autoVerification.localNetworkCandidateCount = localNetworkCandidates.length;
+    // Refresh the server catalog only so normal runtime can restore previously
+    // proven Chat transport mappings. Discovery itself never uses server history as
+    // candidate input: an empty server must be able to rebuild the live account.
+    await syncSharedKnownModels();
+    autoVerification.sharedKnownModelCount = 0;
+    autoVerification.localNetworkCandidateCount = 0;
 
-    // All picker/composer discovery now runs on the isolated verification surface.
-    // The user's source tab is only the progress/result owner and never supplies
-    // request/response evidence for this transaction.
     accountCatalog = await discoverAccountCatalog(tabId);
-    autoVerification.workDiscovery = { attempted: false, entered: false, reason: 'deferred_until_after_gpt_5_5' };
+    autoVerification.workDiscovery = {
+      attempted: false,
+      entered: false,
+      reason: 'official_work_discovery_pending',
+    };
     autoVerification.maxAttempts = accountCatalog.rows.length;
     await broadcastVerificationState(tabId, sourceTabId);
 
@@ -3106,8 +3114,8 @@ async function autoVerify(tabId) {
       accountCatalog,
       {
         restoreModel: null,
-        sharedCandidates: sharedKnownModels,
-        localNetworkCandidates,
+        sharedCandidates: [],
+        localNetworkCandidates: [],
         ownerTabId: sourceTabId,
       },
     );
