@@ -1232,6 +1232,18 @@ document.addEventListener('pointerdown', (event) => {
     return candidates.length === 1 ? candidates[0] : null;
   }
 
+  function pickerSelectedModelSummary(picker, desired) {
+    if (!picker || !desired || !visible(picker)) return false;
+    const opener = redesignedModelViewOpener(picker);
+    if (!opener) return false;
+    const values = [
+      opener.innerText,
+      opener.textContent,
+      opener.getAttribute?.('title'),
+    ].map((value) => String(value || '').trim()).filter(Boolean);
+    return values.some((value) => normalizeDisplayedModel(value) === desired);
+  }
+
   function isModelListScope(scope) {
     if (!scope || !visible(scope)) return false;
     // The composer intelligence picker can expose two model-labelled rows while it is
@@ -1663,7 +1675,13 @@ document.addEventListener('pointerdown', (event) => {
             // The exact owned catalog row's radio state is therefore the primary UI
             // acknowledgement; Composer model text remains a secondary read-only signal.
             if (candidate.isConnected && candidate.getAttribute('data-state') === 'checked') return true;
-            return collectObservation().model === desired;
+            if (collectObservation().model === desired) return true;
+            // Live v0.5.183: official Work can replace the clicked catalog row and
+            // expose the selected model only through the causally-owned Select-model
+            // ViewTrack summary. The exact row click remains the sole selection authority;
+            // this summary is only a post-click acknowledgement.
+            return modern.pickerMode === 'B'
+              && pickerSelectedModelSummary(modern.picker, desired);
           }, 3500, 100)
         : await waitUntil(() => !visible(candidate) || !visibleIntelligencePickerContent(), 1800, 100);
       const observation = collectObservation();
