@@ -57,3 +57,21 @@ test('admin model management can edit, disable and delete uploaded models', () =
   assert.match(adminJs, /method:'DELETE'/);
   assert.match(adminJs, /data-field="enabled"/);
 });
+
+
+test('v0.5.175 response confirmation is the only shared verification authority', () => {
+  assert.match(accountSystem, /response_confirmed INTEGER NOT NULL DEFAULT 0/);
+  assert.match(accountSystem, /responseConfirmed = item\?\.responseConfirmed === true/);
+  assert.match(accountSystem, /response_confirmed=MAX\(shared_model_account_seen\.response_confirmed,excluded\.response_confirmed\)/);
+  assert.match(accountSystem, /WHERE s\.model_id=\? AND s\.response_confirmed=1/);
+  assert.match(accountSystem, /verifiedAccepted \+= 1/);
+  assert.doesNotMatch(accountSystem, /verified_count=verified_count\+\?/);
+});
+
+test('v0.5.175 migration invalidates legacy request-only verification counts', () => {
+  assert.match(accountSystem, /const responseConfirmedAdded = ensureColumn/);
+  assert.match(accountSystem, /v0\.5\.174 and earlier counted request rewrite confirmation as model verification/);
+  assert.match(accountSystem, /SET verified_count=\(/);
+  assert.match(accountSystem, /s\.response_confirmed=1/);
+  assert.match(accountSystem, /generation=generation\+1/);
+});
