@@ -235,7 +235,7 @@ function renderAutoVerifyProgress(autoVerification = null) {
   }
   if (elements.autoVerifyProgressCount) {
     elements.autoVerifyProgressCount.textContent = total
-      ? `执行进度 ${completed}/${total} · 验证成功 ${verified}/${total} · 请求确认 ${requestConfirmed}/${total}`
+      ? `执行进度 ${completed}/${total} · 发现并验证成功 ${verified}/${total} · 请求确认 ${requestConfirmed}/${total}`
       : '发现中…';
   }
   if (elements.autoVerifyProgressLabel) {
@@ -244,8 +244,8 @@ function renderAutoVerifyProgress(autoVerification = null) {
         ? `正在验证：${modelLabel(current)}`
         : '正在发现当前账户可用模型…'
       : total
-        ? `执行完成 ${completed}/${total} · 验证成功 ${verified}/${total} · 未确认 ${failed}`
-        : '未发现可验证模型';
+        ? `执行完成 ${completed}/${total} · 发现并验证成功 ${verified}/${total} · 未确认 ${failed}`
+        : '未发现可发现模型';
   }
 }
 
@@ -456,7 +456,7 @@ elements.autoVerify?.addEventListener('click', () => {
     .then(async (result) => {
       await load();
       showMessage(result.catalogTotal
-        ? `自动验证完成：执行 ${result.catalogTotal}/${result.catalogTotal}；验证成功 ${result.catalogVerified}/${result.catalogTotal}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal}`
+        ? `自动验证完成：执行 ${result.catalogTotal}/${result.catalogTotal}；发现并验证成功 ${result.catalogVerified}/${result.catalogTotal}；请求确认 ${result.catalogRequestConfirmed || 0}/${result.catalogTotal}`
         : `自动验证未发现模型 / No account models discovered · ${result.reason || 'unknown'}`,
         result.catalogFailed || !result.catalogTotal ? 'bad' : 'good',
       );
