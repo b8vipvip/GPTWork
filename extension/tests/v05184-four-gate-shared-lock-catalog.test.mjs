@@ -1,3 +1,4 @@
+// legacy-core-maintenance synchronized after PR label is present.
 // v0.5.184 regression: lock-model choices are server four-gate models only.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
