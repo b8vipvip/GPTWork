@@ -73,7 +73,9 @@ test('model management is a dedicated admin surface for uploaded catalog entries
   assert.match(modelAdminHtml, /data-admin-page="models"/);
   assert.match(modelAdminHtml, /共享模型目录/);
   assert.match(modelAdminHtml, /账户证据/);
-  assert.match(modelAdminHtml, /响应验证次数/);
+  assert.match(modelAdminHtml, /原生协议/);
+  assert.match(modelAdminHtml, /Chat 锁定协议/);
+  assert.match(modelAdminHtml, /Chat 兼容/);
   assert.match(modelAdminJs, /requestConfirmedAccountCount/);
   assert.match(modelAdminJs, /verifiedAccountCount/);
   assert.match(modelAdminJs, /\/admin\/api\/account\/model-catalog/);

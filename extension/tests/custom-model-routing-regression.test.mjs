@@ -57,7 +57,7 @@ test('popup edits lock models and reasoning inline without opening Settings', ()
   assert.match(popupCss, /transform:scaleX\(-1\)/);
   assert.doesNotMatch(popupHtml, /自动锁定 GPT-5\.6 Sol 及以上模型/);
   assert.doesNotMatch(popupHtml, /id="autoVerifyProgress"/);
-  assert.match(popupHtml, />模型验证<\/button>/);
+  assert.match(popupHtml, />发现模型<\/button>/);
   assert.match(popupJs, /catalogVerification/);
   assert.match(popupJs, /5000/);
   assert.match(popupCss, /#popupLockedModels\{color:#15803d/);

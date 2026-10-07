@@ -4,7 +4,8 @@ import test from 'node:test';
 
 const r = (path) => readFile(new URL('../' + path, import.meta.url), 'utf8');
 
-test('current GPTWork version ports live-validated ModelPro v0.1.44 redesign authority', async () => {
+
+test('current GPTWork keeps ModelPro redesign authority while using source-first Work discovery', async () => {
   const [background, content, network, evidence, recovery, manifestText, packageText] = await Promise.all([
     r('background.js'), r('content.js'), r('network-monitor.js'), r('page-model-evidence.js'),
     r('content-runtime-recovery.js'), r('manifest.json'), r('package.json'),
@@ -22,9 +23,8 @@ test('current GPTWork version ports live-validated ModelPro v0.1.44 redesign aut
   assert.match(evidence, /open-picker-default-sol/);
   assert.match(network, /Network\.streamResourceContent/);
   assert.match(network, /initial_conversation_aborted/);
-  assert.match(network, /defaultModel: evidence\.defaultModel/);
-  assert.match(background, /__work_transport__/);
-  assert.match(background, /network_work_catalog_seeded/);
-  assert.match(background, /source: 'network_work_transport'/);
-  assert.ok(background.includes('gpt-6-astra'));
+  assert.match(background, /async function discoverOfficialWorkModels/);
+  assert.match(background, /__picker_b_chat_lock__/);
+  assert.match(background, /official-work-picker-b/);
+  assert.doesNotMatch(background, /network_work_catalog_seeded/);
 });

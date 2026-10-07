@@ -5,12 +5,14 @@ import { rewriteConversationPostData } from '../network-evidence.js';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
-test('verification seeds the configured default as a network-only Work transport after Chat A', () => {
-  assert.match(background, /model: workDefaultModel/);
-  assert.match(background, /selectorKey: '__work_transport__'/);
-  assert.match(background, /reason: 'network_work_catalog_seeded'/);
-  assert.match(background, /source: 'network_work_transport'/);
-  assert.match(background, /floorModel: workDefaultModel/);
+
+test('discovery derives Picker-B Chat transport from official Work evidence instead of a seeded default', () => {
+  assert.match(background, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.match(background, /selectorKey: '__picker_b_chat_lock__'/);
+  assert.match(background, /transportModel: item\.nativeRequestModel/);
+  assert.match(background, /expectedResponseModel: item\.nativeResponseModel/);
+  assert.doesNotMatch(background, /network_work_catalog_seeded/);
+  assert.doesNotMatch(background, /selectorKey: '__work_transport__'/);
 });
 
 test('forced GPT-6 Astra verification model is converted to its Work transport', () => {

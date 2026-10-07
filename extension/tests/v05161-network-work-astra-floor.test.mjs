@@ -14,17 +14,17 @@ test('v0.5.166 retains Astra as the fallback while making the network Work floor
   assert.doesNotMatch(runtime, /product floor to GPT-5\.6 Sol/);
 });
 
-test('v0.5.166 verifies Work through the configured transport without native Work or Picker B dependency', async () => {
+
+test('v0.5.176 discovers official Work natively before proving Picker-B Chat transport', async () => {
   const background = await read('background.js');
   const start = background.indexOf('async function verifyAccountCatalogModels');
   const end = background.indexOf('function modelVerificationHistoryRecord', start);
   const block = background.slice(start, end);
-  assert.match(block, /model: workDefaultModel/);
-  assert.match(block, /selectorKey: '__work_transport__'/);
-  assert.match(block, /source: 'network_work_transport'/);
-  assert.match(block, /reason: 'network_work_catalog_seeded'/);
-  assert.doesNotMatch(block, /sendVerificationReasoningProbe\(tabId, 'work-mode-bootstrap'/);
-  assert.doesNotMatch(block, /beginWorkBootstrapTransaction\(tabId, 'post-sol-work-activation'\)/);
+  assert.match(block, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.match(block, /mergeCatalog\(officialWork\?\.chatCandidates, 'picker-b-chat-compatibility'\)/);
+  assert.match(block, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.doesNotMatch(block, /network_work_catalog_seeded/);
+  assert.doesNotMatch(block, /selectorKey: '__work_transport__'/);
 });
 
 test('release surfaces remain coherent after v0.5.161', async () => {

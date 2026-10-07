@@ -85,11 +85,11 @@ test('v0.5.172 Picker-B discovery owns an isolated pristine tab and never mutate
   assert.match(background, /discoverAccountCatalog\(discoveryTabId\)/);
   assert.match(background, /sendVerificationReasoningProbe\([\s\S]*discoveryTabId/);
   assert.match(background, /chrome\.tabs\.remove\(discoveryTabId\)/);
-  assert.match(background, /native_work_catalog_discovery_temp_tab_closed/);
+  assert.match(background, /official_work_model_discovery_tab_closed/);
   assert.doesNotMatch(background, /sendTabMessage\(sourceTabId, \{ type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE'/);
 
   assert.doesNotMatch(controller, /GPTWORK_DISCOVERY_/);
-  assert.match(controller, /verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
+  assert.match(controller, /!workModeFeatureEnabled \|\| verificationOwned \|\| !enabled \|\| !workModeGuidanceEnabled \|\| !isPristineNewChat\(\)/);
 });
 
 test('v0.5.172 temporary native discovery tab disables normal GPTWork routing authority', async () => {

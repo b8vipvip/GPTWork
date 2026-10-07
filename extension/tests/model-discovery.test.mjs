@@ -54,49 +54,27 @@ test('trusted network evidence can restore a future model that resembles a legac
 });
 
 
-test('auto verification can discover account catalog and use a visible naming fallback for unresolved IDs', async () => {
+
+test('model discovery observes native Chat/Work evidence and preserves visible naming fallback', async () => {
   const contentSource = await readFile(new URL('../content.js', import.meta.url), 'utf8');
   const backgroundSource = await readFile(new URL('../background.js', import.meta.url), 'utf8');
   const networkSource = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
   assert.match(contentSource, /GPTLOCK_DISCOVER_ACCOUNT_MODELS/);
   assert.match(contentSource, /GPTLOCK_AUTO_RESOLVE_MODEL_NAMES/);
-  assert.match(backgroundSource, /account_model_catalog_discovered/);
   assert.match(backgroundSource, /model_name_fallback_completed/);
   assert.match(backgroundSource, /gptworkModelNameMappingsV1/);
+  assert.match(backgroundSource, /model_discovery_started/);
+  assert.match(backgroundSource, /model_discovery_completed/);
+  assert.match(backgroundSource, /async function discoverOfficialWorkModels/);
+  assert.match(backgroundSource, /picker_b_chat_compatibility_started/);
   assert.match(contentSource, /GPTLOCK_VERIFY_ACCOUNT_MODEL/);
-  assert.match(contentSource, /role="menuitemradio"/);
-  assert.match(contentSource, /button\.__composer-pill\[aria-haspopup="menu"\]/);
-  assert.match(contentSource, /composer-intelligence-picker-content/);
-  assert.match(contentSource, /composer-model-picker-slider-advanced-view/);
   assert.match(contentSource, /GPTLOCK_TRUSTED_POINTER/);
-  assert.match(contentSource, /unresolvedLatest/);
-  assert.match(contentSource, /selectorKey/);
-  assert.match(backgroundSource, /currentSelectorKey/);
-  assert.match(backgroundSource, /verificationTransactionForTab/);
-  assert.match(backgroundSource, /networkMonitor\.trustedPointer/);
-  assert.match(backgroundSource, /account_model_verification_started/);
-  assert.match(backgroundSource, /account_model_verification_model_completed/);
-  assert.match(backgroundSource, /account_model_verification_completed/);
-  assert.match(contentSource, /selectModelForVerification/);
-  assert.match(contentSource, /selectionAttempted/);
-  assert.match(backgroundSource, /body forwarded at Fetch\.requestPaused is the sole request-confirmation/);
-  assert.match(backgroundSource, /responseConfirmed/);
-  assert.doesNotMatch(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
   assert.match(backgroundSource, /Only a directly observed network response field/);
-  assert.match(networkSource, /must never participate in served-model verification/);
-  assert.match(backgroundSource, /getVerificationTransaction\(tabId\)/);
-  assert.match(backgroundSource, /fetch_forwarded_request_metadata/);
-  assert.doesNotMatch(backgroundSource, /Model selection was not confirmed/);
-  assert.match(backgroundSource, /sendVerificationReasoningProbe\(tabId, 'GPTWork 模型验证'/);
-  assert.match(backgroundSource, /skipAlignment: true/);
-  assert.match(backgroundSource, /runtimePolicyForTabSync/);
-  assert.match(backgroundSource, /preserveModel: false/);
-  assert.match(networkSource, /preserveReasoning: true/);
-  assert.match(networkSource, /bypassRewrite: false/);
-  assert.match(backgroundSource, /Account-menu DOM is discovery input, not authoritative persistence/);
-  assert.doesNotMatch(backgroundSource, /sources: \[\.\.\.new Set\(\[\.\.\.\(Array\.isArray\(prior\.sources\).*account_model_catalog/s);
+  assert.match(networkSource, /transaction\?\.mode === 'observe-native'/);
+  assert.match(networkSource, /model-discovery-chat-compat/);
+  assert.doesNotMatch(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
+  assert.doesNotMatch(backgroundSource, /network_work_catalog_seeded/);
 });
-
 
 test('v0.5.108 model indicator avoids whole-page button scans and high-frequency polling', () => {
   assert.doesNotMatch(catalogSource, /querySelectorAll\('button,\[role="button"\]'\)/);

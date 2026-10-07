@@ -25,8 +25,8 @@ test('v0.5.174 server Work feature gate is delivered and enforced across client 
   assert.match(adminJs, /workModeFeatureEnabled:el\.workFeature\.checked/);
 
   assert.match(background, /workModeFeatureEnabled: remote\.workModeFeatureEnabled !== false/);
-  assert.match(background, /native_work_catalog_discovery_skipped/);
-  assert.match(background, /reason: 'work_feature_disabled'/);
+  assert.match(background, /async function discoverOfficialWorkModels/);
+  assert.doesNotMatch(background, /official_work_model_discovery_skipped[\s\S]{0,160}work_feature_disabled/);
 
   assert.match(runtime, /WORK_FEATURE_DISABLED/);
   assert.match(runtime, /if \(workFeatureEnabled && feature\.workModeEnabled\)/);
@@ -81,8 +81,10 @@ test('v0.5.174 response confirmation cannot be fabricated from Work default/prof
     }),
     mimeType: 'application/json',
   });
-  assert.equal(evidence.model, 'gpt-5.6-sol');
+  assert.equal(evidence.model, 'gpt-5.6');
+  assert.equal(evidence.rawModel, 'gpt-5.6');
   assert.equal(evidence.defaultModel, 'gpt-6-astra');
+  assert.equal(evidence.rawDefaultModel, 'gpt-6-astra-wm');
 });
 
 test('v0.5.174 native Work discovery requires actual selected-state confirmation', async () => {

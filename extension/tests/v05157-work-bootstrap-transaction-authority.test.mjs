@@ -5,21 +5,23 @@ import test from 'node:test';
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
 
-test('network Work verification keeps verificationTransactions as the terminal request authority', () => {
+
+test('Picker-B Chat compatibility keeps an explicit force-transport transaction as terminal authority', () => {
   const start = background.indexOf('async function verifyAccountCatalogModels');
   const end = background.indexOf('function modelVerificationHistoryRecord', start);
   assert.ok(start >= 0 && end > start);
   const block = background.slice(start, end);
-  assert.match(block, /selectorKey: '__work_transport__'/);
-  assert.match(block, /verificationTransactions\.set\(Number\(tabId\), \{/);
-  assert.doesNotMatch(block, /sendVerificationReasoningProbe\(tabId, 'work-mode-bootstrap'/);
-  assert.doesNotMatch(block, /beginWorkBootstrapTransaction\(tabId, 'post-sol-work-activation'\)/);
-  assert.match(monitor, /authorityKind: 'verification-transaction'/);
-  assert.match(monitor, /forceModel: model/);
+  assert.match(block, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(block, /transportModel: chatCompatibility \? item\.transportModel : null/);
+  assert.match(monitor, /\? 'model-discovery-chat-compat'/);
+  assert.match(monitor, /forceTransportModel: transportModel/);
 });
 
-test('network Work phase does not require Picker B to enter', () => {
-  assert.match(background, /reason: 'network_work_catalog_seeded'/);
-  assert.match(background, /pickerMode: null/);
-  assert.match(background, /entered: true/);
+
+test('v0.5.176 Work phase requires official Picker-B discovery rather than a synthetic network seed', () => {
+  assert.match(background, /async function discoverOfficialWorkModels/);
+  assert.match(background, /official_work_model_discovery_tab_created/);
+  assert.match(background, /official_work_model_native_verified/);
+  assert.match(background, /picker-b-chat-compatibility/);
+  assert.doesNotMatch(background, /network_work_catalog_seeded/);
 });

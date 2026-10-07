@@ -37,13 +37,16 @@ const MODEL_ALIASES = Object.freeze({
   'gpt-5.6-terra-wm': 'gpt-5.6-terra',
   'gpt-5.6-luna-wm': 'gpt-5.6-luna',
   'gpt-5.5-wm': 'gpt-5.5',
-  'gpt-5-5-instant': 'gpt-5.5',
-  'gpt-5-5-thinking': 'gpt-5.5',
-  'gpt-5-6-thinking': 'gpt-5.6-sol',
-  'gpt-5-6': 'gpt-5.6-sol',
   'gpt-6-astra-wm': 'gpt-6-astra',
   'gpt-6-sol-wm': 'gpt-6-sol',
   'gpt-6-luna-wm': 'gpt-6-luna',
+});
+
+const PROTOCOL_ID_NORMALIZATIONS = Object.freeze({
+  'gpt-5-5-instant': 'gpt-5.5-instant',
+  'gpt-5-5-thinking': 'gpt-5.5-thinking',
+  'gpt-5-6-thinking': 'gpt-5.6-thinking',
+  'gpt-5-6': 'gpt-5.6',
 });
 
 const NON_CONCRETE_MODEL_IDS = new Set(['auto']);
@@ -63,16 +66,25 @@ function unique(values) {
 }
 
 function normalizeKnownFamily(model) {
+  // Protocol identities such as *-wm / *-thinking are first-class network model
+  // IDs. Never collapse them into a UI/business model family.
+  if (/(?:-wm|-thinking|-instant)$/.test(model)) return null;
   if (model === 'gpt-6-astra' || model.startsWith('gpt-6-astra.') || model.startsWith('gpt-6-astra:')
-    || model.startsWith('gpt-6-astra_') || model.startsWith('gpt-6-astra-')) return 'gpt-6-astra';
+    || model.startsWith('gpt-6-astra_')) return 'gpt-6-astra';
   if (model === 'gpt-6-sol' || model.startsWith('gpt-6-sol.') || model.startsWith('gpt-6-sol:')
-    || model.startsWith('gpt-6-sol_') || model.startsWith('gpt-6-sol-')) return 'gpt-6-sol';
+    || model.startsWith('gpt-6-sol_')) return 'gpt-6-sol';
   return null;
 }
 
+export function normalizeRawProtocolModelId(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!/^[a-z0-9._:-]{1,128}$/.test(raw)) return null;
+  return PROTOCOL_ID_NORMALIZATIONS[raw] ?? raw;
+}
+
 export function normalizeModelId(value) {
-  const model = String(value ?? '').trim().toLowerCase();
-  if (!/^[a-z0-9._:-]{1,128}$/.test(model)) return null;
+  const model = normalizeRawProtocolModelId(value);
+  if (!model) return null;
   return normalizeKnownFamily(model) ?? MODEL_ALIASES[model] ?? model;
 }
 
@@ -81,9 +93,13 @@ export function normalizeConcreteModelId(value) {
   return model && !NON_CONCRETE_MODEL_IDS.has(model) ? model : null;
 }
 
-export function modelTransportId(value) {
+export function modelTransportId(value, overrides = null) {
   const model = normalizeModelId(value);
-  return model ? MODEL_TRANSPORT_IDS[model] ?? model : null;
+  if (!model) return null;
+  const override = overrides && typeof overrides === 'object'
+    ? normalizeRawProtocolModelId(overrides[model])
+    : null;
+  return override ?? MODEL_TRANSPORT_IDS[model] ?? model;
 }
 
 function modelPriorityScore(value) {

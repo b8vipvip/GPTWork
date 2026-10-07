@@ -17,11 +17,13 @@ test('runtime code generation always matches the coordinated manifest version', 
   assert.match(repair, /generation-reload\.html\?expected=/);
 });
 
-test('strict response confirmation only accepts exact terminal verifier proof', () => {
-  assert.match(background, /expectedVerificationRequestId = requestId \? `cdp-\$\{tabId\}-\$\{requestId\}`/);
-  assert.match(background, /state\.lastVerification\?\.verdict === 'verified'/);
-  assert.match(background, /state\.lastVerification\?\.requestId === expectedVerificationRequestId/);
+
+test('strict discovery confirmation keeps terminal Fetch authority and exact Picker-B protocol proof', () => {
+  assert.match(background, /const discoveryAuthority = \['verification-transaction', 'model-discovery-native', 'model-discovery-chat-compat'\]/);
+  assert.match(background, /state\.lastForwardedRequest = \{/);
   assert.match(background, /verification_request_generation_or_authority_mismatch/);
+  assert.match(background, /rawRequestModel === expectedTransport/);
+  assert.match(background, /rawResponseProtocolModel === expectedResponse/);
 });
 
 test('Windows package ships the current causal jank collector', () => {

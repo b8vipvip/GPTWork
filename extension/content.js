@@ -37,7 +37,7 @@
     'button[aria-label*="停止"]',
   ];
   const VERIFICATION_WORK_LABEL = /^(?:工作|work)$/i;
-  const AUTO_PROBE_TEXT = 'GPTWork 模型验证测试：请只回复“验证完成”。';
+  const AUTO_PROBE_TEXT = 'GPTWork 发现模型测试：请只回复“发现完成”。';
 
   function visibleGeneratingControl() {
     return GENERATING_SELECTORS
@@ -599,7 +599,7 @@ document.addEventListener('pointerdown', (event) => {
         progressHost.id = 'gptlock-verification-progress-host';
         progressHost.style.cssText = 'all:initial;position:fixed;right:12px;bottom:52px;z-index:2147483647';
         const progressRoot = progressHost.attachShadow({ mode: 'open' });
-        progressRoot.innerHTML = '<style>.model-verification-progress{width:240px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;font:700 11px/1.35 system-ui,sans-serif}.model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.model-verification-progress .current{font-weight:600;color:#475569}.model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}</style><div class="model-verification-progress"><div class="current"><span></span></div><div><span>执行进度</span><strong class="execution"></strong></div><div><span>验证成功</span><strong class="verified"></strong></div><div><span>请求确认</span><strong class="requested"></strong></div><progress value="0" max="1"></progress></div>';
+        progressRoot.innerHTML = '<style>.model-verification-progress{width:240px;padding:7px 9px;border:1px solid #bfdbfe;border-radius:10px;background:rgba(239,246,255,.98);box-shadow:0 5px 18px rgba(15,23,42,.12);color:#1e3a8a;font:700 11px/1.35 system-ui,sans-serif}.model-verification-progress div{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.model-verification-progress .current{font-weight:600;color:#475569}.model-verification-progress progress{display:block;width:100%;height:7px;accent-color:#2563eb}</style><div class="model-verification-progress"><div class="current"><span></span></div><div><span>执行进度</span><strong class="execution"></strong></div><div><span>发现并验证成功</span><strong class="verified"></strong></div><div><span>请求确认</span><strong class="requested"></strong></div><progress value="0" max="1"></progress></div>';
         document.documentElement.append(progressHost);
       }
       positionVerificationProgressHost(progressHost);
@@ -616,9 +616,9 @@ document.addEventListener('pointerdown', (event) => {
       const bar = progress.querySelector('progress');
       bar.max = Math.max(1, total);
       bar.value = completed;
-      button.textContent = `GPTWork · 模型验证 · 已执行 ${completed} · 已发现 ${total}`;
+      button.textContent = `GPTWork · 发现模型 · 已执行 ${completed} · 已发现 ${total}`;
       button.dataset.tone = 'wait';
-      button.title = '模型验证正在进行；执行进度与验证成功分开统计。响应/流模型元数据优先用于验证，请求模型保留为请求确认。';
+      button.title = '发现模型正在进行；执行进度与验证成功分开统计。响应/流模型元数据优先用于验证，请求模型保留为请求确认。';
       return;
     }
     document.getElementById('gptlock-verification-progress-host')?.remove();
@@ -640,7 +640,7 @@ document.addEventListener('pointerdown', (event) => {
     button.textContent = `GPTWork · ${label}`;
     button.dataset.tone = tone;
     const verificationReason = auto?.outcome && auto.outcome !== 'verified'
-      ? `模型验证已结束：${auto.reason || auto.outcome}；已验证 ${auto.catalogVerification?.verified || 0}/${auto.catalogVerification?.total || 0}。`
+      ? `发现模型已结束：${auto.reason || auto.outcome}；已发现并验证 ${auto.catalogVerification?.verified || 0}/${auto.catalogVerification?.total || 0}。`
       : null;
     button.title = `${verificationReason || reasonText(guard)}\n点击打开设置 / Click to open settings`;
   }

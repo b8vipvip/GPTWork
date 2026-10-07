@@ -12,26 +12,25 @@ const popupJs = await readFile(new URL('../popup.js', import.meta.url), 'utf8');
 const historyUi = await readFile(new URL('../model-verification-history-options.js', import.meta.url), 'utf8');
 const verificationPolicy = await readFile(new URL('../vendor/modelpro/model-verification.js', import.meta.url), 'utf8');
 
-test('model verification separates request confirmation from backend response verification', () => {
-  assert.match(content, /selectionAttempted/);
-  assert.match(background, /body forwarded at Fetch\.requestPaused is the sole request-confirmation/);
-  assert.match(background, /requestModel === item\.model/);
-  assert.match(background, /responseModel === item\.model/);
-  assert.match(background, /responseConfirmed/);
-  assert.match(background, /evidenceModel = responseModel \|\| \(requestConfirmed \? requestModel : null\)/);
-  assert.match(background, /sendVerificationReasoningProbe\(tabId, 'GPTWork 模型验证'/);
-  assert.doesNotMatch(background, /Model selection was not confirmed/);
+test('model discovery separates native observation from Picker-B Chat compatibility proof', () => {
+  assert.match(background, /async function discoverOfficialWorkModels/);
+  assert.match(background, /mode: 'observe-native'/);
+  assert.match(background, /selectorKey: '__picker_b_chat_lock__'/);
+  assert.match(background, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(background, /rawRequestModel === expectedTransport/);
+  assert.match(background, /rawResponseProtocolModel === expectedResponse/);
+  assert.match(background, /chatLockSupported/);
 });
 
-test('verification progress is a separate fixed host above the status indicator', () => {
+test('model discovery progress remains a separate fixed host above the status indicator', () => {
   assert.match(content, /gptlock-verification-progress-host/);
   assert.match(content, /position:fixed;right:12px;bottom:52px/);
   assert.match(content, /document\.getElementById\('gptlock-verification-progress-host'\)\?\.remove\(\)/);
   assert.doesNotMatch(popup, /id="autoVerifyProgress"/);
-  assert.match(popup, />模型验证<\/button>/);
+  assert.match(popup, />发现模型<\/button>/);
 });
 
-test('settings runtime card has no verification action and exposes persistent verification history', () => {
+test('settings runtime card has no discovery action and exposes persistent discovery history', () => {
   const runtimeStart = settings.indexOf('id="statusHeading"');
   const historyStart = settings.indexOf('id="modelVerificationHistoryHeading"');
   const requestHistoryStart = settings.indexOf('id="requestHistoryHeading"');
@@ -39,13 +38,12 @@ test('settings runtime card has no verification action and exposes persistent ve
   assert(historyStart > runtimeStart);
   assert(requestHistoryStart > historyStart);
   assert.doesNotMatch(settings.slice(runtimeStart, historyStart), /id="autoVerify"/);
-  assert.match(settings, /模型验证记录/);
+  assert.match(settings, /发现模型记录/);
   assert.match(settings, /model-verification-history-options\.js/);
   assert.match(background, /modelVerificationHistoryV1/);
   assert.match(background, /persistModelVerificationHistory/);
   assert.match(historyUi, /chrome\.storage\.local\.get\(MODEL_VERIFICATION_HISTORY_KEY\)/);
 });
-
 
 test('model automation is composer-scoped and structurally owned', () => {
   assert.match(content, /function activeComposerSurface/);
@@ -58,9 +56,11 @@ test('model automation is composer-scoped and structurally owned', () => {
   assert.match(content, /留在聊天模式/);
 });
 
-test('model verification probe uses trusted send and monitor reattach', () => {
+
+test('model discovery probe uses trusted send and monitor reattach', () => {
   assert.match(content, /await trustedPointer\(sendButton, 'click', 'auto-probe-send'\)/);
-  assert.match(background, /Request lock monitor did not reattach after model selection/);
+  assert.match(background, /Request monitor did not reattach/);
+  assert.match(background, /Response capture did not enable before discovery probe/);
 });
 
 test('v0.5.142 uses the validated ModelPro prompt-bank probe path', () => {
@@ -69,23 +69,14 @@ test('v0.5.142 uses the validated ModelPro prompt-bank probe path', () => {
   assert.match(background, /probeText: prompt/);
 });
 
-test('v0.5.135 verifies GPT-5.5 before directly enabling GPTWork Work mode', () => {
+test('v0.5.176 discovers Chat Picker A before official Work Picker B without enabling GPTWork Work', () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
-  const verifyEnd = background.indexOf('async function autoVerify', verifyStart);
+  const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
-  const completed = verifyBody.indexOf("if (item.model === 'gpt-5.5')");
-  const work = verifyBody.indexOf('enableWorkModeForVerification(tabId)', completed);
-  const rediscover = verifyBody.indexOf('const rediscovered = await discoverAccountCatalog(tabId)', completed);
-  assert(completed >= 0 && work > completed && rediscover > work);
-
-  const autoStart = background.indexOf('async function autoVerify');
-  const autoBody = background.slice(autoStart);
-  const initialDiscovery = autoBody.indexOf('accountCatalog = await discoverAccountCatalog(tabId)');
-  const verification = autoBody.indexOf('verifyAccountCatalogModels', initialDiscovery);
-  const prematureWork = autoBody.indexOf('enableWorkModeForVerification(tabId)', initialDiscovery);
-  assert(initialDiscovery >= 0 && verification > initialDiscovery);
-  assert(prematureWork < 0 || prematureWork > verification);
-  assert.match(autoBody, /deferred_until_after_gpt_5_5/);
+  assert.match(verifyBody, /mergeCatalog\(accountCatalog, 'chat-picker-a'\)/);
+  assert.match(verifyBody, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.doesNotMatch(verifyBody, /enableWorkModeForVerification\(tabId\)/);
+  assert.match(verifyBody, /picker-b-chat-compatibility/);
 });
 
 test('v0.5.81 model automation has one composer-scoped authority', () => {
@@ -134,21 +125,17 @@ test('trusted pointer attaches first and revalidates the exact DOM target after 
   assert.match(background, /case 'GPTLOCK_TRUSTED_POINTER_PREPARE'/);
 });
 
-test('verification request-lock mode is owned by an explicit transaction, not migrated tab UI state', () => {
+
+test('model-discovery request authority is owned by explicit native/Chat transactions', () => {
   assert.match(background, /const verificationTransactions = new Map\(\)/);
   assert.match(background, /function verificationTransactionForTab/);
-  assert.match(background, /verificationTransactions\.set\(Number\(tabId\)/);
-  assert.match(background, /verificationTransactions\.delete\(Number\(tabId\)/);
-  assert.match(background, /getVerificationTransaction\(tabId\)/);
-  assert.match(networkMonitor, /effectiveConfiguration\(tabId\)/);
-  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
-  assert.match(networkMonitor, /forceModel: model/);
-  assert.doesNotMatch(background, /function autoVerificationSelectionActiveForTab/);
-  assert.doesNotMatch(background, /function autoVerificationModelForTab/);
+  assert.match(background, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(networkMonitor, /transaction\?\.mode === 'observe-native'/);
+  assert.match(networkMonitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(networkMonitor, /\? 'model-discovery-chat-compat'/);
+  assert.match(networkMonitor, /forceTransportModel: transportModel/);
 });
 
-
-// v0.5.86 fresh-chat regression: second layer is not the account catalog.
 test('v0.5.86 does not mistake second-layer intelligence model summaries for the final catalog', () => {
   assert.match(content, /composer intelligence picker can expose two model-labelled rows/);
   assert.match(content, /scope\.matches\?\.\('\[data-testid="composer-intelligence-picker-content"\]'\)/);
@@ -174,7 +161,8 @@ test('v0.5.87 menu cleanup is idempotent and cannot toggle a closed model trigge
   assert.match(closeBody, /picker_close_incomplete/);
 });
 
-test('v0.5.87 progress starts before catalog discovery so discovery failure remains visible', () => {
+
+test('discovery progress starts before live Chat catalog discovery so failures remain visible', () => {
   const verifyStart = background.indexOf('async function autoVerify');
   const verifyEnd = background.indexOf('function diagnosticTabState', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
@@ -184,11 +172,9 @@ test('v0.5.87 progress starts before catalog discovery so discovery failure rema
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
   assert.match(verifyBody, /autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
-  assert.match(verifyBody, /deferred_until_after_gpt_5_5/);
+  assert.match(verifyBody, /official_work_discovery_pending/);
 });
 
-
-// v0.5.90 explicit legacy-core maintenance: remove quarantine and give execution one causal owner.
 test('v0.5.90 executes only through the active composer model trigger', () => {
   assert.doesNotMatch(content, /MODEL_PICKER_MUTATION_QUARANTINED/);
   assert.match(content, /const valueBearing = menuTriggers\.filter/);
@@ -251,27 +237,23 @@ test('v0.5.94 accepts only the composer-owned in-place advanced catalog after Se
 });
 
 
-test('v0.5.95 verification dynamically converges a growing account model catalog', async () => {
+test('v0.5.176 discovery converges Chat Picker A plus official Work Picker B compatibility', async () => {
   const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
-  assert.match(background, /account_model_catalog_merged/);
-  assert.match(background, /while \(index < queue\.length \|\| stablePasses < 2\)/);
-  assert.match(background, /discoverAccountCatalog\(tabId\)/);
-  assert.match(background, /mergeCatalog\(rediscovered, 'post-turn'\)/);
-  assert.match(background, /mergeCatalog\(rediscovered, 'settle'\)/);
+  assert.match(background, /model_discovery_catalog_merged/);
+  assert.match(background, /while \(index < queue\.length \|\| stablePasses < 2 \|\| !officialWorkDiscoveryDone\)/);
+  assert.match(background, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.match(background, /mergeCatalog\(officialWork\?\.chatCandidates, 'picker-b-chat-compatibility'\)/);
+  assert.match(background, /mergeCatalog\(rediscovered, 'chat-picker-a-settle'\)/);
   assert.match(verificationPolicy, /progress\.total = queue\.length/);
-  assert.match(verificationPolicy, /progress\.reasoningLevels = \[\.\.\.reasoningLevels\]/);
 });
 
-
-test('v0.5.96 waits for stable picker geometry and confirms the selected model before probing', async () => {
+test('v0.5.176 keeps trusted Picker selection for Chat-native models and raw protocol proof for compatibility', async () => {
   assert.match(content, /stableFrames < 2/);
-  assert.match(content, /rejected_unstable_hit_test/);
   assert.match(content, /verification_model_selection_confirmed/);
-  assert.match(content, /collectObservation\(\)\.model === desired/);
   const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
-  assert.match(background, /const networkObservedRequestModel = normalizeConcreteModelId\(state\.lastRequest\?\.model\)/);
-  assert.match(background, /normalizeConcreteModelId\(state\.lastRewrite\?\.modelAfter\)/);
-  assert.doesNotMatch(background, /selected\\n\s+const requestModel/);
+  assert.match(background, /rawRequestModel/);
+  assert.match(background, /rawResponseProtocolModel/);
+  assert.match(background, /chatCompatibility/);
 });
 
 test('v0.5.97 accepts the exact owned catalog radio state as selection acknowledgement', () => {
@@ -290,22 +272,17 @@ test('v0.5.98 ignores hidden stale stop controls between verification models', (
 });
 
 
-test('v0.5.99 response evidence remains partial-safe while v0.5.120 owns verification at Fetch', async () => {
+test('v0.5.176 response evidence remains partial-safe while discovery owns Fetch authorities', async () => {
   const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
   const options = await readFile(new URL('../options.js', import.meta.url), 'utf8');
-  assert.match(monitor, /effectiveConfiguration\(tabId\)/);
-  assert.match(monitor, /authorityKind: 'verification-transaction'/);
-  assert.match(monitor, /verification_authority_mismatch_blocked/);
+  assert.match(monitor, /model-discovery-native/);
+  assert.match(monitor, /model-discovery-chat-compat/);
   assert.match(monitor, /hasResponseMetadataEvidence/);
   assert.match(background, /lastResponseEvidence/);
-  assert.match(background, /responseConfirmed/);
-  assert.match(background, /catalogRequestConfirmed/);
   assert.match(content, />执行进度</);
-  assert.match(content, />验证成功</);
+  assert.match(content, />发现并验证成功</);
   assert.match(options, /执行进度/);
-  assert.match(options, /验证成功/);
 });
-
 
 test('v0.5.100 correlates response evidence to the active formal request', () => {
   assert.match(background, /function responseEvidenceRequestId\(evidence\)/);
@@ -381,32 +358,26 @@ test('v0.5.105 dynamic catalog converges by stable model identity', () => {
   assert.doesNotMatch(verificationPolicy, /\[model \|\| '', rawModel \|\| '', selectorKey, label\]\.join/);
 });
 
-test('v0.5.105 progress UI separates executed work from growing discovery', () => {
+
+test('discovery progress UI separates executed work from growing discovery', () => {
   assert.match(content, /已执行 · \$\{total\} 已发现/);
-  assert.match(content, /模型验证 · 已执行/);
+  assert.match(content, /发现模型 · 已执行/);
 });
 
-
-test('v0.5.106 normalizes GPT-5.6 thinking transport and records performance evidence', () => {
-  assert.match(policy, /'gpt-5-6-thinking': 'gpt-5\.6-sol'/);
+test('v0.5.176 keeps GPT-5.6 Thinking distinct and records performance evidence', () => {
+  assert.match(policy, /'gpt-5-6-thinking': 'gpt-5\.6-thinking'/);
+  assert.doesNotMatch(policy, /'gpt-5-6-thinking': 'gpt-5\.6-sol'/);
   assert.match(background, /GPTLOCK_PERFORMANCE_DIAGNOSTIC/);
-  assert.match(background, /page_responsiveness_sample/);
-  assert.match(background, /verificationActive: Boolean\(verification\)/);
   assert.match(content, /PerformanceObserver/);
-  assert.match(content, /eventLoopLagMs/);
-  assert.match(content, /maxMutationCallbackMs/);
 });
 
-
-test('v0.5.107 rechecks verification authority before mutation and scopes full network capture', async () => {
+test('v0.5.176 rechecks discovery authority before mutation and scopes full network capture', async () => {
   const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
-  assert.match(monitor, /verification_passthrough_late_authority/);
-  assert.match(monitor, /configuration = this\.configuration\(tabId\)/);
+  assert.match(monitor, /model_discovery_native_passthrough/);
+  assert.match(monitor, /effectiveConfiguration\(tabId\)/);
   assert.match(monitor, /enableResponseCapture/);
   assert.match(monitor, /disableResponseCapture/);
-  assert.match(background, /verification_response_capture/);
 });
-
 
 test('v0.5.108 shares verified model metadata without treating it as account access', async () => {
   const accountClient = await readFile(new URL('../account-client.js', import.meta.url), 'utf8');
@@ -419,11 +390,10 @@ test('v0.5.108 shares verified model metadata without treating it as account acc
   assert.match(catalogOptions, /当前账户仍需验证/);
 });
 
-test('v0.5.108 canonicalizes GPT-5.5 instant and clears contradictory response issue', () => {
-  assert.match(policy, /'gpt-5-5-instant': 'gpt-5\.5'/);
-  assert.match(background, /responseIssue: responseConfirmed \? null/);
+test('v0.5.176 protocol normalizer preserves GPT-5.5 instant identity separately', () => {
+  assert.match(policy, /'gpt-5-5-instant': 'gpt-5\.5-instant'/);
+  assert.doesNotMatch(policy, /'gpt-5-5-instant': 'gpt-5\.5'/);
 });
-
 
 test('v0.5.108 popup can persist an empty locked-model list', () => {
   assert.doesNotMatch(popupJs, /至少保留一个锁定模型/);
@@ -432,17 +402,13 @@ test('v0.5.108 popup can persist an empty locked-model list', () => {
 });
 
 
-test('v0.5.135 verification enables GPTWork Work state independently and waits for terminal replies', () => {
-  assert.match(background, /enableWorkModeForVerification/);
-  assert.match(background, /verification_work_mode_transition/);
-  assert.match(background, /discoverAccountCatalog\(tabId\)/);
+test('v0.5.176 official Work discovery is independent from GPTWork Work state and waits for terminal replies', () => {
+  assert.match(background, /discoverOfficialWorkModels/);
+  assert.match(background, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
+  assert.match(background, /mode: 'observe-native'/);
   assert.match(background, /GPTLOCK_WAIT_FOR_PROBE_SETTLED/);
-  assert.match(background, /account_model_verification_aborted_pending_response/);
-  assert.match(background, /source: 'network_work_(?:policy|transport)'/);
-  assert.match(background, /featureState\?\.workModeEnabled === true/);
+  assert.doesNotMatch(background, /verification_work_mode_transition/);
   assert.match(content, /waitForProbeTurnSettled/);
-  assert.match(content, /assistantCountBefore/);
-  assert.match(content, /stillGenerating/);
 });
 
 test('v0.5.111 performance diagnostics stay compact and sample every 30 seconds', () => {
@@ -454,51 +420,39 @@ test('v0.5.111 performance diagnostics stay compact and sample every 30 seconds'
 });
 
 
-test('v0.5.120 resolves verification authority at the Fetch sink and fails closed on mismatch', () => {
+test('v0.5.176 resolves Chat compatibility authority at the raw Fetch transport sink', () => {
   assert.match(networkMonitor, /Resolve authority only after postData acquisition/);
   assert.match(networkMonitor, /configuration = this\.effectiveConfiguration\(tabId\)/);
+  assert.match(networkMonitor, /actualAuthorityModel/);
+  assert.match(networkMonitor, /rewrite\.transportModelAfter/);
   assert.match(networkMonitor, /verification_authority_mismatch_blocked/);
   assert.match(networkMonitor, /await this\.failPaused\(tabId, requestId\)/);
-  assert.match(networkMonitor, /verification_rewrite_failed_closed/);
-  assert.match(background, /state\.lastRewrite\?\.authorityKind === 'verification-transaction'/);
-  assert.match(background, /networkObservedRequestModel/);
-  assert.match(background, /fetch_forwarded_request_metadata/);
-  assert.match(background, /const verified = Boolean\(requestId\) && requestConfirmed && responseConfirmed/);
 });
 
-
-test('v0.5.135 has one strict verification transaction authority with no native-transport alias layer', () => {
-  assert.match(networkMonitor, /preserveModel: false/);
-  assert.match(networkMonitor, /forceModel: model/);
-  assert.match(networkMonitor, /authorityKind: 'verification-transaction'/);
-  assert.doesNotMatch(networkMonitor, /verification-observation/);
-  assert.doesNotMatch(background, /verificationModelEquivalent/);
-  assert.doesNotMatch(background, /stripTransportSuffix/);
-  assert.doesNotMatch(background, /bootstrapVerificationWorkMode/);
-  assert.doesNotMatch(background, /probeText: '1'/);
+test('v0.5.176 has separate native-observation and Chat-force discovery authorities', () => {
+  assert.match(networkMonitor, /transaction\?\.mode === 'observe-native'/);
+  assert.match(networkMonitor, /bypassRewrite: true/);
+  assert.match(networkMonitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(networkMonitor, /authorityKind: transaction\?\.mode === 'force-transport'/);
+  assert.match(networkMonitor, /model-discovery-chat-compat/);
+  assert.match(networkMonitor, /authorityTransportModel/);
 });
 
-test('v0.5.135 enables GPTWork Work feature directly after GPT-5.5 without clicking its UI', async () => {
-  const tabFeatureRuntime = await readFile(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
+test('v0.5.176 enters ChatGPT official Work only inside isolated discovery and never enables GPTWork Work', async () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
-  const verifyEnd = background.indexOf('async function autoVerify', verifyStart);
+  const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
-  assert.match(verifyBody, /enableWorkModeForVerification\(tabId\)/);
-  assert.match(verifyBody, /source: 'network_work_(?:policy|transport)'/);
-  assert.match(tabFeatureRuntime, /export async function enableWorkModeForVerification/);
-  assert.match(tabFeatureRuntime, /setTabFeatureState\(tabId, \{ workModeEnabled: true \}\)/);
-  assert.doesNotMatch(verifyBody, /GPTLOCK_VERIFY_ENTER_WORK_MODE/);
-  assert.doesNotMatch(verifyBody, /bootstrapVerificationWorkMode/);
+  assert.doesNotMatch(verifyBody, /enableWorkModeForVerification\(tabId\)/);
+  assert.match(background, /enterNativeWorkOnDiscoveryTab\(discoveryTabId/);
+  assert.match(background, /isolateTabForNativeDiscovery\(discoveryTabId\)/);
 });
 
-
-test('v0.5.161 keeps verification Work on network transport without requiring native Picker B', () => {
-  assert.match(background, /enableResponseCapture\(tabId\)/);
-  assert.match(background, /state\.lastForwardedRequest/);
-  assert.match(background, /reason: 'network_work_catalog_seeded'/);
-  assert.match(background, /source: 'network_work_transport'/);
-  assert.match(background, /selectorKey: '__work_transport__'/);
-  assert.match(background, /model: workDefaultModel/);
+test('v0.5.176 requires native Picker B discovery before Chat cross-mode locking', () => {
+  assert.match(background, /official_work_model_native_verified/);
+  assert.match(background, /selectorKey: '__picker_b_chat_lock__'/);
+  assert.match(background, /nativeRequestModel/);
+  assert.match(background, /expectedResponseModel/);
+  assert.doesNotMatch(background, /selectorKey: '__work_transport__'/);
 });
 
 test('v0.5.144 restores the validated ModelPro prompt-bank implementation', () => {

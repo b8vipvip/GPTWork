@@ -97,8 +97,10 @@ test('default_model_slug is retained as diagnostic profile metadata only', () =>
     } } }),
     mimeType: 'application/json',
   });
-  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.equal(result.model, 'gpt-5.6');
+  assert.equal(result.rawModel, 'gpt-5.6');
   assert.equal(result.defaultModel, 'gpt-6-sol');
+  assert.equal(result.rawDefaultModel, 'gpt-6-sol-wm');
   assert.match(result.defaultModelField, /default_model_slug/);
   assert.equal(result.reasoning, 'high');
 });
@@ -180,6 +182,7 @@ test('diagnoses empty and unparseable response bodies without retaining content'
     modelCandidatePaths: [],
     reasoningCandidatePaths: [],
     modelCandidateValues: [],
+    rawModelCandidateValues: [],
     reasoningCandidateValues: [],
     matchedHeaderFields: [],
   });
@@ -188,9 +191,13 @@ test('diagnoses empty and unparseable response bodies without retaining content'
   assert.equal(unparsed.diagnostics.bodyLength, 8);
 });
 
-test('normalizes observed Sol transport aliases including thinking metadata', () => {
-  assert.equal(extractRequestEvidence('{"model":"gpt-5.6-sol-wm"}').model, 'gpt-5.6-sol');
-  assert.equal(extractRequestEvidence('{"model":"gpt-5-6-thinking"}').model, 'gpt-5.6-sol');
+test('preserves Thinking as a distinct protocol model while keeping wm business aliases', () => {
+  const sol = extractRequestEvidence('{"model":"gpt-5.6-sol-wm"}');
+  assert.equal(sol.model, 'gpt-5.6-sol');
+  assert.equal(sol.rawModel, 'gpt-5.6-sol-wm');
+  const thinking = extractRequestEvidence('{"model":"gpt-5-6-thinking"}');
+  assert.equal(thinking.model, 'gpt-5.6-thinking');
+  assert.equal(thinking.rawModel, 'gpt-5.6-thinking');
 });
 
 test('rewrites a disallowed top-level model to the known Sol transport id', () => {
@@ -296,7 +303,7 @@ test('extracts model and thinking effort from nested ChatGPT WebSocket encoded_i
   ].join('\n');
   const body = JSON.stringify([{ type: 'message', topic_id: 'conversation-turn-test', payload: { type: 'conversation-turn-stream', payload: { type: 'stream-item', encoded_item: encodedItem } } }]);
   const result = extractResponseEvidence({ body, mimeType: 'application/json' });
-  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.equal(result.model, 'gpt-5.6');
   assert.equal(result.reasoning, 'high');
   assert.match(result.diagnostics.bodyFormat, /embedded-sse/);
   assert.match(result.fields.model, /resolved_model_slug/);

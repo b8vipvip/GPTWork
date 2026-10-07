@@ -16,13 +16,15 @@ function render(data){
     <td><code>${esc(m.model)}</code></td>
     <td><input data-field="label" value="${esc(m.label||m.model)}" maxlength="120"></td>
     <td><select data-field="pickerMode"><option value="">—</option><option value="A" ${m.pickerMode==='A'?'selected':''}>A</option><option value="B" ${m.pickerMode==='B'?'selected':''}>B</option></select></td>
+    <td><code>${esc(m.nativeRequestModel||'—')}</code><br><small>${esc(m.nativeResponseModel||'—')}</small></td>
+    <td><code>${esc(m.chatTransportModel||'—')}</code><br><small>${esc(m.chatResponseModel||'—')}</small></td>
+    <td>${Number(m.chatLockVerifiedCount||0)>0?'✅':'—'} (${Number(m.chatLockVerifiedCount||0)})</td>
     <td><input data-field="enabled" type="checkbox" ${m.enabled!==false?'checked':''}></td>
-    <td>发现 ${Number(m.accountCount||0)} / 请求 ${Number(m.requestConfirmedAccountCount||0)} / 响应 ${Number(m.verifiedAccountCount||0)}</td>
+    <td>发现 ${Number(m.accountCount||0)} / 请求 ${Number(m.requestConfirmedAccountCount||0)} / 原生响应 ${Number(m.verifiedAccountCount||0)} / Chat锁定 ${Number(m.chatLockVerifiedAccountCount||0)}</td>
     <td>${Number(m.discoveredCount||0)}</td>
-    <td>${Number(m.verifiedCount||0)}</td>
     <td>${esc(fmt(m.lastSeenAt))}</td>
     <td><button data-action="save">保存</button> <button data-action="delete" class="danger">删除</button></td>
-  </tr>`).join('')||'<tr><td colspan="9" class="muted">尚未收到客户端上传的模型。</td></tr>';
+  </tr>`).join('')||'<tr><td colspan="11" class="muted">尚未收到客户端上传的模型。</td></tr>';
 }
 async function load(){
   try{

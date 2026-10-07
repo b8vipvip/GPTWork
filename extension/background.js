@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   modelTransportId,
   normalizeConcreteModelId,
+  normalizeRawProtocolModelId,
   normalizePolicy,
   normalizeReasoningLevel,
   normalizeSettings,
@@ -33,6 +34,7 @@ import {
   isolateTabForNativeDiscovery,
   isolateTabForVerification,
   tabFeatureEnabledSync,
+  tabFeatureStateSync,
 } from './tab-feature-runtime.js';
 import { ACCOUNT_REFRESH_ALARM } from './account-refresh-scheduler.js';
 import {
@@ -42,7 +44,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.175';
+const RUNTIME_CODE_VERSION = '0.5.176';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -84,7 +86,16 @@ const accountClient = createAccountClient();
 let accountState = { authenticated: false, authorized: false, allowedWindowKeys: [], deniedWindowKeys: [] };
 let sharedModelCatalogUnavailableUntil = 0;
 let sharedKnownModelIds = new Set();
+let sharedModelProtocolMap = new Map();
+let sharedPickerBChatModelIds = new Set();
 let lastServerModelCatalogGeneration = null;
+
+function rememberProvenPickerBChatModels(items) {
+  sharedPickerBChatModelIds = new Set((Array.isArray(items) ? items : [])
+    .filter((item) => item?.pickerMode === 'B' && normalizeRawProtocolModelId(item?.chatTransportModel))
+    .map((item) => normalizeConcreteModelId(item?.model))
+    .filter(Boolean));
+}
 let diagnosticRuntimeSuspended = false;
 
 function masterRuntimeEnabled() {
@@ -376,7 +387,7 @@ function ensureTabState(tabId, url = '') {
       const previousContextKey = state.contextKey;
       state.url = url;
       state.contextKey = nextContextKey;
-      logRuntime('info', 'verification', 'auto_verify_context_migrated', {
+      logRuntime('info', 'discovery', 'auto_verify_context_migrated', {
         tabId,
         previousContextKey,
         nextContextKey,
@@ -436,8 +447,8 @@ function verificationTransactionForTab(tabId) {
 
 function workBootstrapModelForTab(tabId) {
   const policy = effectivePolicyForTabSync(tabId);
-  return normalizeConcreteModelId(policy.lockedModels?.[0])
-    ?? normalizeConcreteModelId(DEFAULT_POLICY.lockedModels?.[0]);
+  return normalizeConcreteModelId(policy.workDefaultModel)
+    ?? normalizeConcreteModelId(DEFAULT_POLICY.workDefaultModel);
 }
 
 function beginWorkBootstrapTransaction(tabId, source) {
@@ -467,9 +478,23 @@ function runtimePolicyForTabSync(tabId) {
   const pageModel = normalizeConcreteModelId(state?.pageObservation?.model);
   const policy = requestPolicyForTabSync(tabId, pageModel);
   const transaction = verificationTransactionForTab(tabId);
-  return transaction?.model
-    ? normalizePolicy({ ...policy, lockedModels: [transaction.model] })
-    : policy;
+  if (transaction?.model) {
+    return normalizePolicy({ ...policy, lockedModels: [transaction.model] });
+  }
+
+  // Picker B is absent from ordinary Chat's picker. If Model Lock targets B, promote
+  // it only after discovery has proved the exact raw transport works in Chat.
+  const feature = tabFeatureStateSync(tabId);
+  if (feature.modelLockEnabled === true && feature.workModeEnabled !== true && policy.lockedModels.length === 0) {
+    const effective = effectivePolicyForTabSync(tabId);
+    const crossModePickerB = effective.lockedModels.find((model) =>
+      sharedPickerBChatModelIds.has(model) && sharedModelProtocolMap.has(model)
+    ) || null;
+    if (crossModePickerB) {
+      return normalizePolicy({ ...policy, lockedModels: [crossModePickerB] });
+    }
+  }
+  return policy;
 }
 
 function guardFor(state) {
@@ -828,7 +853,9 @@ function mergeResponseEvidence(state, evidence) {
     requestId,
     capturedAt: evidence?.capturedAt ?? previous?.capturedAt ?? new Date().toISOString(),
     model: modelConflict ? null : evidence?.model || previousModel || null,
+    rawModel: evidence?.rawModel || previous?.rawModel || null,
     defaultModel: evidence?.defaultModel || previous?.defaultModel || null,
+    rawDefaultModel: evidence?.rawDefaultModel || previous?.rawDefaultModel || null,
     defaultModelField: evidence?.defaultModelField || previous?.defaultModelField || null,
     reasoning: reasoningConflict ? null : evidence?.reasoning || previous?.reasoning || null,
     conflicts: { model: modelConflict, reasoning: reasoningConflict },
@@ -856,6 +883,7 @@ function verificationResponseObservation(tabId, responseEvidence) {
   // network-evidence.js) can confirm the backend model.
   return {
     model: responseEvidence?.conflicts?.model ? null : observed,
+    rawModel: responseEvidence?.conflicts?.model ? null : normalizeRawProtocolModelId(responseEvidence?.rawModel),
     backendResolvedModel: observed || null,
     downgraded: false,
     reason: target && observed && observed !== target ? 'served_model_mismatch' : null,
@@ -954,7 +982,7 @@ async function applyNetworkEvidence(tabId, evidence) {
         selectedModelEvidenceReason: modelObservation.reason,
       };
       state.lastEvidenceDiagnostics = responseEvidence.diagnostics;
-      logRuntime('info', 'verification', 'backend_model_resolution_observed', {
+      logRuntime('info', 'discovery', 'backend_model_resolution_observed', {
         tabId,
         verificationModel: verificationTransactionForTab(tabId)?.model ?? null,
         backendResolvedModel: modelObservation.backendResolvedModel,
@@ -974,7 +1002,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       ? 'conflicting_response_metadata'
       : null);
     state.phase = result.verdict;
-    logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'verification', 'response_evaluated', {
+    logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'discovery', 'response_evaluated', {
       tabId,
       requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       verdict: result.verdict,
@@ -991,7 +1019,7 @@ async function applyNetworkEvidence(tabId, evidence) {
     state.phase = 'error';
     state.evidenceIssue = 'verification_request_failed';
     state.lastError = errorText(error);
-    logRuntime('error', 'verification', 'response_evaluation_failed', {
+    logRuntime('error', 'discovery', 'response_evaluation_failed', {
       tabId,
       requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       error: state.lastError,
@@ -1004,6 +1032,15 @@ async function applyNetworkEvidence(tabId, evidence) {
 const networkMonitor = new ChatGptNetworkMonitor({
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
+    const feature = tabFeatureStateSync(tabId);
+    const crossModePickerB = feature.modelLockEnabled === true && feature.workModeEnabled !== true
+      ? policy.lockedModels.find((model) =>
+        sharedPickerBChatModelIds.has(model) && sharedModelProtocolMap.has(model)
+      ) || null
+      : null;
+    const crossModeTransport = crossModePickerB
+      ? normalizeRawProtocolModelId(sharedModelProtocolMap.get(crossModePickerB))
+      : null;
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
@@ -1011,16 +1048,23 @@ const networkMonitor = new ChatGptNetworkMonitor({
       preserveModel: false,
       preserveReasoning: false,
       bypassRewrite: false,
-      forceModel: null,
+      // Normal Chat may lock Picker B only through a transport proven by the
+      // official-Work native probe plus the Chat compatibility probe.
+      forceModel: crossModePickerB,
+      forceTransportModel: crossModeTransport,
       responseVerificationEnabled: currentSettings.networkVerificationEnabled,
       knownModels: [...sharedKnownModelIds],
+      modelTransportMap: Object.fromEntries(sharedModelProtocolMap),
     };
   },
+
   getVerificationTransaction(tabId) {
     const transaction = verificationTransactionForTab(tabId);
     if (!transaction?.model) return null;
     return {
       model: transaction.model,
+      mode: transaction.mode || 'force-model',
+      transportModel: normalizeRawProtocolModelId(transaction.transportModel),
       startedAt: transaction.startedAt ?? null,
     };
   },
@@ -1071,7 +1115,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // legitimately omit Network.requestWillBeSent's networkId at this boundary, so
     // retain the forwarded request as first-class verification evidence instead of
     // waiting forever for a Network requestId that may never be correlated.
-    if (rewrite.authorityKind === 'verification-transaction' && rewrite.modelAfter && !rewrite.error) {
+    const discoveryAuthority = ['verification-transaction', 'model-discovery-native', 'model-discovery-chat-compat']
+      .includes(rewrite.authorityKind);
+    if (discoveryAuthority && rewrite.modelAfter && !rewrite.error) {
       state.lastForwardedRequest = {
         capturedAt,
         requestId: rewrite.requestId ?? null,
@@ -1082,10 +1128,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
       };
     }
     const verification = verificationTransactionForTab(tabId);
-    if (verification?.model && rewrite.authorityKind !== 'verification-transaction') {
+    if (verification?.model && !discoveryAuthority) {
       state.lastError = 'verification_request_missing_terminal_authority';
       state.phase = 'error';
-      logRuntime('error', 'verification', 'verification_request_generation_or_authority_mismatch', {
+      logRuntime('error', 'discovery', 'verification_request_generation_or_authority_mismatch', {
         tabId,
         verificationModel: verification.model,
         rewriteAuthorityKind: rewrite.authorityKind ?? null,
@@ -1555,10 +1601,10 @@ async function resolveUnknownCatalogNames(tabId, rows) {
       for (const item of mappings) next[item.raw] = { canonical: item.canonical, displayName: item.displayName, learnedAt: new Date().toISOString() };
       await chrome.storage.sync.set({ gptworkModelNameMappingsV1: next });
     }
-    logRuntime('info', 'verification', 'model_name_fallback_completed', { tabId, rawIds, mappings });
+    logRuntime('info', 'discovery', 'model_name_fallback_completed', { tabId, rawIds, mappings });
     return mappings;
   } catch (error) {
-    logRuntime('warn', 'verification', 'model_name_fallback_failed', { tabId, rawIds, error: errorText(error) });
+    logRuntime('warn', 'discovery', 'model_name_fallback_failed', { tabId, rawIds, error: errorText(error) });
     return [];
   }
 }
@@ -1581,6 +1627,16 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
   const needsInitialSync = !hasSyncedGeneration || syncedAccountId <= 0;
 
   sharedKnownModelIds = new Set(cached.map((item) => normalizeConcreteModelId(item?.model)).filter(Boolean));
+  sharedModelProtocolMap = new Map(cached
+    .map((item) => ({
+      model: normalizeConcreteModelId(item?.model),
+      transport: normalizeRawProtocolModelId(
+        item?.chatTransportModel || (item?.pickerMode === 'A' ? item?.nativeRequestModel : null),
+      ),
+    }))
+    .filter((item) => item.model && item.transport)
+    .map((item) => [item.model, item.transport]));
+  rememberProvenPickerBChatModels(cached);
   if (!force && !accountChanged && !generationChanged && !needsInitialSync) return cached;
   if (Date.now() < sharedModelCatalogUnavailableUntil) return cached;
 
@@ -1592,6 +1648,11 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
         model: normalizeConcreteModelId(item?.model),
         label: String(item?.label || '').trim().slice(0, 120),
         pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
+        nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
+        chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
+        chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
+        chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
         discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
@@ -1602,6 +1663,14 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
       // visible to server administrators but cannot seed client verification.
       .filter((item) => item.verifiedCount > 0 || ['A', 'B'].includes(item.pickerMode));
     sharedKnownModelIds = new Set(models.map((item) => item.model).filter(Boolean));
+    sharedModelProtocolMap = new Map(models
+      .map((item) => ({
+        model: item.model,
+        transport: item.chatTransportModel || (item.pickerMode === 'A' ? item.nativeRequestModel : null),
+      }))
+      .filter((item) => item.model && item.transport)
+      .map((item) => [item.model, item.transport]));
+    rememberProvenPickerBChatModels(models);
     const patch = {};
     if (JSON.stringify(cached) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
     if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
@@ -1610,7 +1679,7 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
       [SHARED_MODEL_CATALOG_ACCOUNT_KEY]: accountId,
     });
     lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
-    logRuntime('info', 'verification', 'shared_model_catalog_synced', {
+    logRuntime('info', 'discovery', 'shared_model_catalog_synced', {
       count: models.length,
       changed: Object.keys(patch).length > 0,
       generation,
@@ -1620,7 +1689,7 @@ async function syncSharedKnownModels({ serverGeneration = lastServerModelCatalog
   } catch (error) {
     const unsupported = Number(error?.status) === 404 || /not found/i.test(errorText(error));
     if (unsupported) sharedModelCatalogUnavailableUntil = Date.now() + 5 * 60 * 1000;
-    logRuntime(unsupported ? 'info' : 'warn', 'verification', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
+    logRuntime(unsupported ? 'info' : 'warn', 'discovery', unsupported ? 'shared_model_catalog_unavailable' : 'shared_model_catalog_sync_failed', {
       error: errorText(error), retryAfterMs: unsupported ? 5 * 60 * 1000 : 0,
     });
     return cached;
@@ -1653,17 +1722,11 @@ function mergeAccountCatalogs(...catalogs) {
 function networkCandidateCatalog(items, source = 'network-candidate') {
   const rows = [];
   const seen = new Set();
-  const skippedWorkTransportModels = [];
-  const allowWorkTransport = serverWorkFeatureEnabled();
   for (const item of Array.isArray(items) ? items : []) {
     const raw = typeof item === 'string' ? item : (item?.model || item?.rawId);
     const model = normalizeConcreteModelId(raw);
     if (!model || seen.has(model)) continue;
     seen.add(model);
-    if (!allowWorkTransport && modelTransportId(model) !== model) {
-      skippedWorkTransportModels.push(model);
-      continue;
-    }
     rows.push({
       model,
       rawId: model,
@@ -1678,7 +1741,6 @@ function networkCandidateCatalog(items, source = 'network-candidate') {
     models: rows.map((row) => row.model),
     reasoningLevels: [],
     pickerMode: null,
-    skippedWorkTransportModels,
   };
 }
 
@@ -1772,7 +1834,7 @@ async function createVerificationExecutionTab(sourceTabId) {
     if (!Number.isInteger(verificationTabId)) throw new Error('Temporary verification tab was not created');
 
     await isolateTabForVerification(verificationTabId);
-    logRuntime('info', 'verification', 'verification_surface_tab_created', {
+    logRuntime('info', 'discovery', 'verification_surface_tab_created', {
       sourceTabId,
       verificationTabId,
       active: false,
@@ -1782,7 +1844,7 @@ async function createVerificationExecutionTab(sourceTabId) {
     if (surface?.ready !== true || surface?.documentVisible !== true) {
       await chrome.tabs.update(verificationTabId, { active: true }).catch(() => null);
       activatedForReadiness = true;
-      logRuntime('info', 'verification', 'verification_surface_activation_fallback', {
+      logRuntime('info', 'discovery', 'verification_surface_activation_fallback', {
         sourceTabId,
         verificationTabId,
         reason: surface?.reason || (surface?.structuralReady ? 'document_hidden' : 'surface_not_ready_in_background'),
@@ -1802,7 +1864,7 @@ async function createVerificationExecutionTab(sourceTabId) {
       };
     }
 
-    logRuntime('info', 'verification', 'verification_surface_ready', {
+    logRuntime('info', 'discovery', 'verification_surface_ready', {
       sourceTabId,
       verificationTabId,
       composerReady: surface.composerReady === true,
@@ -1826,7 +1888,7 @@ async function createVerificationExecutionTab(sourceTabId) {
     if (Number.isInteger(verificationTabId)) {
       await chrome.tabs.remove(verificationTabId).catch(() => null);
     }
-    logRuntime('warn', 'verification', 'verification_surface_tab_create_failed', {
+    logRuntime('warn', 'discovery', 'verification_surface_tab_create_failed', {
       sourceTabId,
       verificationTabId,
       error: errorText(error),
@@ -1851,7 +1913,7 @@ async function closeVerificationExecutionTab(session) {
   }
   if (Number.isInteger(verificationTabId)) {
     await chrome.tabs.remove(verificationTabId).catch(() => null);
-    logRuntime('info', 'verification', 'verification_surface_tab_closed', {
+    logRuntime('info', 'discovery', 'verification_surface_tab_closed', {
       sourceTabId: Number(session?.sourceTabId) || null,
       verificationTabId,
       restoredActiveTabId: session?.activatedForReadiness === true ? restoreActiveTabId : null,
@@ -1885,38 +1947,58 @@ async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
   return { ...last, entered: false, reason: last?.reason || 'native_work_surface_not_ready' };
 }
 
-async function discoverNativeWorkCandidates(sourceTabId, progress) {
-  if (!serverWorkFeatureEnabled()) {
-    logRuntime('info', 'verification', 'native_work_catalog_discovery_skipped', {
-      sourceTabId,
-      reason: 'work_feature_disabled',
-    });
-    return networkCandidateCatalog([], 'native-picker-b');
+async function waitForNetworkModelEvidence(tabId, startedAtMs, timeoutMs = AUTO_VERIFY_RESPONSE_TIMEOUT_MS) {
+  const deadline = Date.now() + Math.max(1500, Number(timeoutMs || 0));
+  let requestId = null;
+  while (Date.now() < deadline) {
+    const state = ensureTabState(tabId);
+    const requestTime = Date.parse(state.lastRequest?.capturedAt || '');
+    if (
+      state.lastRequest?.requestId
+      && Number.isFinite(requestTime)
+      && requestTime >= startedAtMs - 1500
+    ) requestId = state.lastRequest.requestId;
+
+    const evidence = state.lastResponseEvidence;
+    if (
+      requestId
+      && evidence?.requestId === requestId
+      && !evidence?.conflicts?.model
+      && (evidence?.rawModel || evidence?.model)
+    ) {
+      return { timedOut: false, requestId, evidence };
+    }
+    await sleep(150);
   }
+  return { timedOut: true, requestId, evidence: null };
+}
+
+async function discoverOfficialWorkModels(sourceTabId, progress) {
   const sourceTab = await chrome.tabs.get(sourceTabId).catch(() => null);
   if (!sourceTab?.id || !Number.isInteger(sourceTab.windowId)) {
-    logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+    logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
       sourceTabId,
       reason: 'source_tab_unavailable',
     });
-    return networkCandidateCatalog([], 'native-picker-b');
+    return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
   }
 
   const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
   const restoreActiveTabId = Number(activeTabs?.[0]?.id) || null;
   let discoveryTab = null;
   let activatedForReadiness = false;
+  let discoveryTabId = null;
   try {
     discoveryTab = await chrome.tabs.create({
       windowId: sourceTab.windowId,
       url: 'https://chatgpt.com/',
       active: false,
     });
-    const discoveryTabId = Number(discoveryTab?.id);
-    if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary discovery tab was not created');
+    discoveryTabId = Number(discoveryTab?.id);
+    if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary official Work discovery tab was not created');
     await isolateTabForNativeDiscovery(discoveryTabId);
 
-    logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_created', {
+    logRuntime('info', 'discovery', 'official_work_model_discovery_tab_created', {
       sourceTabId,
       discoveryTabId,
       active: false,
@@ -1924,26 +2006,32 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
 
     let enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 9000);
     if (enter?.entered !== true) {
-      // Some ChatGPT builds defer top-level controls while a tab is hidden. Activate
-      // only as a bounded fallback, then restore the user's previously active tab.
       await chrome.tabs.update(discoveryTabId, { active: true }).catch(() => null);
       activatedForReadiness = true;
-      logRuntime('info', 'verification', 'native_work_catalog_discovery_activation_fallback', {
+      logRuntime('info', 'discovery', 'official_work_model_discovery_activation_fallback', {
         sourceTabId,
         discoveryTabId,
-        reason: enter?.reason || 'work_control_not_ready_in_background',
+        reason: enter?.reason || 'official_work_control_not_ready_in_background',
       });
       enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
     }
 
     if (enter?.entered !== true) {
-      logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+      logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
         sourceTabId,
         discoveryTabId,
-        reason: enter?.reason || 'work_control_not_found',
+        reason: enter?.reason || 'official_work_control_not_found',
       });
-      return networkCandidateCatalog([], 'native-picker-b');
+      return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
     }
+
+    const state = ensureTabState(discoveryTabId, discoveryTab.url || 'https://chatgpt.com/');
+    state.windowId = sourceTab.windowId;
+    const attached = await networkMonitor.attach(discoveryTabId);
+    const responseCaptureReady = attached
+      ? await networkMonitor.enableResponseCapture(discoveryTabId).catch(() => false)
+      : false;
+    if (!attached || !responseCaptureReady) throw new Error('Official Work network capture unavailable');
 
     const scanForPickerB = async (timeoutMs) => {
       const deadline = Date.now() + timeoutMs;
@@ -1957,57 +2045,218 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
       return latest;
     };
 
-    let discovered = null;
-    let bootstrapSent = false;
     await sleep(700);
-    discovered = await scanForPickerB(3600);
-
+    let discovered = await scanForPickerB(3600);
+    let bootstrapSent = false;
     if (discovered?.pickerMode !== 'B') {
-      const probe = await sendVerificationReasoningProbe(
-        discoveryTabId,
-        'GPTWork 模型目录发现',
-        Math.max(1, Number(progress.completed || 0) + 1),
-        Math.max(1, Number(progress.total || 1)),
-      );
-      bootstrapSent = probe?.sent === true;
-      if (bootstrapSent) {
-        await sendTabMessage(discoveryTabId, {
-          type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
-          assistantCountBefore: probe.assistantCountBefore ?? 0,
-          timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
-        }).catch(() => null);
-        discovered = await scanForPickerB(6000);
+      verificationTransactions.set(discoveryTabId, {
+        model: 'gpt-5.6-sol',
+        mode: 'observe-native',
+        selectorKey: '__official_work_bootstrap__',
+        label: 'Official Work bootstrap',
+        startedAt: Date.now(),
+      });
+      try {
+        resetVerificationAttempt(state);
+        const probe = await sendVerificationReasoningProbe(
+          discoveryTabId,
+          'GPTWork 发现模型 · Official Work bootstrap',
+          1,
+          1,
+        );
+        bootstrapSent = probe?.sent === true;
+        if (bootstrapSent) {
+          await sendTabMessage(discoveryTabId, {
+            type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+            assistantCountBefore: probe.assistantCountBefore ?? 0,
+            timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+          }).catch(() => null);
+          discovered = await scanForPickerB(6000);
+        }
+      } finally {
+        verificationTransactions.delete(discoveryTabId);
       }
     }
 
-    const candidates = discovered?.pickerMode === 'B'
-      ? networkCandidateCatalog(discovered.rows, 'native-picker-b')
-      : networkCandidateCatalog([], 'native-picker-b');
-    logRuntime(candidates.rows.length ? 'info' : 'warn', 'verification', 'native_work_catalog_discovery_completed', {
+    if (discovered?.pickerMode !== 'B' || !Array.isArray(discovered?.rows) || !discovered.rows.length) {
+      logRuntime('warn', 'discovery', 'official_work_picker_b_empty', {
+        sourceTabId,
+        discoveryTabId,
+        entered: true,
+        bootstrapSent,
+        pickerMode: discovered?.pickerMode ?? null,
+      });
+      return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
+    }
+
+    const nativeResults = [];
+    const rows = discovered.rows.map((row) => ({ ...row, pickerMode: 'B', discoverySource: 'official-work-picker-b' }));
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const model = normalizeConcreteModelId(row?.model || row?.rawId);
+      if (!model) continue;
+      resetVerificationAttempt(state);
+      const startedAtMs = Date.now();
+      verificationTransactions.set(discoveryTabId, {
+        model,
+        mode: 'observe-native',
+        selectorKey: String(row.selectorKey || ''),
+        label: String(row.label || model),
+        startedAt: startedAtMs,
+      });
+      try {
+        const selectionResponse = await sendTabMessage(discoveryTabId, {
+          type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+          model,
+          selectorKey: row.selectorKey,
+          label: row.label,
+        });
+        const selection = selectionResponse?.result || {};
+        if (selection.selectionAttempted !== true) throw new Error('Official Work Picker-B model selection was not activated');
+
+        await sleep(1200);
+        const reattached = await networkMonitor.attach(discoveryTabId);
+        if (!reattached || !await networkMonitor.enableResponseCapture(discoveryTabId)) {
+          throw new Error('Official Work response capture did not re-enable');
+        }
+        const probe = await sendVerificationReasoningProbe(
+          discoveryTabId,
+          'GPTWork 发现模型 · Official Work native',
+          index + 1,
+          rows.length,
+        );
+        if (!probe?.sent) throw new Error('Official Work discovery probe was not sent');
+
+        const [networkEvidence, settled] = await Promise.all([
+          waitForNetworkModelEvidence(discoveryTabId, startedAtMs),
+          sendTabMessage(discoveryTabId, {
+            type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
+            assistantCountBefore: probe.assistantCountBefore ?? 0,
+            timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
+          }).catch(() => null),
+        ]);
+        const rawRequestModel = normalizeRawProtocolModelId(
+          state.lastRewrite?.transportModelAfter
+            || state.lastRewrite?.transportModelBefore
+            || state.lastRequest?.rawModel,
+        );
+        const rawResponseModel = normalizeRawProtocolModelId(
+          networkEvidence?.evidence?.rawModel
+            || state.lastResponseEvidence?.rawModel
+            || state.lastResponseEvidence?.model,
+        );
+        const nativeRequestConfirmed = Boolean(rawRequestModel);
+        const nativeResponseConfirmed = Boolean(rawResponseModel);
+        const nativeVerified = selection.selectionAttempted === true
+          && nativeRequestConfirmed
+          && nativeResponseConfirmed
+          && settled?.settled === true;
+
+        const result = {
+          model,
+          label: String(row.label || model),
+          selectorKey: String(row.selectorKey || ''),
+          pickerMode: 'B',
+          discoverySource: 'official-work-picker-b',
+          nativeRequestModel: rawRequestModel,
+          nativeResponseModel: rawResponseModel,
+          nativeRequestConfirmed,
+          nativeResponseConfirmed,
+          nativeVerified,
+          requestId: networkEvidence?.requestId || state.lastRequest?.requestId || null,
+        };
+        nativeResults.push(result);
+        logRuntime(nativeVerified ? 'info' : 'warn', 'discovery', 'official_work_model_native_verified', {
+          sourceTabId,
+          discoveryTabId,
+          index: index + 1,
+          total: rows.length,
+          ...result,
+        });
+      } catch (error) {
+        nativeResults.push({
+          model,
+          label: String(row.label || model),
+          selectorKey: String(row.selectorKey || ''),
+          pickerMode: 'B',
+          discoverySource: 'official-work-picker-b',
+          nativeRequestModel: null,
+          nativeResponseModel: null,
+          nativeRequestConfirmed: false,
+          nativeResponseConfirmed: false,
+          nativeVerified: false,
+          error: errorText(error),
+        });
+        logRuntime('warn', 'discovery', 'official_work_model_native_failed', {
+          sourceTabId,
+          discoveryTabId,
+          index: index + 1,
+          total: rows.length,
+          model,
+          error: errorText(error),
+        });
+      } finally {
+        verificationTransactions.delete(discoveryTabId);
+      }
+    }
+
+    const chatRows = nativeResults
+      .filter((item) => item.nativeVerified && item.nativeRequestModel)
+      .map((item) => ({
+        model: item.model,
+        rawId: item.model,
+        label: item.label,
+        selectorKey: '__picker_b_chat_lock__',
+        pickerMode: 'B',
+        discoverySource: 'official-work-picker-b',
+        transportModel: item.nativeRequestModel,
+        expectedResponseModel: item.nativeResponseModel,
+        nativeRequestModel: item.nativeRequestModel,
+        nativeResponseModel: item.nativeResponseModel,
+        nativeResponseConfirmed: item.nativeResponseConfirmed,
+      }));
+
+    logRuntime(nativeResults.length ? 'info' : 'warn', 'discovery', 'official_work_model_discovery_completed', {
       sourceTabId,
       discoveryTabId,
       entered: true,
       bootstrapSent,
-      pickerMode: discovered?.pickerMode ?? null,
-      candidates: candidates.models,
-      candidateCount: candidates.rows.length,
+      pickerMode: 'B',
+      models: nativeResults.map((item) => item.model),
+      nativeVerified: nativeResults.filter((item) => item.nativeVerified).length,
+      candidateCount: nativeResults.length,
     });
-    return candidates;
+    return {
+      pickerMode: 'B',
+      rows,
+      models: nativeResults.map((item) => item.model),
+      reasoningLevels: discovered.reasoningLevels || [],
+      nativeResults,
+      chatCandidates: {
+        pickerMode: 'B',
+        rows: chatRows,
+        models: chatRows.map((item) => item.model),
+        reasoningLevels: discovered.reasoningLevels || [],
+      },
+    };
   } catch (error) {
-    logRuntime('warn', 'verification', 'native_work_catalog_discovery_unavailable', {
+    logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
       sourceTabId,
-      discoveryTabId: Number(discoveryTab?.id) || null,
+      discoveryTabId,
       reason: errorText(error),
     });
-    return networkCandidateCatalog([], 'native-picker-b');
+    return { pickerMode: 'B', rows: [], models: [], nativeResults: [], chatCandidates: { pickerMode: 'B', rows: [], models: [], reasoningLevels: [] } };
   } finally {
-    const discoveryTabId = Number(discoveryTab?.id) || null;
+    if (Number.isInteger(discoveryTabId)) {
+      await networkMonitor.disableResponseCapture(discoveryTabId).catch(() => {});
+      await networkMonitor.detach(discoveryTabId).catch(() => {});
+    }
     if (activatedForReadiness && restoreActiveTabId && restoreActiveTabId !== discoveryTabId) {
       await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
     }
-    if (discoveryTabId) await chrome.tabs.remove(discoveryTabId).catch(() => null);
-    if (discoveryTabId) {
-      logRuntime('info', 'verification', 'native_work_catalog_discovery_temp_tab_closed', {
+    if (Number.isInteger(discoveryTabId)) await chrome.tabs.remove(discoveryTabId).catch(() => null);
+    if (Number.isInteger(discoveryTabId)) {
+      logRuntime('info', 'discovery', 'official_work_model_discovery_tab_closed', {
         sourceTabId,
         discoveryTabId,
         restoredActiveTabId: activatedForReadiness ? restoreActiveTabId : null,
@@ -2018,41 +2267,96 @@ async function discoverNativeWorkCandidates(sourceTabId, progress) {
 
 async function publishAccountModels(accountCatalog, progress) {
   const byModel = new Map();
-  for (const row of accountCatalog?.rows || []) {
-    const model = normalizeConcreteModelId(row?.model || row?.rawId);
-    if (!model) continue;
-    byModel.set(model, {
+  const ensure = (modelValue, seed = {}) => {
+    const model = normalizeConcreteModelId(modelValue);
+    if (!model) return null;
+    const current = byModel.get(model) || {
       model,
-      label: String(row?.label || row?.displayName || model).trim().slice(0, 120),
-      pickerMode: ['A', 'B'].includes(row?.pickerMode) ? row.pickerMode : null,
+      label: String(seed.label || model).trim().slice(0, 120),
+      pickerMode: ['A', 'B'].includes(seed.pickerMode) ? seed.pickerMode : null,
       requestConfirmed: false,
       responseConfirmed: false,
+      nativeRequestModel: null,
+      nativeResponseModel: null,
+      nativeResponseConfirmed: false,
+      chatTransportModel: null,
+      chatResponseModel: null,
+      chatLockRequestConfirmed: false,
+      chatLockResponseConfirmed: false,
+      chatLockSupported: false,
+      discoverySource: seed.discoverySource || null,
+    };
+    if (!current.pickerMode && ['A', 'B'].includes(seed.pickerMode)) current.pickerMode = seed.pickerMode;
+    if (seed.label) current.label = String(seed.label).trim().slice(0, 120);
+    if (seed.discoverySource) current.discoverySource = seed.discoverySource;
+    byModel.set(model, current);
+    return current;
+  };
+
+  for (const row of accountCatalog?.rows || []) {
+    ensure(row?.model || row?.rawId, {
+      label: row?.label || row?.displayName,
+      pickerMode: row?.pickerMode,
+      discoverySource: row?.discoverySource || 'chat-picker-a',
     });
   }
+
+  for (const item of progress?.officialWorkDiscovery?.nativeResults || []) {
+    const current = ensure(item?.model, {
+      label: item?.label,
+      pickerMode: 'B',
+      discoverySource: 'official-work-picker-b',
+    });
+    if (!current) continue;
+    current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel) || current.nativeRequestModel;
+    current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel) || current.nativeResponseModel;
+    current.nativeResponseConfirmed = current.nativeResponseConfirmed || item?.nativeResponseConfirmed === true;
+    current.requestConfirmed = current.requestConfirmed || item?.nativeRequestConfirmed === true;
+    current.responseConfirmed = current.responseConfirmed || item?.nativeResponseConfirmed === true;
+  }
+
   for (const item of progress?.results || []) {
     const model = normalizeConcreteModelId(item?.model || item?.requestModel || item?.evidenceModel);
     if (!model) continue;
-    const pickerDiscovered = ['A', 'B'].includes(item?.pickerMode);
-    const responseConfirmed = item?.responseConfirmed === true;
-    const existing = byModel.get(model);
-    // A shared/network candidate is not a new discovery merely because Fetch
-    // rewrote the outgoing request. Re-publish it only when this account saw it
-    // in a real Picker or the backend directly confirmed it in response metadata.
-    if (!existing && !pickerDiscovered && !responseConfirmed) continue;
-    const current = existing || {
-      model,
-      label: String(item?.label || model).trim().slice(0, 120),
-      pickerMode: pickerDiscovered ? item.pickerMode : null,
-      requestConfirmed: false,
-      responseConfirmed: false,
-    };
+    const current = ensure(model, {
+      label: item?.label,
+      pickerMode: item?.pickerMode,
+      discoverySource: item?.discoverySource,
+    });
+    if (!current) continue;
+
     current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
-    current.responseConfirmed = current.responseConfirmed || responseConfirmed;
-    if (!current.pickerMode && pickerDiscovered) current.pickerMode = item.pickerMode;
-    byModel.set(model, current);
+    current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
+    current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel)
+      || normalizeRawProtocolModelId(item?.rawRequestModel)
+      || current.nativeRequestModel;
+    current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel)
+      || (!item?.chatLockRequestConfirmed ? normalizeRawProtocolModelId(item?.rawResponseModel) : null)
+      || current.nativeResponseModel;
+    current.nativeResponseConfirmed = current.nativeResponseConfirmed
+      || item?.nativeResponseConfirmed === true
+      || (item?.pickerMode === 'A' && item?.responseConfirmed === true);
+
+    if (item?.chatLockRequestConfirmed === true || item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true) {
+      current.chatLockRequestConfirmed = current.chatLockRequestConfirmed || item?.chatLockRequestConfirmed === true;
+      current.chatLockResponseConfirmed = current.chatLockResponseConfirmed || item?.chatLockResponseConfirmed === true;
+      current.chatLockSupported = current.chatLockSupported || item?.chatLockSupported === true;
+      if (item?.chatLockSupported === true) {
+        current.chatTransportModel = normalizeRawProtocolModelId(item?.chatTransportModel)
+          || normalizeRawProtocolModelId(item?.rawRequestModel)
+          || current.chatTransportModel;
+        current.chatResponseModel = normalizeRawProtocolModelId(item?.chatResponseModel)
+          || normalizeRawProtocolModelId(item?.rawResponseModel)
+          || current.chatResponseModel;
+      }
+    }
   }
-  const models = [...byModel.values()].slice(0, 128);
+
+  const models = [...byModel.values()]
+    .filter((item) => item.pickerMode || item.nativeResponseConfirmed || item.chatLockSupported)
+    .slice(0, 128);
   if (!models.length) return [];
+
   try {
     const result = await accountClient.publishSharedModels(models);
     const shared = (Array.isArray(result?.models) ? result.models : [])
@@ -2060,6 +2364,11 @@ async function publishAccountModels(accountCatalog, progress) {
         model: normalizeConcreteModelId(item?.model),
         label: String(item?.label || '').trim().slice(0, 120),
         pickerMode: ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null,
+        nativeRequestModel: normalizeRawProtocolModelId(item?.nativeRequestModel),
+        nativeResponseModel: normalizeRawProtocolModelId(item?.nativeResponseModel),
+        chatTransportModel: normalizeRawProtocolModelId(item?.chatTransportModel),
+        chatResponseModel: normalizeRawProtocolModelId(item?.chatResponseModel),
+        chatLockVerifiedCount: Math.max(0, Number(item?.chatLockVerifiedCount || 0)),
         discoveredCount: Math.max(0, Number(item?.discoveredCount || 0)),
         verifiedCount: Math.max(0, Number(item?.verifiedCount || 0)),
         lastSeenAt: item?.lastSeenAt || null,
@@ -2067,6 +2376,14 @@ async function publishAccountModels(accountCatalog, progress) {
       .filter((item) => item.model);
     const generation = Math.max(0, Number(result?.generation || 0));
     sharedKnownModelIds = new Set(shared.map((item) => item.model).filter(Boolean));
+    sharedModelProtocolMap = new Map(shared
+      .map((item) => ({
+        model: item.model,
+        transport: item.chatTransportModel || (item.pickerMode === 'A' ? item.nativeRequestModel : null),
+      }))
+      .filter((item) => item.model && item.transport)
+      .map((item) => [item.model, item.transport]));
+    rememberProvenPickerBChatModels(shared);
     await Promise.all([
       chrome.storage.sync.set({ [SHARED_KNOWN_MODELS_KEY]: shared }),
       chrome.storage.local.set({
@@ -2075,16 +2392,19 @@ async function publishAccountModels(accountCatalog, progress) {
       }),
     ]);
     lastServerModelCatalogGeneration = Math.max(lastServerModelCatalogGeneration ?? 0, generation);
-    logRuntime('info', 'verification', 'shared_model_catalog_published', {
+    logRuntime('info', 'discovery', 'shared_model_catalog_published', {
       submitted: models.length,
-      requestConfirmed: models.filter((item) => item.requestConfirmed).length,
-      responseConfirmed: models.filter((item) => item.responseConfirmed).length,
+      nativeResponseConfirmed: models.filter((item) => item.nativeResponseConfirmed).length,
+      chatLockSupported: models.filter((item) => item.chatLockSupported).length,
       shared: shared.length,
       generation,
     });
     return shared;
   } catch (error) {
-    logRuntime('warn', 'verification', 'shared_model_catalog_publish_failed', { submitted: models.length, error: errorText(error) });
+    logRuntime('warn', 'discovery', 'shared_model_catalog_publish_failed', {
+      submitted: models.length,
+      error: errorText(error),
+    });
     return [];
   }
 }
@@ -2103,7 +2423,7 @@ async function discoverAccountCatalog(tabId) {
     // promoted to discoveredModels by model-catalog.js only after the per-model probe
     // produces trusted network request/response metadata.
     const nameMappings = await resolveUnknownCatalogNames(tabId, rows);
-    logRuntime(models.length ? 'info' : 'warn', 'verification', 'account_model_catalog_discovered', {
+    logRuntime(models.length ? 'info' : 'warn', 'discovery', 'account_model_catalog_discovered', {
       tabId,
       models,
       reasoningLevels,
@@ -2117,7 +2437,7 @@ async function discoverAccountCatalog(tabId) {
     const pickerMode = result?.catalog?.pickerMode ?? null;
     return { models, reasoningLevels, rows: rows.map((row) => ({ ...row, pickerMode })), nameMappings, pickerMode };
   } catch (error) {
-    logRuntime('warn', 'verification', 'account_model_catalog_discovery_failed', {
+    logRuntime('warn', 'discovery', 'account_model_catalog_discovery_failed', {
       tabId,
       error: errorText(error),
     });
@@ -2127,7 +2447,7 @@ async function discoverAccountCatalog(tabId) {
 
 async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    logRuntime('warn', 'verification', 'verification_stale_generation_reload', { tabId, attempt, maxAttempts: 3 });
+    logRuntime('warn', 'discovery', 'verification_stale_generation_reload', { tabId, attempt, maxAttempts: 3 });
     await chrome.tabs.reload(tabId);
     await new Promise((resolve) => setTimeout(resolve, 3000));
     const settled = await sendTabMessage(tabId, {
@@ -2136,7 +2456,7 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
       timeoutMs: 3500,
     }).catch(() => null);
     if (settled?.settled === true || settled?.stillGenerating === false) {
-      logRuntime('info', 'verification', 'verification_stale_generation_recovered', { tabId, attempt, method: 'reload' });
+      logRuntime('info', 'discovery', 'verification_stale_generation_recovered', { tabId, attempt, method: 'reload' });
       return { settled: true, method: 'reload', attempt };
     }
   }
@@ -2148,7 +2468,7 @@ async function recoverStaleVerificationTurn(tabId, assistantCountBefore) {
     timeoutMs: 3500,
   }).catch(() => null);
   const ok = stopped?.stopped === true && (settled?.settled === true || settled?.stillGenerating === false);
-  logRuntime(ok ? 'info' : 'warn', 'verification', 'verification_stale_generation_recovered', {
+  logRuntime(ok ? 'info' : 'warn', 'discovery', 'verification_stale_generation_recovered', {
     tabId, method: 'stop-button', stopped: stopped?.stopped === true, settled: Boolean(ok),
   });
   return { settled: Boolean(ok), method: 'stop-button', stopped: stopped?.stopped === true };
@@ -2189,7 +2509,7 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   progress.discoveryPasses += 1;
   const hasDesired = () => (catalog?.rows || []).some((row) => normalizeConcreteModelId(row?.model || row?.rawId) === desiredModel);
   if (catalog?.pickerMode === 'B' && hasDesired()) return catalog;
-  logRuntime('info', 'verification', 'picker_b_reacquire_started', { tabId, desiredModel, observedPickerMode: catalog?.pickerMode ?? null });
+  logRuntime('info', 'discovery', 'picker_b_reacquire_started', { tabId, desiredModel, observedPickerMode: catalog?.pickerMode ?? null });
   const workBootstrap = beginWorkBootstrapTransaction(tabId, 'picker-b-reacquire');
   try {
     const probe = await sendVerificationReasoningProbe(tabId, 'work-mode-b-reacquire', progress.completed + 1, progress.total);
@@ -2206,19 +2526,23 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
     if (catalog?.pickerMode === 'B' && hasDesired()) break;
     await sleep(500);
   } while (Date.now() < deadline);
-  logRuntime(hasDesired() ? 'info' : 'warn', 'verification', 'picker_b_reacquire_completed', { tabId, desiredModel, pickerMode: catalog?.pickerMode ?? null, available: hasDesired() });
+  logRuntime(hasDesired() ? 'info' : 'warn', 'discovery', 'picker_b_reacquire_completed', { tabId, desiredModel, pickerMode: catalog?.pickerMode ?? null, available: hasDesired() });
   return catalog;
 }
 
-async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {}) {
-  const workDefaultModel = workBootstrapModelForTab(tabId);
-  // ModelPro owns the reusable catalog identity/order/merge policy. GPTWork keeps
-  // browser, Work activation, request interception and response evidence adapters.
+async function verifyAccountCatalogModels(
+  tabId,
+  state,
+  accountCatalog,
+  { restoreModel = null, sharedCandidates = [], localNetworkCandidates = [], ownerTabId = tabId } = {},
+) {
+  // v0.5.176 model discovery is source-first. Server history and previous local
+  // network candidates are diagnostic inputs only; they never seed a discovery run.
   const catalog = createVerificationCatalog({
     normalizeModel: normalizeConcreteModelId,
     onMerged: ({ phase, added, total, reasoningLevels }) => {
       state.autoVerification.maxAttempts = total;
-      logRuntime('info', 'verification', 'account_model_catalog_merged', {
+      logRuntime('info', 'discovery', 'model_discovery_catalog_merged', {
         tabId, phase, added, total, reasoningLevels,
       });
     },
@@ -2226,47 +2550,62 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
   const { queue, knownKeys, progress } = catalog;
   state.autoVerification.catalogVerification = progress;
   const mergeCatalog = catalog.merge;
-  let workActivationPending = false;
+  progress.officialWorkDiscovery = {
+    attempted: false,
+    entered: false,
+    pickerMode: null,
+    nativeResults: [],
+    chatCompatibilityCandidates: 0,
+  };
+  progress.ignoredSeedCandidates = {
+    shared: Array.isArray(sharedCandidates) ? sharedCandidates.length : 0,
+    localNetwork: Array.isArray(localNetworkCandidates) ? localNetworkCandidates.length : 0,
+  };
 
-  mergeCatalog(accountCatalog, 'initial');
-  const sharedNetworkCatalog = networkCandidateCatalog(sharedCandidates, 'shared-server');
-  const localNetworkCatalog = networkCandidateCatalog(localNetworkCandidates, 'local-network-evidence');
-  mergeCatalog(sharedNetworkCatalog, 'shared-network-candidates');
-  mergeCatalog(localNetworkCatalog, 'local-network-candidates');
-  const skippedWorkTransportModels = [...new Set([
-    ...(sharedNetworkCatalog.skippedWorkTransportModels || []),
-    ...(localNetworkCatalog.skippedWorkTransportModels || []),
-  ])];
-  if (skippedWorkTransportModels.length) {
-    logRuntime('info', 'verification', 'work_transport_candidates_skipped', {
-      tabId,
-      reason: 'work_feature_disabled',
-      models: skippedWorkTransportModels,
-    });
-  }
+  mergeCatalog(accountCatalog, 'chat-picker-a');
   await broadcastVerificationState(tabId, ownerTabId);
-  logRuntime(queue.length ? 'info' : 'warn', 'verification', 'account_model_verification_started', {
-    tabId, total: queue.length, models: queue.map((item) => item.model || item.label),
+  logRuntime(queue.length ? 'info' : 'warn', 'discovery', 'model_discovery_started', {
+    tabId,
+    chatPickerModels: queue.map((item) => item.model || item.label),
+    ignoredSeedCandidates: progress.ignoredSeedCandidates,
   });
 
   let index = 0;
   let stablePasses = 0;
+  let officialWorkDiscoveryDone = false;
   const transientRetryCounts = new Map();
-  while (index < queue.length || stablePasses < 2) {
+
+  while (index < queue.length || stablePasses < 2 || !officialWorkDiscoveryDone) {
     if (index >= queue.length) {
+      if (!officialWorkDiscoveryDone) {
+        const officialWork = await discoverOfficialWorkModels(tabId, progress);
+        officialWorkDiscoveryDone = true;
+        progress.officialWorkDiscovery = {
+          attempted: true,
+          entered: officialWork?.nativeResults?.length > 0 || officialWork?.rows?.length > 0,
+          pickerMode: officialWork?.pickerMode ?? null,
+          nativeResults: Array.isArray(officialWork?.nativeResults) ? officialWork.nativeResults : [],
+          chatCompatibilityCandidates: Number(officialWork?.chatCandidates?.rows?.length || 0),
+        };
+        const added = mergeCatalog(officialWork?.chatCandidates, 'picker-b-chat-compatibility');
+        if (added) stablePasses = 0;
+        await broadcastVerificationState(tabId, ownerTabId);
+        if (index < queue.length) continue;
+      }
+
       const rediscovered = await discoverAccountCatalog(tabId);
       progress.discoveryPasses += 1;
-      const added = mergeCatalog(rediscovered, 'settle');
+      const added = mergeCatalog(rediscovered, 'chat-picker-a-settle');
       stablePasses = added ? 0 : stablePasses + 1;
       progress.stablePasses = stablePasses;
       await broadcastVerificationState(tabId, ownerTabId);
-      if (index >= queue.length && stablePasses < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 650));
-      }
+      if (index >= queue.length && stablePasses < 2) await sleep(650);
       continue;
     }
 
     const item = queue[index];
+    const chatCompatibility = item.selectorKey === '__picker_b_chat_lock__';
+    const pickerNative = !chatCompatibility && ['A', 'B'].includes(item.pickerMode);
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
@@ -2276,188 +2615,258 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
       model: item.model || null,
       selectorKey: item.selectorKey || '',
       label: item.label || '',
+      mode: chatCompatibility ? 'force-transport' : 'observe-native',
+      transportModel: chatCompatibility ? item.transportModel : null,
       startedAt: transactionStartedAtMs,
     });
     resetVerificationAttempt(state);
     await broadcastVerificationState(tabId, ownerTabId);
-    logRuntime('info', 'verification', 'account_model_verification_model_started', {
-      tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label,
+
+    logRuntime('info', 'discovery', chatCompatibility
+      ? 'picker_b_chat_compatibility_started'
+      : 'chat_picker_model_native_started', {
+      tabId,
+      index: index + 1,
+      total: queue.length,
+      model: item.model,
+      selectorKey: item.selectorKey,
+      label: item.label,
+      transportModel: item.transportModel || null,
+      expectedResponseModel: item.expectedResponseModel || null,
     });
 
     let abortForPendingTurn = false;
     try {
       const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
-      if (!attached) throw new Error(state.monitor?.error || 'Request lock monitor is not attached');
-      if (item.pickerMode === 'B' && item.model) {
-        const freshB = await reacquirePickerBForModel(tabId, item.model, progress);
-        const freshRow = (freshB?.rows || []).find((row) => normalizeConcreteModelId(row?.model || row?.rawId) === item.model);
-        if (freshRow) {
-          item.selectorKey = String(freshRow.selectorKey || item.selectorKey || '');
-          item.label = String(freshRow.label || item.label || '');
-        }
-      }
-      const transportOnly = item.selectorKey === '__work_transport__' || item.selectorKey === NETWORK_CANDIDATE_SELECTOR;
-      let selectionResponse = null;
-      let selection = { selectionAttempted: false, observation: state.pageObservation || null };
-      if (!transportOnly) {
-        selectionResponse = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, selectorKey: item.selectorKey, label: item.label });
-        selection = selectionResponse?.result || {};
-      }
-      if (selection.selectionAttempted !== true && item.pickerMode === 'B' && item.model) {
-        const freshB = await reacquirePickerBForModel(tabId, item.model, progress);
-        const freshRow = (freshB?.rows || []).find((row) => normalizeConcreteModelId(row?.model || row?.rawId) === item.model);
-        if (freshRow) {
-          item.selectorKey = String(freshRow.selectorKey || item.selectorKey || '');
-          item.label = String(freshRow.label || item.label || '');
-          selectionResponse = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: item.model, selectorKey: item.selectorKey, label: item.label });
-          selection = selectionResponse?.result || {};
-        }
-      }
-      if (!transportOnly && selection.selectionAttempted !== true) throw new Error('Model selection control was not activated');
-      if (transportOnly) {
-        logRuntime(
-          'info',
-          'verification',
-          item.selectorKey === NETWORK_CANDIDATE_SELECTOR ? 'verification_network_candidate_probe' : 'verification_hidden_work_transport_probe',
-          { tabId, model: item.model, selectorKey: item.selectorKey },
-        );
-      }
+      if (!attached) throw new Error(state.monitor?.error || 'Request monitor is not attached');
 
-      // Picker B updates ChatGPT's Work model state asynchronously. v0.1.34 proved
-      // that sending in the same task can leave the native conversation body on the
-      // previous GPT-5.6 Sol model even though the B row is already checked. Give the
-      // page state a bounded settle window before arming/sending the verification turn.
-      if (item.pickerMode === 'B') {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        logRuntime('info', 'verification', 'picker_b_selection_settled_before_probe', {
-          tabId,
+      let selection = { selectionAttempted: false, observation: state.pageObservation || null };
+      if (pickerNative) {
+        const selectionResponse = await sendTabMessage(tabId, {
+          type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
           model: item.model,
-          settleMs: 1200,
+          selectorKey: item.selectorKey,
+          label: item.label,
         });
+        selection = selectionResponse?.result || {};
+        if (selection.selectionAttempted !== true) throw new Error('Chat Picker model selection control was not activated');
+        await sleep(700);
       }
 
       const reattached = await networkMonitor.attach(tabId);
-      if (!reattached) throw new Error(state.monitor?.error || 'Request lock monitor did not reattach after model selection');
-      // A Work bootstrap/navigation can detach CDP and clears responseCaptureTabs.
-      // Fetch-only reattach is insufficient: verification needs the same Network
-      // lifecycle for the requestId and its terminal response. Re-enable it for
-      // every model immediately before the probe.
-      const responseCaptureReady = await networkMonitor.enableResponseCapture(tabId);
-      if (!responseCaptureReady) throw new Error('Response capture did not re-enable before verification probe');
-      const probe = await sendVerificationReasoningProbe(tabId, 'GPTWork 模型验证', index + 1, queue.length);
-      if (!probe?.sent) throw new Error('Visible model verification probe was not sent');
-      const attemptStartedMs = Date.now() - 1500;
-      const [waited, turnSettled] = await Promise.all([
-        waitForAttemptVerification(tabId, attemptStartedMs),
+      if (!reattached) throw new Error(state.monitor?.error || 'Request monitor did not reattach');
+      if (!await networkMonitor.enableResponseCapture(tabId)) {
+        throw new Error('Response capture did not enable before discovery probe');
+      }
+
+      const probe = await sendVerificationReasoningProbe(
+        tabId,
+        chatCompatibility ? 'GPTWork 发现模型 · Picker B Chat compatibility' : 'GPTWork 发现模型 · Chat native',
+        index + 1,
+        queue.length,
+      );
+      if (!probe?.sent) throw new Error('Model discovery probe was not sent');
+
+      const [networkEvidence, turnSettled] = await Promise.all([
+        waitForNetworkModelEvidence(tabId, transactionStartedAtMs),
         sendTabMessage(tabId, {
           type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
           assistantCountBefore: probe.assistantCountBefore ?? 0,
           timeoutMs: AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
         }),
       ]);
+
       let effectiveTurnSettled = turnSettled;
       if (effectiveTurnSettled?.settled !== true) {
         effectiveTurnSettled = await recoverStaleVerificationTurn(tabId, probe.assistantCountBefore ?? 0);
       }
       if (effectiveTurnSettled?.settled !== true) {
         abortForPendingTurn = true;
-        throw new Error('ChatGPT response remained non-terminal after 3 reload recoveries and stop-button recovery');
+        throw new Error('ChatGPT response remained non-terminal during model discovery');
       }
-      // The body forwarded at Fetch.requestPaused is the sole request-confirmation
-      // authority. Network.requestWillBeSent may expose the page's pre-interception
-      // body, so keep it only as diagnostic evidence. Response/stream metadata remains
-      // the independent backend-served-model authority.
-      const forwardedRequestId = state.lastForwardedRequest?.requestId ?? null;
-      const requestId = state.lastRequest?.requestId ?? forwardedRequestId;
-      const networkObservedRequestModel = normalizeConcreteModelId(state.lastRequest?.model);
-      const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
-      const authoritativeRewrite = Boolean(
-        item.model
-        && state.lastRewrite?.authorityKind === 'verification-transaction'
-        && state.lastRewrite?.authorityModel === item.model
-        && Number.isFinite(rewriteCapturedAtMs)
-        && rewriteCapturedAtMs >= transactionStartedAtMs - 250
-        && !state.lastRewrite?.error
+
+      const requestId = networkEvidence?.requestId
+        || state.lastRequest?.requestId
+        || state.lastForwardedRequest?.requestId
+        || null;
+      const responseEvidence = networkEvidence?.evidence
+        || (state.lastResponseEvidence?.requestId === requestId ? state.lastResponseEvidence : null);
+      const rawRequestModel = normalizeRawProtocolModelId(
+        state.lastRewrite?.transportModelAfter
+          || state.lastRewrite?.transportModelBefore
+          || state.lastRequest?.rawModel
+          || state.lastRequest?.model,
       );
-      const requestModel = item.model
-        ? (authoritativeRewrite ? normalizeConcreteModelId(state.lastRewrite?.modelAfter) : null)
-        : networkObservedRequestModel;
-      const responseEvidence = state.lastResponseEvidence?.requestId === requestId
-        ? state.lastResponseEvidence
-        : null;
-      // Keep the response observation for mismatch/default diagnostics, but never
-      // promote it directly to completion proof. The strict verifier may intentionally
-      // downgrade this raw candidate.
-      const responseObservation = verificationResponseObservation(tabId, responseEvidence);
-      const rawResponseModel = normalizeConcreteModelId(responseObservation.model);
-      const expectedVerificationRequestId = requestId ? `cdp-${tabId}-${requestId}` : null;
-      const terminalVerification = state.lastVerification?.verdict === 'verified'
-        && expectedVerificationRequestId
-        && state.lastVerification?.requestId === expectedVerificationRequestId
-        ? state.lastVerification
-        : null;
-      const responseModel = normalizeConcreteModelId(terminalVerification?.model);
-      const requestConfirmed = item.model
-        ? Boolean(authoritativeRewrite) && (
-          requestModel === item.model || Boolean(item.rawModel && requestModel === item.rawModel)
-        )
-        : Boolean(requestModel);
-      const responseConfirmed = Boolean(terminalVerification) && (item.model
-        ? responseModel === item.model || Boolean(item.rawModel && responseModel === item.rawModel)
-        : Boolean(responseModel));
-      const requestMismatch = Boolean(item.model && authoritativeRewrite && requestModel) && !requestConfirmed;
-      const verified = Boolean(requestId) && requestConfirmed && responseConfirmed && !requestMismatch;
-      const evidenceModel = responseModel || (requestConfirmed ? requestModel : null);
-      const evidenceSource = responseModel
-        ? 'network_response_metadata'
-        : requestConfirmed
-          ? (item.model ? 'fetch_forwarded_request_metadata' : 'network_request_metadata')
-          : null;
+      const rawResponseProtocolModel = normalizeRawProtocolModelId(
+        responseEvidence?.rawModel
+          || state.lastResponseEvidence?.rawModel
+          || state.lastResponseEvidence?.model,
+      );
+      const requestModel = normalizeConcreteModelId(
+        state.lastRewrite?.modelAfter
+          || state.lastRequest?.model
+          || rawRequestModel,
+      );
+      const responseModel = normalizeConcreteModelId(
+        responseEvidence?.model
+          || rawResponseProtocolModel,
+      );
+
+      let requestConfirmed = false;
+      let responseConfirmed = false;
+      let verified = false;
+      let evidenceSource = null;
+      let responseIssue = null;
+
+      if (chatCompatibility) {
+        const expectedTransport = normalizeRawProtocolModelId(item.transportModel);
+        const expectedResponse = normalizeRawProtocolModelId(item.expectedResponseModel);
+        const rewriteCapturedAtMs = Date.parse(state.lastRewrite?.capturedAt || '');
+        const authoritativeRewrite = Boolean(
+          state.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
+          && state.lastRewrite?.authorityModel === item.model
+          && Number.isFinite(rewriteCapturedAtMs)
+          && rewriteCapturedAtMs >= transactionStartedAtMs - 250
+          && !state.lastRewrite?.error
+        );
+        requestConfirmed = Boolean(
+          authoritativeRewrite
+          && expectedTransport
+          && rawRequestModel === expectedTransport
+        );
+        responseConfirmed = Boolean(
+          expectedResponse
+          && rawResponseProtocolModel
+          && rawResponseProtocolModel === expectedResponse
+        );
+        responseIssue = responseConfirmed
+          ? null
+          : rawResponseProtocolModel
+            ? 'chat_mode_response_differs_from_official_work'
+            : 'chat_mode_response_model_missing';
+        verified = Boolean(requestId && requestConfirmed && responseConfirmed);
+        evidenceSource = responseConfirmed
+          ? 'network_response_metadata'
+          : requestConfirmed
+            ? 'fetch_forwarded_request_metadata'
+            : null;
+      } else {
+        requestConfirmed = Boolean(selection.selectionAttempted && rawRequestModel);
+        responseConfirmed = Boolean(rawResponseProtocolModel);
+        verified = Boolean(
+          requestId
+          && selection.selectionAttempted
+          && requestConfirmed
+          && responseConfirmed
+        );
+        responseIssue = responseConfirmed ? null : 'native_response_model_missing';
+        evidenceSource = responseConfirmed
+          ? 'network_response_metadata'
+          : requestConfirmed
+            ? 'network_request_metadata'
+            : null;
+      }
+
       const retryKey = catalog.identity(item);
       const retryCount = transientRetryCounts.get(retryKey) || 0;
       const result = {
-        model: item.model || requestModel, rawModel: item.rawModel || requestModel,
-        selectorKey: item.selectorKey, label: item.label, verified,
-        selected: selection.selectionAttempted === true, requestConfirmed, responseConfirmed,
-        requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel,
+        model: item.model || requestModel,
+        rawModel: item.rawModel || item.model || requestModel,
+        selectorKey: item.selectorKey,
+        label: item.label,
+        pickerMode: item.pickerMode || null,
+        discoverySource: item.discoverySource || null,
+        verified,
+        selected: pickerNative ? selection.selectionAttempted === true : false,
+        requestConfirmed,
+        responseConfirmed,
+        requestId,
+        requestModel,
+        rawRequestModel,
+        responseModel,
+        rawResponseModel: rawResponseProtocolModel,
+        evidenceModel: responseModel || requestModel || item.model || null,
         responseReasoning: responseEvidence?.reasoning ?? null,
-        responseVerdict: responseConfirmed ? 'verified' : state.lastVerification?.verdict ?? null,
-        responseIssue: responseConfirmed ? null : state.evidenceIssue ?? null,
+        responseVerdict: responseConfirmed ? 'verified' : 'unverified',
+        responseIssue,
         responseHttpStatus: Number(responseEvidence?.diagnostics?.httpStatus || 0),
         responseBodyError: responseEvidence?.bodyError ?? null,
-        retryCount,
-        pickerMode: item.pickerMode || null,
         evidenceSource,
-        timedOut: waited.timedOut, turnSettled: true, observation: selection.observation || null,
+        timedOut: networkEvidence?.timedOut === true,
+        turnSettled: true,
+        observation: selection.observation || null,
+        nativeRequestModel: chatCompatibility
+          ? normalizeRawProtocolModelId(item.nativeRequestModel)
+          : rawRequestModel,
+        nativeResponseModel: chatCompatibility
+          ? normalizeRawProtocolModelId(item.nativeResponseModel)
+          : rawResponseProtocolModel,
+        nativeResponseConfirmed: chatCompatibility
+          ? item.nativeResponseConfirmed === true
+          : responseConfirmed,
+        chatTransportModel: chatCompatibility ? rawRequestModel : null,
+        chatResponseModel: chatCompatibility ? rawResponseProtocolModel : null,
+        chatLockRequestConfirmed: chatCompatibility ? requestConfirmed : false,
+        chatLockResponseConfirmed: chatCompatibility ? responseConfirmed : false,
+        chatLockSupported: chatCompatibility ? verified : false,
+        retryCount,
       };
-      if (shouldRetryTransientResponse(result, { maxRetries: 1 })) {
+
+      if (!chatCompatibility && shouldRetryTransientResponse(result, { maxRetries: 1 })) {
         transientRetryCounts.set(retryKey, retryCount + 1);
-        logRuntime('warn', 'verification', 'account_model_verification_transient_response_retry', {
-          tabId, index: index + 1, total: queue.length, model: result.model,
-          requestId: result.requestId, responseHttpStatus: result.responseHttpStatus,
-          responseBodyError: result.responseBodyError, responseIssue: result.responseIssue,
-          retryCount: retryCount + 1, maxRetries: 1,
-        });
         verificationTransactions.delete(Number(tabId));
         await broadcastVerificationState(tabId, ownerTabId);
         await sleep(650);
         continue;
       }
+
       progress.results.push(result);
       if (requestConfirmed) progress.requestConfirmed += 1;
-      if (verified) progress.verified += 1; else progress.failed += 1;
-      logRuntime(verified ? 'info' : 'warn', 'verification', 'account_model_verification_model_completed', {
-        tabId, index: index + 1, total: queue.length, model: result.model, rawModel: result.rawModel,
-        selectorKey: item.selectorKey, label: item.label, verified, requestConfirmed, responseConfirmed,
-        requestId: result.requestId, requestModel, networkObservedRequestModel, responseModel, rawResponseModel, evidenceModel: result.evidenceModel,
-        responseVerdict: result.responseVerdict, responseIssue: result.responseIssue,
-        evidenceSource: result.evidenceSource, timedOut: waited.timedOut,
+      if (verified) progress.verified += 1;
+      else progress.failed += 1;
+
+      logRuntime(verified ? 'info' : 'warn', 'discovery', chatCompatibility
+        ? 'picker_b_chat_compatibility_completed'
+        : 'chat_picker_model_native_completed', {
+        tabId,
+        index: index + 1,
+        total: queue.length,
+        model: result.model,
+        pickerMode: result.pickerMode,
+        verified,
+        requestConfirmed,
+        responseConfirmed,
+        rawRequestModel,
+        rawResponseModel: rawResponseProtocolModel,
+        nativeRequestModel: result.nativeRequestModel,
+        nativeResponseModel: result.nativeResponseModel,
+        chatLockSupported: result.chatLockSupported,
+        responseIssue,
+        evidenceSource,
       });
     } catch (error) {
       progress.failed += 1;
-      progress.results.push({ model: item.model, selectorKey: item.selectorKey, label: item.label, pickerMode: item.pickerMode || null, verified: false, error: errorText(error) });
-      logRuntime('warn', 'verification', 'account_model_verification_model_failed', {
-        tabId, index: index + 1, total: queue.length, model: item.model, selectorKey: item.selectorKey, label: item.label, error: errorText(error),
+      progress.results.push({
+        model: item.model,
+        selectorKey: item.selectorKey,
+        label: item.label,
+        pickerMode: item.pickerMode || null,
+        discoverySource: item.discoverySource || null,
+        nativeRequestModel: item.nativeRequestModel || null,
+        nativeResponseModel: item.nativeResponseModel || null,
+        nativeResponseConfirmed: item.nativeResponseConfirmed === true,
+        chatTransportModel: item.transportModel || null,
+        verified: false,
+        error: errorText(error),
+      });
+      logRuntime('warn', 'discovery', chatCompatibility
+        ? 'picker_b_chat_compatibility_failed'
+        : 'chat_picker_model_native_failed', {
+        tabId,
+        index: index + 1,
+        total: queue.length,
+        model: item.model,
+        error: errorText(error),
       });
     }
 
@@ -2467,131 +2876,55 @@ async function verifyAccountCatalogModels(tabId, state, accountCatalog, { restor
     await broadcastVerificationState(tabId, ownerTabId);
 
     if (abortForPendingTurn) {
-      logRuntime('warn', 'verification', 'account_model_verification_aborted_pending_response', { tabId, index, total: queue.length });
+      logRuntime('warn', 'discovery', 'model_discovery_aborted_pending_response', {
+        tabId, index, total: queue.length,
+      });
       break;
     }
 
-    // GPT-5.5 finishes in the visible Chat/Picker-A phase. Work verification
-  // then uses the same tab-scoped network policy as normal GPTWork use; it does not
-  // click or invoke ChatGPT's native Work toggle and does not wait for Picker B.
-  if (item.model === 'gpt-5.5') {
-    if (!serverWorkFeatureEnabled()) {
-      workActivationPending = false;
-      progress.workDiscovery = {
-        attempted: false,
-        entered: false,
-        reason: 'work_feature_disabled',
-        runtimeEnabled: false,
-      };
-      logRuntime('info', 'verification', 'verification_work_mode_skipped', {
-        tabId, phase: 'post_gpt_5_5', reason: 'work_feature_disabled',
-      });
-    } else {
-      try {
-        const featureState = await enableWorkModeForVerification(tabId);
-        workActivationPending = featureState?.workModeEnabled === true;
-        progress.workDiscovery = {
-          attempted: false,
-          entered: false,
-          reason: workActivationPending ? 'waiting_for_sol_then_network_work' : 'work_runtime_not_enabled',
-        };
-        logRuntime(workActivationPending ? 'info' : 'warn', 'verification', 'verification_work_mode_armed', {
-          tabId, phase: 'post_gpt_5_5', runtimeEnabled: workActivationPending,
-          source: 'network_work_policy', floorModel: workDefaultModel,
-        });
-      } catch (error) {
-        progress.workDiscovery = { attempted: false, entered: false, reason: 'work_runtime_enable_failed', error: errorText(error) };
-        logRuntime('warn', 'verification', 'verification_work_mode_armed', {
-          tabId, phase: 'post_gpt_5_5', runtimeEnabled: false, error: errorText(error),
-        });
-      }
-    }
-  }
-
-  // Once Chat A's Sol turn is proven, native Work is entered only as a bounded
-  // discovery transaction. Picker-B rows are converted immediately into network-only
-  // candidates and the page returns to Chat. Normal GPTWork Work execution remains
-  // independent of ChatGPT's native Work UI.
-  if (item.model === 'gpt-5.6-sol' && workActivationPending) {
-    const completedSol = progress.results.at(-1);
-    if (completedSol?.verified === true) {
-      const nativeCandidates = await discoverNativeWorkCandidates(tabId, progress);
-      const addedFromNative = mergeCatalog(nativeCandidates, 'native-picker-b-discovery');
-
-      // The configured Work default is a network candidate even when the page does
-      // not expose it. Request/response evidence remains the terminal authority.
-      const networkWorkCatalog = {
-        pickerMode: null,
-        reasoningLevels: [],
-        rows: [{
-          model: workDefaultModel,
-          rawId: workDefaultModel,
-          label: `Work Default · ${workDefaultModel}`,
-          selectorKey: '__work_transport__',
-          pickerMode: null,
-        }],
-      };
-      const addedFromWork = mergeCatalog(networkWorkCatalog, 'work-network');
-      progress.workDiscovery = {
-        attempted: true,
-        entered: true,
-        reason: 'network_work_catalog_seeded',
-        runtimeEnabled: true,
-        source: 'network_work_transport',
-        pickerMode: null,
-        added: addedFromWork,
-        nativeDiscovered: addedFromNative,
-        floorModel: workDefaultModel,
-      };
-      logRuntime('info', 'verification', 'verification_work_mode_transition', {
-        tabId, phase: 'post_gpt_5_6_sol', entered: true,
-        source: 'network_work_transport', reason: 'network_work_catalog_seeded',
-        pickerMode: null, added: addedFromWork, nativeDiscovered: addedFromNative, floorModel: workDefaultModel,
-      });
-      if (addedFromWork) stablePasses = 0;
+    if (!chatCompatibility) {
+      const rediscovered = await discoverAccountCatalog(tabId);
+      progress.discoveryPasses += 1;
+      const added = mergeCatalog(rediscovered, 'chat-picker-a-post-turn');
+      stablePasses = added ? 0 : stablePasses + 1;
+      progress.stablePasses = stablePasses;
       await broadcastVerificationState(tabId, ownerTabId);
-    } else {
-      progress.workDiscovery = {
-        attempted: false,
-        entered: false,
-        reason: 'deferred_until_sol_verified',
-        runtimeEnabled: true,
-        source: 'network_work_policy',
-        floorModel: workDefaultModel,
-      };
     }
-    workActivationPending = false;
-  }
-
-    // A completed verified turn is already sufficient to rediscover the catalog.
-    // Never send an extra "unlock" turn after Sol. v0.1.16 showed that this extra
-    // turn runs outside verificationTransactions, so the copied GPTWork normal
-    // policy rewrites an exact Sol request into gpt-6-astra-wm. The recovery path
-    // then reloads the page while that turn is generating, which is the direct
-    // source of ChatGPT's "连接已中断。正在等待完整回复" state.
-    const rediscovered = await discoverAccountCatalog(tabId);
-    progress.discoveryPasses += 1;
-    const added = mergeCatalog(rediscovered, 'post-turn');
-    stablePasses = added ? 0 : stablePasses + 1;
-    progress.stablePasses = stablePasses;
-    await broadcastVerificationState(tabId, ownerTabId);
   }
 
   verificationTransactions.delete(Number(tabId));
   progress.currentModel = null;
   progress.currentSelectorKey = null;
   progress.currentLabel = null;
-  if (restoreModel && queue.some((item) => item.model === restoreModel)) {
-    try { await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL', model: restoreModel, label: restoreModel }); }
-    catch (error) {
-      logRuntime('warn', 'verification', 'account_model_verification_restore_failed', { tabId, model: restoreModel, error: errorText(error) });
+
+  if (restoreModel && queue.some((item) => item.model === restoreModel && item.pickerMode === 'A')) {
+    try {
+      await sendTabMessage(tabId, {
+        type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+        model: restoreModel,
+        label: restoreModel,
+      });
+    } catch (error) {
+      logRuntime('warn', 'discovery', 'model_discovery_restore_failed', {
+        tabId,
+        model: restoreModel,
+        error: errorText(error),
+      });
     }
   }
-  logRuntime(progress.failed ? 'warn' : 'info', 'verification', 'account_model_verification_completed', {
-    tabId, total: progress.total, uniqueModels: knownKeys.size, requestConfirmed: progress.requestConfirmed,
-    verified: progress.verified, failed: progress.failed,
-    discoveryPasses: progress.discoveryPasses, stablePasses: progress.stablePasses,
-    reasoningLevels: progress.reasoningLevels, results: progress.results,
+
+  logRuntime(progress.failed ? 'warn' : 'info', 'discovery', 'model_discovery_completed', {
+    tabId,
+    total: progress.total,
+    uniqueModels: knownKeys.size,
+    requestConfirmed: progress.requestConfirmed,
+    verified: progress.verified,
+    failed: progress.failed,
+    discoveryPasses: progress.discoveryPasses,
+    stablePasses: progress.stablePasses,
+    officialWorkDiscovery: progress.officialWorkDiscovery,
+    reasoningLevels: progress.reasoningLevels,
+    results: progress.results,
   });
   await broadcastVerificationState(tabId, ownerTabId);
   return progress;
@@ -2655,7 +2988,7 @@ async function autoVerify(tabId) {
   sourceState.lastError = null;
   resetVerificationAttempt(sourceState);
   sourceState.autoVerification = autoVerification;
-  logRuntime('info', 'verification', 'auto_verify_started', { tabId: sourceTabId, pageContext, execution: 'isolated_tab' });
+  logRuntime('info', 'discovery', 'auto_verify_started', { tabId: sourceTabId, pageContext, execution: 'isolated_tab' });
   await broadcastTabState(sourceTabId);
 
   let session = null;
@@ -2703,7 +3036,7 @@ async function autoVerify(tabId) {
     try {
       await persistModelVerificationHistory(sourceTabId, autoVerification);
     } catch (historyError) {
-      logRuntime('warn', 'verification', 'model_verification_history_write_failed', {
+      logRuntime('warn', 'discovery', 'model_verification_history_write_failed', {
         tabId: sourceTabId,
         error: errorText(historyError),
       });
@@ -2713,7 +3046,7 @@ async function autoVerify(tabId) {
     } else {
       await broadcastTabState(sourceTabId);
     }
-    logRuntime('warn', 'verification', 'auto_verify_infrastructure_failed', {
+    logRuntime('warn', 'discovery', 'auto_verify_infrastructure_failed', {
       tabId: sourceTabId,
       executionTabId: autoVerification.executionTabId,
       reason,
@@ -2805,18 +3138,19 @@ async function autoVerify(tabId) {
     state.lastError = page.error;
     await broadcastVerificationState(tabId, sourceTabId);
 
-    const [sharedKnownModels, localNetworkCandidates] = await Promise.all([
-      syncSharedKnownModels(),
-      loadTrustedLocalNetworkCandidates(),
-    ]);
-    autoVerification.sharedKnownModelCount = sharedKnownModels.length;
-    autoVerification.localNetworkCandidateCount = localNetworkCandidates.length;
+    // Refresh the server catalog only so normal runtime can restore previously
+    // proven Chat transport mappings. Discovery itself never uses server history as
+    // candidate input: an empty server must be able to rebuild the live account.
+    await syncSharedKnownModels();
+    autoVerification.sharedKnownModelCount = 0;
+    autoVerification.localNetworkCandidateCount = 0;
 
-    // All picker/composer discovery now runs on the isolated verification surface.
-    // The user's source tab is only the progress/result owner and never supplies
-    // request/response evidence for this transaction.
     accountCatalog = await discoverAccountCatalog(tabId);
-    autoVerification.workDiscovery = { attempted: false, entered: false, reason: 'deferred_until_after_gpt_5_5' };
+    autoVerification.workDiscovery = {
+      attempted: false,
+      entered: false,
+      reason: 'official_work_discovery_pending',
+    };
     autoVerification.maxAttempts = accountCatalog.rows.length;
     await broadcastVerificationState(tabId, sourceTabId);
 
@@ -2826,8 +3160,8 @@ async function autoVerify(tabId) {
       accountCatalog,
       {
         restoreModel: null,
-        sharedCandidates: sharedKnownModels,
-        localNetworkCandidates,
+        sharedCandidates: [],
+        localNetworkCandidates: [],
         ownerTabId: sourceTabId,
       },
     );
@@ -2835,7 +3169,7 @@ async function autoVerify(tabId) {
     if (catalogVerification.requestConfirmed > 0) {
       await publishAccountModels(accountCatalog, catalogVerification);
     } else {
-      logRuntime('warn', 'verification', 'shared_model_catalog_publish_skipped', {
+      logRuntime('warn', 'discovery', 'shared_model_catalog_publish_skipped', {
         tabId,
         sourceTabId,
         reason: 'zero_request_confirmed',
@@ -2875,11 +3209,11 @@ async function autoVerify(tabId) {
       finalReason = 'verification_infrastructure_no_requests_confirmed';
       autoVerification.infrastructureFailure = true;
     } else if (
-      catalogVerification?.workDiscovery?.attempted === true
-      && catalogVerification.workDiscovery.entered !== true
+      catalogVerification?.officialWorkDiscovery?.attempted === true
+      && catalogVerification.officialWorkDiscovery.entered !== true
     ) {
       finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
-      finalReason = 'work_model_discovery_incomplete';
+      finalReason = 'official_work_model_discovery_incomplete';
     }
 
     autoVerification.running = false;
@@ -2902,12 +3236,12 @@ async function autoVerify(tabId) {
     try {
       await persistModelVerificationHistory(sourceTabId, autoVerification);
     } catch (error) {
-      logRuntime('warn', 'verification', 'model_verification_history_write_failed', { tabId: sourceTabId, error: errorText(error) });
+      logRuntime('warn', 'discovery', 'model_verification_history_write_failed', { tabId: sourceTabId, error: errorText(error) });
     }
     await networkMonitor.disableResponseCapture(tabId);
     await broadcastVerificationState(tabId, sourceTabId);
 
-    logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'verification', 'auto_verify_completed', {
+    logRuntime(finalOutcome === 'verified' ? 'info' : 'warn', 'discovery', 'auto_verify_completed', {
       tabId: sourceTabId,
       executionTabId: tabId,
       outcome: finalOutcome,
@@ -3487,7 +3821,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         state.lastError = null;
         state.evidenceIssue = null;
         state.autoVerification = null;
-        logRuntime('info', 'verification', 'legacy_probe_reset', { tabId });
+        logRuntime('info', 'discovery', 'legacy_probe_reset', { tabId });
         await broadcastTabState(tabId);
         return publicTabState(state);
       }
@@ -3498,7 +3832,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!state || !accountAllowsState(state)) throw new Error('当前账号没有有效权益');
         const existingTask = autoVerificationTasks.get(tabId);
         if (existingTask) {
-          logRuntime('info', 'verification', 'auto_verify_duplicate_joined', {
+          logRuntime('info', 'discovery', 'auto_verify_duplicate_joined', {
             tabId,
             running: Boolean(state.autoVerification?.running),
           });

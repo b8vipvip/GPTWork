@@ -215,12 +215,27 @@ export class ChatGptNetworkMonitor {
         ...base,
         authorityKind: 'normal-policy',
         authorityModel: null,
+        authorityRequestModel: null,
         authorityStartedAt: null,
       };
     }
-    // Fetch.requestPaused is the terminal request-mutation boundary. The selected
-    // catalog model owns the forwarded request; there is no parallel "observe native
-    // transport" authority and no alias path that can disagree with this decision.
+    if (transaction?.mode === 'observe-native') {
+      return {
+        ...base,
+        preferredReasoning: null,
+        preserveModel: true,
+        preserveReasoning: true,
+        bypassRewrite: true,
+        forceModel: null,
+        forceTransportModel: null,
+        responseVerificationEnabled: true,
+        authorityKind: 'model-discovery-native',
+        authorityModel: model,
+        authorityRequestModel: null,
+        authorityStartedAt: Number(transaction?.startedAt) || null,
+      };
+    }
+    const transportModel = String(transaction?.transportModel || '').trim() || null;
     return {
       ...base,
       lockedModels: [model],
@@ -229,13 +244,18 @@ export class ChatGptNetworkMonitor {
       preserveReasoning: true,
       bypassRewrite: false,
       forceModel: model,
+      forceTransportModel: transportModel,
       responseVerificationEnabled: true,
       knownModels: [...new Set([
         ...(Array.isArray(base.knownModels) ? base.knownModels : []),
         model,
       ])],
-      authorityKind: 'verification-transaction',
+      authorityKind: transaction?.mode === 'force-transport'
+        ? 'model-discovery-chat-compat'
+        : 'verification-transaction',
       authorityModel: model,
+      authorityRequestModel: model,
+      authorityTransportModel: transportModel,
       authorityStartedAt: Number(transaction?.startedAt) || null,
     };
   }
@@ -624,24 +644,34 @@ export class ChatGptNetworkMonitor {
           requestId: params.networkId ? String(params.networkId) : null,
           fetchRequestId: requestId,
           changed: false,
-          reason: 'verification_passthrough_late_authority',
+          reason: 'model_discovery_native_passthrough',
           modelBefore: observed.model,
           modelAfter: observed.model,
+          transportModelBefore: observed.rawModel || observed.model,
+          transportModelAfter: observed.rawModel || observed.model,
           reasoningBefore: observed.reasoning,
           reasoningAfter: observed.reasoning,
           reasoningFields: [],
           authorityKind: configuration.authorityKind,
           authorityModel: configuration.authorityModel,
+          authorityRequestModel: configuration.authorityRequestModel,
+          authorityTransportModel: configuration.authorityTransportModel,
           authorityStartedAt: configuration.authorityStartedAt,
         });
         return;
       }
       rewrite = rewriteConversationPostData(postData, configuration);
+      const actualAuthorityModel = configuration.authorityKind === 'model-discovery-chat-compat'
+        ? rewrite.transportModelAfter
+        : rewrite.modelAfter;
+      const expectedAuthorityModel = configuration.authorityKind === 'model-discovery-chat-compat'
+        ? configuration.authorityTransportModel
+        : configuration.authorityRequestModel;
       if (
-        configuration.authorityKind === 'verification-transaction'
-        && rewrite.modelAfter !== configuration.authorityModel
+        ['verification-transaction', 'model-discovery-chat-compat'].includes(configuration.authorityKind)
+        && actualAuthorityModel !== expectedAuthorityModel
       ) {
-        const detail = `verification_request_authority_mismatch:${rewrite.modelAfter || 'none'}!=${configuration.authorityModel}`;
+        const detail = `verification_request_authority_mismatch:${actualAuthorityModel || 'none'}!=${expectedAuthorityModel || 'none'}`;
         this.onRewrite?.(tabId, {
           endpoint,
           requestId: params.networkId ? String(params.networkId) : null,
@@ -657,6 +687,8 @@ export class ChatGptNetworkMonitor {
           reasoningFields: rewrite.reasoningFields,
           authorityKind: configuration.authorityKind,
           authorityModel: configuration.authorityModel,
+          authorityRequestModel: configuration.authorityRequestModel,
+          authorityTransportModel: configuration.authorityTransportModel,
           authorityStartedAt: configuration.authorityStartedAt,
           error: detail,
         });
@@ -679,6 +711,8 @@ export class ChatGptNetworkMonitor {
         reasoningFields: rewrite.reasoningFields,
         authorityKind: configuration.authorityKind,
         authorityModel: configuration.authorityModel,
+        authorityRequestModel: configuration.authorityRequestModel,
+        authorityTransportModel: configuration.authorityTransportModel,
         authorityStartedAt: configuration.authorityStartedAt,
       });
     } catch (error) {

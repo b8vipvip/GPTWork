@@ -141,10 +141,12 @@ test('v0.5.174 removes default-model profile identity from response verification
 });
 
 
-test('v0.5.117 treats served/resolved model mismatch as strict response evidence', () => {
+
+test('strict response evidence uses served/resolved fields without profile inference', () => {
   assert.match(backgroundSource, /served_model_mismatch/);
   assert.doesNotMatch(backgroundSource, /work_profile_confirmed_by_default_model_slug/);
-  assert.match(backgroundSource, /const responseObservation = verificationResponseObservation\(tabId, responseEvidence\)/);
+  assert.match(backgroundSource, /Only a directly observed network response field/);
+  assert.match(backgroundSource, /normalizeRawProtocolModelId\(responseEvidence\?\.rawModel\)/);
   assert.doesNotMatch(backgroundSource, /backend_resolution_not_selected_model/);
 });
 

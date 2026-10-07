@@ -43,11 +43,11 @@ test('GPT-5.6 local budget preserves the verified 88 percent safety window', () 
   assert.equal(budget.remainingPercent, 90);
 });
 
-test('web thinking alias shares the GPT-5.6 Sol context family', () => {
-  assert.equal(indicator.normalizeModelId('gpt-5-6-thinking'), 'gpt-5.6-sol');
+test('web thinking transport is a distinct GPT-5.6 Thinking identity', () => {
+  assert.equal(indicator.normalizeModelId('gpt-5-6-thinking'), 'gpt-5.6-thinking');
   const window = indicator.contextWindowForModel('gpt-5-6-thinking');
   assert.equal(window.tokens, 1_050_000);
-  assert.equal(window.model, 'gpt-5.6-sol');
+  assert.equal(window.model, 'gpt-5.6-thinking');
 });
 
 test('old tiny learned cap like the runtime-log 9.6k sample is rejected', () => {
