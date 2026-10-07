@@ -146,7 +146,7 @@ test('response headers are whitelisted and normalized', () => {
 
 test('request metadata stays explicitly non-authoritative', () => {
   const result = extractRequestEvidence('{"model":"gpt-5.6-sol","reasoning_effort":"medium"}');
-  assert.equal(result.model, 'gpt-5.6');
+  assert.equal(result.model, 'gpt-5.6-sol');
   assert.equal(result.reasoning, 'medium');
   assert.equal(result.evidenceSource, 'network_request_metadata');
 });
