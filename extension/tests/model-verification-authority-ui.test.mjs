@@ -118,8 +118,8 @@ test('v0.5.83 has one model UI transaction authority and never clicks from obser
 
 test('trusted pointer attaches first and revalidates the exact DOM target after layout settles', () => {
   assert.match(content, /GPTLOCK_TRUSTED_POINTER_PREPARE/);
-  assert.match(content, /stableFrames < 2/);
-  assert.match(content, /rejected_unstable_hit_test/);
+  assert.match(content, /const ready = await waitUntil/);
+  assert.match(content, /rejected_unowned_hit_test/);
   assert.match(content, /function pointerStillOwnsPoint/);
   assert.match(content, /document\.elementFromPoint/);
   assert.match(background, /case 'GPTLOCK_TRUSTED_POINTER_PREPARE'/);
@@ -248,7 +248,7 @@ test('v0.5.176 discovery converges Chat Picker A plus official Work Picker B com
 });
 
 test('v0.5.176 keeps trusted Picker selection for Chat-native models and raw protocol proof for compatibility', async () => {
-  assert.match(content, /stableFrames < 2/);
+  assert.match(content, /const ready = await waitUntil/);
   assert.match(content, /verification_model_selection_confirmed/);
   const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
   assert.match(background, /rawRequestModel/);
