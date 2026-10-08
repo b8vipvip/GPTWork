@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.191';
+const RUNTIME_CODE_VERSION = '0.5.192';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2393,7 +2393,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     };
 
     await sleep(700);
-    let discovered = await scanForPickerB(3600);
+    let discovered = await scanForPickerB(12000);
     if (
       discovered?.pickerMode === 'B'
       && Array.isArray(discovered?.rows)
@@ -2421,7 +2421,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     }
 
     let bootstrapSent = false;
-    if (discovered?.pickerMode !== 'B') {
+    if (enter?.entered === true && discovered?.pickerMode !== 'B') {
       verificationTransactions.set(discoveryTabId, {
         model: 'gpt-5.6-sol',
         mode: 'observe-native',
@@ -3229,6 +3229,14 @@ async function verifyAccountCatalogModels(
 
       if (!officialWorkDiscoveryDone) {
         const officialWork = await discoverOfficialWorkModels(tabId, progress);
+        // A completed attempt is not an all-stages-completed discovery when the
+        // official Work stage never obtained its owned model catalog. Record the
+        // explicit incomplete state, rather than treating zero B candidates as a
+        // successful empty catalog.
+        progress.officialWorkStageCompleted = Boolean(
+          Array.isArray(officialWork?.nativeResults)
+          && officialWork.nativeResults.length > 0
+        );
         officialWorkDiscoveryDone = true;
         progress.officialWorkDiscovery = {
           attempted: true,
