@@ -93,10 +93,10 @@ test('native Work discovery requires a real selected control or a real Work surf
 
   assert.match(content, /function workControlSelected\(control\)/);
   assert.match(content, /function verificationWorkSurfaceActive\(\)/);
-  assert.match(content, /workControlSelected\(after\) \|\| verificationWorkSurfaceActive\(\)/);
-  assert.match(content, /'work_control_confirmed'/);
+  assert.match(content, /const evidence = await waitUntil\(\(\) => \{/);
+  assert.match(content, /const confirmed = Boolean\(evidence\?\.active\)/);
   assert.match(content, /'work_surface_confirmed'/);
-  assert.match(content, /reason: 'work_control_not_confirmed'/);
+  assert.match(content, /'work_control_actuated_unconfirmed'/);
   assert.match(background, /response\?\.confirmed === true/);
   assert.doesNotMatch(background, /entered: response\?\.ok === true && \(response\?\.attempted === true/);
 });

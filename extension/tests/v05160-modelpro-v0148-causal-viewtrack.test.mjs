@@ -14,8 +14,8 @@ test('pre-navigation discovery stays hit-test strict and exact ViewTrack navigat
   const helper = content.slice(helperStart, helperEnd);
   assert.match(helper, /const semanticRows = distinctModelRows\(picker\);/);
   assert.match(helper, /const rows = requireInteraction \? semanticRows\.filter\(interactionVisible\) : semanticRows;/);
-  assert.match(helper, /models\.has\('gpt-5\.5'\)/);
-  assert.match(helper, /models\.has\('gpt-5\.6-sol'\)/);
+  assert.match(helper, /DIRECT_CHAT_MODEL_IDS\.has\(model\)/);
+  assert.match(content, /DIRECT_CHAT_MODEL_IDS = new Set\(\['gpt-6', 'gpt-5\.6-sol', 'gpt-5\.5'\]\)/);
 
   const openStart = content.indexOf('async function openModernModelMenu()');
   const openEnd = content.indexOf('function rowModelDescriptor(row)', openStart);

@@ -34,6 +34,6 @@ test('deprecation-label compatibility is narrow and keeps the exact default Chat
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   const helper = source.slice(helperStart, helperEnd);
   assert.match(helper, /semanticRows\.filter\(interactionVisible\)/);
-  assert.match(helper, /models\.has\('gpt-5\.5'\)/);
-  assert.match(helper, /models\.has\('gpt-5\.6-sol'\)/);
+  assert.match(helper, /allModels\.some\(\(model\) => !DIRECT_CHAT_MODEL_IDS\.has\(model\)\)/);
+  assert.match(source, /DIRECT_CHAT_MODEL_IDS = new Set\(\['gpt-6', 'gpt-5\.6-sol', 'gpt-5\.5'\]\)/);
 });

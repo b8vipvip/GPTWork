@@ -1194,20 +1194,19 @@ document.addEventListener('pointerdown', (event) => {
     ].filter(Boolean).join(' ')).toLowerCase().replace(/\s+/g, ' ').trim();
   }
 
+  const DIRECT_CHAT_MODEL_IDS = new Set(['gpt-6', 'gpt-5.6-sol', 'gpt-5.5']);
+
   function defaultChatDirectModelRows(picker, { requireInteraction = true } = {}) {
     if (!picker || !visible(picker)) return [];
-    // 2026-09 ChatGPT redesign: the top-level composer menu itself contains the
-    // two Chat models and an accessible Select-model control. The model rows are
-    // already authoritative; clicking the nested opener leaves this valid list.
     if (picker.matches?.('[data-testid="composer-intelligence-picker-content"]')) return [];
     const semanticRows = distinctModelRows(picker);
+    // Model catalog classification belongs to the owned model rows, never their
+    // count. Official Chat now includes GPT-6 alongside 5.6 Sol and 5.5, so
+    // "not exactly two models" cannot mean official Work.
+    const allModels = semanticRows.map((row) => rowModelDescriptor(row).model);
+    if (allModels.length < 2 || allModels.some((model) => !DIRECT_CHAT_MODEL_IDS.has(model))) return [];
     const rows = requireInteraction ? semanticRows.filter(interactionVisible) : semanticRows;
-    const models = new Set(rows.map((row) => rowModelDescriptor(row).model).filter(Boolean));
-    if (models.size !== 2 || !models.has('gpt-5.5') || !models.has('gpt-5.6-sol')) return [];
-    return rows.filter((row) => {
-      const model = rowModelDescriptor(row).model;
-      return model === 'gpt-5.5' || model === 'gpt-5.6-sol';
-    });
+    return rows.length >= 2 ? rows : [];
   }
 
   function advancedPickerView(picker) {
@@ -1353,7 +1352,7 @@ document.addEventListener('pointerdown', (event) => {
     // Detect the structure that is actually open so a verification turn may migrate
     // A -> B or B -> A without treating reasoning controls as model rows.
     let redesignedDirectRows = defaultChatDirectModelRows(picker);
-    if (redesignedDirectRows.length === 2) {
+    if (redesignedDirectRows.length >= 2) {
       pickerTopologyProbe('picker-mode-a-redesigned-direct-chat-list', {
         pageContext,
         pickerMode: 'A',
@@ -1389,21 +1388,17 @@ document.addEventListener('pointerdown', (event) => {
       if (navigated) {
         const redesignedResolution = await waitUntil(() => {
           // The exact accessible Select-model ViewToggle just established causal ownership.
-          // Chat's current model view is the exact default pair (5.6 Sol + 5.5). Official
-          // Work uses the same ViewTrack shell, but its selected model panel expands in-place
-          // to the account catalog (for example GPT-6/Astra/Terra/Luna rows). Treat that
-          // expanded owned list as Picker B instead of falling through as an empty Picker A.
+          // All Chat layouts use the same owned-row classifier. GPT-6 on Chat is
+          // not evidence of Work; only Work-exclusive catalog IDs establish B.
           const chatRows = defaultChatDirectModelRows(picker, { requireInteraction: false });
-          if (chatRows.length === 2) return { pickerMode: 'A', rows: chatRows };
+          if (chatRows.length >= 2) return { pickerMode: 'A', rows: chatRows };
 
           const ownedRows = distinctModelRows(picker);
-          const ownedModels = new Set(
-            ownedRows.map((row) => rowModelDescriptor(row).model || rowModelDescriptor(row).rawId).filter(Boolean)
-          );
-          const exactChatPair = ownedModels.size === 2
-            && ownedModels.has('gpt-5.5')
-            && ownedModels.has('gpt-5.6-sol');
-          if (ownedRows.length >= 2 && !exactChatPair) {
+          const ownedModels = ownedRows.map((row) => rowModelDescriptor(row).model);
+          if (
+            ownedRows.length >= 2
+            && ownedModels.some((model) => model && !DIRECT_CHAT_MODEL_IDS.has(model))
+          ) {
             return { pickerMode: 'B', rows: ownedRows };
           }
           return null;
@@ -2149,50 +2144,45 @@ document.addEventListener('pointerdown', (event) => {
 
   async function enterVerificationWorkMode() {
     await waitForIdle();
-    let actuated = false;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const control = verificationWorkControl();
-      if (!control) {
-        await new Promise((resolve) => window.setTimeout(resolve, 240 * attempt));
-        continue;
-      }
-      if (workControlSelected(control) || verificationWorkSurfaceActive()) {
-        return {
-          attempted: attempt > 1,
-          actuated,
-          alreadySelected: true,
-          confirmed: true,
-          reason: 'already_work',
-          surfaceEvidence: verificationWorkSurfaceEvidence(),
-        };
-      }
-      const clicked = await trustedPointer(control, 'click', `verification-work-mode:attempt-${attempt}`);
-      if (clicked) actuated = true;
-      if (!clicked) {
-        await new Promise((resolve) => window.setTimeout(resolve, 260 * attempt));
-        continue;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
-      const after = verificationWorkControl();
-      if (workControlSelected(after) || verificationWorkSurfaceActive()) {
-        return {
-          attempted: true,
-          actuated,
-          alreadySelected: false,
-          confirmed: true,
-          reason: workControlSelected(after) ? 'work_control_confirmed' : 'work_surface_confirmed',
-          surfaceEvidence: verificationWorkSurfaceEvidence(),
-        };
-      }
+    const initial = verificationWorkSurfaceEvidence();
+    if (initial.active === true) {
+      return {
+        attempted: false, actuated: false, alreadySelected: true,
+        confirmed: true, reason: 'already_work', surfaceEvidence: initial,
+      };
     }
+
+    // One explicit transition is owned by this invocation. The old retry loop
+    // clicked Work repeatedly while the SPA was still transitioning, potentially
+    // toggling it back to Chat. Wait for the result of the first click instead.
+    const control = verificationWorkControl();
+    if (!control) {
+      return {
+        attempted: false, actuated: false, alreadySelected: false,
+        confirmed: false, reason: 'work_control_not_found',
+        surfaceEvidence: initial,
+      };
+    }
+    const actuated = await trustedPointer(control, 'click', 'verification-work-mode:single-transition');
+    if (!actuated) {
+      return {
+        attempted: true, actuated: false, alreadySelected: false,
+        confirmed: false, reason: 'work_control_click_rejected',
+        surfaceEvidence: verificationWorkSurfaceEvidence(),
+      };
+    }
+
+    const evidence = await waitUntil(() => {
+      const current = verificationWorkSurfaceEvidence();
+      return current.active ? current : null;
+    }, 8500, 250);
+    const confirmed = Boolean(evidence?.active);
     return {
-      attempted: true,
-      actuated,
-      alreadySelected: false,
-      confirmed: false,
-      reason: 'work_control_not_confirmed',
-      actuationReason: actuated ? 'work_control_actuated_unconfirmed' : null,
-      surfaceEvidence: verificationWorkSurfaceEvidence(),
+      attempted: true, actuated: true, alreadySelected: false,
+      confirmed,
+      reason: confirmed ? 'work_surface_confirmed' : 'work_control_actuated_unconfirmed',
+      actuationReason: confirmed ? null : 'work_control_actuated_unconfirmed',
+      surfaceEvidence: evidence || verificationWorkSurfaceEvidence(),
     };
   }
 
