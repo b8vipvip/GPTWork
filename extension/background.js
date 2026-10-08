@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.201';
+const RUNTIME_CODE_VERSION = '0.5.202';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1987,7 +1987,7 @@ function verificationSurfaceAccepted(surface, requireVisible) {
 }
 
 async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = true } = {}) {
-  const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
+  let deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
   let last = {
     ready: false,
     structuralReady: false,
@@ -2000,6 +2000,19 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
   let recoveryAttempted = false;
   let loadingRecoveryAttempts = 0;
   let lastLoadingRecoveryAt = 0;
+  let postRecoveryGraceGranted = false;
+  const extendAfterRecovery = () => {
+    // A successful content-script reinjection is not a ready composer. In the
+    // v0.5.201 log it completed at the 12s deadline, just before the composer
+    // became usable. Give the SAME page a bounded settling window, without
+    // another navigation, a picker click or a probe submission.
+    if (postRecoveryGraceGranted || last?.contentRuntimeReady !== true) return;
+    postRecoveryGraceGranted = true;
+    deadline = Math.max(deadline, Date.now() + 4000);
+    logRuntime('info', 'discovery', 'verification_surface_post_recovery_grace', {
+      tabId, reason: last?.reason || 'composer_not_ready',
+    });
+  };
   do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return { ...last, reason: 'verification_tab_closed' };
@@ -2027,6 +2040,7 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
         if (verificationSurfaceAccepted(last, requireVisible)) {
           return { ...last, ready: true };
         }
+        extendAfterRecovery();
       }
     } else if (
       last?.contentRuntimeReady !== true
@@ -2060,6 +2074,7 @@ async function waitForVerificationSurface(tabId, timeoutMs, { requireVisible = t
         if (verificationSurfaceAccepted(last, requireVisible)) {
           return { ...last, ready: true };
         }
+        extendAfterRecovery();
       }
     }
 
@@ -3234,6 +3249,20 @@ function shouldRetrySharedChatLockReplyLoss({
     && /message channel closed|message port closed|receiving end does not exist/i.test(String(error || ''));
 }
 
+// Only transient page-readiness failures are retryable, never an authoritative
+// Work-mode verdict, changed conversation, transport request or backend response.
+// This is distinct from the lost-message-port budget: both can happen during
+// the same navigation, but every extra attempt is pre-probe and bounded.
+function shouldRetrySharedChatLockPreProbeReadiness({
+  chatCompatibility, sharedSessionPrepared, probeDispatchStarted, error, retryCount,
+}) {
+  return chatCompatibility === true
+    && sharedSessionPrepared === true
+    && probeDispatchStarted !== true
+    && Number(retryCount || 0) < 1
+    && /^(?:Chat lock shared conversation not ready: composer_not_ready|official_chat_mode_unconfirmed:official_picker_mode_unresolved)$/.test(String(error || ''));
+}
+
 async function verifyAccountCatalogModels(
   tabId,
   state,
@@ -3281,6 +3310,7 @@ async function verifyAccountCatalogModels(
   let pickerAChatLockQueued = false;
   let officialWorkDiscoveryDone = false;
   const transientRetryCounts = new Map();
+  const preProbeReadinessRetryCounts = new Map();
   const sharedChatLockSession = {
     prepared: false,
     startedAt: null,
@@ -3777,6 +3807,23 @@ async function verifyAccountCatalogModels(
         transientRetryCounts.set(retryKey, retryCount + 1);
         logRuntime('warn', 'discovery', 'chat_lock_transient_reply_recovered', {
           tabId, model: item.model, retryCount: retryCount + 1,
+          reason: errorText(error),
+        });
+        verificationTransactions.delete(Number(tabId));
+        await sleep(650);
+        continue;
+      }
+      const readinessRetryCount = preProbeReadinessRetryCounts.get(retryKey) || 0;
+      if (shouldRetrySharedChatLockPreProbeReadiness({
+        chatCompatibility,
+        sharedSessionPrepared: sharedChatLockSession.prepared === true,
+        probeDispatchStarted,
+        error: errorText(error),
+        retryCount: readinessRetryCount,
+      })) {
+        preProbeReadinessRetryCounts.set(retryKey, readinessRetryCount + 1);
+        logRuntime('warn', 'discovery', 'chat_lock_pre_probe_readiness_retry', {
+          tabId, model: item.model, retryCount: readinessRetryCount + 1,
           reason: errorText(error),
         });
         verificationTransactions.delete(Number(tabId));
