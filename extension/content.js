@@ -1964,6 +1964,11 @@ document.addEventListener('pointerdown', (event) => {
     let stableSince = 0;
     let lastFingerprint = '';
     while (Date.now() < deadline) {
+      const comparison = await resolveDiscoveryComparisonChoice();
+      if (comparison.present) {
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+        continue;
+      }
       const snapshot = idleSnapshot();
       // Current ChatGPT can leave a stale visible Stop control mounted after the
       // response has terminally settled. A ready composer + stable assistant turn
@@ -2204,6 +2209,48 @@ document.addEventListener('pointerdown', (event) => {
     return { stopped: true, idle: Boolean(idle) };
   }
 
+  // One owner for ChatGPT's side-by-side response preference screen. During
+  // GPTWork's own discovery turns, choose the first visible response once; this
+  // prompt is not an assistant transcript and must not leave the probe hanging.
+  const discoveryComparisonChoices = new WeakSet();
+  function discoveryAnswerOnePreferenceControl() {
+    const choiceName = /^(?:我更喜欢这个回答|我更喜歡這個回答|I prefer this (?:response|answer)|I like this (?:response|answer) better)$/i;
+    const buttons = [...document.querySelectorAll('button,[role="button"]')]
+      .filter((element) => visible(element) && choiceName.test(
+        String(element.getAttribute('aria-label') || element.innerText || element.textContent || '')
+          .replace(/\\s+/g, ' ').trim()
+      ));
+    if (buttons.length < 2) return null;
+    // Each answer owns its own preference button. Accept only the scoped card
+    // labelled Answer 1, never a page-global "first button" guess.
+    const cardFor = (button) => {
+      let parent = button.parentElement;
+      for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
+        const label = String(parent.innerText || parent.textContent || '')
+          .replace(/\\s+/g, ' ').trim();
+        if (/^(?:回答\\s*1|Answer\\s*1)\\b/i.test(label) && !/(?:回答\\s*2|Answer\\s*2)/i.test(label)) return parent;
+      }
+      return null;
+    };
+    const owned = buttons.filter((button) => cardFor(button));
+    return owned.length === 1 ? owned[0] : null;
+  }
+
+  async function resolveDiscoveryComparisonChoice() {
+    const control = discoveryAnswerOnePreferenceControl();
+    if (!control) return { present: false, acted: false };
+    if (discoveryComparisonChoices.has(control)) return { present: true, acted: false, pending: true };
+    // Mark before dispatch. A CDP reply may be lost when the preference screen
+    // navigates, but that must not lead to a second choice click.
+    discoveryComparisonChoices.add(control);
+    const acted = await trustedPointer(control, 'click', 'discovery-answer-one-preference');
+    pointerTrace(acted ? 'discovery_comparison_answer_one_selected' : 'discovery_comparison_answer_one_unconfirmed', {
+      href: location.href,
+      target: compactElementProbe(control),
+    });
+    return { present: true, acted };
+  }
+
   async function waitForProbeTurnSettled(message = {}) {
     const before = Math.max(0, Number(message.assistantCountBefore || 0));
     const timeoutMs = Math.min(180000, Math.max(5000, Number(message.timeoutMs || 120000)));
@@ -2211,7 +2258,21 @@ document.addEventListener('pointerdown', (event) => {
     let sawActivity = Boolean(visibleGeneratingControl()) || assistantMessages().length > before;
     let idleSince = 0;
     let stableFingerprint = '';
+    let comparisonChoiceActuated = false;
     while (Date.now() < deadline) {
+      const comparison = await resolveDiscoveryComparisonChoice();
+      if (comparison.acted) {
+        comparisonChoiceActuated = true;
+        sawActivity = true;
+      }
+      // The comparison screen is a response, but not a standard assistant DOM
+      // message. Wait for its preference control to disappear after one click.
+      if (comparison.present) {
+        idleSince = 0;
+        stableFingerprint = '';
+        await new Promise((resolve) => window.setTimeout(resolve, 200));
+        continue;
+      }
       const generating = Boolean(visibleGeneratingControl());
       const messages = assistantMessages();
       if (generating || messages.length > before) sawActivity = true;
@@ -2228,7 +2289,7 @@ document.addEventListener('pointerdown', (event) => {
         stableFingerprint = fingerprint;
         idleSince = Date.now();
       } else if (idleSince && Date.now() - idleSince >= 1200) {
-        return { settled: true, assistantCount: messages.length, responseTextLength: text.length };
+        return { settled: true, assistantCount: messages.length, responseTextLength: text.length, comparisonChoiceActuated };
       }
       await new Promise((resolve) => window.setTimeout(resolve, 200));
     }
