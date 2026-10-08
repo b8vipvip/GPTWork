@@ -13,7 +13,7 @@ test('v0.5.181 classifies the redesigned expanded owned model list as Picker B',
 
   assert.match(body, /picker-mode-b-redesigned-owned-model-list/);
   assert.match(body, /const ownedRows = distinctModelRows\(picker\)/);
-  assert.match(body, /ownedRows\.length >= 2 && !exactChatPair/);
+  assert.match(body, /ownedModels\.some\(\(model\) => model && !DIRECT_CHAT_MODEL_IDS\.has\(model\)\)/);
   assert.match(body, /return \{ pickerMode: 'B', rows: ownedRows \}/);
 });
 
@@ -22,8 +22,8 @@ test('v0.5.181 keeps the exact Chat pair as Picker A and does not mislabel unres
   const end = content.indexOf('function rowModelDescriptor', start);
   const body = content.slice(start, end);
 
-  assert.match(body, /ownedModels\.has\('gpt-5\.5'\)/);
-  assert.match(body, /ownedModels\.has\('gpt-5\.6-sol'\)/);
+  assert.match(body, /const chatRows = defaultChatDirectModelRows\(picker, \{ requireInteraction: false \}\)/);
+  assert.match(body, /chatRows\.length >= 2/);
   assert.match(body, /pickerMode: null/);
   assert.doesNotMatch(
     body.slice(body.indexOf("picker-redesign-model-view-unresolved"), body.indexOf("const initialOpener")),
