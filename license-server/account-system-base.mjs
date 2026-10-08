@@ -353,6 +353,36 @@ export function createAccountSystem({
   ensureColumn('shared_model_account_seen', 'chat_response_model', 'chat_response_model TEXT');
   ensureColumn('shared_model_account_seen', 'chat_lock_request_confirmed', 'chat_lock_request_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_request_confirmed IN (0,1))');
   ensureColumn('shared_model_account_seen', 'chat_lock_response_confirmed', 'chat_lock_response_confirmed INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_response_confirmed IN (0,1))');
+  // Completion is per stage, per account and per model. Unlike the server
+  // shared-model eligibility flag, a completed unsuccessful Chat-lock test is
+  // still history that does not need to be blindly repeated. Old rows default
+  // to 0: never invent completion for tests run by earlier protocol versions.
+  const nativeStageCompletionAdded = ensureColumn(
+    'shared_model_account_seen',
+    'native_stage_complete',
+    'native_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(native_stage_complete IN (0,1))',
+  );
+  ensureColumn('shared_model_account_seen', 'chat_lock_stage_complete', 'chat_lock_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_stage_complete IN (0,1))');
+  ensureColumn('shared_model_account_seen', 'last_chat_attempt_transport', 'last_chat_attempt_transport TEXT');
+  ensureColumn('shared_model_account_seen', 'last_chat_attempt_response', 'last_chat_attempt_response TEXT');
+  if (nativeStageCompletionAdded) {
+    // One-time migration from historical native verification results. Only
+    // account rows with both a confirmed request and completed response *plus*
+    // an actual native transport ID are safe to reuse. Picker A additionally
+    // requires an exposed served-model ID; Picker B's existing native-stage
+    // contract accepts a completed response stream without one. Do not infer
+    // any past negative Chat-lock completion (its attempted protocol was not
+    // stored before v0.5.198).
+    db.prepare(`UPDATE shared_model_account_seen SET native_stage_complete=1
+      WHERE request_confirmed=1 AND response_confirmed=1 AND native_request_model LIKE 'gpt-%'
+        AND EXISTS (
+          SELECT 1 FROM shared_model_catalog c WHERE c.model_id=shared_model_account_seen.model_id
+            AND (
+              (c.picker_mode='A' AND shared_model_account_seen.native_response_model LIKE 'gpt-%')
+              OR c.picker_mode='B'
+            )
+        )`).run();
+  }
   db.prepare("UPDATE users SET user_level='normal' WHERE user_level NOT IN ('normal','deep','heavy') OR user_level IS NULL").run();
   db.prepare('UPDATE shared_model_catalog SET discovered_count=verified_count WHERE discovered_count=0 AND verified_count>0').run();
   db.prepare('INSERT OR IGNORE INTO shared_model_catalog_state(id,generation,updated_at) VALUES(1,0,?)').run(nowIso());
@@ -612,6 +642,36 @@ export function createAccountSystem({
       }));
   }
 
+  function accountModelVerificationLedger(userId) {
+    return db.prepare(`SELECT
+      s.model_id,s.request_confirmed,s.response_confirmed,s.native_request_model,s.native_response_model,
+      s.chat_lock_request_confirmed,s.chat_lock_response_confirmed,s.chat_transport_model,s.chat_response_model,
+      s.native_stage_complete,s.chat_lock_stage_complete,
+      s.last_chat_attempt_transport,s.last_chat_attempt_response,
+      s.last_seen_at,c.picker_mode
+      FROM shared_model_account_seen s
+      INNER JOIN shared_model_catalog c ON c.model_id=s.model_id
+      WHERE s.user_id=? AND c.enabled=1
+      ORDER BY s.last_seen_at DESC,s.model_id ASC LIMIT 256`).all(Number(userId))
+      .map((item) => ({
+        model: item.model_id,
+        pickerMode: item.picker_mode || null,
+        nativeStageComplete: item.native_stage_complete === 1,
+        chatLockStageComplete: item.chat_lock_stage_complete === 1,
+        requestConfirmed: item.request_confirmed === 1,
+        responseConfirmed: item.response_confirmed === 1,
+        nativeRequestModel: item.native_request_model || null,
+        nativeResponseModel: item.native_response_model || null,
+        chatLockRequestConfirmed: item.chat_lock_request_confirmed === 1,
+        chatLockResponseConfirmed: item.chat_lock_response_confirmed === 1,
+        chatTransportModel: item.chat_transport_model || null,
+        chatResponseModel: item.chat_response_model || null,
+        chatAttemptTransport: item.last_chat_attempt_transport || null,
+        chatAttemptResponseModel: item.last_chat_attempt_response || null,
+        lastSeenAt: item.last_seen_at,
+      }));
+  }
+
   function mergeSharedModelCatalog(inputModels, userId) {
     const now = nowIso();
     const rows = Array.isArray(inputModels) ? inputModels.slice(0, 128) : [];
@@ -628,22 +688,35 @@ export function createAccountSystem({
       chat_response_model=COALESCE(?,chat_response_model),
       discovered_count=discovered_count+1,last_seen_at=?
       WHERE model_id=?`);
-    const seenSelect = db.prepare(`SELECT request_confirmed,response_confirmed,chat_lock_request_confirmed,chat_lock_response_confirmed
+    const seenSelect = db.prepare(`SELECT
+      request_confirmed,response_confirmed,chat_lock_request_confirmed,chat_lock_response_confirmed,
+      native_stage_complete,chat_lock_stage_complete
       FROM shared_model_account_seen WHERE user_id=? AND model_id=?`);
     const seen = db.prepare(`INSERT INTO shared_model_account_seen(
         user_id,model_id,request_confirmed,response_confirmed,
         native_request_model,native_response_model,chat_transport_model,chat_response_model,
-        chat_lock_request_confirmed,chat_lock_response_confirmed,first_seen_at,last_seen_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+        chat_lock_request_confirmed,chat_lock_response_confirmed,native_stage_complete,chat_lock_stage_complete,
+        last_chat_attempt_transport,last_chat_attempt_response,first_seen_at,last_seen_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(user_id,model_id) DO UPDATE SET
         request_confirmed=MAX(shared_model_account_seen.request_confirmed,excluded.request_confirmed),
         response_confirmed=MAX(shared_model_account_seen.response_confirmed,excluded.response_confirmed),
         native_request_model=COALESCE(excluded.native_request_model,shared_model_account_seen.native_request_model),
         native_response_model=COALESCE(excluded.native_response_model,shared_model_account_seen.native_response_model),
-        chat_transport_model=excluded.chat_transport_model,
-        chat_response_model=excluded.chat_response_model,
-        chat_lock_request_confirmed=excluded.chat_lock_request_confirmed,
-        chat_lock_response_confirmed=excluded.chat_lock_response_confirmed,
+        native_stage_complete=MAX(shared_model_account_seen.native_stage_complete,excluded.native_stage_complete),
+        chat_lock_stage_complete=MAX(shared_model_account_seen.chat_lock_stage_complete,excluded.chat_lock_stage_complete),
+        last_chat_attempt_transport=CASE WHEN excluded.chat_lock_stage_complete=1
+          THEN excluded.last_chat_attempt_transport ELSE shared_model_account_seen.last_chat_attempt_transport END,
+        last_chat_attempt_response=CASE WHEN excluded.chat_lock_stage_complete=1
+          THEN excluded.last_chat_attempt_response ELSE shared_model_account_seen.last_chat_attempt_response END,
+        chat_transport_model=CASE WHEN excluded.chat_lock_stage_complete=1
+          THEN excluded.chat_transport_model ELSE shared_model_account_seen.chat_transport_model END,
+        chat_response_model=CASE WHEN excluded.chat_lock_stage_complete=1
+          THEN excluded.chat_response_model ELSE shared_model_account_seen.chat_response_model END,
+        chat_lock_request_confirmed=CASE WHEN excluded.chat_lock_stage_complete=1
+          THEN excluded.chat_lock_request_confirmed ELSE shared_model_account_seen.chat_lock_request_confirmed END,
+        chat_lock_response_confirmed=CASE WHEN excluded.chat_lock_stage_complete=1
+          THEN excluded.chat_lock_response_confirmed ELSE shared_model_account_seen.chat_lock_response_confirmed END,
         last_seen_at=excluded.last_seen_at`);
     const recomputeCounts = db.prepare(`UPDATE shared_model_catalog SET
       verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.response_confirmed=1),
@@ -668,10 +741,18 @@ export function createAccountSystem({
         const pickerMode = ['A', 'B'].includes(item?.pickerMode) ? item.pickerMode : null;
         const requestConfirmed = item?.requestConfirmed === true;
         const responseConfirmed = item?.nativeResponseConfirmed === true || item?.responseConfirmed === true;
+        const nativeStageComplete = item?.nativeStageComplete === true;
+        const chatLockStageComplete = item?.chatLockStageComplete === true;
         const chatLockRequestConfirmed = item?.chatLockRequestConfirmed === true;
         const chatLockResponseConfirmed = item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true;
         const nativeRequestModel = normalizeSharedModelId(item?.nativeRequestModel);
         const nativeResponseModel = normalizeSharedModelId(item?.nativeResponseModel);
+        const chatAttemptTransport = chatLockStageComplete
+          ? normalizeSharedModelId(item?.chatAttemptTransport || item?.chatTransportModel)
+          : null;
+        const chatAttemptResponseModel = chatLockStageComplete
+          ? normalizeSharedModelId(item?.chatAttemptResponseModel || item?.chatResponseModel)
+          : null;
         const chatTransportModel = chatLockResponseConfirmed
           ? normalizeSharedModelId(item?.chatTransportModel)
           : null;
@@ -706,7 +787,9 @@ export function createAccountSystem({
         seen.run(
           Number(userId),model,requestConfirmed ? 1 : 0,responseConfirmed ? 1 : 0,
           nativeRequestModel,nativeResponseModel,chatTransportModel,chatResponseModel,
-          chatLockRequestConfirmed ? 1 : 0,chatLockResponseConfirmed ? 1 : 0,now,now,
+          chatLockRequestConfirmed ? 1 : 0,chatLockResponseConfirmed ? 1 : 0,
+          nativeStageComplete ? 1 : 0,chatLockStageComplete ? 1 : 0,
+          chatAttemptTransport,chatAttemptResponseModel,now,now,
         );
         recomputeCounts.run(model,model,model);
         clearUnprovenChatTransport.run(model);
@@ -714,8 +797,10 @@ export function createAccountSystem({
         if (
           (!seenBefore?.request_confirmed && requestConfirmed)
           || (!seenBefore?.response_confirmed && responseConfirmed)
-          || Boolean(seenBefore?.chat_lock_request_confirmed) !== chatLockRequestConfirmed
-          || Boolean(seenBefore?.chat_lock_response_confirmed) !== chatLockResponseConfirmed
+          || (nativeStageComplete && !seenBefore?.native_stage_complete)
+          || (chatLockStageComplete && !seenBefore?.chat_lock_stage_complete)
+          || (chatLockStageComplete && Boolean(seenBefore?.chat_lock_request_confirmed) !== chatLockRequestConfirmed)
+          || (chatLockStageComplete && Boolean(seenBefore?.chat_lock_response_confirmed) !== chatLockResponseConfirmed)
         ) catalogChanged = true;
         accepted += 1;
         if (responseConfirmed) verifiedAccepted += 1;
@@ -1595,6 +1680,15 @@ export function createAccountSystem({
           ok: true,
           generation: sharedModelCatalogGeneration(),
           models: sharedModelCatalog({ clientEligibleOnly: true }),
+        }, cors), true;
+      }
+
+      if (path === '/api/v1/account/model-verifications' && req.method === 'GET') {
+        const session = requireSession(req);
+        return json(res, 200, {
+          ok: true,
+          generation: sharedModelCatalogGeneration(),
+          models: accountModelVerificationLedger(session.user_id),
         }, cors), true;
       }
 

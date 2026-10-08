@@ -60,10 +60,10 @@ test('network stream without raw served-model evidence never proves Chat compati
 
 test('server replaces stale account Chat proof rather than permanently OR-ing positives', () => {
   const merge = block(server, 'function mergeSharedModelCatalog(inputModels, userId)', 'function updateSharedModelCatalog');
-  assert.match(merge, /chat_lock_request_confirmed=excluded\.chat_lock_request_confirmed/);
-  assert.match(merge, /chat_lock_response_confirmed=excluded\.chat_lock_response_confirmed/);
-  assert.match(merge, /chat_transport_model=excluded\.chat_transport_model/);
-  assert.match(merge, /chat_response_model=excluded\.chat_response_model/);
+  assert.match(merge, /chat_lock_request_confirmed=CASE WHEN excluded\.chat_lock_stage_complete=1/);
+  assert.match(merge, /chat_lock_response_confirmed=CASE WHEN excluded\.chat_lock_stage_complete=1/);
+  assert.match(merge, /chat_transport_model=CASE WHEN excluded\.chat_lock_stage_complete=1/);
+  assert.match(merge, /chat_response_model=CASE WHEN excluded\.chat_lock_stage_complete=1/);
   assert.match(merge, /clearUnprovenChatTransport\.run\(model\)/);
   assert.match(merge, /Boolean\(seenBefore\?\.chat_lock_response_confirmed\) !== chatLockResponseConfirmed/);
   assert.doesNotMatch(merge, /chat_lock_response_confirmed=MAX\(/);

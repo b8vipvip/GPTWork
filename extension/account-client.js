@@ -270,6 +270,12 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     return request('/api/v1/account/model-catalog', { auth: true });
   }
 
+  async function modelVerificationLedger() {
+    await initialize();
+    if (!token) return { ok: true, models: [], generation: 0, unavailable: true };
+    return request('/api/v1/account/model-verifications', { auth: true });
+  }
+
   async function publishSharedModels(models) {
     await initialize();
     if (!token) return { ok: true, accepted: 0, models: [] };
@@ -333,6 +339,7 @@ export function createAccountClient({ baseUrl = API_BASE } = {}) {
     clientControl,
     security,
     sharedModelCatalog,
+    modelVerificationLedger,
     publishSharedModels,
     releaseDevice,
     revokeSession,
