@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.197';
+const RUNTIME_CODE_VERSION = '0.5.198';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2447,6 +2447,42 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
       const row = rows[index];
       const model = normalizeConcreteModelId(row?.model || row?.rawId);
       if (!model) continue;
+      const prior = progress?.modelVerificationLedger?.[model];
+      if (
+        prior?.pickerMode === 'B'
+        && prior?.nativeStageComplete === true
+        && prior?.requestConfirmed === true
+        && prior?.responseConfirmed === true
+        && prior?.nativeRequestModel
+      ) {
+        nativeResults.push({
+          model,
+          label: String(row.label || model),
+          selectorKey: String(row.selectorKey || ''),
+          pickerMode: 'B',
+          discoverySource: 'official-work-picker-b',
+          nativeRequestModel: prior.nativeRequestModel,
+          nativeResponseModel: prior.nativeResponseModel,
+          nativeRequestConfirmed: true,
+          nativeResponseConfirmed: Boolean(prior.nativeResponseModel),
+          nativeResponseObserved: true,
+          nativeVerified: true,
+          nativeStageComplete: true,
+          reusedFromServer: true,
+        });
+        progress.activeStage = {
+          ...progress.activeStage,
+          completed: index + 1,
+          verified: nativeResults.filter(x => x.nativeVerified).length,
+          requestConfirmed: nativeResults.filter(x => x.nativeRequestConfirmed).length,
+          currentModel: null,
+        };
+        logRuntime('info', 'discovery', 'official_work_native_stage_reused', {
+          model, index: index + 1, total: rows.length,
+        });
+        await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
+        continue;
+      }
       const liveStateBefore = ensureTabState(discoveryTabId);
       resetVerificationAttempt(liveStateBefore);
       progress.activeStage = {
@@ -2561,6 +2597,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
               ? 'request_transport+response_stream'
               : null,
           nativeVerified,
+          nativeStageComplete: nativeVerified,
           requestId: networkEvidence?.requestId || liveState.lastRequest?.requestId || null,
         };
         nativeResults.push(result);
@@ -2700,6 +2737,8 @@ async function publishAccountModels(accountCatalog, progress) {
       nativeRequestModel: null,
       nativeResponseModel: null,
       nativeResponseConfirmed: false,
+      nativeStageComplete: false,
+      chatLockStageComplete: false,
       chatTransportModel: null,
       chatResponseModel: null,
       chatLockRequestConfirmed: false,
@@ -2737,6 +2776,8 @@ async function publishAccountModels(accountCatalog, progress) {
     // response-model confirmation. Only the stage-owned explicit verdict counts.
     current.nativeResponseConfirmed = current.nativeResponseConfirmed
       || item?.nativeResponseConfirmed === true;
+    current.nativeStageComplete = current.nativeStageComplete
+      || item?.nativeStageComplete === true;
     current.requestConfirmed = current.requestConfirmed || item?.nativeRequestConfirmed === true;
     // The legacy response-confirmed gate continues to represent a successful
     // response stream. It must not be mislabeled as served-model identity.
@@ -2754,11 +2795,13 @@ async function publishAccountModels(accountCatalog, progress) {
     });
     if (!current) continue;
 
-    current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
-    current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
     const chatLockResult = item?.selectorKey === '__picker_a_chat_lock__'
       || item?.selectorKey === '__picker_b_chat_lock__';
     if (!chatLockResult) {
+      current.requestConfirmed = current.requestConfirmed || item?.requestConfirmed === true;
+      current.responseConfirmed = current.responseConfirmed || item?.responseConfirmed === true;
+      current.nativeStageComplete = current.nativeStageComplete
+        || item?.nativeStageComplete === true;
       current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel)
         || normalizeRawProtocolModelId(item?.rawRequestModel)
         || current.nativeRequestModel;
@@ -2770,6 +2813,8 @@ async function publishAccountModels(accountCatalog, progress) {
         || (item?.pickerMode === 'A' && item?.responseConfirmed === true);
     }
 
+    current.chatLockStageComplete = current.chatLockStageComplete
+      || item?.chatLockStageComplete === true;
     if (item?.chatLockRequestConfirmed === true || item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true) {
       current.chatLockRequestConfirmed = current.chatLockRequestConfirmed || item?.chatLockRequestConfirmed === true;
       current.chatLockResponseConfirmed = current.chatLockResponseConfirmed || item?.chatLockResponseConfirmed === true;
@@ -3126,6 +3171,45 @@ function nativeChatPickerFamily(rawProtocolModel) {
   return normalizeConcreteModelId(raw);
 }
 
+async function loadAccountModelVerificationLedger() {
+  // An authenticated, per-account ledger is distinct from the *eligible only*
+  // shared model catalog. It includes verified native stages whose Chat lock is
+  // still negative. Absence of a server row (including after delete-all) means
+  // never skip anything.
+  try {
+    const result = await accountClient.modelVerificationLedger();
+    if (result?.ok !== true || result?.unavailable === true) {
+      throw new Error('account_model_ledger_unavailable');
+    }
+    const models = Array.isArray(result.models) ? result.models : [];
+    const byId = {};
+    for (const entry of models) {
+      const model = normalizeConcreteModelId(entry?.model);
+      if (!model || !['A', 'B'].includes(entry?.pickerMode)) continue;
+      byId[model] = {
+        ...entry,
+        model,
+        nativeRequestModel: normalizeRawProtocolModelId(entry?.nativeRequestModel),
+        nativeResponseModel: normalizeRawProtocolModelId(entry?.nativeResponseModel),
+        chatTransportModel: normalizeRawProtocolModelId(entry?.chatTransportModel),
+        chatResponseModel: normalizeRawProtocolModelId(entry?.chatResponseModel),
+      };
+    }
+    logRuntime('info', 'discovery', 'account_model_verification_ledger_loaded', {
+      generation: Number(result.generation || 0),
+      modelCount: Object.keys(byId).length,
+      nativeCompleted: Object.values(byId).filter(x => x.nativeStageComplete === true).length,
+      chatCompleted: Object.values(byId).filter(x => x.chatLockStageComplete === true).length,
+    });
+    return byId;
+  } catch (error) {
+    logRuntime('warn', 'discovery', 'account_model_verification_ledger_unavailable', {
+      reason: errorText(error),
+    });
+    return {};
+  }
+}
+
 async function verifyAccountCatalogModels(
   tabId,
   state,
@@ -3144,6 +3228,7 @@ async function verifyAccountCatalogModels(
     },
   });
   const { queue, knownKeys, progress } = catalog;
+  progress.modelVerificationLedger = await loadAccountModelVerificationLedger();
   state.autoVerification.catalogVerification = progress;
   const mergeCatalog = catalog.merge;
   progress.officialWorkDiscovery = {
@@ -3260,6 +3345,7 @@ async function verifyAccountCatalogModels(
     }
 
     const item = queue[index];
+    const previous = progress.modelVerificationLedger?.[normalizeConcreteModelId(item.model)];
     const pickerAChatLock = item.selectorKey === '__picker_a_chat_lock__';
     const pickerBChatLock = item.selectorKey === '__picker_b_chat_lock__';
     const chatCompatibility = pickerAChatLock || pickerBChatLock;
@@ -3273,6 +3359,67 @@ async function verifyAccountCatalogModels(
       ? 'picker_a_chat_lock_failed'
       : 'picker_b_chat_compatibility_failed';
     const pickerNative = !chatCompatibility && ['A', 'B'].includes(item.pickerMode);
+
+    const reusableNative = !chatCompatibility
+      && item.pickerMode === 'A'
+      && previous?.pickerMode === 'A'
+      && previous?.nativeStageComplete === true
+      && previous?.requestConfirmed === true
+      && previous?.responseConfirmed === true
+      && previous?.nativeRequestModel
+      && previous?.nativeResponseModel;
+    const reusableLock = chatCompatibility
+      && previous?.pickerMode === item.pickerMode
+      && previous?.chatLockStageComplete === true
+      && previous?.chatTransportModel === normalizeRawProtocolModelId(item.transportModel)
+      && previous?.chatResponseModel;
+    if (reusableNative || reusableLock) {
+      const rawRequestModel = reusableLock ? previous.chatTransportModel : previous.nativeRequestModel;
+      const rawResponseModel = reusableLock ? previous.chatResponseModel : previous.nativeResponseModel;
+      const verified = reusableLock
+        ? previous.chatLockRequestConfirmed === true
+          && previous.chatLockResponseConfirmed === true
+          && rawResponseModel === normalizeRawProtocolModelId(item.expectedResponseModel)
+        : true;
+      progress.results.push({
+        model: item.model,
+        selectorKey: item.selectorKey,
+        label: item.label,
+        pickerMode: item.pickerMode,
+        discoverySource: item.discoverySource,
+        verified,
+        requestConfirmed: reusableLock ? previous.chatLockRequestConfirmed === true : true,
+        responseConfirmed: reusableLock ? previous.chatLockResponseConfirmed === true : true,
+        rawRequestModel,
+        rawResponseModel,
+        nativeRequestModel: previous.nativeRequestModel,
+        nativeResponseModel: previous.nativeResponseModel,
+        nativeResponseConfirmed: Boolean(previous.nativeResponseModel && previous.pickerMode === 'A'),
+        nativeStageComplete: previous.nativeStageComplete === true,
+        chatTransportModel: reusableLock ? rawRequestModel : null,
+        chatResponseModel: reusableLock ? rawResponseModel : null,
+        chatLockRequestConfirmed: reusableLock ? previous.chatLockRequestConfirmed === true : false,
+        chatLockResponseConfirmed: reusableLock ? previous.chatLockResponseConfirmed === true : false,
+        chatLockSupported: reusableLock ? verified : false,
+        chatLockStageComplete: previous.chatLockStageComplete === true,
+        reusedFromServer: true,
+      });
+      if (verified) progress.verified += 1;
+      else progress.failed += 1;
+      if (reusableNative || previous.chatLockRequestConfirmed === true) progress.requestConfirmed += 1;
+      index += 1;
+      progress.completed = index;
+      logRuntime('info', 'discovery', 'model_verification_stage_reused', {
+        model: item.model,
+        pickerMode: item.pickerMode,
+        stage: reusableLock ? 'chat-lock' : 'native',
+        verified,
+        index,
+        total: queue.length,
+      });
+      await broadcastVerificationState(tabId, ownerTabId);
+      continue;
+    }
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
@@ -3536,6 +3683,14 @@ async function verifyAccountCatalogModels(
         nativeResponseConfirmed: chatCompatibility
           ? item.nativeResponseConfirmed === true
           : responseConfirmed,
+        nativeStageComplete: !chatCompatibility && verified,
+        // A definitive mismatching served-model response is a completed test,
+        // even if not compatible. Timeouts/transport failures and passthroughs
+        // are incomplete and will be retried on the next discovery.
+        chatLockStageComplete: chatCompatibility
+          && requestConfirmed
+          && Boolean(rawResponseProtocolModel)
+          && successfulConversationResponseEvidence(responseEvidence),
         chatTransportModel: chatCompatibility ? rawRequestModel : null,
         chatResponseModel: chatCompatibility ? rawResponseProtocolModel : null,
         chatLockRequestConfirmed: chatCompatibility ? requestConfirmed : false,
