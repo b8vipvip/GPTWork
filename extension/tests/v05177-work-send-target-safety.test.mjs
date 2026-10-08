@@ -25,7 +25,7 @@ test('v0.5.177 confirms official Work from the live Work composer surface', () =
   assert.match(content, /function verificationWorkSurfaceActive/);
   assert.match(content, /chatgpt\\s\*work/);
   assert.match(content, /使用\\s\*chatgpt\\s\*work/);
-  assert.match(content, /workControlSelected\(control\) \|\| verificationWorkSurfaceActive\(\)/);
-  assert.match(content, /workControlSelected\(after\) \|\| verificationWorkSurfaceActive\(\)/);
+  assert.match(content, /const initial = verificationWorkSurfaceEvidence\(\)/);
+  assert.match(content, /const current = verificationWorkSurfaceEvidence\(\)/);
   assert.match(content, /work_surface_confirmed/);
 });
