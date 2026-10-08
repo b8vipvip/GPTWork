@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.196';
+const RUNTIME_CODE_VERSION = '0.5.197';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2731,13 +2731,17 @@ async function publishAccountModels(accountCatalog, progress) {
     if (!current) continue;
     current.nativeRequestModel = normalizeRawProtocolModelId(item?.nativeRequestModel) || current.nativeRequestModel;
     current.nativeResponseModel = normalizeRawProtocolModelId(item?.nativeResponseModel) || current.nativeResponseModel;
+    // The Work-native stage already separated real served-model identity from
+    // response-stream completion. Do not let the publishing accumulator regain
+    // partial authority and turn "nativeVerified" (stream-only) into an exposed
+    // response-model confirmation. Only the stage-owned explicit verdict counts.
     current.nativeResponseConfirmed = current.nativeResponseConfirmed
-      || item?.nativeResponseConfirmed === true
-      || item?.nativeVerified === true;
+      || item?.nativeResponseConfirmed === true;
     current.requestConfirmed = current.requestConfirmed || item?.nativeRequestConfirmed === true;
+    // The legacy response-confirmed gate continues to represent a successful
+    // response stream. It must not be mislabeled as served-model identity.
     current.responseConfirmed = current.responseConfirmed
-      || item?.nativeResponseConfirmed === true
-      || item?.nativeVerified === true;
+      || item?.nativeResponseObserved === true;
   }
 
   for (const item of progress?.results || []) {
@@ -2797,6 +2801,10 @@ async function publishAccountModels(accountCatalog, progress) {
     logRuntime('info', 'discovery', 'shared_model_catalog_published', {
       submitted: models.length,
       nativeResponseConfirmed: models.filter((item) => item.nativeResponseConfirmed).length,
+      workNativeResponseObserved: (progress?.officialWorkDiscovery?.nativeResults || [])
+        .filter((item) => item.nativeResponseObserved === true).length,
+      workNativeResponseMetadataConfirmed: (progress?.officialWorkDiscovery?.nativeResults || [])
+        .filter((item) => item.nativeResponseConfirmed === true).length,
       chatLockSupported: models.filter((item) => item.chatLockSupported).length,
       fourGateEligible: shared.length,
       shared: shared.length,
