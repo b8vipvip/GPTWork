@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.190';
+const RUNTIME_CODE_VERSION = '0.5.191';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2955,6 +2955,31 @@ async function reacquirePickerBForModel(tabId, desiredModel, progress) {
   return catalog;
 }
 
+async function requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded = false } = {}) {
+  // Official mode authority lives only in content.js, which consults the current
+  // owned Picker-A/B topology. Background consumes its verdict, never infers Chat
+  // mode from hostname, pathname, a successful network rewrite, or a Work toggle.
+  const verdict = await sendTabMessage(tabId, {
+    type: 'GPTLOCK_VERIFY_OFFICIAL_CHAT_MODE',
+    switchIfNeeded,
+  });
+  logRuntime(verdict?.confirmed === true ? 'info' : 'warn', 'discovery',
+    'chat_lock_official_chat_mode_verdict', {
+      tabId,
+      model: normalizeConcreteModelId(item?.model),
+      pickerMode: verdict?.pickerMode || null,
+      confirmed: verdict?.confirmed === true,
+      switched: verdict?.switched === true,
+      switchIfNeeded,
+      pathname: verdict?.pathname || null,
+      reason: verdict?.reason || null,
+    });
+  if (verdict?.ok !== true || verdict?.confirmed !== true) {
+    throw new Error(`official_chat_mode_unconfirmed:${verdict?.reason || verdict?.pickerMode || 'unavailable'}`);
+  }
+  return verdict;
+}
+
 async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedSession) {
   const targetModel = normalizeConcreteModelId(item?.model);
   const firstUse = sharedSession?.prepared !== true;
@@ -3047,6 +3072,18 @@ async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item,
       conversationPathname: sharedSession?.conversationPathname || null,
       reuseCount: Number(sharedSession?.reused || 0),
     });
+  }
+
+  // This is the single gate for every forced Chat-lock turn. A fresh / URL can
+  // reopen in official Work because ChatGPT remembers its last mode. Switching is
+  // an explicit Chat control action and its outcome must be Picker A.
+  await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: true });
+  const afterModeSwitch = await verificationSurfaceStatus(tabId);
+  if (
+    sharedSession?.conversationPathname
+    && afterModeSwitch?.pathname !== sharedSession.conversationPathname
+  ) {
+    throw new Error(`Chat lock conversation changed during mode transition: ${afterModeSwitch?.pathname || 'unknown'}`);
   }
 
   const currentTab = await chrome.tabs.get(tabId).catch(() => null);
@@ -3330,6 +3367,9 @@ async function verifyAccountCatalogModels(
       }
 
       if (chatCompatibility) {
+        // Read-only post-turn check: if ChatGPT switched to Work while the forced
+        // request completed, the turn cannot count as Chat-lock evidence.
+        await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
         await pinSharedChatLockConversation(tabId, ownerTabId, sharedChatLockSession, item);
       }
 
@@ -3386,18 +3426,26 @@ async function verifyAccountCatalogModels(
         );
 
         const responseObserved = successfulConversationResponseEvidence(responseEvidence);
-        const explicitResponseCompatible = !rawResponseProtocolModel
-          || (expectedResponse
-            ? rawResponseProtocolModel === expectedResponse
-            : normalizeConcreteModelId(rawResponseProtocolModel) === item.model);
+        // A successful stream proves that *something* answered, not that the
+        // desired locked model answered. Both source and Chat must expose matching
+        // authoritative response model IDs before Chat compatibility is admitted.
+        const explicitResponseCompatible = Boolean(
+          rawResponseProtocolModel
+          && expectedResponse
+          && rawResponseProtocolModel === expectedResponse
+        );
         responseConfirmed = Boolean(responseObserved && explicitResponseCompatible);
         responseIssue = responseConfirmed
           ? null
-          : rawResponseProtocolModel && !explicitResponseCompatible
-            ? pickerAChatLock
-              ? 'picker_a_chat_lock_response_mismatch'
-              : 'chat_mode_response_differs_from_official_work'
-            : 'chat_mode_response_not_observed';
+          : !responseObserved
+            ? 'chat_mode_response_not_observed'
+            : !rawResponseProtocolModel
+              ? 'chat_mode_response_model_not_exposed'
+              : !expectedResponse
+                ? 'native_response_model_not_exposed'
+                : pickerAChatLock
+                  ? 'picker_a_chat_lock_response_mismatch'
+                  : 'chat_mode_response_differs_from_official_work';
         verified = Boolean(requestId && requestConfirmed && responseConfirmed);
         evidenceSource = rawResponseProtocolModel && responseConfirmed
           ? 'network_response_metadata'
@@ -3465,8 +3513,8 @@ async function verifyAccountCatalogModels(
         chatLockRequestConfirmed: chatCompatibility ? requestConfirmed : false,
         chatLockResponseConfirmed: chatCompatibility ? responseConfirmed : false,
         chatLockSupported: chatCompatibility ? verified : false,
-        chatVerificationBasis: chatCompatibility
-          ? (rawResponseProtocolModel ? 'forced_transport+response_model' : 'forced_transport+response_stream')
+        chatVerificationBasis: chatCompatibility && verified
+          ? 'forced_transport+response_model'
           : null,
         retryCount,
       };
