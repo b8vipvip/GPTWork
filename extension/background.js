@@ -2349,8 +2349,14 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         sourceTabId,
         discoveryTabId,
         reason: enter?.reason || 'official_work_control_not_ready_in_background',
+        alreadyActuated: enter?.actuated === true,
       });
-      enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
+      // Activating a hidden tab can complete the already-dispatched transition.
+      // Never click Work twice after the first trusted click was accepted:
+      // doing so toggles or disrupts the same SPA transition.
+      if (enter?.actuated !== true) {
+        enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
+      }
     }
 
     if (enter?.entered !== true && enter?.actuated !== true) {
