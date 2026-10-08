@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.200';
+const RUNTIME_CODE_VERSION = '0.5.201';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -3220,6 +3220,20 @@ async function loadAccountModelVerificationLedger() {
   }
 }
 
+// A navigation can destroy the content-script reply port immediately after the
+// shared Chat verification surface becomes ready. Only a pre-probe reply loss
+// may be retried: once the probe is dispatched, there may already be a live
+// model request, so retrying could send an unintended duplicate turn.
+function shouldRetrySharedChatLockReplyLoss({
+  chatCompatibility, sharedSessionPrepared, probeDispatchStarted, error, retryCount,
+}) {
+  return chatCompatibility === true
+    && sharedSessionPrepared === true
+    && probeDispatchStarted !== true
+    && Number(retryCount || 0) < 1
+    && /message channel closed|message port closed|receiving end does not exist/i.test(String(error || ''));
+}
+
 async function verifyAccountCatalogModels(
   tabId,
   state,
@@ -3462,6 +3476,7 @@ async function verifyAccountCatalogModels(
     });
 
     let abortForPendingTurn = false;
+    let probeDispatchStarted = false;
     try {
       if (chatCompatibility) {
         const fresh = await prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedChatLockSession);
@@ -3496,6 +3511,7 @@ async function verifyAccountCatalogModels(
         throw new Error('Response capture did not enable before discovery probe');
       }
 
+      probeDispatchStarted = true;
       const probe = await sendVerificationReasoningProbe(
         tabId,
         pickerAChatLock
@@ -3749,6 +3765,24 @@ async function verifyAccountCatalogModels(
         evidenceSource,
       });
     } catch (error) {
+      const retryKey = catalog.identity(item);
+      const retryCount = transientRetryCounts.get(retryKey) || 0;
+      if (shouldRetrySharedChatLockReplyLoss({
+        chatCompatibility,
+        sharedSessionPrepared: sharedChatLockSession.prepared === true,
+        probeDispatchStarted,
+        error: errorText(error),
+        retryCount,
+      })) {
+        transientRetryCounts.set(retryKey, retryCount + 1);
+        logRuntime('warn', 'discovery', 'chat_lock_transient_reply_recovered', {
+          tabId, model: item.model, retryCount: retryCount + 1,
+          reason: errorText(error),
+        });
+        verificationTransactions.delete(Number(tabId));
+        await sleep(650);
+        continue;
+      }
       progress.failed += 1;
       progress.results.push({
         model: item.model,
