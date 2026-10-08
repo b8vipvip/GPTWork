@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.195';
+const RUNTIME_CODE_VERSION = '0.5.196';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2527,14 +2527,19 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
             || responseEvidence?.model,
         );
         const nativeRequestConfirmed = Boolean(rawRequestModel);
-        const nativeResponseConfirmed = Boolean(rawResponseModel);
         const nativeResponseObserved = successfulConversationResponseEvidence(responseEvidence);
-        const nativeResponseCompatible = !rawResponseModel
-          || normalizeConcreteModelId(rawResponseModel) === model;
+        // A Work response stream can succeed without exposing any served-model
+        // identity. Keep stream completion and authoritative model-ID confirmation
+        // as separate facts. Never report "nativeResponseConfirmed" from the
+        // successful stream alone.
+        const nativeResponseCompatible = rawResponseModel
+          ? normalizeConcreteModelId(rawResponseModel) === model
+          : null;
+        const nativeResponseConfirmed = Boolean(rawResponseModel && nativeResponseCompatible);
         const nativeVerified = selection.selectionAttempted === true
           && nativeRequestConfirmed
           && nativeResponseObserved
-          && nativeResponseCompatible
+          && nativeResponseCompatible !== false
           && settled?.settled === true;
 
         const result = {
@@ -2546,7 +2551,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           nativeRequestModel: rawRequestModel,
           nativeResponseModel: rawResponseModel,
           nativeRequestConfirmed,
-          nativeResponseConfirmed: nativeVerified,
+          nativeResponseConfirmed,
           nativeResponseMetadataConfirmed: nativeResponseConfirmed,
           nativeResponseObserved,
           nativeResponseCompatible,
@@ -3412,10 +3417,16 @@ async function verifyAccountCatalogModels(
           && rewriteCapturedAtMs >= transactionStartedAtMs - 250
           && !liveState.lastRewrite?.error
         );
+        // The default Chat model can already equal the requested target.
+        // "verification_model_already_exact" is only a passthrough, not a
+        // causal demonstration that the lock changed which model was served.
+        const effectiveRewrite = liveState.lastRewrite?.changed === true
+          && normalizeRawProtocolModelId(liveState.lastRewrite?.transportModelBefore) !== expectedTransport;
         requestConfirmed = Boolean(
           authoritativeRewrite
           && expectedTransport
           && rawRequestModel === expectedTransport
+          && effectiveRewrite
         );
 
         const responseObserved = successfulConversationResponseEvidence(responseEvidence);
@@ -3428,17 +3439,21 @@ async function verifyAccountCatalogModels(
           && rawResponseProtocolModel === expectedResponse
         );
         responseConfirmed = Boolean(responseObserved && explicitResponseCompatible);
-        responseIssue = responseConfirmed
-          ? null
-          : !responseObserved
-            ? 'chat_mode_response_not_observed'
-            : !rawResponseProtocolModel
-              ? 'chat_mode_response_model_not_exposed'
-              : !expectedResponse
-                ? 'native_response_model_not_exposed'
-                : pickerAChatLock
-                  ? 'picker_a_chat_lock_response_mismatch'
-                  : 'chat_mode_response_differs_from_official_work';
+        responseIssue = !requestConfirmed
+          ? authoritativeRewrite && expectedTransport && rawRequestModel === expectedTransport && !effectiveRewrite
+            ? 'chat_lock_no_effective_rewrite'
+            : 'chat_lock_request_unconfirmed'
+          : responseConfirmed
+            ? null
+            : !responseObserved
+              ? 'chat_mode_response_not_observed'
+              : !rawResponseProtocolModel
+                ? 'chat_mode_response_model_not_exposed'
+                : !expectedResponse
+                  ? 'native_response_model_not_exposed'
+                  : pickerAChatLock
+                    ? 'picker_a_chat_lock_response_mismatch'
+                    : 'chat_mode_response_differs_from_official_work';
         verified = Boolean(requestId && requestConfirmed && responseConfirmed);
         evidenceSource = rawResponseProtocolModel && responseConfirmed
           ? 'network_response_metadata'
