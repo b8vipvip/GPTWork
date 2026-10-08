@@ -86,7 +86,9 @@ test('admin model management can edit, disable and delete uploaded models', () =
 
 test('v0.5.176 recomputes native and Chat-lock verification counts from per-account evidence', () => {
   assert.match(accountSystem, /response_confirmed=MAX\(shared_model_account_seen\.response_confirmed,excluded\.response_confirmed\)/);
-  assert.match(accountSystem, /chat_lock_response_confirmed=MAX\(shared_model_account_seen\.chat_lock_response_confirmed,excluded\.chat_lock_response_confirmed\)/);
+  assert.match(accountSystem, /chat_lock_response_confirmed=excluded\\.chat_lock_response_confirmed/);
+  assert.match(accountSystem, /chat_lock_request_confirmed=excluded\\.chat_lock_request_confirmed/);
+  assert.match(accountSystem, /clearUnprovenChatTransport\\.run\\(model\\)/);
   assert.match(accountSystem, /verified_count=\(SELECT COUNT\(\*\) FROM shared_model_account_seen s WHERE s\.model_id=\? AND s\.response_confirmed=1\)/);
   assert.match(accountSystem, /chat_lock_verified_count=\(SELECT COUNT\(\*\) FROM shared_model_account_seen s WHERE s\.model_id=\? AND s\.chat_lock_response_confirmed=1\)/);
   assert.match(accountSystem, /chatLockResponseConfirmed/);
