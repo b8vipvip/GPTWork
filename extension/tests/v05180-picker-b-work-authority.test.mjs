@@ -34,6 +34,10 @@ test('v0.5.180 recognizes current Work composer semantics without relying on tog
   assert.match(content, /companionControl/);
   assert.match(content, /打开桌面应用/);
   assert.match(content, /actuationReason: actuated \? 'work_control_actuated_unconfirmed' : null/);
-  assert.match(content, /reason: 'work_control_not_confirmed'/);
+  assert.match(content, /reason: 'work_control_actuated_unconfirmed'/);
+  assert.doesNotMatch(
+    content.slice(content.indexOf('async function enterVerificationWorkMode()'), content.indexOf('async function stopStaleGeneration()')),
+    /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/,
+  );
   assert.match(content, /surfaceEvidence: verificationWorkSurfaceEvidence\(\)/);
 });
