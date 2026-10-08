@@ -2218,7 +2218,7 @@ document.addEventListener('pointerdown', (event) => {
     const buttons = [...document.querySelectorAll('button,[role="button"]')]
       .filter((element) => visible(element) && choiceName.test(
         String(element.getAttribute('aria-label') || element.innerText || element.textContent || '')
-          .replace(/\\s+/g, ' ').trim()
+          .replace(/\s+/g, ' ').trim()
       ));
     if (buttons.length < 2) return null;
     // Each answer owns its own preference button. Accept only the scoped card
@@ -2227,8 +2227,8 @@ document.addEventListener('pointerdown', (event) => {
       let parent = button.parentElement;
       for (let depth = 0; parent && depth < 6; depth++, parent = parent.parentElement) {
         const label = String(parent.innerText || parent.textContent || '')
-          .replace(/\\s+/g, ' ').trim();
-        if (/^(?:回答\\s*1|Answer\\s*1)\\b/i.test(label) && !/(?:回答\\s*2|Answer\\s*2)/i.test(label)) return parent;
+          .replace(/\s+/g, ' ').trim();
+        if (/^(?:回答\s*1|Answer\s*1)\b/i.test(label) && !/(?:回答\s*2|Answer\s*2)/i.test(label)) return parent;
       }
       return null;
     };
