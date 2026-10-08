@@ -365,6 +365,14 @@ export function createAccountSystem({
   ensureColumn('shared_model_account_seen', 'chat_lock_stage_complete', 'chat_lock_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_stage_complete IN (0,1))');
   ensureColumn('shared_model_account_seen', 'last_chat_attempt_transport', 'last_chat_attempt_transport TEXT');
   ensureColumn('shared_model_account_seen', 'last_chat_attempt_response', 'last_chat_attempt_response TEXT');
+  // The recycle bin is a representation of the same per-account verification
+  // record, not an older reduced schema. A restored model must retain stage
+  // completion and the exact negative Chat-lock attempt, or discovery restarts
+  // already-finished work after restore.
+  ensureColumn('shared_model_account_seen_trash', 'native_stage_complete', 'native_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(native_stage_complete IN (0,1))');
+  ensureColumn('shared_model_account_seen_trash', 'chat_lock_stage_complete', 'chat_lock_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_stage_complete IN (0,1))');
+  ensureColumn('shared_model_account_seen_trash', 'last_chat_attempt_transport', 'last_chat_attempt_transport TEXT');
+  ensureColumn('shared_model_account_seen_trash', 'last_chat_attempt_response', 'last_chat_attempt_response TEXT');
   if (nativeStageCompletionAdded) {
     // One-time migration from historical native verification results. Only
     // account rows with both a confirmed request and completed response *plus*
@@ -871,8 +879,9 @@ export function createAccountSystem({
     const saveTrashEvidence = db.prepare(`INSERT OR REPLACE INTO shared_model_account_seen_trash(
         user_id,model_id,request_confirmed,response_confirmed,native_request_model,native_response_model,
         chat_transport_model,chat_response_model,chat_lock_request_confirmed,chat_lock_response_confirmed,
+        native_stage_complete,chat_lock_stage_complete,last_chat_attempt_transport,last_chat_attempt_response,
         first_seen_at,last_seen_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const deleteActive = db.prepare('DELETE FROM shared_model_catalog WHERE model_id=?');
     const deleted = [];
     const missing = [];
@@ -893,6 +902,7 @@ export function createAccountSystem({
           saveTrashEvidence.run(
             row.user_id,row.model_id,row.request_confirmed,row.response_confirmed,row.native_request_model,row.native_response_model,
             row.chat_transport_model,row.chat_response_model,row.chat_lock_request_confirmed,row.chat_lock_response_confirmed,
+            row.native_stage_complete,row.chat_lock_stage_complete,row.last_chat_attempt_transport,row.last_chat_attempt_response,
             row.first_seen_at,row.last_seen_at,
           );
         }
@@ -933,8 +943,9 @@ export function createAccountSystem({
     const restoreEvidence = db.prepare(`INSERT OR REPLACE INTO shared_model_account_seen(
         user_id,model_id,request_confirmed,response_confirmed,native_request_model,native_response_model,
         chat_transport_model,chat_response_model,chat_lock_request_confirmed,chat_lock_response_confirmed,
+        native_stage_complete,chat_lock_stage_complete,last_chat_attempt_transport,last_chat_attempt_response,
         first_seen_at,last_seen_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const recomputeCounts = db.prepare(`UPDATE shared_model_catalog SET
       verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.response_confirmed=1),
       chat_lock_verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.chat_lock_response_confirmed=1)
@@ -961,6 +972,7 @@ export function createAccountSystem({
           restoreEvidence.run(
             row.user_id,row.model_id,row.request_confirmed,row.response_confirmed,row.native_request_model,row.native_response_model,
             row.chat_transport_model,row.chat_response_model,row.chat_lock_request_confirmed,row.chat_lock_response_confirmed,
+            row.native_stage_complete,row.chat_lock_stage_complete,row.last_chat_attempt_transport,row.last_chat_attempt_response,
             row.first_seen_at,row.last_seen_at,
           );
         }
