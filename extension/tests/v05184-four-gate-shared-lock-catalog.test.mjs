@@ -71,7 +71,8 @@ test('v0.5.184 Work response stream pass counts as the native-response test with
   const body = background.slice(start, end);
   assert.match(body, /nativeResponseObserved = successfulConversationResponseEvidence\(responseEvidence\)/);
   assert.match(body, /nativeVerified = selection\.selectionAttempted === true/);
-  assert.match(body, /nativeResponseConfirmed: nativeVerified/);
+  assert.match(body, /nativeResponseConfirmed,\s*nativeResponseMetadataConfirmed: nativeResponseConfirmed/);
+  assert.doesNotMatch(body, /nativeResponseConfirmed: nativeVerified/);
   assert.match(body, /nativeResponseMetadataConfirmed: nativeResponseConfirmed/);
 });
 
