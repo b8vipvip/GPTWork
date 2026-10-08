@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.192';
+const RUNTIME_CODE_VERSION = '0.5.193';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2315,13 +2315,12 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
   const activeTabs = await chrome.tabs.query({ windowId: sourceTab.windowId, active: true }).catch(() => []);
   const restoreActiveTabId = Number(activeTabs?.[0]?.id) || null;
   let discoveryTab = null;
-  let activatedForReadiness = false;
   let discoveryTabId = null;
   try {
     discoveryTab = await chrome.tabs.create({
       windowId: sourceTab.windowId,
       url: 'https://chatgpt.com/',
-      active: false,
+      active: true,
     });
     discoveryTabId = Number(discoveryTab?.id);
     if (!Number.isInteger(discoveryTabId)) throw new Error('Temporary official Work discovery tab was not created');
@@ -2338,27 +2337,10 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     logRuntime('info', 'discovery', 'official_work_model_discovery_tab_created', {
       sourceTabId,
       discoveryTabId,
-      active: false,
+      active: true,
     });
 
     let enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 9000);
-    if (enter?.entered !== true) {
-      await chrome.tabs.update(discoveryTabId, { active: true }).catch(() => null);
-      activatedForReadiness = true;
-      logRuntime('info', 'discovery', 'official_work_model_discovery_activation_fallback', {
-        sourceTabId,
-        discoveryTabId,
-        reason: enter?.reason || 'official_work_control_not_ready_in_background',
-        alreadyActuated: enter?.actuated === true,
-      });
-      // Activating a hidden tab can complete the already-dispatched transition.
-      // Never click Work twice after the first trusted click was accepted:
-      // doing so toggles or disrupts the same SPA transition.
-      if (enter?.actuated !== true) {
-        enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 6500);
-      }
-    }
-
     if (enter?.entered !== true && enter?.actuated !== true) {
       logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
         sourceTabId,
@@ -2700,7 +2682,12 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
       await networkMonitor.disableResponseCapture(discoveryTabId).catch(() => {});
       await networkMonitor.detach(discoveryTabId).catch(() => {});
     }
-    if (activatedForReadiness && restoreActiveTabId && restoreActiveTabId !== discoveryTabId) {
+    // The Chat-lock stage resumes on this original shared Chat tab. Work owns the
+    // foreground only during native Picker B discovery and releases it here.
+    // Restore before closing Work so Chrome never chooses a random active tab.
+    if (Number.isInteger(sourceTabId)) {
+      await chrome.tabs.update(sourceTabId, { active: true }).catch(() => null);
+    } else if (restoreActiveTabId && restoreActiveTabId !== discoveryTabId) {
       await chrome.tabs.update(restoreActiveTabId, { active: true }).catch(() => null);
     }
     if (Number.isInteger(discoveryTabId)) await chrome.tabs.remove(discoveryTabId).catch(() => null);
@@ -2708,7 +2695,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
       logRuntime('info', 'discovery', 'official_work_model_discovery_tab_closed', {
         sourceTabId,
         discoveryTabId,
-        restoredActiveTabId: activatedForReadiness ? restoreActiveTabId : null,
+        restoredActiveTabId: sourceTabId,
       });
     }
   }

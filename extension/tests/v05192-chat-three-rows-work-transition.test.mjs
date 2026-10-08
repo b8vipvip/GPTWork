@@ -42,8 +42,9 @@ test('official Work mode entry cannot click Work twice while the first transitio
 test('Work discovery only bootstraps after its mode has already been proven', () => {
   const source = block(background, 'async function discoverOfficialWorkModels', 'async function publishAccountModels');
   assert.match(source, /scanForPickerB\(12000\)/);
-  assert.match(source, /if \(enter\?\.actuated !== true\) \{/);
-  assert.match(source, /alreadyActuated: enter\?\.actuated === true/);
+  assert.match(source, /url: 'https:\/\/chatgpt\.com\/',\s*active: true/);
+  assert.match(source, /await chrome\.tabs\.update\(sourceTabId, \{ active: true \}\)/);
+  assert.doesNotMatch(source, /official_work_model_discovery_activation_fallback/);
   assert.match(source, /if \(enter\?\.entered === true && discovered\?\.pickerMode !== 'B'\)/);
   assert.match(source, /official_work_model_discovery_unavailable/);
 });

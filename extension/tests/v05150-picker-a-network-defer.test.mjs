@@ -21,7 +21,7 @@ test('Picker A network defer remains available only when the requested model is 
 test('Picker B native discovery and trusted-pointer ownership stay strict', () => {
   assert.match(content, /function pointerStillOwnsPoint/);
   assert.match(content, /hit === element \|\| element\.contains\?\.\(hit\)/);
-  assert.match(content, /rejected_unstable_hit_test/);
+  assert.match(content, /rejected_unowned_hit_test/);
   assert.match(background, /Official Work Picker-B model selection was not activated/);
   assert.match(background, /selection\.selectionAttempted === true/);
   assert.match(background, /mode: 'observe-native'/);

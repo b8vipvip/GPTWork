@@ -1074,39 +1074,35 @@ document.addEventListener('pointerdown', (event) => {
         pointerTrace('invalidated_after_debugger_attach', { traceId, action, source, target: compactElementProbe(element) });
         return false;
       }
-      // chrome.debugger's infobar and Radix slider transitions can both move the picker.
-      // Wait for the exact owned element to stop moving AND own its center before dispatch.
-      // This is a readiness barrier, not a second selector/authority path.
-      let point = null;
-      let previousPoint = null;
-      let stableFrames = 0;
-      const ready = await waitUntil(() => {
-        if (!element.isConnected || !visible(element)) return null;
-        const nextPoint = pointerOwnedVisiblePoint(element);
-        if (!nextPoint) {
-          previousPoint = null;
-          stableFrames = 0;
-          return null;
-        }
-        const stable = previousPoint
-          && Math.abs(nextPoint.x - previousPoint.x) < 1
-          && Math.abs(nextPoint.y - previousPoint.y) < 1;
-        previousPoint = nextPoint;
-        stableFrames = stable ? stableFrames + 1 : 0;
-        if (stableFrames < 2) return null;
-        point = nextPoint;
-        return nextPoint;
-      }, 1800, 80);
-      if (!ready || !point) {
-        const fallbackPoint = element.isConnected && visible(element) ? pointerOwnedVisiblePoint(element) : null;
-        pointerTrace('rejected_unstable_hit_test', {
-          traceId, action, source, point: fallbackPoint,
+      // The single authoritative click precondition is a live viewport point
+      // actually owned by this exact DOM control. A hit on the button's SVG/path
+      // is valid because the button owns that descendant. The previous two-frame
+      // stability counter could timeout on background Work tabs even when the
+      // target still owned a valid point (v0.5.192 field trace, auto-probe-send).
+      // Do not add a second selector, keyboard decision, or synthetic click path.
+      const ready = await waitUntil(
+        () => element.isConnected && visible(element) ? pointerOwnedVisiblePoint(element) : null,
+        2400,
+        80,
+      );
+      // Re-read immediately before CDP dispatch: do not reuse stale coordinates
+      // if a menu animation or the debugger banner moved the element.
+      const point = ready ? pointerOwnedVisiblePoint(element) : null;
+      if (!point) {
+        pointerTrace('rejected_unowned_hit_test', {
+          traceId, action, source,
           target: compactElementProbe(element),
-          hit: compactElementProbe(fallbackPoint ? document.elementFromPoint(fallbackPoint.x, fallbackPoint.y) : null),
         });
         return false;
       }
       const hit = document.elementFromPoint(point.x, point.y);
+      if (!pointerStillOwnsPoint(element, point)) {
+        pointerTrace('rejected_unowned_hit_test', {
+          traceId, action, source, point,
+          target: compactElementProbe(element), hit: compactElementProbe(hit),
+        });
+        return false;
+      }
       await sendMessage({ type: 'GPTLOCK_TRUSTED_POINTER', action, x: point.x, y: point.y, traceId, source, target: compactElementProbe(element), hit: compactElementProbe(hit) });
       pointerTrace('dispatched', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(hit) });
       return true;
