@@ -25,6 +25,7 @@ test('recover exactly once after shared Chat navigation drops a pre-probe reply'
   assert.equal(fn(candidate), true);
   assert.equal(fn({...candidate, retryCount: 1}), false);
   assert.equal(fn({...candidate, error: 'The message port closed before a response was received.'}), true);
+  assert.equal(fn({...candidate, error: 'Could not establish connection. Receiving end does not exist.'}), true);
 });
 
 test('never retry after a probe may have been sent or the shared session is not ready', () => {
