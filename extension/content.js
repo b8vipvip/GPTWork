@@ -2072,7 +2072,7 @@ document.addEventListener('pointerdown', (event) => {
     const matches = [...document.querySelectorAll('button,[role="tab"],[role="button"]')]
       .filter((element) => {
         if (!visible(element)) return false;
-        const text = String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim();
+        const text = String(element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
         if (!VERIFICATION_CHAT_LABEL.test(text)) return false;
         const rect = element.getBoundingClientRect();
         return rect.top >= 0 && rect.top < 120 && rect.width > 24 && rect.width < 240;
