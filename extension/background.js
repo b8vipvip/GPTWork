@@ -2739,6 +2739,8 @@ async function publishAccountModels(accountCatalog, progress) {
       nativeResponseConfirmed: false,
       nativeStageComplete: false,
       chatLockStageComplete: false,
+      chatAttemptTransport: null,
+      chatAttemptResponseModel: null,
       chatTransportModel: null,
       chatResponseModel: null,
       chatLockRequestConfirmed: false,
@@ -2815,6 +2817,12 @@ async function publishAccountModels(accountCatalog, progress) {
 
     current.chatLockStageComplete = current.chatLockStageComplete
       || item?.chatLockStageComplete === true;
+    if (item?.chatLockStageComplete === true) {
+      current.chatAttemptTransport = normalizeRawProtocolModelId(item?.chatAttemptTransport || item?.rawRequestModel)
+        || current.chatAttemptTransport;
+      current.chatAttemptResponseModel = normalizeRawProtocolModelId(item?.chatAttemptResponseModel || item?.rawResponseModel)
+        || current.chatAttemptResponseModel;
+    }
     if (item?.chatLockRequestConfirmed === true || item?.chatLockResponseConfirmed === true || item?.chatLockSupported === true) {
       current.chatLockRequestConfirmed = current.chatLockRequestConfirmed || item?.chatLockRequestConfirmed === true;
       current.chatLockResponseConfirmed = current.chatLockResponseConfirmed || item?.chatLockResponseConfirmed === true;
@@ -3193,6 +3201,8 @@ async function loadAccountModelVerificationLedger() {
         nativeResponseModel: normalizeRawProtocolModelId(entry?.nativeResponseModel),
         chatTransportModel: normalizeRawProtocolModelId(entry?.chatTransportModel),
         chatResponseModel: normalizeRawProtocolModelId(entry?.chatResponseModel),
+        chatAttemptTransport: normalizeRawProtocolModelId(entry?.chatAttemptTransport),
+        chatAttemptResponseModel: normalizeRawProtocolModelId(entry?.chatAttemptResponseModel),
       };
     }
     logRuntime('info', 'discovery', 'account_model_verification_ledger_loaded', {
@@ -3371,11 +3381,11 @@ async function verifyAccountCatalogModels(
     const reusableLock = chatCompatibility
       && previous?.pickerMode === item.pickerMode
       && previous?.chatLockStageComplete === true
-      && previous?.chatTransportModel === normalizeRawProtocolModelId(item.transportModel)
-      && previous?.chatResponseModel;
+      && previous?.chatAttemptTransport === normalizeRawProtocolModelId(item.transportModel)
+      && previous?.chatAttemptResponseModel;
     if (reusableNative || reusableLock) {
-      const rawRequestModel = reusableLock ? previous.chatTransportModel : previous.nativeRequestModel;
-      const rawResponseModel = reusableLock ? previous.chatResponseModel : previous.nativeResponseModel;
+      const rawRequestModel = reusableLock ? previous.chatAttemptTransport : previous.nativeRequestModel;
+      const rawResponseModel = reusableLock ? previous.chatAttemptResponseModel : previous.nativeResponseModel;
       const verified = reusableLock
         ? previous.chatLockRequestConfirmed === true
           && previous.chatLockResponseConfirmed === true
@@ -3396,8 +3406,10 @@ async function verifyAccountCatalogModels(
         nativeResponseModel: previous.nativeResponseModel,
         nativeResponseConfirmed: Boolean(previous.nativeResponseModel && previous.pickerMode === 'A'),
         nativeStageComplete: previous.nativeStageComplete === true,
-        chatTransportModel: reusableLock ? rawRequestModel : null,
-        chatResponseModel: reusableLock ? rawResponseModel : null,
+        chatTransportModel: reusableLock && verified ? rawRequestModel : null,
+        chatResponseModel: reusableLock && verified ? rawResponseModel : null,
+        chatAttemptTransport: reusableLock ? rawRequestModel : null,
+        chatAttemptResponseModel: reusableLock ? rawResponseModel : null,
         chatLockRequestConfirmed: reusableLock ? previous.chatLockRequestConfirmed === true : false,
         chatLockResponseConfirmed: reusableLock ? previous.chatLockResponseConfirmed === true : false,
         chatLockSupported: reusableLock ? verified : false,
@@ -3693,6 +3705,8 @@ async function verifyAccountCatalogModels(
           && successfulConversationResponseEvidence(responseEvidence),
         chatTransportModel: chatCompatibility ? rawRequestModel : null,
         chatResponseModel: chatCompatibility ? rawResponseProtocolModel : null,
+        chatAttemptTransport: chatCompatibility ? rawRequestModel : null,
+        chatAttemptResponseModel: chatCompatibility ? rawResponseProtocolModel : null,
         chatLockRequestConfirmed: chatCompatibility ? requestConfirmed : false,
         chatLockResponseConfirmed: chatCompatibility ? responseConfirmed : false,
         chatLockSupported: chatCompatibility ? verified : false,
