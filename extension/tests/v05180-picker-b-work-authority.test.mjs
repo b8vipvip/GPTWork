@@ -12,8 +12,10 @@ test('v0.5.180 Work entry does not wait for chrome tab complete before messaging
   const body = background.slice(start, end);
   assert.match(body, /type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE'/);
   assert.doesNotMatch(body, /if \(tab\.status === 'complete'\) \{\s*const response = await sendTabMessage/);
-  assert.match(body, /ensureContentRuntime\(tabId, 'official_work_entry_wait'\)/);
-  assert.match(body, /last\.entered \|\| last\.actuated/);
+  assert.match(body, /waitForVerificationSurface\(tabId, timeoutMs, \{ requireVisible: true \}\)/);
+  assert.match(body, /pendingModeConfirmation: true/);
+  assert.equal((body.match(/type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE'/g) || []).length, 1);
+  assert.doesNotMatch(body, /last\.entered \|\| last\.actuated/);
 });
 
 test('v0.5.180 Picker-B topology is the authoritative Work-surface proof', () => {
