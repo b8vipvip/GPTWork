@@ -42,6 +42,7 @@
     'button[aria-label*="停止"]',
   ];
   const VERIFICATION_WORK_LABEL = /^(?:工作|work)$/i;
+  const VERIFICATION_CHAT_LABEL = /^(?:聊天|chat)$/i;
   const AUTO_PROBE_TEXT = 'GPTWork 发现模型测试：请只回复“发现完成”。';
 
   function visibleGeneratingControl() {
@@ -2065,6 +2066,87 @@ document.addEventListener('pointerdown', (event) => {
     return verificationWorkSurfaceEvidence().active;
   }
 
+  function verificationChatControl() {
+    // Only the explicit Chat mode switch is actionable. A generic new-chat URL,
+    // an unselected Work button, or a Chat-looking model label is never proof.
+    const matches = [...document.querySelectorAll('button,[role="tab"],[role="button"]')]
+      .filter((element) => {
+        if (!visible(element)) return false;
+        const text = String(element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim();
+        if (!VERIFICATION_CHAT_LABEL.test(text)) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.top >= 0 && rect.top < 120 && rect.width > 24 && rect.width < 240;
+      });
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  async function readVerificationOfficialMode() {
+    // openModernModelMenu is the *only* Picker A/B classifier. This method
+    // consumes that decision; no second DOM/URL/Work-label heuristic can approve
+    // a Chat-lock proof.
+    const picker = await openModernModelMenu();
+    try {
+      return {
+        pickerMode: picker.pickerMode || null,
+        modelCount: Array.isArray(picker.rows) ? picker.rows.length : 0,
+        pathname: location.pathname,
+      };
+    } finally {
+      await closeModelMenus(picker.trigger);
+    }
+  }
+
+  async function verifyOfficialChatMode({ switchIfNeeded = false } = {}) {
+    await waitForIdle();
+    const before = await readVerificationOfficialMode();
+    if (before.pickerMode === 'A') {
+      return { confirmed: true, switched: false, pickerMode: 'A', pathname: location.pathname };
+    }
+    if (!switchIfNeeded || before.pickerMode !== 'B') {
+      return {
+        confirmed: false,
+        switched: false,
+        pickerMode: before.pickerMode,
+        reason: before.pickerMode === 'B'
+          ? 'official_chat_mode_not_active'
+          : 'official_picker_mode_unresolved',
+        pathname: location.pathname,
+      };
+    }
+
+    const control = verificationChatControl();
+    if (!control) {
+      return {
+        confirmed: false,
+        switched: false,
+        pickerMode: before.pickerMode,
+        reason: 'official_chat_control_not_found',
+        pathname: location.pathname,
+      };
+    }
+
+    const activated = await trustedPointer(control, 'click', 'verification-official-chat-mode');
+    if (!activated) {
+      return {
+        confirmed: false,
+        switched: false,
+        pickerMode: before.pickerMode,
+        reason: 'official_chat_control_click_rejected',
+        pathname: location.pathname,
+      };
+    }
+
+    await waitUntil(() => findComposer(), 6000, 150);
+    const after = await readVerificationOfficialMode();
+    return {
+      confirmed: after.pickerMode === 'A',
+      switched: true,
+      pickerMode: after.pickerMode,
+      reason: after.pickerMode === 'A' ? null : 'official_chat_transition_unconfirmed',
+      pathname: location.pathname,
+    };
+  }
+
   async function enterVerificationWorkMode() {
     await waitForIdle();
     let actuated = false;
@@ -2482,6 +2564,13 @@ document.addEventListener('pointerdown', (event) => {
           ok: false,
           error: error instanceof Error ? error.message : String(error),
         }),
+      );
+      return true;
+    }
+    if (message?.type === 'GPTLOCK_VERIFY_OFFICIAL_CHAT_MODE') {
+      void verifyOfficialChatMode({ switchIfNeeded: message.switchIfNeeded === true }).then(
+        (result) => sendResponse({ ok: true, ...result }),
+        (error) => sendResponse({ ok: false, confirmed: false, reason: error instanceof Error ? error.message : String(error) }),
       );
       return true;
     }
