@@ -30,6 +30,7 @@ test('the sole trusted pointer authority accepts a button whose center hit is it
   let currentHit = null;
   const runtime = {
     window: { innerWidth: 1600, innerHeight: 900 },
+    location: { href: 'https://chatgpt.com/' },
     document: { elementFromPoint: () => currentHit },
     visible: (element) => element.isConnected,
     pointerTrace: () => {},
