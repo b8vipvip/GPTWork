@@ -3108,7 +3108,7 @@ function nativeChatPickerFamily(rawProtocolModel) {
   // model. A UI click alone is not proof of the chosen native model.
   const raw = normalizeRawProtocolModelId(rawProtocolModel);
   if (!raw) return null;
-  const direct = String(raw).match(/^gpt-(\\d+(?:\\.\\d+)*)(?:-thinking)?$/);
+  const direct = String(raw).match(/^gpt-(\d+(?:\.\d+)*)(?:-thinking)?$/);
   if (direct) return direct[1] === '5.6' ? 'gpt-5.6-sol' : `gpt-${direct[1]}`;
   return normalizeConcreteModelId(raw);
 }
