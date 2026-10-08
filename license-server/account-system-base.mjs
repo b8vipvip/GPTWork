@@ -640,15 +640,20 @@ export function createAccountSystem({
         response_confirmed=MAX(shared_model_account_seen.response_confirmed,excluded.response_confirmed),
         native_request_model=COALESCE(excluded.native_request_model,shared_model_account_seen.native_request_model),
         native_response_model=COALESCE(excluded.native_response_model,shared_model_account_seen.native_response_model),
-        chat_transport_model=COALESCE(excluded.chat_transport_model,shared_model_account_seen.chat_transport_model),
-        chat_response_model=COALESCE(excluded.chat_response_model,shared_model_account_seen.chat_response_model),
-        chat_lock_request_confirmed=MAX(shared_model_account_seen.chat_lock_request_confirmed,excluded.chat_lock_request_confirmed),
-        chat_lock_response_confirmed=MAX(shared_model_account_seen.chat_lock_response_confirmed,excluded.chat_lock_response_confirmed),
+        chat_transport_model=excluded.chat_transport_model,
+        chat_response_model=excluded.chat_response_model,
+        chat_lock_request_confirmed=excluded.chat_lock_request_confirmed,
+        chat_lock_response_confirmed=excluded.chat_lock_response_confirmed,
         last_seen_at=excluded.last_seen_at`);
     const recomputeCounts = db.prepare(`UPDATE shared_model_catalog SET
       verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.response_confirmed=1),
       chat_lock_verified_count=(SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=? AND s.chat_lock_response_confirmed=1)
       WHERE model_id=?`);
+
+    const clearUnprovenChatTransport = db.prepare(`UPDATE shared_model_catalog SET
+      chat_transport_model=NULL,
+      chat_response_model=NULL
+      WHERE model_id=? AND chat_lock_verified_count=0`);
 
     let accepted = 0;
     let verifiedAccepted = 0;
@@ -704,12 +709,13 @@ export function createAccountSystem({
           chatLockRequestConfirmed ? 1 : 0,chatLockResponseConfirmed ? 1 : 0,now,now,
         );
         recomputeCounts.run(model,model,model);
+        clearUnprovenChatTransport.run(model);
 
         if (
           (!seenBefore?.request_confirmed && requestConfirmed)
           || (!seenBefore?.response_confirmed && responseConfirmed)
-          || (!seenBefore?.chat_lock_request_confirmed && chatLockRequestConfirmed)
-          || (!seenBefore?.chat_lock_response_confirmed && chatLockResponseConfirmed)
+          || Boolean(seenBefore?.chat_lock_request_confirmed) !== chatLockRequestConfirmed
+          || Boolean(seenBefore?.chat_lock_response_confirmed) !== chatLockResponseConfirmed
         ) catalogChanged = true;
         accepted += 1;
         if (responseConfirmed) verifiedAccepted += 1;

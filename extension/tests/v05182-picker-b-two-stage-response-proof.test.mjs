@@ -33,7 +33,7 @@ test('v0.5.182 official Work success accepts exact request transport plus a succ
   assert.match(body, /filter\(\(item\) => item\.nativeVerified && item\.nativeRequestModel\)/);
 });
 
-test('v0.5.182 Chat forced-lock proof accepts a successful response stream without requiring resolved_model_slug', () => {
+test('v0.5.191 Chat forced-lock proof requires served-model identity even when a response stream exists', () => {
   const helperStart = background.indexOf('function successfulConversationResponseEvidence');
   const helperEnd = background.indexOf('async function discoverOfficialWorkModels', helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
@@ -47,17 +47,19 @@ test('v0.5.182 Chat forced-lock proof accepts a successful response stream witho
   const body = background.slice(verifyStart, verifyEnd);
   assert.match(body, /allowModelMissing: chatCompatibility/);
   assert.match(body, /responseObserved = successfulConversationResponseEvidence\(responseEvidence\)/);
-  assert.match(body, /explicitResponseCompatible = !rawResponseProtocolModel/);
+  assert.match(body, /const explicitResponseCompatible = Boolean\(/);
+  assert.match(body, /rawResponseProtocolModel === expectedResponse/);
+  assert.match(body, /chat_mode_response_model_not_exposed/);
   assert.match(body, /verified = Boolean\(requestId && requestConfirmed && responseConfirmed\)/);
   assert.match(body, /network_response_stream/);
   assert.match(body, /chatLockSupported: chatCompatibility \? verified : false/);
 });
 
-test('v0.5.182 still rejects an explicitly exposed response model that disagrees with the selected Picker-B model', () => {
+test('v0.5.191 rejects an explicitly exposed response model that disagrees with Work-native evidence', () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
   const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
   const body = background.slice(verifyStart, verifyEnd);
   assert.match(body, /rawResponseProtocolModel === expectedResponse/);
-  assert.match(body, /normalizeConcreteModelId\(rawResponseProtocolModel\) === item\.model/);
+  assert.match(body, /expectedResponse\s*&&\s*rawResponseProtocolModel === expectedResponse/);
   assert.match(body, /chat_mode_response_differs_from_official_work/);
 });
