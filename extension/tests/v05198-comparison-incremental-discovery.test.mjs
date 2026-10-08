@@ -75,6 +75,10 @@ test('ledger stage histories are merged independently and negative completed loc
   assert.match(server,/last_chat_attempt_transport=CASE WHEN excluded\.chat_lock_stage_complete=1/);
   assert.match(server,/chatTransportModel = chatLockResponseConfirmed/);
   assert.match(server,/last_chat_attempt_response/);
+  assert.match(server,/if \(nativeStageCompletionAdded\)/);
+  assert.match(server,/request_confirmed=1 AND response_confirmed=1 AND native_request_model LIKE 'gpt-%'/);
+  assert.match(server,/c\.picker_mode='A' AND shared_model_account_seen\.native_response_model LIKE 'gpt-%'/);
+  assert.match(server,/OR c\.picker_mode='B'/);
 });
 
 test('loading the account stage ledger never seeds models absent from the live picker',async()=>{
