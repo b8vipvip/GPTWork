@@ -27,8 +27,9 @@ test('v0.5.182 official Work success accepts exact request transport plus a succ
   assert.match(body, /official_work_model_native_started/);
   assert.match(body, /allowModelMissing: true/);
   assert.match(body, /nativeResponseObserved = successfulConversationResponseEvidence\(responseEvidence\)/);
-  assert.match(body, /nativeResponseCompatible = !rawResponseModel/);
-  assert.match(body, /nativeRequestConfirmed\s*&&\s*nativeResponseObserved\s*&&\s*nativeResponseCompatible/);
+  assert.match(body, /nativeResponseCompatible = rawResponseModel/);
+  assert.match(body, /nativeResponseConfirmed = Boolean\(rawResponseModel && nativeResponseCompatible\)/);
+  assert.match(body, /nativeRequestConfirmed\s*&&\s*nativeResponseObserved\s*&&\s*nativeResponseCompatible !== false/);
   assert.match(body, /nativeVerificationBasis: nativeResponseConfirmed/);
   assert.match(body, /filter\(\(item\) => item\.nativeVerified && item\.nativeRequestModel\)/);
 });
