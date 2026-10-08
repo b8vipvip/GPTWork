@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.193';
+const RUNTIME_CODE_VERSION = '0.5.194';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2182,73 +2182,53 @@ async function closeVerificationExecutionTab(session) {
 }
 
 async function enterNativeWorkOnDiscoveryTab(tabId, timeoutMs) {
-  const deadline = Date.now() + Math.max(1000, Number(timeoutMs || 0));
-  let last = { entered: false, actuated: false, reason: 'content_runtime_unavailable' };
-  let recoveryAttempted = false;
-  let loadingRecoveryAttempts = 0;
-  let lastLoadingRecoveryAt = 0;
-  do {
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (!tab) return { ...last, reason: 'discovery_tab_closed' };
-
-    // As with the verification surface, ChatGPT's SPA can accept content-runtime
-    // messages before chrome.tabs reports status="complete". Ask the page directly.
-    const response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' }).catch((error) => ({
-      ok: false,
-      attempted: false,
+  // One invocation owns exactly one official Work transition. A ChatGPT SPA
+  // navigation can destroy the content-script reply port AFTER CDP has already
+  // clicked Work. Retrying the message on a missing acknowledgement can click
+  // Work twice and send the page back to Chat (observed in v0.5.193).
+  //
+  // Reuse the existing page-readiness owner before actuation. After dispatch,
+  // only the existing Picker B catalog classifier may confirm Work; uncertainty
+  // is not permission for another mode click.
+  const surface = await waitForVerificationSurface(tabId, timeoutMs, { requireVisible: true });
+  if (surface?.ready !== true) {
+    return {
+      entered: false,
       actuated: false,
-      reason: errorText(error),
-    }));
-    last = {
-      entered: response?.ok === true && (response?.confirmed === true || response?.alreadySelected === true),
-      reason: response?.reason || null,
-      attempted: response?.attempted === true,
-      actuated: response?.actuated === true,
-      alreadySelected: response?.alreadySelected === true,
-      confirmed: response?.confirmed === true,
-      surfaceEvidence: response?.surfaceEvidence || null,
+      pendingModeConfirmation: false,
+      reason: surface?.reason || 'official_work_composer_not_ready',
     };
-    if (last.entered || last.actuated) return last;
+  }
 
-    if (
-      !recoveryAttempted
-      && tab.status === 'complete'
-      && isChatGptUrl(tab.url || '')
-      && /receiving end does not exist|content_runtime_unavailable/i.test(String(last.reason || ''))
-    ) {
-      recoveryAttempted = true;
-      await ensureContentRuntime(tabId, 'official_work_entry_wait').catch(() => null);
-    } else if (
-      tab.status === 'loading'
-      && isChatGptUrl(tab.url || '')
-      && /receiving end does not exist|content_runtime_unavailable/i.test(String(last.reason || ''))
-      && loadingRecoveryAttempts < 3
-      && Date.now() - lastLoadingRecoveryAt >= 700
-    ) {
-      loadingRecoveryAttempts += 1;
-      lastLoadingRecoveryAt = Date.now();
-      const recovery = await ensureContentRuntimeDuringLoad(
-        tabId,
-        `official_work_entry_loading_${loadingRecoveryAttempts}`,
-      ).catch((error) => ({
-        ready: false,
-        injected: false,
-        reason: 'loading_recovery_failed',
-        error: errorText(error),
-      }));
-      logRuntime(recovery?.ready ? 'info' : 'warn', 'discovery', 'official_work_loading_recovery', {
-        tabId,
-        attempt: loadingRecoveryAttempts,
-        tabStatus: tab.status ?? null,
-        ready: recovery?.ready === true,
-        injected: recovery?.injected === true,
-        reason: recovery?.reason || null,
-        error: recovery?.error || null,
-      });
-    }
-    await sleep(300);
-  } while (Date.now() < deadline);
-  return { ...last, entered: false, reason: last?.reason || 'native_work_surface_not_ready' };
+  let response = null;
+  try {
+    response = await sendTabMessage(tabId, { type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE' });
+  } catch (error) {
+    // The message reply can disappear when the *first* Work click causes a
+    // document navigation. Do not send the command again. The caller scans
+    // Picker B and fails closed if the transition did not actually happen.
+    logRuntime('warn', 'discovery', 'official_work_transition_reply_lost', {
+      tabId,
+      reason: errorText(error),
+    });
+    return {
+      entered: false,
+      actuated: false,
+      pendingModeConfirmation: true,
+      reason: 'work_transition_reply_lost',
+    };
+  }
+
+  return {
+    entered: response?.ok === true && (response?.confirmed === true || response?.alreadySelected === true),
+    actuated: response?.actuated === true,
+    attempted: response?.attempted === true,
+    alreadySelected: response?.alreadySelected === true,
+    confirmed: response?.confirmed === true,
+    pendingModeConfirmation: response?.actuated === true && response?.confirmed !== true,
+    reason: response?.reason || null,
+    surfaceEvidence: response?.surfaceEvidence || null,
+  };
 }
 
 function successfulConversationResponseEvidence(evidence) {
@@ -2341,7 +2321,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     });
 
     let enter = await enterNativeWorkOnDiscoveryTab(discoveryTabId, 9000);
-    if (enter?.entered !== true && enter?.actuated !== true) {
+    if (enter?.entered !== true && enter?.actuated !== true && enter?.pendingModeConfirmation !== true) {
       logRuntime('warn', 'discovery', 'official_work_model_discovery_unavailable', {
         sourceTabId,
         discoveryTabId,

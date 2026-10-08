@@ -31,13 +31,12 @@ test('verification surface retries targeted injection before chrome tab completi
   assert.match(body, /ensureContentRuntime\(tabId, 'verification_surface_wait'\)/);
 });
 
-test('official Work entry uses the same loading-safe recovery path', () => {
+test('official Work entry delegates loading recovery to the single existing surface owner', () => {
   const start = background.indexOf('async function enterNativeWorkOnDiscoveryTab');
   const end = background.indexOf('function successfulConversationResponseEvidence', start);
   const body = background.slice(start, end);
-  assert.match(body, /tab\.status === 'loading'/);
-  assert.match(body, /ensureContentRuntimeDuringLoad/);
-  assert.match(body, /official_work_entry_loading_/);
-  assert.match(body, /official_work_loading_recovery/);
-  assert.match(body, /ensureContentRuntime\(tabId, 'official_work_entry_wait'\)/);
+  assert.match(body, /waitForVerificationSurface\(tabId, timeoutMs, \{ requireVisible: true \}\)/);
+  assert.match(body, /if \(surface\?\.ready !== true\)/);
+  assert.equal((body.match(/type: 'GPTLOCK_VERIFY_ENTER_WORK_MODE'/g) || []).length, 1);
+  assert.doesNotMatch(body, /ensureContentRuntimeDuringLoad/);
 });

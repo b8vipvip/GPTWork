@@ -21,8 +21,9 @@ test('only the content runtime knows whether the official Picker A/Chat mode is 
   const mode = block(content, 'function verificationChatControl()', 'async function enterVerificationWorkMode()');
   assert.match(content, /const VERIFICATION_CHAT_LABEL =/);
   assert.match(mode, /const picker = await openModernModelMenu\(\)/);
-  assert.match(mode, /pickerMode: picker\.pickerMode \|\| null/);
-  assert.match(mode, /await closeModelMenus\(picker\.trigger\)/);
+  assert.match(mode, /pickerMode: picker\?\.pickerMode \|\| null/);
+  assert.match(mode, /await closeModelMenus\(picker\?\.trigger\)/);
+  assert.match(mode, /const deadline = Date\.now\(\) \+ 7500/);
   assert.match(mode, /if \(before\.pickerMode === 'A'\)/);
   assert.match(mode, /if \(!switchIfNeeded \|\| before\.pickerMode !== 'B'\)/);
   assert.match(mode, /const control = verificationChatControl\(\)/);
