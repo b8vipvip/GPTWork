@@ -2072,19 +2072,27 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   async function readVerificationOfficialMode() {
-    // openModernModelMenu is the *only* Picker A/B classifier. This method
-    // consumes that decision; no second DOM/URL/Work-label heuristic can approve
-    // a Chat-lock proof.
-    const picker = await openModernModelMenu();
-    try {
-      return {
-        pickerMode: picker.pickerMode || null,
-        modelCount: Array.isArray(picker.rows) ? picker.rows.length : 0,
-        pathname: location.pathname,
-      };
-    } finally {
-      await closeModelMenus(picker.trigger);
-    }
+    // The same owned picker classifier is the *only* mode authority. A null
+    // response during a Radix menu transition means "not settled yet", not
+    // "not in Chat". Keep polling this same authority; no URL/toolbar/label
+    // heuristic may make the decision.
+    const deadline = Date.now() + 7500;
+    let last = { pickerMode: null, modelCount: 0, pathname: location.pathname };
+    do {
+      const picker = await openModernModelMenu();
+      try {
+        last = {
+          pickerMode: picker?.pickerMode || null,
+          modelCount: Array.isArray(picker?.rows) ? picker.rows.length : 0,
+          pathname: location.pathname,
+        };
+      } finally {
+        await closeModelMenus(picker?.trigger);
+      }
+      if (last.pickerMode === 'A' || last.pickerMode === 'B') return last;
+      await new Promise((resolve) => window.setTimeout(resolve, 260));
+    } while (Date.now() < deadline);
+    return last;
   }
 
   async function verifyOfficialChatMode({ switchIfNeeded = false } = {}) {
