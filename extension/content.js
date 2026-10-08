@@ -1466,14 +1466,33 @@ document.addEventListener('pointerdown', (event) => {
     // its two inline rows (GPT-5.6 Sol + GPT-5.5) to picker B merely because the
     // advanced view was mounted. Picker B is ONLY the catalog opened by activating
     // the unique accessible "选择模型 / Select model" opener.
-    if (alreadyVisibleRows.length && !initialOpener) {
-      pickerTopologyProbe('picker-mode-a-advanced-inline-list', {
+    // A Work catalog that has *already opened* in this same owned picker is
+    // authoritative. Its current model rows include B-exclusive identities.
+    // Previously an old Select-model opener could remain mounted underneath the
+    // new list: clicking that occluded stale opener failed three hit tests and
+    // incorrectly aborted GPT-6.1 Sol selection (v0.5.198 10:57:50-10:58:01Z).
+    // The ONE owned semantic row classifier decides A vs B. Never click the
+    // second-layer opener again when that exact catalog is already visible.
+    const alreadyVisibleModels = alreadyVisibleRows.map((row) => rowModelDescriptor(row).model);
+    const alreadyVisibleWorkCatalog = alreadyVisibleRows.length >= 2
+      && alreadyVisibleModels.some((model) => model && !DIRECT_CHAT_MODEL_IDS.has(model));
+    if (alreadyVisibleWorkCatalog || (alreadyVisibleRows.length && !initialOpener)) {
+      const resolvedMode = alreadyVisibleWorkCatalog ? 'B' : 'A';
+      pickerTopologyProbe(alreadyVisibleWorkCatalog
+        ? 'picker-mode-b-already-open-owned-catalog'
+        : 'picker-mode-a-advanced-inline-list', {
         pageContext,
-        pickerMode: 'A',
+        pickerMode: resolvedMode,
         submenu: compactElementProbe(alreadyVisibleAdvanced),
         modelRows: alreadyVisibleRows.map((row) => ({ element: compactElementProbe(row), descriptor: rowModelDescriptor(row) })),
       });
-      return { trigger, picker, opener: null, submenu: alreadyVisibleAdvanced, rows: alreadyVisibleRows, pageContext, pickerMode: 'A' };
+      return {
+        trigger, picker, opener: null,
+        submenu: alreadyVisibleAdvanced,
+        rows: alreadyVisibleRows,
+        pageContext,
+        pickerMode: resolvedMode,
+      };
     }
 
     if (!initialOpener) {
