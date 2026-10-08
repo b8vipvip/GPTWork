@@ -357,10 +357,32 @@ export function createAccountSystem({
   // shared-model eligibility flag, a completed unsuccessful Chat-lock test is
   // still history that does not need to be blindly repeated. Old rows default
   // to 0: never invent completion for tests run by earlier protocol versions.
-  ensureColumn('shared_model_account_seen', 'native_stage_complete', 'native_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(native_stage_complete IN (0,1))');
+  const nativeStageCompletionAdded = ensureColumn(
+    'shared_model_account_seen',
+    'native_stage_complete',
+    'native_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(native_stage_complete IN (0,1))',
+  );
   ensureColumn('shared_model_account_seen', 'chat_lock_stage_complete', 'chat_lock_stage_complete INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_stage_complete IN (0,1))');
   ensureColumn('shared_model_account_seen', 'last_chat_attempt_transport', 'last_chat_attempt_transport TEXT');
   ensureColumn('shared_model_account_seen', 'last_chat_attempt_response', 'last_chat_attempt_response TEXT');
+  if (nativeStageCompletionAdded) {
+    // One-time migration from historical native verification results. Only
+    // account rows with both a confirmed request and completed response *plus*
+    // an actual native transport ID are safe to reuse. Picker A additionally
+    // requires an exposed served-model ID; Picker B's existing native-stage
+    // contract accepts a completed response stream without one. Do not infer
+    // any past negative Chat-lock completion (its attempted protocol was not
+    // stored before v0.5.198).
+    db.prepare(`UPDATE shared_model_account_seen SET native_stage_complete=1
+      WHERE request_confirmed=1 AND response_confirmed=1 AND native_request_model LIKE 'gpt-%'
+        AND EXISTS (
+          SELECT 1 FROM shared_model_catalog c WHERE c.model_id=shared_model_account_seen.model_id
+            AND (
+              (c.picker_mode='A' AND shared_model_account_seen.native_response_model LIKE 'gpt-%')
+              OR c.picker_mode='B'
+            )
+        )`).run();
+  }
   db.prepare("UPDATE users SET user_level='normal' WHERE user_level NOT IN ('normal','deep','heavy') OR user_level IS NULL").run();
   db.prepare('UPDATE shared_model_catalog SET discovered_count=verified_count WHERE discovered_count=0 AND verified_count>0').run();
   db.prepare('INSERT OR IGNORE INTO shared_model_catalog_state(id,generation,updated_at) VALUES(1,0,?)').run(nowIso());
