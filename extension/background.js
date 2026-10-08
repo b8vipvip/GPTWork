@@ -48,7 +48,7 @@ import {
   shouldRetryTransientResponse,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.194';
+const RUNTIME_CODE_VERSION = '0.5.195';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -3101,6 +3101,18 @@ async function pinSharedChatLockConversation(tabId, ownerTabId, sharedSession, i
   return pathname;
 }
 
+function nativeChatPickerFamily(rawProtocolModel) {
+  // The Chat selector displays business labels, while native Chat transport and
+  // served-model IDs may add -thinking. This single conversion is used for both
+  // request and response and never turns a Work -wm variant into a direct Chat
+  // model. A UI click alone is not proof of the chosen native model.
+  const raw = normalizeRawProtocolModelId(rawProtocolModel);
+  if (!raw) return null;
+  const direct = String(raw).match(/^gpt-(\d+(?:\.\d+)*)(?:-thinking)?$/);
+  if (direct) return direct[1] === '5.6' ? 'gpt-5.6-sol' : `gpt-${direct[1]}`;
+  return normalizeConcreteModelId(raw);
+}
+
 async function verifyAccountCatalogModels(
   tabId,
   state,
@@ -3436,15 +3448,27 @@ async function verifyAccountCatalogModels(
               ? 'fetch_forwarded_request_metadata'
               : null;
       } else {
-        requestConfirmed = Boolean(selection.selectionAttempted && rawRequestModel);
-        responseConfirmed = Boolean(rawResponseProtocolModel);
-        verified = Boolean(
-          requestId
-          && selection.selectionAttempted
-          && requestConfirmed
-          && responseConfirmed
+        // Native Picker A must prove the selected business model through both the
+        // real outgoing request and the served response. This also makes a
+        // reasoning-only "High" label harmless: it cannot promote GPT-6 or Sol
+        // if the transport/response actually belongs to the other model.
+        requestConfirmed = Boolean(
+          selection.selectionAttempted
+          && rawRequestModel
+          && nativeChatPickerFamily(rawRequestModel) === item.model
         );
-        responseIssue = responseConfirmed ? null : 'native_response_model_missing';
+        responseConfirmed = Boolean(
+          rawResponseProtocolModel
+          && nativeChatPickerFamily(rawResponseProtocolModel) === item.model
+        );
+        verified = Boolean(requestId && requestConfirmed && responseConfirmed);
+        responseIssue = !rawResponseProtocolModel
+          ? 'native_response_model_missing'
+          : !responseConfirmed
+            ? 'native_response_model_mismatch'
+            : !requestConfirmed
+              ? 'native_request_model_mismatch'
+              : null;
         evidenceSource = responseConfirmed
           ? 'network_response_metadata'
           : requestConfirmed
