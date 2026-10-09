@@ -243,6 +243,41 @@ export function shouldRetryTransientResponse(result = {}, { maxRetries = 1 } = {
     && (!result.responseModel || responseIssue === 'response_body_read_failed');
 }
 
+
+/**
+ * Work picker activation is not request evidence: the exact intercepted request
+ * for the captured response must carry the intended official Work model ID.
+ * A previous bootstrap/selection request in the same tab is never sufficient.
+ * This does not claim the served model when the stream hides its identity.
+ */
+export function verifyOfficialWorkRequestIdentity({
+  expectedModel = null,
+  rawRequestModel = null,
+  responseRequestId = null,
+  requestRequestId = null,
+  rewriteRequestId = null,
+  normalizeModel = (value) => value || null,
+} = {}) {
+  const requested = normalizeModel(rawRequestModel);
+  const expected = normalizeModel(expectedModel);
+  const linked = Boolean(
+    responseRequestId && (
+      requestRequestId === responseRequestId || rewriteRequestId === responseRequestId
+    )
+  );
+  const confirmed = Boolean(linked && requested && expected && requested === expected);
+  const issue = !responseRequestId
+    ? 'work_native_response_request_id_missing'
+    : !linked
+      ? 'work_native_request_id_mismatch'
+      : !requested
+        ? 'work_native_request_model_missing'
+        : requested !== expected
+          ? 'work_native_request_model_mismatch'
+          : null;
+  return { confirmed, issue };
+}
+
 export function publishableVerificationResults(results = [], normalizeModel = (value) => value || null) {
   return (Array.isArray(results) ? results : []).filter((item) => (
     item?.verified === true
