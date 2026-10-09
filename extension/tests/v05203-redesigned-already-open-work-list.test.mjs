@@ -22,7 +22,7 @@ const make = (models, interactive=models, state='open') => {
   };
   vm.createContext(scope);
   const classify=vm.runInContext(body+'\nalreadyOpenOwnedWorkCatalog',scope);
-  return classify(picker).map(row=>row.model);
+  return Array.from(classify(picker),row=>row.model);
 };
 test('the eight-row Work directory is retained when already interactive',()=>{
   const work=['gpt-6.1-sol','gpt-6-astra','gpt-6-sol','gpt-6-luna','gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','gpt-5.5'];
