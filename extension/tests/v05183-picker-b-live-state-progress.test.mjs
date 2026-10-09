@@ -23,9 +23,14 @@ test('v0.5.183 Work verification reads the live state after SPA conversation nav
   assert.ok(start >= 0 && end > start);
   const body = background.slice(start, end);
   assert.match(body, /const liveState = ensureTabState\(discoveryTabId\)/);
-  assert.match(body, /liveState\.lastRewrite\?\.transportModelAfter/);
-  assert.match(body, /liveState\.lastRequest\?\.rawModel/);
-  assert.match(body, /nativeRequestConfirmed = Boolean\(rawRequestModel\)/);
+  // A live state from the SPA destination is required, but a previous probe's
+  // transport is not evidence for this response. Require its exact CDP ID and model.
+  assert.match(body, /liveState\.lastRewrite\?\.requestId === evidenceRequestId/);
+  assert.match(body, /liveState\.lastRequest\?\.requestId === evidenceRequestId/);
+  assert.match(body, /matchingRewrite\?\.transportModelAfter/);
+  assert.match(body, /matchingRequest\?\.rawModel/);
+  assert.match(body, /expectedModel: model/);
+  assert.match(body, /nativeRequestConfirmed = workRequestEvidence\.confirmed/);
 });
 
 test('v0.5.183 mirrors the running discovery state onto the active official Work tab', () => {
