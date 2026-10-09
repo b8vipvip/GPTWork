@@ -278,6 +278,56 @@ export function verifyOfficialWorkRequestIdentity({
   return { confirmed, issue };
 }
 
+
+/**
+ * Server history is an optimization, not an authority for verification status.
+ * Reuse Work-native stages ONLY when the server retained an authoritative
+ * served-model identity matching the exact intended model. A successful
+ * response stream with no raw served-model ID must be re-probed after upgrades.
+ */
+export function reusableConfirmedWorkNativeStage(prior, model, normalizeModel = (value) => value || null) {
+  const target = normalizeModel(model);
+  return Boolean(
+    target
+    && prior?.pickerMode === 'B'
+    && prior?.nativeStageComplete === true
+    && prior?.requestConfirmed === true
+    && prior?.responseConfirmed === true
+    && prior?.nativeResponseConfirmed === true
+    && prior?.nativeRequestModel
+    && normalizeModel(prior.nativeRequestModel) === target
+    && prior?.nativeResponseModel
+    && normalizeModel(prior.nativeResponseModel) === target
+  );
+}
+
+/**
+ * A definitive negative Chat lock is useful history, not a perpetual skip.
+ * Future auto-discovery runs must perform a new, causally observed request.
+ * Even historical successes may be reused only with both explicit positive
+ * verdicts, the expected raw transport and served response identity.
+ */
+export function reusableConfirmedChatLockStage(
+  prior,
+  { pickerMode = null, transportModel = null, expectedResponseModel = null } = {},
+  normalizeRawModel = (value) => value || null,
+) {
+  const transport = normalizeRawModel(transportModel);
+  const expected = normalizeRawModel(expectedResponseModel);
+  return Boolean(
+    ['A', 'B'].includes(pickerMode)
+    && prior?.pickerMode === pickerMode
+    && prior?.chatLockStageComplete === true
+    && prior?.chatLockSupported === true
+    && prior?.chatLockRequestConfirmed === true
+    && prior?.chatLockResponseConfirmed === true
+    && transport
+    && expected
+    && normalizeRawModel(prior?.chatAttemptTransport) === transport
+    && normalizeRawModel(prior?.chatAttemptResponseModel) === expected
+  );
+}
+
 export function publishableVerificationResults(results = [], normalizeModel = (value) => value || null) {
   return (Array.isArray(results) ? results : []).filter((item) => (
     item?.verified === true
