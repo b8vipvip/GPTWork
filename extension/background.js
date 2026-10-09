@@ -46,9 +46,10 @@ import {
   summarizeVerificationOutcome,
   createModelVerificationHistoryRecord,
   shouldRetryTransientResponse,
+  verifyOfficialWorkRequestIdentity,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.203';
+const RUNTIME_CODE_VERSION = '0.5.204';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2566,18 +2567,37 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           }).catch(() => null),
         ]);
         const liveState = ensureTabState(discoveryTabId);
+        // Only bind the outgoing model to the SAME CDP request whose response
+        // was captured. A prior Work bootstrap or menu transition can leave a
+        // valid but unrelated lastRewrite on this tab.
+        const evidenceRequestId = networkEvidence?.requestId || null;
+        const matchingRewrite = evidenceRequestId
+          && liveState.lastRewrite?.requestId === evidenceRequestId
+          ? liveState.lastRewrite : null;
+        const matchingRequest = evidenceRequestId
+          && liveState.lastRequest?.requestId === evidenceRequestId
+          ? liveState.lastRequest : null;
         const rawRequestModel = normalizeRawProtocolModelId(
-          liveState.lastRewrite?.transportModelAfter
-            || liveState.lastRewrite?.transportModelBefore
-            || liveState.lastRequest?.rawModel,
+          matchingRewrite?.transportModelAfter
+            || matchingRewrite?.transportModelBefore
+            || matchingRequest?.rawModel,
         );
         const responseEvidence = networkEvidence?.evidence
-          || (liveState.lastResponseEvidence?.requestId === networkEvidence?.requestId ? liveState.lastResponseEvidence : null);
+          || (evidenceRequestId && liveState.lastResponseEvidence?.requestId === evidenceRequestId
+            ? liveState.lastResponseEvidence : null);
         const rawResponseModel = normalizeRawProtocolModelId(
           responseEvidence?.rawModel
             || responseEvidence?.model,
         );
-        const nativeRequestConfirmed = Boolean(rawRequestModel);
+        const workRequestEvidence = verifyOfficialWorkRequestIdentity({
+          expectedModel: model,
+          rawRequestModel,
+          responseRequestId: evidenceRequestId,
+          requestRequestId: matchingRequest?.requestId || null,
+          rewriteRequestId: matchingRewrite?.requestId || null,
+          normalizeModel: normalizeConcreteModelId,
+        });
+        const nativeRequestConfirmed = workRequestEvidence.confirmed;
         const nativeResponseObserved = successfulConversationResponseEvidence(responseEvidence);
         // A Work response stream can succeed without exposing any served-model
         // identity. Keep stream completion and authoritative model-ID confirmation
@@ -2602,6 +2622,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           nativeRequestModel: rawRequestModel,
           nativeResponseModel: rawResponseModel,
           nativeRequestConfirmed,
+          nativeRequestIssue: workRequestEvidence.issue,
           nativeResponseConfirmed,
           nativeResponseMetadataConfirmed: nativeResponseConfirmed,
           nativeResponseObserved,
