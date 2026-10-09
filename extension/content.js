@@ -1324,6 +1324,23 @@ document.addEventListener('pointerdown', (event) => {
     return /^\/c\/[^/]+/.test(location.pathname) ? 'existing_chat' : 'new_chat';
   }
 
+  // The redesigned slider's Work catalog can remain mounted in the SAME owned
+  // Radix picker after its Select-model transition. Only the current trigger's
+  // open popup and two interactive rows including a Work-exclusive identity
+  // establish Picker B. Never use a global popup or the stale occluded ViewToggle.
+  function alreadyOpenOwnedWorkCatalog(picker) {
+    if (!picker || !visible(picker) || picker?.getAttribute?.('data-state') === 'closed') return [];
+    const rows = distinctModelRows(picker);
+    if (rows.length < 2) return [];
+    const interactiveModels = rows.filter(interactionVisible)
+      .map((row) => rowModelDescriptor(row).model).filter(Boolean);
+    if (
+      interactiveModels.length < 2
+      || !interactiveModels.some((model) => !DIRECT_CHAT_MODEL_IDS.has(model))
+    ) return [];
+    return rows;
+  }
+
   async function openModernModelMenu() {
     await dismissWorkContinuationPrompt();
     const pageContext = verificationPageContext();
@@ -1340,6 +1357,26 @@ document.addEventListener('pointerdown', (event) => {
       pickerTopologyProbe('after-trigger-click', { ownedPicker: compactElementProbe(picker) });
     }
     if (!picker) return { trigger, picker: null, opener: null, submenu: null, rows: [], pageContext };
+
+    // v0.5.202 runtime 07:45:22Z: the Work list was already open with eight
+    // real semantic rows, but its old Select-model ViewToggle was occluded.
+    // Reuse this EXACT owned catalog before attempting any second-layer click.
+    const alreadyOpenWorkRows = alreadyOpenOwnedWorkCatalog(picker);
+    if (alreadyOpenWorkRows.length) {
+      pickerTopologyProbe('picker-mode-b-redesigned-already-open-owned-list', {
+        pageContext,
+        pickerMode: 'B',
+        ownedPicker: compactElementProbe(picker),
+        modelRows: alreadyOpenWorkRows.map((row) => ({
+          element: compactElementProbe(row),
+          descriptor: rowModelDescriptor(row),
+        })),
+      });
+      return {
+        trigger, picker, opener: null, submenu: picker,
+        rows: alreadyOpenWorkRows, pageContext, pickerMode: 'B',
+      };
+    }
 
     // Picker topology is a runtime capability, not a URL property. ChatGPT can
     // switch the same / or /c/:id composer between:
