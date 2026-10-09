@@ -328,6 +328,50 @@ export function reusableConfirmedChatLockStage(
   );
 }
 
+
+/**
+ * A failed, empty primary conversation body is not evidence of any served model.
+ * Terminal HTTP/2 transport failures can stop the passive evidence wait, but an
+ * ordinary partial/aborted SSE must NEVER trigger a duplicate probe.
+ */
+export function terminalOfficialWorkTransportFailure(evidence) {
+  const error = String(evidence?.bodyError || '');
+  const parsed = Number(evidence?.diagnostics?.parsedObjectCount || 0);
+  const bytes = Number(evidence?.diagnostics?.streamCaptureBytes || 0);
+  return Boolean(
+    /^net::ERR_(?:HTTP2_PROTOCOL_ERROR|CONNECTION_RESET|CONNECTION_CLOSED|EMPTY_RESPONSE)$/.test(error)
+    && Number(evidence?.diagnostics?.httpStatus || 0) === 200
+    && !evidence?.rawModel
+    && !evidence?.model
+    && !evidence?.conflicts?.model
+    && parsed === 0
+    && bytes === 0
+    && !(typeof evidence?.rawResponseBody === 'string' && evidence.rawResponseBody.length)
+  );
+}
+
+/**
+ * Resending a probe is permitted only after the previous UI turn is confirmed
+ * settled, the original model/request IDs matched, and its response terminated
+ * with a known empty-body transport failure. Exactly one replay per model/run.
+ */
+export function shouldRetryOfficialWorkNativeTransport({
+  evidence,
+  nativeRequestConfirmed = false,
+  turnSettled = false,
+  requestId = null,
+  retryCount = 0,
+  maxRetries = 1,
+} = {}) {
+  return Boolean(
+    requestId
+    && nativeRequestConfirmed === true
+    && turnSettled === true
+    && Number(retryCount || 0) < Math.max(0, Number(maxRetries || 0))
+    && terminalOfficialWorkTransportFailure(evidence)
+  );
+}
+
 export function publishableVerificationResults(results = [], normalizeModel = (value) => value || null) {
   return (Array.isArray(results) ? results : []).filter((item) => (
     item?.verified === true

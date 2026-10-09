@@ -49,9 +49,11 @@ import {
   verifyOfficialWorkRequestIdentity,
   reusableConfirmedWorkNativeStage,
   reusableConfirmedChatLockStage,
+  terminalOfficialWorkTransportFailure,
+  shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.205';
+const RUNTIME_CODE_VERSION = '0.5.206';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -2265,7 +2267,7 @@ async function waitForNetworkModelEvidence(
   tabId,
   startedAtMs,
   timeoutMs = AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
-  { allowModelMissing = false } = {},
+  { allowModelMissing = false, allowTerminalFailure = false } = {},
 ) {
   const deadline = Date.now() + Math.max(1500, Number(timeoutMs || 0));
   let requestId = null;
@@ -2293,6 +2295,12 @@ async function waitForNetworkModelEvidence(
       )
     ) {
       return { timedOut: false, requestId, evidence };
+    }
+    // Only Work-native discovery opts into terminal error evidence. Do not
+    // allow a known-empty, failed primary response to burn the full 120s
+    // network evidence timeout while the UI completion gate runs separately.
+    if (matchingResponse && allowTerminalFailure && terminalOfficialWorkTransportFailure(evidence)) {
+      return { timedOut: false, requestId, evidence, terminalFailure: true };
     }
     await sleep(150);
   }
@@ -2449,6 +2457,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
     }
 
     const nativeResults = [];
+    const nativeTransientRetryCounts = new Map();
     const rows = discovered.rows.map((row) => ({ ...row, pickerMode: 'B', discoverySource: 'official-work-picker-b' }));
     progress.activeStage = {
       id: 'picker-b-work',
@@ -2533,6 +2542,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
         label: String(row.label || model),
         selectorKey: String(row.selectorKey || ''),
       });
+      let retryingNativeModel = false;
       try {
         const selectionResponse = await sendTabMessage(discoveryTabId, {
           type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
@@ -2561,7 +2571,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
             discoveryTabId,
             startedAtMs,
             AUTO_VERIFY_RESPONSE_TIMEOUT_MS,
-            { allowModelMissing: true },
+            { allowModelMissing: true, allowTerminalFailure: true },
           ),
           sendTabMessage(discoveryTabId, {
             type: 'GPTLOCK_WAIT_FOR_PROBE_SETTLED',
@@ -2616,6 +2626,30 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           && nativeResponseCompatible !== false
           && settled?.settled === true;
 
+        const retryCount = nativeTransientRetryCounts.get(model) || 0;
+        if (shouldRetryOfficialWorkNativeTransport({
+          evidence: responseEvidence,
+          nativeRequestConfirmed,
+          turnSettled: settled?.settled === true,
+          requestId: evidenceRequestId,
+          retryCount,
+        })) {
+          nativeTransientRetryCounts.set(model, retryCount + 1);
+          retryingNativeModel = true;
+          logRuntime('warn', 'discovery', 'official_work_native_transport_retry', {
+            sourceTabId,
+            discoveryTabId,
+            model,
+            requestId: evidenceRequestId,
+            error: responseEvidence?.bodyError || null,
+            retryCount: retryCount + 1,
+            maxRetries: 1,
+          });
+          // The previous request has definitively failed and the UI turn has
+          // settled. The for-loop increment restores this same model index.
+          index -= 1;
+          continue;
+        }
         const result = {
           model,
           label: String(row.label || model),
@@ -2630,6 +2664,7 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           nativeResponseMetadataConfirmed: nativeResponseConfirmed,
           nativeResponseObserved,
           nativeResponseCompatible,
+          nativeTransportFailure: responseEvidence?.bodyError || null,
           nativeVerificationBasis: nativeResponseConfirmed
             ? 'request_transport+response_model'
             : nativeResponseObserved
@@ -2677,9 +2712,11 @@ async function discoverOfficialWorkModels(sourceTabId, progress) {
           verified: nativeResults.filter((item) => item.nativeVerified).length,
           requestConfirmed: nativeResults.filter((item) => item.nativeRequestConfirmed).length,
           currentModel: null,
-          currentLabel: index + 1 < rows.length
-            ? '准备验证下一个 Picker B（Work）'
-            : 'Picker B（Work）验证完成',
+          currentLabel: retryingNativeModel
+            ? `网络中断后重试 ${String(row.label || model)}（最多一次）`
+            : index + 1 < rows.length
+              ? '准备验证下一个 Picker B（Work）'
+              : 'Picker B（Work）验证完成',
         };
         await broadcastVerificationTabs(sourceTabId, ownerTabId, [discoveryTabId]);
       }
