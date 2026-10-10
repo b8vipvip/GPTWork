@@ -23,8 +23,10 @@ test('each Chat-lock model gets a fresh Chat document and reset evidence', () =>
 
 test('picker A native baseline prevents no-effect Chat lock from claiming success', () => {
   assert.match(body, /chat_lock_distinct_picker_a_baseline_unavailable/);
-  assert.match(body, /chat_lock_baseline_request_mismatch/);
-  assert.match(body, /const effectiveRewrite = liveState\.lastRewrite\?\.changed === true\s*&& baselineConfirmed/);
+  assert.match(body, /chat_lock_picker_a_request_unconfirmed/);
+  assert.match(body, /officialPickerAuthority = Boolean\(/);
+  assert.match(body, /targetPickerConfirmed/);
+  assert.match(body, /liveState\.lastRewrite\?\.changed === false/);
   assert.match(body, /requestId\s*&& liveState\.lastRewrite\?\.requestId === requestId/);
   assert.match(body, /rawResponseProtocolModel === expectedResponse/);
   assert.match(body, /chatLockSupported: chatCompatibility \? verified : false/);
