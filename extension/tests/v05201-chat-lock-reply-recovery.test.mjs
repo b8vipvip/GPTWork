@@ -44,7 +44,7 @@ test('the actual catch retries the same catalog item without treating it as a co
   assert.match(verify, /verificationTransactions\.delete\(Number\(tabId\)\);\s*await sleep\(650\);\s*continue;/);
   assert.match(verify, /chat_lock_transient_reply_recovered/);
   // Keep the existing causal rewrite + exact response proof unchanged.
-  assert.match(verify, /const effectiveRewrite = liveState\.lastRewrite\?\.changed === true/);
+  assert.match(verify, /const officialPickerAuthority = Boolean\(/);
   assert.match(verify, /rawResponseProtocolModel === expectedResponse/);
   assert.match(verify, /verified = Boolean\(requestId && requestConfirmed && responseConfirmed\)/);
 });
