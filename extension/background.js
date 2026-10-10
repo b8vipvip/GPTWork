@@ -3377,7 +3377,10 @@ async function verifyAccountCatalogModels(
     reused: 0,
   };
 
-  while (index < queue.length || stablePasses < 2) {
+  // The first Picker A pass can stabilize before the native queue is drained.
+  // Even when stablePasses >= 2, enter once more to enroll the forced Chat-lock
+  // probes; otherwise multi-model catalogs silently skip all lock verification.
+  while (index < queue.length || stablePasses < 2 || !pickerAChatLockQueued) {
     if (index >= queue.length) {
       if (!pickerAChatLockQueued) {
         pickerAChatLockQueued = true;

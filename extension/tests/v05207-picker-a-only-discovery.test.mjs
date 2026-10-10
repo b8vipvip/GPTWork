@@ -17,6 +17,11 @@ const row = { model: 'gpt-5.5', rawId: 'gpt-5.5', label: 'GPT-5.5', selectorKey:
 const pickerA = { pickerMode: 'A', rows: [row], models: ['gpt-5.5'], reasoningLevels: [] };
 const raw = value => value ? String(value) : null;
 const concrete = value => value ? String(value).replace(/-thinking$/, '') : null;
+const pickerFamily = value => {
+  const model = concrete(value);
+  return model === 'gpt-5.6' ? 'gpt-5.6-sol' : model;
+};
+const transportFor = model => `${String(model || 'gpt-5.5').replace(/-sol$/, '')}-thinking`;
 const goodStream = evidence => Boolean(
   evidence
   && evidence.diagnostics?.httpStatus === 200
@@ -25,7 +30,15 @@ const goodStream = evidence => Boolean(
   && !evidence.conflicts?.model
 );
 
-async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 'gpt-5.5-thinking', staleLockResponse = false, failedLockStream = false, pickerMode = 'A' } = {}) {
+async function runPickerA({ nativeResponse = null, lockResponse = null, staleLockResponse = false, failedLockStream = false, pickerMode = 'A', pickerModels = null } = {}) {
+  const activeCatalog = Array.isArray(pickerModels) && pickerModels.length
+    ? {
+      pickerMode: 'A',
+      rows: pickerModels.map(model => ({ model, rawId: model, label: model, selectorKey: `picker-${model}`, pickerMode: 'A' })),
+      models: pickerModels,
+      reasoningLevels: [],
+    }
+    : pickerA;
   const state = { autoVerification: { running: true } };
   const transactions = new Map();
   const events = [];
@@ -36,7 +49,7 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
     AUTO_VERIFY_RESPONSE_TIMEOUT_MS: 120000,
     normalizeConcreteModelId: concrete,
     normalizeRawProtocolModelId: raw,
-    nativeChatPickerFamily: concrete,
+    nativeChatPickerFamily: pickerFamily,
     successfulConversationResponseEvidence: goodStream,
     verificationTransactions: transactions,
     logRuntime: (_level, _category, event) => events.push(event),
@@ -59,7 +72,7 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
     pinSharedChatLockConversation: async () => {},
     shouldRetrySharedChatLockReplyLoss: () => false,
     shouldRetrySharedChatLockPreProbeReadiness: () => false,
-    discoverAccountCatalog: async () => pickerA,
+    discoverAccountCatalog: async () => activeCatalog,
     networkMonitor: {
       isAttached: () => true,
       attach: async () => true,
@@ -67,7 +80,7 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
     },
     sendTabMessage: async (_tab, message) => {
       if (message.type === 'GPTLOCK_VERIFY_ACCOUNT_MODEL') {
-        return { result: { selectionAttempted: true, observation: { model: 'gpt-5.5' } } };
+        return { result: { selectionAttempted: true, observation: { model: message.model } } };
       }
       if (message.type === 'GPTLOCK_WAIT_FOR_PROBE_SETTLED') return { settled: true };
       throw new Error('unexpected message ' + message.type);
@@ -76,22 +89,24 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
       sent += 1;
       const transaction = transactions.get(7);
       const lock = transaction?.mode === 'force-transport';
+      const model = transaction?.model || 'gpt-5.5';
+      const transport = transportFor(model);
       const requestId = 'real-request-' + sent;
       state.lastRequest = {
         requestId, capturedAt: new Date().toISOString(),
-        model: 'gpt-5.5', rawModel: 'gpt-5.5-thinking',
+        model, rawModel: transport,
       };
       state.lastRewrite = lock ? {
         authorityKind: 'model-discovery-chat-compat',
-        authorityModel: 'gpt-5.5',
-        transportModelBefore: 'gpt-6',
-        transportModelAfter: 'gpt-5.5-thinking',
+        authorityModel: model,
+        transportModelBefore: transport === 'gpt-6-thinking' ? 'gpt-5.5-thinking' : 'gpt-6-thinking',
+        transportModelAfter: transport,
         changed: true, capturedAt: new Date().toISOString(),
       } : null;
       state.lastResponseEvidence = {
         requestId: lock && staleLockResponse ? 'other-request' : requestId,
-        rawModel: lock ? lockResponse : nativeResponse,
-        model: lock ? lockResponse : nativeResponse,
+        rawModel: lock ? (lockResponse || transport) : (nativeResponse || transport),
+        model: lock ? (lockResponse || transport) : (nativeResponse || transport),
         diagnostics: { httpStatus: 200, parsedObjectCount: 1 },
         bodyError: lock && failedLockStream ? 'net::ERR_HTTP2_PROTOCOL_ERROR' : null,
       };
@@ -107,7 +122,7 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
   };
   vm.createContext(runtime);
   const verify = vm.runInContext(verifySource + '\nverifyAccountCatalogModels', runtime);
-  const progress = await verify(7, state, pickerA, { ownerTabId: 7 });
+  const progress = await verify(7, state, activeCatalog, { ownerTabId: 7 });
   return { progress, sent, events };
 }
 
@@ -134,6 +149,20 @@ test('real Picker A native turn and force-locked Chat turn must both receive the
   assert.equal(progress.results[1].rawResponseModel, 'gpt-5.5-thinking');
   assert.deepEqual([...progress.pickerModes], ['A']);
   assert.equal(events.some(event => event.includes('official_work_model_native_started')), false);
+});
+
+test('three native Picker A models still enqueue three forced Chat-lock probes after the stable-pass threshold', async () => {
+  const { progress, sent, events } = await runPickerA({ pickerModels: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-6'] });
+  assert.equal(sent, 6, JSON.stringify({ results: progress.results, events }));
+  assert.equal(progress.total, 6);
+  assert.equal(progress.verified, 6);
+  assert.equal(progress.failed, 0);
+  assert.equal(progress.results.filter(item => item.nativeStageComplete).length, 3);
+  assert.equal(progress.results.filter(item => item.chatLockSupported).length, 3);
+  assert.equal(progress.results.filter(item => item.chatLockStageComplete).length, 3);
+  assert.equal(events.filter(event => event === 'picker_a_chat_lock_queued').length, 1);
+  assert.equal(events.filter(event => event === 'picker_a_chat_lock_completed').length, 3);
+  assert.deepEqual([...progress.pickerModes], ['A']);
 });
 
 test('wrong served model in native Picker A cannot queue a successful lock', async () => {
