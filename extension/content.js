@@ -625,7 +625,7 @@ document.addEventListener('pointerdown', (event) => {
       const stageLabel = activeStage?.label || null;
       progress.querySelector('.execution').textContent = total
         ? activeStage
-          ? `${completed} / ${total} · ${stageLabel || 'Picker B · ChatGPT Work'}`
+          ? `${completed} / ${total} · ${stageLabel || 'Picker A · Chat'}`
           : `${completed} 已执行 · ${total} 已发现`
         : '正在发现…';
       progress.querySelector('.verified').textContent = total ? `${verified} / ${total}` : '…';
