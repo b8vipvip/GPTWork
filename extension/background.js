@@ -48,7 +48,6 @@ import {
   shouldRetryTransientResponse,
   verifyOfficialWorkRequestIdentity,
   reusableConfirmedWorkNativeStage,
-  reusableConfirmedChatLockStage,
   terminalOfficialWorkTransportFailure,
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
@@ -3342,7 +3341,6 @@ async function verifyAccountCatalogModels(
     },
   });
   const { queue, knownKeys, progress } = catalog;
-  progress.modelVerificationLedger = await loadAccountModelVerificationLedger();
   state.autoVerification.catalogVerification = progress;
   const mergeCatalog = catalog.merge;
   // Discover Models is limited to Picker A in the official Chat surface.
@@ -3442,7 +3440,8 @@ async function verifyAccountCatalogModels(
     }
 
     const item = queue[index];
-    const previous = progress.modelVerificationLedger?.[normalizeConcreteModelId(item.model)];
+    // Every explicit discovery run sends real Chat requests. Historical server
+    // ledger entries cannot substitute for a fresh model/request/response proof.
     const pickerAChatLock = item.selectorKey === '__picker_a_chat_lock__';
     const pickerBChatLock = item.selectorKey === '__picker_b_chat_lock__';
     const chatCompatibility = pickerAChatLock || pickerBChatLock;
@@ -3455,83 +3454,8 @@ async function verifyAccountCatalogModels(
     const chatLockFailedEvent = pickerAChatLock
       ? 'picker_a_chat_lock_failed'
       : 'picker_b_chat_compatibility_failed';
-    const pickerNative = !chatCompatibility && ['A', 'B'].includes(item.pickerMode);
+    const pickerNative = !chatCompatibility && item.pickerMode === 'A';
 
-    const reusableNative = !chatCompatibility
-      && item.pickerMode === 'A'
-      && previous?.pickerMode === 'A'
-      && previous?.nativeStageComplete === true
-      && previous?.requestConfirmed === true
-      && previous?.responseConfirmed === true
-      && previous?.nativeRequestModel
-      && previous?.nativeResponseModel;
-    const reusableLock = chatCompatibility && reusableConfirmedChatLockStage(
-      previous,
-      {
-        pickerMode: item.pickerMode,
-        transportModel: item.transportModel,
-        expectedResponseModel: item.expectedResponseModel,
-      },
-      normalizeRawProtocolModelId,
-    );
-    if (chatCompatibility && previous?.chatLockStageComplete === true && !reusableLock) {
-      logRuntime('info', 'discovery', 'chat_lock_negative_stage_reprobe', {
-        model: item.model,
-        pickerMode: item.pickerMode,
-        previousSupported: previous.chatLockSupported === true,
-        previousRequestConfirmed: previous.chatLockRequestConfirmed === true,
-        previousResponseConfirmed: previous.chatLockResponseConfirmed === true,
-      });
-    }
-    if (reusableNative || reusableLock) {
-      const rawRequestModel = reusableLock ? previous.chatAttemptTransport : previous.nativeRequestModel;
-      const rawResponseModel = reusableLock ? previous.chatAttemptResponseModel : previous.nativeResponseModel;
-      const verified = reusableLock
-        ? previous.chatLockRequestConfirmed === true
-          && previous.chatLockResponseConfirmed === true
-          && rawResponseModel === normalizeRawProtocolModelId(item.expectedResponseModel)
-        : true;
-      progress.results.push({
-        model: item.model,
-        selectorKey: item.selectorKey,
-        label: item.label,
-        pickerMode: item.pickerMode,
-        discoverySource: item.discoverySource,
-        verified,
-        requestConfirmed: reusableLock ? previous.chatLockRequestConfirmed === true : true,
-        responseConfirmed: reusableLock ? previous.chatLockResponseConfirmed === true : true,
-        rawRequestModel,
-        rawResponseModel,
-        nativeRequestModel: previous.nativeRequestModel,
-        nativeResponseModel: previous.nativeResponseModel,
-        nativeResponseConfirmed: Boolean(previous.nativeResponseModel && previous.pickerMode === 'A'),
-        nativeStageComplete: previous.nativeStageComplete === true,
-        chatTransportModel: reusableLock && verified ? rawRequestModel : null,
-        chatResponseModel: reusableLock && verified ? rawResponseModel : null,
-        chatAttemptTransport: reusableLock ? rawRequestModel : null,
-        chatAttemptResponseModel: reusableLock ? rawResponseModel : null,
-        chatLockRequestConfirmed: reusableLock ? previous.chatLockRequestConfirmed === true : false,
-        chatLockResponseConfirmed: reusableLock ? previous.chatLockResponseConfirmed === true : false,
-        chatLockSupported: reusableLock ? verified : false,
-        chatLockStageComplete: previous.chatLockStageComplete === true,
-        reusedFromServer: true,
-      });
-      if (verified) progress.verified += 1;
-      else progress.failed += 1;
-      if (reusableNative || previous.chatLockRequestConfirmed === true) progress.requestConfirmed += 1;
-      index += 1;
-      progress.completed = index;
-      logRuntime('info', 'discovery', 'model_verification_stage_reused', {
-        model: item.model,
-        pickerMode: item.pickerMode,
-        stage: reusableLock ? 'chat-lock' : 'native',
-        verified,
-        index,
-        total: queue.length,
-      });
-      await broadcastVerificationState(tabId, ownerTabId);
-      continue;
-    }
     progress.currentModel = item.model;
     progress.currentSelectorKey = item.selectorKey;
     progress.currentLabel = item.label;
