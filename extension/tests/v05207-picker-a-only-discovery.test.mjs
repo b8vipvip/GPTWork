@@ -169,7 +169,7 @@ test('discovery has no Work entry/Picker B stage, even if legacy helper still ex
 
 test('official Picker A target selection and real Chat response must both match', async () => {
   const { progress, sent, events } = await runPickerA();
-  assert.equal(sent, 4, JSON.stringify({ results: progress.results, events }));
+  assert.equal(sent, 6, JSON.stringify({ results: progress.results, events }));
   assert.equal(progress.discoveryMode, 'picker-a-chat-only');
   assert.equal(progress.total, 4);
   assert.equal(progress.verified, 4);
@@ -182,7 +182,7 @@ test('official Picker A target selection and real Chat response must both match'
 
 test('three native Picker A models also run three isolated official Picker A lock proofs', async () => {
   const { progress, sent, events, isolatedSessions, baselines } = await runPickerA({ pickerModels: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-6'] });
-  assert.equal(sent, 6, JSON.stringify({ results: progress.results, events }));
+  assert.equal(sent, 9, JSON.stringify({ results: progress.results, events }));
   assert.equal(progress.total, 6);
   assert.equal(progress.verified, 6);
   assert.equal(progress.failed, 0);
@@ -199,7 +199,7 @@ test('three native Picker A models also run three isolated official Picker A loc
     assert.ok(row.session >= 1 && row.session <= 3);
   }
   assert.equal(new Set(baselines.map(row => row.session)).size, 3);
-  assert.equal(progress.results.filter(row => row.chatLockSupported && row.baselineSelectionAttempted && row.targetPickerConfirmed).length, 3);
+  assert.equal(progress.results.filter(row => row.chatLockSupported && row.baselineNetworkConfirmed && row.targetPickerConfirmed).length, 3);
 });
 
 test('wrong served model in native Picker A cannot queue a successful lock', async () => {
