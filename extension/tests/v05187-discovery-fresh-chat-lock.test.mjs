@@ -29,10 +29,12 @@ test('distinct native Picker A selection precedes the forced Chat request', () =
   const probe = body.indexOf('const probe = await sendVerificationReasoningProbe', prepare);
   assert.ok(prepare >= 0 && choose > prepare && probe > choose);
   assert.match(body, /baselineSelectionAttempted = selected\?\.result\?\.selectionAttempted === true/);
-  assert.match(body, /const baselineConfirmed = Boolean\(/);
-  assert.match(body, /observedBaselineTransport === baselineTransport/);
+  assert.match(body, /baselineUiConfirmed = selected\?\.result\?\.uiConfirmed === true/);
+  assert.match(body, /targetPickerConfirmed = targetChoice\?\.result\?\.selectionAttempted === true/);
+  assert.match(body, /targetChoice\?\.result\?\.uiConfirmed === true/);
   assert.match(body, /observedBaselineTransport !== expectedTransport/);
   assert.match(body, /liveState\.lastRewrite\?\.requestId === requestId/);
+  assert.match(body, /officialPickerAuthority = Boolean\(/);
   assert.match(body, /liveState\.lastRequest\?\.requestId === requestId/);
 });
 
