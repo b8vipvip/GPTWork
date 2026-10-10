@@ -213,7 +213,7 @@ test('single Picker A model cannot invent a distinct baseline or prove a no-op l
   const { progress, sent } = await runPickerA({ pickerModels: ['gpt-5.5'] });
   assert.equal(sent, 1);
   assert.equal(progress.results[0].verified, true);
-  assert.equal(progress.results[1].chatLockSupported, false);
+  assert.equal(progress.results[1].verified, false);
   assert.match(progress.results[1].error || '', /chat_lock_distinct_picker_a_baseline_unavailable/);
 });
 
