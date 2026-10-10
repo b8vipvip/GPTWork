@@ -13,8 +13,9 @@ test('Work policy has a configurable floor and preserves eligible page models', 
 });
 
 
-test('failed official Work discovery cannot be reported as a fully verified account', () => {
-  assert.match(background, /catalogVerification\?\.officialWorkDiscovery\?\.attempted === true/);
-  assert.match(background, /catalogVerification\.officialWorkDiscovery\.entered !== true/);
-  assert.match(background, /finalReason = 'official_work_model_discovery_incomplete'/);
+test('Picker A verification does not require official Work completion', () => {
+  const auto = background.slice(background.indexOf('async function autoVerify'), background.indexOf('function diagnosticTabState'));
+  assert.match(auto, /summarizeVerificationOutcome\(catalogVerification\)/);
+  assert.doesNotMatch(auto, /official_work_model_discovery_incomplete/);
+  assert.doesNotMatch(auto, /officialWorkDiscovery\.entered/);
 });

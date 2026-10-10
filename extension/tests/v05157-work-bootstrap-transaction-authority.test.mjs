@@ -18,10 +18,11 @@ test('Picker-B Chat compatibility keeps an explicit force-transport transaction 
 });
 
 
-test('v0.5.176 Work phase requires official Picker-B discovery rather than a synthetic network seed', () => {
+test('legacy Picker B helper remains isolated from the A-only verification scheduler', () => {
   assert.match(background, /async function discoverOfficialWorkModels/);
-  assert.match(background, /official_work_model_discovery_tab_created/);
-  assert.match(background, /official_work_model_native_verified/);
-  assert.match(background, /picker-b-chat-compatibility/);
+  const body = background.slice(background.indexOf('async function verifyAccountCatalogModels'), background.indexOf('function modelVerificationHistoryRecord'));
+  assert.doesNotMatch(body, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.match(body, /discoveryMode = 'picker-a-chat-only'/);
+  assert.doesNotMatch(body, /picker-b-chat-compatibility/);
   assert.doesNotMatch(background, /network_work_catalog_seeded/);
 });

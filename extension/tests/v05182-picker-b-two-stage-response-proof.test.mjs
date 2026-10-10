@@ -5,17 +5,18 @@ import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
 
-test('v0.5.182 completes the whole official Work Picker-B pass before Chat forced-lock verification is queued', () => {
+test('Picker A-only discovery no longer executes the historical official Work/Picker B stage', () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
   const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
   assert.ok(verifyStart >= 0 && verifyEnd > verifyStart);
   const body = background.slice(verifyStart, verifyEnd);
 
-  const discoverCall = body.indexOf('const officialWork = await discoverOfficialWorkModels(tabId, progress)');
-  const mergeChatCandidates = body.indexOf("mergeCatalog(officialWork?.chatCandidates, 'picker-b-chat-compatibility')");
-  assert.ok(discoverCall >= 0 && mergeChatCandidates > discoverCall);
+  assert.match(body, /progress\.discoveryMode = 'picker-a-chat-only'/);
+  assert.match(body, /picker_a_chat_lock_queued/);
   assert.match(body, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
-  assert.match(body, /selectorKey === '__picker_b_chat_lock__'/);
+  assert.doesNotMatch(body, /await discoverOfficialWorkModels\(/);
+  assert.doesNotMatch(body, /mergeCatalog\(officialWork\?\.chatCandidates/);
+  assert.doesNotMatch(body, /officialWorkDiscoveryDone/);
 });
 
 test('v0.5.182 official Work success accepts exact request transport plus a successful response stream when resolved model metadata is hidden', () => {

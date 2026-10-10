@@ -15,14 +15,15 @@ test('v0.5.166 retains Astra as the fallback while making the network Work floor
 });
 
 
-test('v0.5.176 discovers official Work natively before proving Picker-B Chat transport', async () => {
+test('Picker A-only discovery keeps native and forced Chat proof without Work discovery', async () => {
   const background = await read('background.js');
   const start = background.indexOf('async function verifyAccountCatalogModels');
   const end = background.indexOf('function modelVerificationHistoryRecord', start);
   const block = background.slice(start, end);
-  assert.match(block, /discoverOfficialWorkModels\(tabId, progress\)/);
-  assert.match(block, /mergeCatalog\(officialWork\?\.chatCandidates, 'picker-b-chat-compatibility'\)/);
+  assert.doesNotMatch(block, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.doesNotMatch(block, /mergeCatalog\(officialWork\?\.chatCandidates/);
   assert.match(block, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(block, /picker_a_chat_lock_queued/);
   assert.doesNotMatch(block, /network_work_catalog_seeded/);
   assert.doesNotMatch(block, /selectorKey: '__work_transport__'/);
 });

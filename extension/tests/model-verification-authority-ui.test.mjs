@@ -69,14 +69,16 @@ test('v0.5.142 uses the validated ModelPro prompt-bank probe path', () => {
   assert.match(background, /probeText: prompt/);
 });
 
-test('v0.5.176 discovers Chat Picker A before official Work Picker B without enabling GPTWork Work', () => {
+test('Picker A discovery never invokes the historical official Work / Picker B step', () => {
   const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
   const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
   assert.match(verifyBody, /mergeCatalog\(accountCatalog, 'chat-picker-a'\)/);
-  assert.match(verifyBody, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.match(verifyBody, /picker_a_chat_lock_queued/);
+  assert.match(verifyBody, /discoveryMode = 'picker-a-chat-only'/);
+  assert.doesNotMatch(verifyBody, /discoverOfficialWorkModels\(tabId, progress\)/);
+  assert.doesNotMatch(verifyBody, /picker-b-chat-compatibility/);
   assert.doesNotMatch(verifyBody, /enableWorkModeForVerification\(tabId\)/);
-  assert.match(verifyBody, /picker-b-chat-compatibility/);
 });
 
 test('v0.5.81 model automation has one composer-scoped authority', () => {
@@ -162,7 +164,7 @@ test('v0.5.87 menu cleanup is idempotent and cannot toggle a closed model trigge
 });
 
 
-test('discovery progress starts before live Chat catalog discovery so failures remain visible', () => {
+test('discovery progress starts before confirmed Picker A catalog discovery', () => {
   const verifyStart = background.indexOf('async function autoVerify');
   const verifyEnd = background.indexOf('function diagnosticTabState', verifyStart);
   const verifyBody = background.slice(verifyStart, verifyEnd);
@@ -172,7 +174,8 @@ test('discovery progress starts before live Chat catalog discovery so failures r
   assert(runningAt >= 0 && broadcastAt > runningAt && discoverAt > broadcastAt);
   assert.match(verifyBody, /maxAttempts: 0/);
   assert.match(verifyBody, /autoVerification\.maxAttempts = accountCatalog\.rows\.length/);
-  assert.match(verifyBody, /official_work_discovery_pending/);
+  assert.match(verifyBody, /verification_picker_a_unavailable/);
+  assert.doesNotMatch(verifyBody, /official_work_discovery_pending/);
 });
 
 test('v0.5.90 executes only through the active composer model trigger', () => {
@@ -237,13 +240,16 @@ test('v0.5.94 accepts only the composer-owned in-place advanced catalog after Se
 });
 
 
-test('v0.5.176 discovery converges Chat Picker A plus official Work Picker B compatibility', async () => {
-  const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
-  assert.match(background, /model_discovery_catalog_merged/);
-  assert.match(background, /while \(index < queue\.length \|\| stablePasses < 2 \|\| !officialWorkDiscoveryDone\)/);
-  assert.match(background, /discoverOfficialWorkModels\(tabId, progress\)/);
-  assert.match(background, /mergeCatalog\(officialWork\?\.chatCandidates, 'picker-b-chat-compatibility'\)/);
-  assert.match(background, /mergeCatalog\(rediscovered, 'chat-picker-a-settle'\)/);
+test('discovery converges Picker A native and Chat-lock stages only', () => {
+  const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
+  const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
+  const body = background.slice(verifyStart, verifyEnd);
+  assert.match(body, /model_discovery_catalog_merged/);
+  assert.match(body, /while \(index < queue\.length \|\| stablePasses < 2\)/);
+  assert.match(body, /picker_a_chat_lock_queued/);
+  assert.doesNotMatch(body, /await discoverOfficialWorkModels\(/);
+  assert.doesNotMatch(body, /mergeCatalog\(officialWork\?\.chatCandidates/);
+  assert.match(body, /mergeCatalog\(rediscovered, 'chat-picker-a-settle'\)/);
   assert.match(verificationPolicy, /progress\.total = queue\.length/);
 });
 
