@@ -22,7 +22,7 @@ test('Picker A-only discovery keeps native and forced Chat proof without Work di
   const block = background.slice(start, end);
   assert.doesNotMatch(block, /discoverOfficialWorkModels\(tabId, progress\)/);
   assert.doesNotMatch(block, /mergeCatalog\(officialWork\?\.chatCandidates/);
-  assert.match(block, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(block, /mode: chatCompatibility \? 'picker-a-ui-lock' : 'observe-native'/);
   assert.match(block, /picker_a_chat_lock_queued/);
   assert.doesNotMatch(block, /network_work_catalog_seeded/);
   assert.doesNotMatch(block, /selectorKey: '__work_transport__'/);
