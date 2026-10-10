@@ -30,7 +30,8 @@ test('A successful response stream without served-model metadata is not confirme
 
 test('a Chat lock that leaves request model unchanged is not a causal lock proof',()=>{
   assert.match(compat,/const effectiveRewrite = liveState\.lastRewrite\?\.changed === true/);
-  assert.match(compat,/transportModelBefore\) !== expectedTransport/);
+  assert.match(compat,/observedBaselineTransport !== expectedTransport/);
+  assert.match(compat,/observedBaselineTransport === baselineTransport/);
   assert.match(compat,/rawRequestModel === expectedTransport\s*&& effectiveRewrite/);
   assert.match(compat,/chat_lock_no_effective_rewrite/);
   assert.match(compat,/chat_lock_request_unconfirmed/);
