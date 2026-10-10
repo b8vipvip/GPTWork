@@ -100,6 +100,28 @@ test('strict mode blocks only a confirmed response model mismatch for the latest
   assert.equal(guard.reason, 'model_not_allowed');
 });
 
+test('empty model-lock list never blocks normal Chat after a previously confirmed mismatch', () => {
+  const noLockPolicy = { ...DEFAULT_POLICY, lockedModels: [] };
+  const oldMismatch = state({
+    phase: 'mismatch',
+    lastRequest: { capturedAt: '2026-08-26T12:55:18.000Z' },
+    lastVerification: confirmedMismatch({ model: 'gpt-6-thinking' }),
+    pageObservation: { model: 'gpt-6', reasoning: 'high' },
+  });
+  const guard = evaluateGuard({ state: oldMismatch, policy: noLockPolicy, settings: ENABLED_SETTINGS });
+  assert.equal(guard.canSend, true);
+  assert.equal(guard.allowKind, 'unlocked');
+  assert.equal(guard.status, 'no_locked_model');
+  assert.equal(guard.reason, 'no_locked_model');
+  assert.equal(guard.uiConflicts, false);
+
+  // Strictness and mismatching back-end metadata still apply when an actual
+  // model lock is configured. Disabling the final lock is the only exemption.
+  const locked = evaluateGuard({ state: oldMismatch, policy: DEFAULT_POLICY, settings: ENABLED_SETTINGS });
+  assert.equal(locked.canSend, false);
+  assert.equal(locked.reason, 'model_not_allowed');
+});
+
 test('stale mismatch from an older turn cannot block a newer request', () => {
   const guard = evaluateGuard({
     state: state({
