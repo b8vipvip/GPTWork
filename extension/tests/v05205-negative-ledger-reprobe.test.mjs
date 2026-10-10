@@ -55,12 +55,14 @@ test('fully proven positive Chat lock is still reusable with exact transport and
   assert.equal(lock(chat, 'A', 'gpt-5.5-thinking', 'gpt-5.5-thinking'), true);
 });
 
-test('Work and Chat verification loops call strict history reuse gates', async () => {
+test('Picker A live verification never trusts a saved ledger instead of sending', async () => {
   const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
-  assert.match(background, /reusableConfirmedWorkNativeStage\(prior, model, normalizeConcreteModelId\)/);
-  assert.match(background, /official_work_native_unconfirmed_stage_reprobe/);
-  assert.match(background, /reusableConfirmedChatLockStage\(/);
-  assert.match(background, /chat_lock_negative_stage_reprobe/);
-  assert.match(background, /nativeResponseCompatible !== false/);
-  assert.match(background, /rawResponseProtocolModel === expectedResponse/);
+  const start = background.indexOf('async function verifyAccountCatalogModels');
+  const end = background.indexOf('function modelVerificationHistoryRecord', start);
+  const body = background.slice(start, end);
+  assert.match(body, /sendVerificationReasoningProbe\(/);
+  assert.match(body, /rawResponseProtocolModel === expectedResponse/);
+  assert.doesNotMatch(body, /loadAccountModelVerificationLedger\(/);
+  assert.doesNotMatch(body, /reusableConfirmedChatLockStage\(/);
+  assert.doesNotMatch(body, /reusedFromServer/);
 });
