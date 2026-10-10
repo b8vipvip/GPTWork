@@ -33,6 +33,7 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
   const runtime = {
     createVerificationCatalog,
     shouldRetryTransientResponse,
+    AUTO_VERIFY_RESPONSE_TIMEOUT_MS: 120000,
     normalizeConcreteModelId: concrete,
     normalizeRawProtocolModelId: raw,
     nativeChatPickerFamily: concrete,
