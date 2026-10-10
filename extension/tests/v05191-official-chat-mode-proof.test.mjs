@@ -44,7 +44,7 @@ test('every forced Chat-lock turn verifies Picker A before dispatch and after re
   const probe = loop.indexOf('const probe = await sendVerificationReasoningProbe');
   const after = loop.lastIndexOf('requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false })');
   assert.ok(before >= 0 && probe > before && after > probe);
-  assert.match(background, /Chat lock conversation changed during mode transition/);
+  assert.match(background, /Isolated Chat lock mode transition left new Chat/);
 });
 
 test('network stream without raw served-model evidence never proves Chat compatibility', () => {
