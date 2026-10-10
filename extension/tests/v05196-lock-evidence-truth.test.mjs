@@ -30,7 +30,7 @@ test('A successful response stream without served-model metadata is not confirme
 
 test('a Chat lock that leaves request model unchanged is not a causal lock proof',()=>{
   assert.match(compat,/const officialPickerAuthority = Boolean\(/);
-  assert.match(compat,/baselineUiConfirmed/);
+  assert.match(compat,/baselineNetworkConfirmed/);
   assert.match(compat,/targetPickerConfirmed/);
   assert.match(compat,/baselineTransport !== expectedTransport/);
   assert.match(compat,/rawRequestModel === expectedTransport/);

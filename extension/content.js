@@ -1770,7 +1770,7 @@ document.addEventListener('pointerdown', (event) => {
         await closeModelMenus(modern.trigger);
         return { attempted: false, observation, uiConfirmed: false };
       }
-      return { attempted: true, observation, uiConfirmed: confirmed };
+      return { attempted: true, observation, uiConfirmed: confirmed, networkDeferred: Boolean(networkDeferred) };
     }
 
     await closeModelMenus(modern.trigger);

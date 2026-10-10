@@ -30,7 +30,7 @@ const goodStream = evidence => Boolean(
   && !evidence.conflicts?.model
 );
 
-async function runPickerA({ nativeResponse = null, lockResponse = null, staleLockResponse = false, failedLockStream = false, baselineMismatch = false, targetSelectionUnconfirmed = false, pickerMode = 'A', pickerModels = ['gpt-5.5', 'gpt-6'] } = {}) {
+async function runPickerA({ nativeResponse = null, lockResponse = null, staleLockResponse = false, failedLockStream = false, baselineMismatch = false, targetSelectionUnconfirmed = false, deferredSelection = false, baselineServedMismatch = false, pickerMode = 'A', pickerModels = ['gpt-5.5', 'gpt-6'] } = {}) {
   const activeCatalog = Array.isArray(pickerModels) && pickerModels.length
     ? {
       pickerMode: 'A',
@@ -99,7 +99,8 @@ async function runPickerA({ nativeResponse = null, lockResponse = null, staleLoc
         }
         return { result: {
           selectionAttempted: true,
-          uiConfirmed: !(targetSelectionUnconfirmed && currentTarget === 'gpt-5.5'),
+          uiConfirmed: !(targetSelectionUnconfirmed && currentTarget === 'gpt-5.5') && !deferredSelection,
+          networkDeferred: !(targetSelectionUnconfirmed && currentTarget === 'gpt-5.5') && deferredSelection,
           observation: { model: message.model },
         } };
       }
@@ -110,26 +111,31 @@ async function runPickerA({ nativeResponse = null, lockResponse = null, staleLoc
       sent += 1;
       const transaction = transactions.get(7);
       const lock = transaction?.mode === 'picker-a-ui-lock';
+      const baseline = transaction?.mode === 'observe-native' && Boolean(currentBaseline) && !currentTarget;
       const model = transaction?.model || 'gpt-5.5';
       const transport = transportFor(model);
       const requestId = 'real-request-' + sent;
       state.lastRequest = {
         requestId, capturedAt: new Date().toISOString(),
         model: lock ? currentTarget : model,
-        rawModel: lock && baselineMismatch && model === 'gpt-5.5' ? transportFor(currentBaseline) : transport,
+        rawModel: baseline && baselineMismatch && currentBaseline === 'gpt-6' ? transportFor('gpt-5.5') : transport,
       };
-      state.lastRewrite = lock ? {
-        authorityKind: 'model-discovery-picker-a-ui-lock',
+      state.lastRewrite = lock || baseline ? {
+        authorityKind: lock ? 'model-discovery-picker-a-ui-lock' : 'model-discovery-native',
         authorityModel: model,
         requestId,
-        transportModelBefore: baselineMismatch && model === 'gpt-5.5' ? transportFor(currentBaseline) : transport,
-        transportModelAfter: baselineMismatch && model === 'gpt-5.5' ? transportFor(currentBaseline) : transport,
+        transportModelBefore: state.lastRequest.rawModel,
+        transportModelAfter: state.lastRequest.rawModel,
         changed: false, capturedAt: new Date().toISOString(),
       } : null;
       state.lastResponseEvidence = {
         requestId: lock && staleLockResponse && model === 'gpt-5.5' ? 'other-request' : requestId,
-        rawModel: lock && model === 'gpt-5.5' ? (lockResponse || transport) : !lock && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
-        model: lock && model === 'gpt-5.5' ? (lockResponse || transport) : !lock && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
+        rawModel: baseline && baselineServedMismatch ? 'gpt-5.5-thinking'
+          : lock && model === 'gpt-5.5' ? (lockResponse || transport)
+          : !lock && !baseline && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
+        model: baseline && baselineServedMismatch ? 'gpt-5.5-thinking'
+          : lock && model === 'gpt-5.5' ? (lockResponse || transport)
+          : !lock && !baseline && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
         diagnostics: { httpStatus: 200, parsedObjectCount: 1 },
         bodyError: lock && failedLockStream && model === 'gpt-5.5' ? 'net::ERR_HTTP2_PROTOCOL_ERROR' : null,
       };
@@ -163,7 +169,7 @@ test('discovery has no Work entry/Picker B stage, even if legacy helper still ex
 
 test('official Picker A target selection and real Chat response must both match', async () => {
   const { progress, sent, events } = await runPickerA();
-  assert.equal(sent, 4, JSON.stringify({ results: progress.results, events }));
+  assert.equal(sent, 6, JSON.stringify({ results: progress.results, events }));
   assert.equal(progress.discoveryMode, 'picker-a-chat-only');
   assert.equal(progress.total, 4);
   assert.equal(progress.verified, 4);
@@ -176,7 +182,7 @@ test('official Picker A target selection and real Chat response must both match'
 
 test('three native Picker A models also run three isolated official Picker A lock proofs', async () => {
   const { progress, sent, events, isolatedSessions, baselines } = await runPickerA({ pickerModels: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-6'] });
-  assert.equal(sent, 6, JSON.stringify({ results: progress.results, events }));
+  assert.equal(sent, 9, JSON.stringify({ results: progress.results, events }));
   assert.equal(progress.total, 6);
   assert.equal(progress.verified, 6);
   assert.equal(progress.failed, 0);
@@ -193,7 +199,7 @@ test('three native Picker A models also run three isolated official Picker A loc
     assert.ok(row.session >= 1 && row.session <= 3);
   }
   assert.equal(new Set(baselines.map(row => row.session)).size, 3);
-  assert.equal(progress.results.filter(row => row.chatLockSupported && row.baselineSelectionAttempted && row.targetPickerConfirmed).length, 3);
+  assert.equal(progress.results.filter(row => row.chatLockSupported && row.baselineNetworkConfirmed && row.targetPickerConfirmed).length, 3);
 });
 
 test('wrong served model in native Picker A cannot queue a successful lock', async () => {
@@ -211,7 +217,7 @@ test('wrong, stale, or failed Chat response never verifies the Picker A lock', a
     { failedLockStream: true },
   ]) {
     const { progress, sent } = await runPickerA(scenario);
-    assert.equal(sent, 4);
+    assert.equal(sent, 6);
     assert.equal(progress.results[0].verified, true);
     const firstLock = progress.results.find(row => row.model === 'gpt-5.5' && row.selectorKey === '__picker_a_chat_lock__');
     assert.equal(firstLock.verified, false);
@@ -232,17 +238,37 @@ test('wrong actual outgoing transport cannot pass even when Picker A target UI a
   const firstLock = progress.results.find(row => row.model === 'gpt-5.5' && row.selectorKey === '__picker_a_chat_lock__');
   assert.equal(firstLock.verified, false);
   assert.equal(firstLock.requestConfirmed, false);
-  assert.equal(firstLock.responseIssue, 'chat_lock_picker_a_request_unconfirmed');
+  assert.match(firstLock.error || '', /chat_lock_baseline_network_unconfirmed/);
 });
 
 test('a target Picker A click without UI acknowledgement cannot prove model locking', async () => {
   const { progress, sent } = await runPickerA({ targetSelectionUnconfirmed: true });
-  assert.equal(sent, 3);
+  assert.equal(sent, 5);
   const firstLock = progress.results.find(row => row.model === 'gpt-5.5' && row.selectorKey === '__picker_a_chat_lock__');
   assert.equal(firstLock.verified, false);
   assert.equal(firstLock.chatLockSupported, false);
   assert.equal(firstLock.targetPickerConfirmed, false);
   assert.match(firstLock.error || '', /chat_lock_target_picker_a_selection_unconfirmed/);
+});
+
+test('network-deferred Picker A row clicks require real baseline and target model evidence', async () => {
+  const { progress, sent } = await runPickerA({ deferredSelection: true });
+  assert.equal(sent, 6);
+  assert.equal(progress.verified, 4);
+  for (const row of progress.results.filter(result => result.selectorKey === '__picker_a_chat_lock__')) {
+    assert.equal(row.baselineUiConfirmed, false);
+    assert.equal(row.baselineNetworkConfirmed, true);
+    assert.equal(row.targetPickerConfirmed, true);
+    assert.equal(row.chatLockSupported, true);
+  }
+});
+
+test('wrong served model from baseline probe fails closed before target dispatch', async () => {
+  const { progress } = await runPickerA({ deferredSelection: true, baselineServedMismatch: true });
+  const row = progress.results.find(result => result.model === 'gpt-5.5' && result.selectorKey === '__picker_a_chat_lock__');
+  assert.equal(row.verified, false);
+  assert.equal(row.chatLockSupported, false);
+  assert.match(row.error || '', /chat_lock_baseline_network_unconfirmed/);
 });
 
 test('if official Chat mode cannot be confirmed no Picker A request is sent', async () => {
