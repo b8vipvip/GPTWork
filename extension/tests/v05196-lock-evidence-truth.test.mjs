@@ -47,5 +47,5 @@ test('a Chat lock that leaves request model unchanged is not a causal lock proof
 test('other-model backend mismatch remains a failed Chat lock even when rewrite is valid',()=>{
   assert.match(compat,/rawResponseProtocolModel === expectedResponse/);
   assert.match(compat,/picker_a_chat_lock_response_mismatch/);
-  assert.match(compat,/chat_mode_response_differs_from_official_work/);
+  assert.match(compat,/chat_lock_picker_a_request_unconfirmed/);
 });
