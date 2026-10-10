@@ -53,7 +53,7 @@ test('network stream without raw served-model evidence never proves Chat compati
   assert.match(loop, /chat_mode_response_model_not_exposed/);
   assert.match(loop, /native_response_model_not_exposed/);
   assert.match(loop, /chatLockSupported: chatCompatibility \? verified : false/);
-  assert.match(loop, /chatVerificationBasis: chatCompatibility && verified\s*\? 'forced_transport\+response_model'/);
+  assert.match(loop, /chatVerificationBasis: chatCompatibility && verified\s*\? 'official_picker_a_selection\+request_transport\+response_model'/);
   assert.doesNotMatch(loop, /explicitResponseCompatible = !rawResponseProtocolModel/);
   assert.doesNotMatch(loop, /forced_transport\+response_stream/);
 });
