@@ -59,7 +59,7 @@ test('v0.5.176 discovers Picker B in official ChatGPT Work independently from GP
 test('v0.5.176 returns verified Picker B models to Chat for cross-mode lock proof', async () => {
   const background = await read('background.js');
   assert.match(background, /selectorKey: '__picker_b_chat_lock__'/);
-  assert.match(background, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(background, /mode: chatCompatibility \? 'picker-a-ui-lock' : 'observe-native'/);
   assert.match(background, /picker_b_chat_compatibility_started/);
   assert.match(background, /rawRequestModel === expectedTransport/);
   assert.match(background, /rawResponseProtocolModel === expectedResponse/);
@@ -69,7 +69,7 @@ test('v0.5.176 returns verified Picker B models to Chat for cross-mode lock proo
 test('v0.5.176 network monitor has distinct native-observation and Chat-force authorities', async () => {
   const monitor = await read('network-monitor.js');
   assert.match(monitor, /transaction\?\.mode === 'observe-native'/);
-  assert.match(monitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(monitor, /authorityKind: transaction\?\.mode === 'picker-a-ui-lock'/);
   assert.match(monitor, /bypassRewrite: true/);
   assert.match(monitor, /model-discovery-chat-compat/);
   assert.match(monitor, /authorityTransportModel: transportModel/);
