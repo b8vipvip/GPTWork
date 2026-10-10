@@ -101,10 +101,12 @@ test('loading the account stage ledger never seeds models absent from the live p
   const schedule=block(background,'async function verifyAccountCatalogModels(','function modelVerificationHistoryRecord');
   assert.match(schedule,/mergeCatalog\(accountCatalog, 'chat-picker-a'\)/);
   assert.match(schedule,/const item = queue\[index\]/);
-  assert.match(schedule,/model_verification_stage_reused/);
-  // Raw transport and served-model matching moved into a pure reuse gate.
-  // Keep checking both exact identities rather than asserting its old callsite.
-  assert.match(schedule,/reusableConfirmedChatLockStage\(/);
+  // Ledger data remains inspectable but does not authorize skipping any live
+  // Picker A request in the new discovery workflow.
+  assert.doesNotMatch(schedule,/model_verification_stage_reused/);
+  assert.doesNotMatch(schedule,/reusableConfirmedChatLockStage\(/);
+  assert.doesNotMatch(schedule,/loadAccountModelVerificationLedger\(/);
+  assert.match(schedule,/sendVerificationReasoningProbe\(/);
   const reusable = await readFile(new URL('../vendor/modelpro/model-verification.js',import.meta.url),'utf8');
   assert.match(reusable,/normalizeRawModel\(prior\?\.chatAttemptTransport\) === transport/);
   assert.match(reusable,/normalizeRawModel\(prior\?\.chatAttemptResponseModel\) === expected/);
