@@ -3859,6 +3859,13 @@ async function verifyAccountCatalogModels(
         nativeResponseModel: item.nativeResponseModel || null,
         nativeResponseConfirmed: item.nativeResponseConfirmed === true,
         chatTransportModel: item.transportModel || null,
+        chatLockSupported: false,
+        chatLockRequestConfirmed: false,
+        chatLockResponseConfirmed: false,
+        chatLockStageComplete: false,
+        baselineModel: chatCompatibility ? baselineModel : null,
+        baselineTransport: chatCompatibility ? baselineTransport : null,
+        baselineSelectionAttempted: chatCompatibility ? baselineSelectionAttempted : false,
         verified: false,
         error: errorText(error),
       });
