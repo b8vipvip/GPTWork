@@ -217,7 +217,7 @@ test('wrong, stale, or failed Chat response never verifies the Picker A lock', a
     { failedLockStream: true },
   ]) {
     const { progress, sent } = await runPickerA(scenario);
-    assert.equal(sent, 4);
+    assert.equal(sent, 6);
     assert.equal(progress.results[0].verified, true);
     const firstLock = progress.results.find(row => row.model === 'gpt-5.5' && row.selectorKey === '__picker_a_chat_lock__');
     assert.equal(firstLock.verified, false);
@@ -238,12 +238,12 @@ test('wrong actual outgoing transport cannot pass even when Picker A target UI a
   const firstLock = progress.results.find(row => row.model === 'gpt-5.5' && row.selectorKey === '__picker_a_chat_lock__');
   assert.equal(firstLock.verified, false);
   assert.equal(firstLock.requestConfirmed, false);
-  assert.equal(firstLock.responseIssue, 'chat_lock_picker_a_request_unconfirmed');
+  assert.match(firstLock.error || '', /chat_lock_baseline_network_unconfirmed/);
 });
 
 test('a target Picker A click without UI acknowledgement cannot prove model locking', async () => {
   const { progress, sent } = await runPickerA({ targetSelectionUnconfirmed: true });
-  assert.equal(sent, 3);
+  assert.equal(sent, 5);
   const firstLock = progress.results.find(row => row.model === 'gpt-5.5' && row.selectorKey === '__picker_a_chat_lock__');
   assert.equal(firstLock.verified, false);
   assert.equal(firstLock.chatLockSupported, false);
