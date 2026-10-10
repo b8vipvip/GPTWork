@@ -271,9 +271,7 @@ function render(state) {
     title = stage
       ? `发现模型中 · ${stage.label} ${Number(stage.completed || 0)}/${Number(stage.total || 0)}`
       : `发现模型中 ${auto.attempt || 1}/${auto.maxAttempts || 2} / Model discovery`;
-    detail = stage?.id === 'picker-b-work'
-      ? '正在 ChatGPT Work 页面逐个真实验证 Picker B；Work 全部完成后才会回到普通 Chat 进行第二轮强制锁定验证。'
-      : '正在等待本次真实聊天响应；如果响应证据不足，程序会自动跟踪 handoff 后续流并最多再发送一次测试消息。';
+    detail = '仅验证普通 Chat 的 Picker A：选中模型、发送真实请求，并等待同一请求的实际响应模型；不会进入 Work 或发现 Picker B。';
     tone = 'wait';
   } else if (auto?.completedAt && autoApplies) {
     if (autoEvidenceConfirmed && auto.outcome === 'verified') {
