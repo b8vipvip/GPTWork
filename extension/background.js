@@ -3096,112 +3096,63 @@ async function requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded
 
 async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedSession) {
   const targetModel = normalizeConcreteModelId(item?.model);
-  const firstUse = sharedSession?.prepared !== true;
-  logRuntime('info', 'discovery', firstUse
-    ? 'chat_lock_shared_session_prepare_started'
-    : 'chat_lock_shared_session_reuse_started', {
-    tabId,
-    ownerTabId,
-    model: targetModel,
-    pickerMode: item?.pickerMode || null,
-    conversationPathname: sharedSession?.conversationPathname || null,
+  // An actual v0.5.208 discovery mixed three model-lock probes in one
+  // conversation. Reusing that conversation can bias ChatGPT's served model,
+  // and makes a GPT-6 -> GPT-6 passthrough look like a valid probe.
+  // Always reset to an independent official Chat surface per model.
+  const attempt = Number(sharedSession?.attempts || 0) + 1;
+  if (sharedSession) {
+    sharedSession.prepared = false;
+    sharedSession.conversationPathname = null;
+    sharedSession.initialPathname = null;
+    sharedSession.attempts = attempt;
+  }
+  logRuntime('info', 'discovery', 'chat_lock_isolated_session_prepare_started', {
+    tabId, ownerTabId, model: targetModel, pickerMode: item?.pickerMode || null, attempt,
   });
-
-  // Response capture is attempt-scoped even though every Chat-lock proof now shares
-  // one ChatGPT tab and one conversation. Clearing Network state between attempts
-  // prevents the prior turn's stream/handoff evidence from confirming the next model.
   await networkMonitor.disableResponseCapture(tabId).catch(() => {});
+  await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
 
+  const navigationDeadline = Date.now() + 12000;
   let surface = null;
-  if (firstUse) {
-    // Start exactly one clean Chat surface for the whole Chat-lock stage. v0.5.187
-    // navigated here for every model, which created a different conversation per
-    // proof and also invalidated in-flight Fetch interceptions during each reset.
-    await chrome.tabs.update(tabId, { url: 'https://chatgpt.com/' });
-
-    const navigationDeadline = Date.now() + 12000;
-    let rootDocumentObserved = false;
-    do {
-      const tab = await chrome.tabs.get(tabId).catch(() => null);
-      surface = await verificationSurfaceStatus(tabId);
-      let tabPathname = null;
-      try { tabPathname = new URL(tab?.url || '').pathname; } catch {}
-      if (
-        tabPathname === '/'
-        && surface?.pathname === '/'
-        && surface?.contentRuntimeReady === true
-      ) {
-        rootDocumentObserved = true;
-        break;
-      }
-      await sleep(200);
-    } while (Date.now() < navigationDeadline);
-    if (!rootDocumentObserved) {
-      throw new Error('Chat lock shared root document did not become ready');
-    }
-
-    surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
-    if (surface?.ready !== true || surface?.pathname !== '/') {
-      throw new Error(`Chat lock shared surface not ready: ${surface?.reason || surface?.pathname || 'unknown'}`);
-    }
-
-    if (sharedSession) {
-      sharedSession.prepared = true;
-      sharedSession.startedAt = Date.now();
-      sharedSession.initialPathname = '/';
-    }
-    logRuntime('info', 'discovery', 'chat_lock_shared_session_started', {
-      tabId,
-      ownerTabId,
-      model: targetModel,
-      pickerMode: item?.pickerMode || null,
-      pathname: surface?.pathname || null,
-    });
-  } else {
+  let rootDocumentObserved = false;
+  do {
     const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (!tab || !isChatGptUrl(tab.url || '')) {
-      throw new Error('Chat lock shared tab is no longer available');
-    }
-    surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
-    const pathname = surface?.pathname || (() => {
-      try { return new URL(tab.url || '').pathname; } catch { return null; }
-    })();
-    const supportedPath = pathname === '/' || /^\/c\/[^/?#]+\/?$/.test(String(pathname || ''));
-    if (surface?.ready !== true || !supportedPath) {
-      throw new Error(`Chat lock shared conversation not ready: ${surface?.reason || pathname || 'unknown'}`);
-    }
+    surface = await verificationSurfaceStatus(tabId);
+    let tabPathname = null;
+    try { tabPathname = new URL(tab?.url || '').pathname; } catch {}
     if (
-      sharedSession?.conversationPathname
-      && pathname !== sharedSession.conversationPathname
+      tabPathname === '/'
+      && surface?.pathname === '/'
+      && surface?.contentRuntimeReady === true
     ) {
-      throw new Error(`Chat lock shared conversation changed: ${pathname || 'unknown'}`);
+      rootDocumentObserved = true;
+      break;
     }
-    if (sharedSession) sharedSession.reused = Number(sharedSession.reused || 0) + 1;
-    logRuntime('info', 'discovery', 'chat_lock_shared_session_reused', {
-      tabId,
-      ownerTabId,
-      model: targetModel,
-      pickerMode: item?.pickerMode || null,
-      pathname,
-      conversationPathname: sharedSession?.conversationPathname || null,
-      reuseCount: Number(sharedSession?.reused || 0),
-    });
+    await sleep(200);
+  } while (Date.now() < navigationDeadline);
+  if (!rootDocumentObserved) throw new Error('Isolated Chat lock root document did not become ready');
+
+  surface = await waitForVerificationSurface(tabId, 12000, { requireVisible: true });
+  if (surface?.ready !== true || surface?.pathname !== '/') {
+    throw new Error(`Isolated Chat lock surface not ready: ${surface?.reason || surface?.pathname || 'unknown'}`);
   }
 
-  // This is the single gate for every forced Chat-lock turn. A fresh / URL can
-  // reopen in official Work because ChatGPT remembers its last mode. Switching is
-  // an explicit Chat control action and its outcome must be Picker A.
+  // A / navigation can reopen in Work, so confirm the actual official
+  // Chat selector before selecting the distinct Picker A baseline.
   await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: true });
   const afterModeSwitch = await verificationSurfaceStatus(tabId);
-  if (
-    sharedSession?.conversationPathname
-    && afterModeSwitch?.pathname !== sharedSession.conversationPathname
-  ) {
-    throw new Error(`Chat lock conversation changed during mode transition: ${afterModeSwitch?.pathname || 'unknown'}`);
+  if (afterModeSwitch?.pathname !== '/') {
+    throw new Error(`Isolated Chat lock mode transition left new Chat: ${afterModeSwitch?.pathname || 'unknown'}`);
   }
 
-  const currentTab = await chrome.tabs.get(tabId).catch(() => null);
-  const liveState = ensureTabState(tabId, currentTab?.url || 'https://chatgpt.com/');
+  if (sharedSession) {
+    sharedSession.prepared = true;
+    sharedSession.startedAt = Date.now();
+    sharedSession.initialPathname = '/';
+  }
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const liveState = ensureTabState(tabId, tab?.url || 'https://chatgpt.com/');
   resetVerificationAttempt(liveState);
   if (!liveState.autoVerification?.running) {
     const ownerState = Number.isInteger(ownerTabId) ? tabStates.get(ownerTabId) : null;
@@ -3214,11 +3165,14 @@ async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item,
     ? await networkMonitor.enableResponseCapture(tabId).catch(() => false)
     : false;
   if (!attached || !captureReady) {
-    throw new Error('Chat lock shared surface network capture unavailable');
+    throw new Error('Isolated Chat lock surface network capture unavailable');
   }
-
+  logRuntime('info', 'discovery', 'chat_lock_isolated_session_ready', {
+    tabId, ownerTabId, model: targetModel, pickerMode: item?.pickerMode || null,
+    attempt, pathname: afterModeSwitch?.pathname || null,
+  });
   await broadcastVerificationState(tabId, ownerTabId);
-  return { state: liveState, surface, firstUse };
+  return { state: liveState, surface: afterModeSwitch, firstUse: true };
 }
 
 async function pinSharedChatLockConversation(tabId, ownerTabId, sharedSession, item) {
@@ -3490,6 +3444,9 @@ async function verifyAccountCatalogModels(
 
     let abortForPendingTurn = false;
     let probeDispatchStarted = false;
+    let baselineModel = null;
+    let baselineTransport = null;
+    let baselineSelectionAttempted = false;
     try {
       if (!chatCompatibility) {
         // A native probe is valid only in official Chat, never in a remembered Work tab.
@@ -3498,6 +3455,43 @@ async function verifyAccountCatalogModels(
       if (chatCompatibility) {
         const fresh = await prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedChatLockSession);
         state = fresh.state;
+        // Choose an independently native-verified Picker A model OTHER than the
+        // lock target. This makes even the default GPT-6 lock a causal rewrite,
+        // instead of treating an already-selected GPT-6 request as evidence.
+        const verifiedBaselines = progress.results.filter((result) => (
+          result?.pickerMode === 'A'
+          && result?.selectorKey !== '__picker_a_chat_lock__'
+          && result?.nativeStageComplete === true
+          && result?.verified === true
+          && result?.model !== item.model
+          && normalizeRawProtocolModelId(result?.nativeRequestModel || result?.rawRequestModel)
+          && normalizeRawProtocolModelId(result?.nativeRequestModel || result?.rawRequestModel)
+            !== normalizeRawProtocolModelId(item.transportModel)
+        ));
+        const baseline = verifiedBaselines.find((result) => result.model === 'gpt-6')
+          || verifiedBaselines[0];
+        if (!baseline) throw new Error('chat_lock_distinct_picker_a_baseline_unavailable');
+        baselineModel = baseline.model;
+        baselineTransport = normalizeRawProtocolModelId(baseline.nativeRequestModel || baseline.rawRequestModel);
+        const selected = await sendTabMessage(tabId, {
+          type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+          model: baseline.model,
+          selectorKey: baseline.selectorKey,
+          label: baseline.label,
+        });
+        baselineSelectionAttempted = selected?.result?.selectionAttempted === true;
+        if (!baselineSelectionAttempted) {
+          throw new Error('chat_lock_baseline_picker_a_selection_unconfirmed');
+        }
+        logRuntime('info', 'discovery', 'chat_lock_distinct_baseline_selected', {
+          tabId, model: item.model, baselineModel, baselineTransport,
+          observationModel: selected?.result?.observation?.model || null,
+          uiConfirmed: selected?.result?.uiConfirmed === true,
+        });
+        // Clicking a model row can rerender the composer, so settle and verify
+        // that the test still runs in official Chat before the actual request.
+        await sleep(700);
+        await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
         transactionStartedAtMs = Date.now();
         const transaction = verificationTransactions.get(Number(tabId));
         if (transaction) transaction.startedAt = transactionStartedAtMs;
@@ -3568,7 +3562,8 @@ async function verifyAccountCatalogModels(
       // transport model string happens to match. Both stages recheck Chat mode.
       await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
       if (chatCompatibility) {
-        await pinSharedChatLockConversation(tabId, ownerTabId, sharedChatLockSession, item);
+        // Each lock now owns a separate new Chat conversation; there is
+        // deliberately no cross-model conversation pin or reuse.
       }
 
       const liveState = ensureTabState(tabId);
@@ -3617,7 +3612,10 @@ async function verifyAccountCatalogModels(
         const expectedResponse = normalizeRawProtocolModelId(item.expectedResponseModel);
         const rewriteCapturedAtMs = Date.parse(liveState.lastRewrite?.capturedAt || '');
         const authoritativeRewrite = Boolean(
-          liveState.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
+          requestId
+          && liveState.lastRewrite?.requestId === requestId
+          && liveState.lastRequest?.requestId === requestId
+          && liveState.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
           && liveState.lastRewrite?.authorityModel === item.model
           && Number.isFinite(rewriteCapturedAtMs)
           && rewriteCapturedAtMs >= transactionStartedAtMs - 250
@@ -3626,8 +3624,15 @@ async function verifyAccountCatalogModels(
         // The default Chat model can already equal the requested target.
         // "verification_model_already_exact" is only a passthrough, not a
         // causal demonstration that the lock changed which model was served.
+        const observedBaselineTransport = normalizeRawProtocolModelId(liveState.lastRewrite?.transportModelBefore);
+        const baselineConfirmed = Boolean(
+          baselineSelectionAttempted
+          && baselineTransport
+          && observedBaselineTransport === baselineTransport
+          && observedBaselineTransport !== expectedTransport
+        );
         const effectiveRewrite = liveState.lastRewrite?.changed === true
-          && normalizeRawProtocolModelId(liveState.lastRewrite?.transportModelBefore) !== expectedTransport;
+          && baselineConfirmed;
         requestConfirmed = Boolean(
           authoritativeRewrite
           && expectedTransport
@@ -3645,21 +3650,26 @@ async function verifyAccountCatalogModels(
           && rawResponseProtocolModel === expectedResponse
         );
         responseConfirmed = Boolean(responseObserved && explicitResponseCompatible);
+        const responseNetworkError = String(responseEvidence?.diagnostics?.networkError || responseEvidence?.bodyError || '');
         responseIssue = !requestConfirmed
-          ? authoritativeRewrite && expectedTransport && rawRequestModel === expectedTransport && !effectiveRewrite
-            ? 'chat_lock_no_effective_rewrite'
-            : 'chat_lock_request_unconfirmed'
+          ? authoritativeRewrite && !baselineConfirmed
+            ? 'chat_lock_baseline_request_mismatch'
+            : authoritativeRewrite && expectedTransport && rawRequestModel === expectedTransport && !effectiveRewrite
+              ? 'chat_lock_no_effective_rewrite'
+              : 'chat_lock_request_unconfirmed'
           : responseConfirmed
             ? null
-            : !responseObserved
-              ? 'chat_mode_response_not_observed'
-              : !rawResponseProtocolModel
-                ? 'chat_mode_response_model_not_exposed'
-                : !expectedResponse
-                  ? 'native_response_model_not_exposed'
-                  : pickerAChatLock
-                    ? 'picker_a_chat_lock_response_mismatch'
-                    : 'chat_mode_response_differs_from_official_work';
+            : rawResponseProtocolModel && expectedResponse && rawResponseProtocolModel !== expectedResponse
+              ? pickerAChatLock ? 'picker_a_chat_lock_response_mismatch' : 'chat_mode_response_differs_from_official_work'
+              : !responseObserved && responseNetworkError
+                ? 'chat_lock_response_interrupted'
+                : !responseObserved
+                  ? 'chat_mode_response_not_observed'
+                  : !rawResponseProtocolModel
+                    ? 'chat_mode_response_model_not_exposed'
+                    : !expectedResponse
+                      ? 'native_response_model_not_exposed'
+                      : 'chat_mode_response_unconfirmed';
         verified = Boolean(requestId && requestConfirmed && responseConfirmed);
         evidenceSource = rawResponseProtocolModel && responseConfirmed
           ? 'network_response_metadata'
@@ -3732,6 +3742,10 @@ async function verifyAccountCatalogModels(
         timedOut: networkEvidence?.timedOut === true,
         turnSettled: true,
         observation: selection.observation || null,
+        baselineModel: chatCompatibility ? baselineModel : null,
+        baselineTransport: chatCompatibility ? baselineTransport : null,
+        baselineSelectionAttempted: chatCompatibility ? baselineSelectionAttempted : false,
+        responseNetworkError: String(responseEvidence?.diagnostics?.networkError || responseEvidence?.bodyError || '') || null,
         nativeRequestModel: chatCompatibility
           ? normalizeRawProtocolModelId(item.nativeRequestModel)
           : rawRequestModel,
@@ -3791,6 +3805,10 @@ async function verifyAccountCatalogModels(
         nativeRequestModel: result.nativeRequestModel,
         nativeResponseModel: result.nativeResponseModel,
         chatLockSupported: result.chatLockSupported,
+        baselineModel: result.baselineModel,
+        baselineTransport: result.baselineTransport,
+        baselineSelectionAttempted: result.baselineSelectionAttempted,
+        responseNetworkError: result.responseNetworkError,
         responseIssue,
         evidenceSource,
       });
@@ -3841,6 +3859,13 @@ async function verifyAccountCatalogModels(
         nativeResponseModel: item.nativeResponseModel || null,
         nativeResponseConfirmed: item.nativeResponseConfirmed === true,
         chatTransportModel: item.transportModel || null,
+        chatLockSupported: false,
+        chatLockRequestConfirmed: false,
+        chatLockResponseConfirmed: false,
+        chatLockStageComplete: false,
+        baselineModel: chatCompatibility ? baselineModel : null,
+        baselineTransport: chatCompatibility ? baselineTransport : null,
+        baselineSelectionAttempted: chatCompatibility ? baselineSelectionAttempted : false,
         verified: false,
         error: errorText(error),
       });
@@ -3910,11 +3935,7 @@ async function verifyAccountCatalogModels(
     discoveryPasses: progress.discoveryPasses,
     stablePasses: progress.stablePasses,
     discoveryMode: progress.discoveryMode,
-    sharedChatLockSession: {
-      prepared: sharedChatLockSession.prepared === true,
-      conversationPathname: sharedChatLockSession.conversationPathname || null,
-      reuseCount: Number(sharedChatLockSession.reused || 0),
-    },
+    isolatedChatLockSessions: Number(sharedChatLockSession.attempts || 0),
     reasoningLevels: progress.reasoningLevels,
     results: progress.results,
   });
