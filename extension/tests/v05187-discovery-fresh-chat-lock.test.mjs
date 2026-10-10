@@ -32,7 +32,7 @@ test('distinct native Picker A selection precedes the forced Chat request', () =
   assert.match(body, /baselineUiConfirmed = selected\?\.result\?\.uiConfirmed === true/);
   assert.match(body, /targetPickerConfirmed = targetChoice\?\.result\?\.selectionAttempted === true/);
   assert.match(body, /targetChoice\?\.result\?\.uiConfirmed === true/);
-  assert.match(body, /observedBaselineTransport !== expectedTransport/);
+  assert.match(body, /baselineTransport !== expectedTransport/);
   assert.match(body, /liveState\.lastRewrite\?\.requestId === requestId/);
   assert.match(body, /officialPickerAuthority = Boolean\(/);
   assert.match(body, /liveState\.lastRequest\?\.requestId === requestId/);
