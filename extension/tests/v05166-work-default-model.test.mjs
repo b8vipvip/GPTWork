@@ -22,7 +22,7 @@ test('settings source derives Work default choices from locked models', async ()
 });
 
 
-test('runtime Work policy consumes the configured default while discovery remains source-first', async () => {
+test('runtime Work policy remains independent of Picker A-only discovery', async () => {
   const [runtime, background] = await Promise.all([read('tab-feature-runtime.js'), read('background.js')]);
   assert.match(runtime, /basePolicy\.workDefaultModel/);
   assert.match(runtime, /isAtLeastWorkFloor\(selected, floor\) \? selected : floor/);
@@ -30,8 +30,8 @@ test('runtime Work policy consumes the configured default while discovery remain
     background.indexOf('async function verifyAccountCatalogModels'),
     background.indexOf('function modelVerificationHistoryRecord'),
   );
-  assert.match(block, /discoverOfficialWorkModels\(tabId, progress\)/);
-  assert.match(block, /picker-b-chat-compatibility/);
+  assert.match(block, /discoveryMode = 'picker-a-chat-only'/);
+  assert.doesNotMatch(block, /discoverOfficialWorkModels\(tabId, progress\)/);
   assert.doesNotMatch(block, /workBootstrapModelForTab\(tabId\)/);
   assert.doesNotMatch(block, /selectorKey: '__work_transport__'/);
 });
