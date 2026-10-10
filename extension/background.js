@@ -3944,6 +3944,9 @@ async function verifyAccountCatalogModels(
         nativeResponseModel: item.nativeResponseModel || null,
         nativeResponseConfirmed: item.nativeResponseConfirmed === true,
         chatTransportModel: item.transportModel || null,
+        verified: false,
+        requestConfirmed: false,
+        responseConfirmed: false,
         chatLockSupported: false,
         chatLockRequestConfirmed: false,
         chatLockResponseConfirmed: false,
@@ -3954,7 +3957,6 @@ async function verifyAccountCatalogModels(
         baselineUiConfirmed: chatCompatibility ? baselineUiConfirmed : false,
         baselineNetworkConfirmed: chatCompatibility ? baselineNetworkConfirmed : false,
         targetPickerConfirmed: chatCompatibility ? targetPickerConfirmed : false,
-        verified: false,
         error: errorText(error),
       });
       logRuntime('warn', 'discovery', chatCompatibility
