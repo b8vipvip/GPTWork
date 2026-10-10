@@ -1,53 +1,48 @@
-// [legacy-core-maintenance] v0.5.189 supersedes per-model fresh resets with one shared Chat-lock conversation.
+// Regression: each Picker A Chat-lock proof starts in its own new Chat session.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const background = await readFile(new URL('../background.js', import.meta.url), 'utf8');
+const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
+const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
+const body = background.slice(verifyStart, verifyEnd);
 
-test('Picker A and Picker B Chat-lock passes share one Chat tab and conversation', () => {
-  assert.match(background, /async function prepareSharedChatLockVerificationSurface/);
-  assert.match(background, /const firstUse = sharedSession\?\.prepared !== true/);
-  assert.match(background, /if \(firstUse\)/);
-  assert.match(background, /chrome\.tabs\.update\(tabId, \{ url: 'https:\/\/chatgpt\.com\/' \}\)/);
-  assert.match(background, /chat_lock_shared_session_started/);
-  assert.match(background, /chat_lock_shared_session_reused/);
-  assert.match(background, /chat_lock_shared_conversation_pinned/);
-  assert.match(background, /sharedSession\.conversationPathname/);
-  assert.doesNotMatch(background, /resetChatLockVerificationSurface/);
+test('a fresh ordinary Chat surface is required for every Picker A lock attempt', () => {
+  const start = background.indexOf('async function prepareSharedChatLockVerificationSurface');
+  const end = background.indexOf('async function pinSharedChatLockConversation', start);
+  const prepare = background.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(prepare, /sharedSession\.prepared = false/);
+  assert.match(prepare, /sharedSession\.conversationPathname = null/);
+  assert.match(prepare, /chrome\.tabs\.update\(tabId, \{ url: 'https:\/\/chatgpt\.com\/' \}\)/);
+  assert.match(prepare, /chat_lock_isolated_session_ready/);
+  assert.match(prepare, /requireVerificationOfficialChatMode\(tabId, item, \{ switchIfNeeded: true \}\)/);
+  assert.doesNotMatch(prepare, /chat_lock_shared_session_reused/);
+  assert.match(body, /await prepareSharedChatLockVerificationSurface\(tabId, ownerTabId, item, sharedChatLockSession\)/);
+  assert.doesNotMatch(body, /await pinSharedChatLockConversation\(/);
+});
 
-  const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
-  const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
-  const body = background.slice(verifyStart, verifyEnd);
-  assert.match(body, /const sharedChatLockSession = \{/);
-  const prepare = body.indexOf('await prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedChatLockSession)');
+test('distinct native Picker A selection precedes the forced Chat request', () => {
+  const prepare = body.indexOf('await prepareSharedChatLockVerificationSurface(');
+  const choose = body.indexOf("type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL'", prepare);
   const probe = body.indexOf('const probe = await sendVerificationReasoningProbe', prepare);
-  assert.ok(prepare >= 0);
-  assert.ok(probe > prepare);
-  assert.match(body, /await pinSharedChatLockConversation\(tabId, ownerTabId, sharedChatLockSession, item\)/);
+  assert.ok(prepare >= 0 && choose > prepare && probe > choose);
+  assert.match(body, /baselineSelectionAttempted = selected\?\.result\?\.selectionAttempted === true/);
+  assert.match(body, /const baselineConfirmed = Boolean\(/);
+  assert.match(body, /observedBaselineTransport === baselineTransport/);
+  assert.match(body, /observedBaselineTransport !== expectedTransport/);
+  assert.match(body, /liveState\.lastRewrite\?\.requestId === requestId/);
+  assert.match(body, /liveState\.lastRequest\?\.requestId === requestId/);
 });
 
-test('shared Chat-lock attempts still restart evidence clocks and use the live post-attempt state', () => {
-  const verifyStart = background.indexOf('async function verifyAccountCatalogModels');
-  const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
-  const body = background.slice(verifyStart, verifyEnd);
-  assert.match(body, /transactionStartedAtMs = Date\.now\(\);/);
-  assert.match(body, /transaction\.startedAt = transactionStartedAtMs/);
-  assert.match(body, /const liveState = ensureTabState\(tabId\)/);
-  assert.match(body, /liveState\.lastRewrite\?\.transportModelAfter/);
-  assert.match(body, /liveState\.lastRewrite\?\.authorityKind === 'model-discovery-chat-compat'/);
-});
-
-test('discovery response evidence bypasses ordinary lock-policy verdict mutation', () => {
+test('discovery response truth bypasses ordinary lock-policy verdict mutation', () => {
   const applyStart = background.indexOf('async function applyNetworkEvidence');
   const applyEnd = background.indexOf('const networkMonitor = new ChatGptNetworkMonitor', applyStart);
-  const body = background.slice(applyStart, applyEnd);
-  const transaction = body.indexOf('const discoveryTransaction = verificationTransactionForTab(tabId)');
-  const observed = body.indexOf("'verification_response_evidence_observed'");
-  const ordinaryVerify = body.indexOf('const result = await verifyObservation');
-  assert.ok(transaction >= 0);
-  assert.ok(observed > transaction);
-  assert.ok(ordinaryVerify > observed);
-  assert.match(body, /if \(discoveryTransaction\?\.model\)/);
-  assert.match(body, /await broadcastTabState\(tabId\);\s*return;/);
+  const value = background.slice(applyStart, applyEnd);
+  const transaction = value.indexOf('const discoveryTransaction = verificationTransactionForTab(tabId)');
+  const observed = value.indexOf("'verification_response_evidence_observed'");
+  const ordinaryVerify = value.indexOf('const result = await verifyObservation');
+  assert.ok(transaction >= 0 && observed > transaction && ordinaryVerify > observed);
+  assert.match(value, /if \(discoveryTransaction\?\.model\)/);
 });
