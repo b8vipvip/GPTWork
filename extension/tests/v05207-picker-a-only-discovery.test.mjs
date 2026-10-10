@@ -165,7 +165,7 @@ test('real Picker A native turn and force-locked Chat turn must both receive the
 });
 
 test('three native Picker A models still enqueue three forced Chat-lock probes after the stable-pass threshold', async () => {
-  const { progress, sent, events } = await runPickerA({ pickerModels: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-6'] });
+  const { progress, sent, events, isolatedSessions, baselines } = await runPickerA({ pickerModels: ['gpt-5.5', 'gpt-5.6-sol', 'gpt-6'] });
   assert.equal(sent, 6, JSON.stringify({ results: progress.results, events }));
   assert.equal(progress.total, 6);
   assert.equal(progress.verified, 6);
