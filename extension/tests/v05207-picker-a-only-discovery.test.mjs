@@ -118,20 +118,24 @@ async function runPickerA({ nativeResponse = null, lockResponse = null, staleLoc
       state.lastRequest = {
         requestId, capturedAt: new Date().toISOString(),
         model: lock ? currentTarget : model,
-        rawModel: lock && baselineMismatch && model === 'gpt-5.5' ? transportFor(currentBaseline) : transport,
+        rawModel: baseline && baselineMismatch && currentBaseline === 'gpt-6' ? transportFor('gpt-5.5') : transport,
       };
-      state.lastRewrite = lock ? {
-        authorityKind: 'model-discovery-picker-a-ui-lock',
+      state.lastRewrite = lock || baseline ? {
+        authorityKind: lock ? 'model-discovery-picker-a-ui-lock' : 'model-discovery-native',
         authorityModel: model,
         requestId,
-        transportModelBefore: baselineMismatch && model === 'gpt-5.5' ? transportFor(currentBaseline) : transport,
-        transportModelAfter: baselineMismatch && model === 'gpt-5.5' ? transportFor(currentBaseline) : transport,
+        transportModelBefore: state.lastRequest.rawModel,
+        transportModelAfter: state.lastRequest.rawModel,
         changed: false, capturedAt: new Date().toISOString(),
       } : null;
       state.lastResponseEvidence = {
         requestId: lock && staleLockResponse && model === 'gpt-5.5' ? 'other-request' : requestId,
-        rawModel: lock && model === 'gpt-5.5' ? (lockResponse || transport) : !lock && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
-        model: lock && model === 'gpt-5.5' ? (lockResponse || transport) : !lock && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
+        rawModel: baseline && baselineServedMismatch ? 'gpt-5.5-thinking'
+          : lock && model === 'gpt-5.5' ? (lockResponse || transport)
+          : !lock && !baseline && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
+        model: baseline && baselineServedMismatch ? 'gpt-5.5-thinking'
+          : lock && model === 'gpt-5.5' ? (lockResponse || transport)
+          : !lock && !baseline && model === 'gpt-5.5' ? (nativeResponse || transport) : transport,
         diagnostics: { httpStatus: 200, parsedObjectCount: 1 },
         bodyError: lock && failedLockStream && model === 'gpt-5.5' ? 'net::ERR_HTTP2_PROTOCOL_ERROR' : null,
       };
