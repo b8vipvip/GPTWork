@@ -49,7 +49,8 @@ test('Work discovery only bootstraps after its mode has already been proven', ()
   assert.match(source, /official_work_model_discovery_unavailable/);
 });
 
-test('official Work incomplete remains an incomplete pipeline outcome', () => {
-  assert.match(background, /progress\.officialWorkStageCompleted = Boolean/);
-  assert.match(background, /official_work_model_discovery_incomplete/);
+test('Picker A-only verification no longer waits for official Work completion', () => {
+  const auto = background.slice(background.indexOf('async function autoVerify'), background.indexOf('function diagnosticTabState'));
+  assert.match(auto, /summarizeVerificationOutcome\(catalogVerification\)/);
+  assert.doesNotMatch(auto, /official_work_model_discovery_incomplete/);
 });
