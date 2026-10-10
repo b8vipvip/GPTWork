@@ -3345,19 +3345,19 @@ async function verifyAccountCatalogModels(
   progress.modelVerificationLedger = await loadAccountModelVerificationLedger();
   state.autoVerification.catalogVerification = progress;
   const mergeCatalog = catalog.merge;
-  progress.officialWorkDiscovery = {
-    attempted: false,
-    entered: false,
-    pickerMode: null,
-    nativeResults: [],
-    chatCompatibilityCandidates: 0,
-  };
+  // Discover Models is limited to Picker A in the official Chat surface.
+  // The old Work/Picker B helper is deliberately not part of this pipeline.
+  progress.discoveryMode = 'picker-a-chat-only';
   progress.ignoredSeedCandidates = {
     shared: Array.isArray(sharedCandidates) ? sharedCandidates.length : 0,
     localNetwork: Array.isArray(localNetworkCandidates) ? localNetworkCandidates.length : 0,
   };
   progress.ownerTabId = Number.isInteger(ownerTabId) ? ownerTabId : tabId;
 
+  if (accountCatalog?.pickerMode !== 'A'
+    || accountCatalog?.rows?.some((row) => row?.pickerMode !== 'A')) {
+    throw new Error('picker_a_chat_catalog_unconfirmed');
+  }
   mergeCatalog(accountCatalog, 'chat-picker-a');
   await broadcastVerificationState(tabId, ownerTabId);
   logRuntime(queue.length ? 'info' : 'warn', 'discovery', 'model_discovery_started', {
@@ -3369,7 +3369,6 @@ async function verifyAccountCatalogModels(
   let index = 0;
   let stablePasses = 0;
   let pickerAChatLockQueued = false;
-  let officialWorkDiscoveryDone = false;
   const transientRetryCounts = new Map();
   const preProbeReadinessRetryCounts = new Map();
   const sharedChatLockSession = {
@@ -3380,7 +3379,7 @@ async function verifyAccountCatalogModels(
     reused: 0,
   };
 
-  while (index < queue.length || stablePasses < 2 || !officialWorkDiscoveryDone) {
+  while (index < queue.length || stablePasses < 2) {
     if (index >= queue.length) {
       if (!pickerAChatLockQueued) {
         pickerAChatLockQueued = true;
@@ -3425,33 +3424,16 @@ async function verifyAccountCatalogModels(
         }
       }
 
-      if (!officialWorkDiscoveryDone) {
-        const officialWork = await discoverOfficialWorkModels(tabId, progress);
-        // A completed attempt is not an all-stages-completed discovery when the
-        // official Work stage never obtained its owned model catalog. Record the
-        // explicit incomplete state, rather than treating zero B candidates as a
-        // successful empty catalog.
-        progress.officialWorkStageCompleted = Boolean(
-          Array.isArray(officialWork?.nativeResults)
-          && officialWork.nativeResults.length > 0
-        );
-        officialWorkDiscoveryDone = true;
-        progress.officialWorkDiscovery = {
-          attempted: true,
-          entered: officialWork?.nativeResults?.length > 0 || officialWork?.rows?.length > 0,
-          pickerMode: officialWork?.pickerMode ?? null,
-          nativeResults: Array.isArray(officialWork?.nativeResults) ? officialWork.nativeResults : [],
-          chatCompatibilityCandidates: Number(officialWork?.chatCandidates?.rows?.length || 0),
-        };
-        const added = mergeCatalog(officialWork?.chatCandidates, 'picker-b-chat-compatibility');
-        if (added) stablePasses = 0;
-        await broadcastVerificationState(tabId, ownerTabId);
-        if (index < queue.length) continue;
-      }
-
       const rediscovered = await discoverAccountCatalog(tabId);
       progress.discoveryPasses += 1;
-      const added = mergeCatalog(rediscovered, 'chat-picker-a-settle');
+      const added = rediscovered?.pickerMode === 'A'
+        ? mergeCatalog(rediscovered, 'chat-picker-a-settle')
+        : 0; // Never enroll Picker B or an unresolved picker as Chat models.
+      if (rediscovered?.pickerMode !== 'A') {
+        logRuntime('warn', 'discovery', 'picker_a_rediscovery_skipped', {
+          tabId, pickerMode: rediscovered?.pickerMode || null,
+        });
+      }
       stablePasses = added ? 0 : stablePasses + 1;
       progress.stablePasses = stablePasses;
       await broadcastVerificationState(tabId, ownerTabId);
@@ -3582,6 +3564,10 @@ async function verifyAccountCatalogModels(
     let abortForPendingTurn = false;
     let probeDispatchStarted = false;
     try {
+      if (!chatCompatibility) {
+        // A native probe is valid only in official Chat, never in a remembered Work tab.
+        await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
+      }
       if (chatCompatibility) {
         const fresh = await prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedChatLockSession);
         state = fresh.state;
@@ -3651,21 +3637,29 @@ async function verifyAccountCatalogModels(
         throw new Error('ChatGPT response remained non-terminal during model discovery');
       }
 
+      // A request served in Work cannot verify a Chat Picker A model, even if the
+      // transport model string happens to match. Both stages recheck Chat mode.
+      await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
       if (chatCompatibility) {
-        // Read-only post-turn check: if ChatGPT switched to Work while the forced
-        // request completed, the turn cannot count as Chat-lock evidence.
-        await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
         await pinSharedChatLockConversation(tabId, ownerTabId, sharedChatLockSession, item);
       }
 
       const liveState = ensureTabState(tabId);
       state = liveState;
+      const requestCapturedAtMs = Date.parse(liveState.lastRequest?.capturedAt || '');
       const requestId = networkEvidence?.requestId
-        || liveState.lastRequest?.requestId
-        || liveState.lastForwardedRequest?.requestId
-        || null;
-      const responseEvidence = networkEvidence?.evidence
-        || (liveState.lastResponseEvidence?.requestId === requestId ? liveState.lastResponseEvidence : null);
+        || (Number.isFinite(requestCapturedAtMs)
+          && requestCapturedAtMs >= transactionStartedAtMs - 1500
+          ? liveState.lastRequest?.requestId : null);
+      // Only the response for THIS outgoing request can verify the Picker A
+      // model. A stale tab-level stream, a different request, or a model label
+      // in an unrelated frame must never become response truth.
+      const responseEvidence = requestId
+        ? (liveState.lastResponseEvidence?.requestId === requestId
+          ? liveState.lastResponseEvidence
+          : networkEvidence?.evidence?.requestId === requestId
+            ? networkEvidence.evidence : null)
+        : null;
       const rawRequestModel = normalizeRawProtocolModelId(
         liveState.lastRewrite?.transportModelAfter
           || liveState.lastRewrite?.transportModelBefore
@@ -3673,9 +3667,7 @@ async function verifyAccountCatalogModels(
           || liveState.lastRequest?.model,
       );
       const rawResponseProtocolModel = normalizeRawProtocolModelId(
-        responseEvidence?.rawModel
-          || state.lastResponseEvidence?.rawModel
-          || state.lastResponseEvidence?.model,
+        responseEvidence?.rawModel || responseEvidence?.model,
       );
       const requestModel = normalizeConcreteModelId(
         liveState.lastRewrite?.modelAfter
@@ -3756,16 +3748,23 @@ async function verifyAccountCatalogModels(
         // if the transport/response actually belongs to the other model.
         requestConfirmed = Boolean(
           selection.selectionAttempted
+          && requestId
+          && liveState.lastRequest?.requestId === requestId
           && rawRequestModel
           && nativeChatPickerFamily(rawRequestModel) === item.model
         );
         responseConfirmed = Boolean(
-          rawResponseProtocolModel
+          requestId
+          && responseEvidence?.requestId === requestId
+          && successfulConversationResponseEvidence(responseEvidence)
+          && rawResponseProtocolModel
           && nativeChatPickerFamily(rawResponseProtocolModel) === item.model
         );
         verified = Boolean(requestId && requestConfirmed && responseConfirmed);
-        responseIssue = !rawResponseProtocolModel
-          ? 'native_response_model_missing'
+        responseIssue = !successfulConversationResponseEvidence(responseEvidence)
+          ? 'native_response_not_observed'
+          : !rawResponseProtocolModel
+            ? 'native_response_model_missing'
           : !responseConfirmed
             ? 'native_response_model_mismatch'
             : !requestConfirmed
@@ -3944,7 +3943,9 @@ async function verifyAccountCatalogModels(
     if (!chatCompatibility) {
       const rediscovered = await discoverAccountCatalog(tabId);
       progress.discoveryPasses += 1;
-      const added = mergeCatalog(rediscovered, 'chat-picker-a-post-turn');
+      const added = rediscovered?.pickerMode === 'A'
+        ? mergeCatalog(rediscovered, 'chat-picker-a-post-turn')
+        : 0;
       stablePasses = added ? 0 : stablePasses + 1;
       progress.stablePasses = stablePasses;
       await broadcastVerificationState(tabId, ownerTabId);
@@ -3981,7 +3982,7 @@ async function verifyAccountCatalogModels(
     failed: progress.failed,
     discoveryPasses: progress.discoveryPasses,
     stablePasses: progress.stablePasses,
-    officialWorkDiscovery: progress.officialWorkDiscovery,
+    discoveryMode: progress.discoveryMode,
     sharedChatLockSession: {
       prepared: sharedChatLockSession.prepared === true,
       conversationPathname: sharedChatLockSession.conversationPathname || null,
@@ -4214,12 +4215,18 @@ async function autoVerify(tabId) {
     autoVerification.sharedKnownModelCount = 0;
     autoVerification.localNetworkCandidateCount = 0;
 
+    // ChatGPT can reopen / in its last-used official Work mode. Confirm (or
+    // explicitly switch to) Picker A before collecting any candidate model.
+    try {
+      await requireVerificationOfficialChatMode(tabId, { model: null }, { switchIfNeeded: true });
+    } catch (error) {
+      return await finishInfrastructureFailure('verification_picker_a_unavailable', error);
+    }
     accountCatalog = await discoverAccountCatalog(tabId);
-    autoVerification.workDiscovery = {
-      attempted: false,
-      entered: false,
-      reason: 'official_work_discovery_pending',
-    };
+    if (accountCatalog.pickerMode !== 'A') {
+      return await finishInfrastructureFailure('verification_picker_a_unavailable',
+        new Error('picker_a_chat_catalog_unconfirmed'));
+    }
     autoVerification.maxAttempts = accountCatalog.rows.length;
     await broadcastVerificationState(tabId, sourceTabId);
 
@@ -4277,12 +4284,6 @@ async function autoVerify(tabId) {
       finalOutcome = 'unverified';
       finalReason = 'verification_infrastructure_no_requests_confirmed';
       autoVerification.infrastructureFailure = true;
-    } else if (
-      catalogVerification?.officialWorkDiscovery?.attempted === true
-      && catalogVerification.officialWorkDiscovery.entered !== true
-    ) {
-      finalOutcome = Number(catalogVerification?.verified || 0) > 0 ? 'partial' : 'unverified';
-      finalReason = 'official_work_model_discovery_incomplete';
     }
 
     autoVerification.running = false;
