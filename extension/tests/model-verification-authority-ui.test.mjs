@@ -245,7 +245,7 @@ test('discovery converges Picker A native and Chat-lock stages only', () => {
   const verifyEnd = background.indexOf('function modelVerificationHistoryRecord', verifyStart);
   const body = background.slice(verifyStart, verifyEnd);
   assert.match(body, /model_discovery_catalog_merged/);
-  assert.match(body, /while \(index < queue\.length \|\| stablePasses < 2\)/);
+  assert.match(body, /while \(index < queue\.length \|\| stablePasses < 2 \|\| !pickerAChatLockQueued\)/);
   assert.match(body, /picker_a_chat_lock_queued/);
   assert.doesNotMatch(body, /await discoverOfficialWorkModels\(/);
   assert.doesNotMatch(body, /mergeCatalog\(officialWork\?\.chatCandidates/);
