@@ -42,7 +42,7 @@ test('every forced Chat-lock turn verifies Picker A before dispatch and after re
   const loop = block(background, 'async function verifyAccountCatalogModels', 'function modelVerificationHistoryRecord');
   const before = loop.indexOf('prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedChatLockSession)');
   const probe = loop.indexOf('const probe = await sendVerificationReasoningProbe');
-  const after = loop.indexOf('requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false })');
+  const after = loop.lastIndexOf('requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false })');
   assert.ok(before >= 0 && probe > before && after > probe);
   assert.match(background, /Chat lock conversation changed during mode transition/);
 });
