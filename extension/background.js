@@ -3900,7 +3900,8 @@ async function verifyAccountCatalogModels(
       const retryCount = transientRetryCounts.get(retryKey) || 0;
       if (shouldRetrySharedChatLockReplyLoss({
         chatCompatibility,
-        sharedSessionPrepared: sharedChatLockSession.prepared === true,
+        sharedSessionPrepared: sharedChatLockSession.prepared === true
+          || (Number(sharedChatLockSession.attempts || 0) > 0 && !probeDispatchStarted),
         probeDispatchStarted,
         error: errorText(error),
         retryCount,
@@ -3917,7 +3918,8 @@ async function verifyAccountCatalogModels(
       const readinessRetryCount = preProbeReadinessRetryCounts.get(retryKey) || 0;
       if (shouldRetrySharedChatLockPreProbeReadiness({
         chatCompatibility,
-        sharedSessionPrepared: sharedChatLockSession.prepared === true,
+        sharedSessionPrepared: sharedChatLockSession.prepared === true
+          || (Number(sharedChatLockSession.attempts || 0) > 0 && !probeDispatchStarted),
         probeDispatchStarted,
         error: errorText(error),
         retryCount: readinessRetryCount,
