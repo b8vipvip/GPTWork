@@ -124,7 +124,7 @@ test('discovery has no Work entry/Picker B stage, even if legacy helper still ex
 
 test('real Picker A native turn and force-locked Chat turn must both receive the matching model response', async () => {
   const { progress, sent, events } = await runPickerA();
-  assert.equal(sent, 2);
+  assert.equal(sent, 2, JSON.stringify({ results: progress.results, events }));
   assert.equal(progress.discoveryMode, 'picker-a-chat-only');
   assert.equal(progress.total, 2);
   assert.equal(progress.verified, 2);
@@ -139,7 +139,7 @@ test('wrong served model in native Picker A cannot queue a successful lock', asy
   const { progress, sent } = await runPickerA({ nativeResponse: 'gpt-6' });
   assert.equal(sent, 1);
   assert.equal(progress.verified, 0);
-  assert.equal(progress.results[0].responseConfirmed, false);
+  assert.equal(progress.results[0].responseConfirmed, false, JSON.stringify(progress.results));
 });
 
 test('wrong, stale, or failed Chat response never verifies the Picker A lock', async () => {
