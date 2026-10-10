@@ -30,7 +30,7 @@ const goodStream = evidence => Boolean(
   && !evidence.conflicts?.model
 );
 
-async function runPickerA({ nativeResponse = null, lockResponse = null, staleLockResponse = false, failedLockStream = false, baselineMismatch = false, targetSelectionUnconfirmed = false, pickerMode = 'A', pickerModels = ['gpt-5.5', 'gpt-6'] } = {}) {
+async function runPickerA({ nativeResponse = null, lockResponse = null, staleLockResponse = false, failedLockStream = false, baselineMismatch = false, targetSelectionUnconfirmed = false, deferredSelection = false, baselineServedMismatch = false, pickerMode = 'A', pickerModels = ['gpt-5.5', 'gpt-6'] } = {}) {
   const activeCatalog = Array.isArray(pickerModels) && pickerModels.length
     ? {
       pickerMode: 'A',
@@ -99,7 +99,8 @@ async function runPickerA({ nativeResponse = null, lockResponse = null, staleLoc
         }
         return { result: {
           selectionAttempted: true,
-          uiConfirmed: !(targetSelectionUnconfirmed && currentTarget === 'gpt-5.5'),
+          uiConfirmed: !(targetSelectionUnconfirmed && currentTarget === 'gpt-5.5') && !deferredSelection,
+          networkDeferred: !(targetSelectionUnconfirmed && currentTarget === 'gpt-5.5') && deferredSelection,
           observation: { model: message.model },
         } };
       }
@@ -110,6 +111,7 @@ async function runPickerA({ nativeResponse = null, lockResponse = null, staleLoc
       sent += 1;
       const transaction = transactions.get(7);
       const lock = transaction?.mode === 'picker-a-ui-lock';
+      const baseline = transaction?.mode === 'observe-native' && Boolean(currentBaseline) && !currentTarget;
       const model = transaction?.model || 'gpt-5.5';
       const transport = transportFor(model);
       const requestId = 'real-request-' + sent;
