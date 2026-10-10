@@ -1025,6 +1025,25 @@ async function applyNetworkEvidence(tabId, evidence) {
     return;
   }
 
+  // With no explicit locked models, verification is observational only.
+  // Applying a strict "model_not_allowed" verdict to an empty model list
+  // blocked normal GPT-6 chat after generation 37 had intentionally pruned
+  // lockedModels to [] (observed in the v0.5.211 -> .212 runtime logs).
+  // The discovery transaction above retains its full request/response gates.
+  const normalPolicy = runtimePolicyForTabSync(tabId);
+  if (normalPolicy.lockedModels.length === 0) {
+    state.lastVerification = null;
+    state.evidenceIssue = null;
+    state.lastError = null;
+    state.phase = 'unverified';
+    logRuntime('info', 'discovery', 'response_verification_skipped_no_locked_model', {
+      tabId,
+      requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
+    });
+    await broadcastTabState(tabId);
+    return;
+  }
+
   // Downstream generation can emit many packets carrying the same served-model
   // metadata. Once this exact request is verified, keep that terminal proof unless a
   // later packet introduces contradictory model/reasoning evidence.
@@ -3275,6 +3294,9 @@ function shouldRetrySharedChatLockReplyLoss({
 // Work-mode verdict, changed conversation, transport request or backend response.
 // This is distinct from the lost-message-port budget: both can happen during
 // the same navigation, but every extra attempt is pre-probe and bounded.
+// v0.5.212 fresh isolated Chat runs surfaced 'Isolated Chat lock surface not ready:
+// composer_not_ready'. The older shared-session-only regex did not recognize
+// that precise error, so neither GPT-5.6 Sol nor GPT-6 received its safe retry.
 function shouldRetrySharedChatLockPreProbeReadiness({
   chatCompatibility, sharedSessionPrepared, probeDispatchStarted, error, retryCount,
 }) {
@@ -3282,7 +3304,7 @@ function shouldRetrySharedChatLockPreProbeReadiness({
     && sharedSessionPrepared === true
     && probeDispatchStarted !== true
     && Number(retryCount || 0) < 1
-    && /^(?:Chat lock shared conversation not ready: composer_not_ready|official_chat_mode_unconfirmed:official_picker_mode_unresolved)$/.test(String(error || ''));
+    && /^(?:Isolated Chat lock surface not ready: composer_not_ready|Chat lock shared conversation not ready: composer_not_ready|official_chat_mode_unconfirmed:official_picker_mode_unresolved)$/.test(String(error || ''));
 }
 
 async function verifyAccountCatalogModels(

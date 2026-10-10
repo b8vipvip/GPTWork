@@ -96,6 +96,21 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     };
   }
 
+  // A deliberately empty lock list is a valid configuration, not a policy
+  // that forbids every model. This also clears a previously recorded mismatch
+  // after the user disables the final model lock.
+  if (!Array.isArray(policy.lockedModels) || policy.lockedModels.length === 0) {
+    return {
+      ...base,
+      canSend: true,
+      allowKind: 'unlocked',
+      status: 'no_locked_model',
+      uiMatches: false,
+      uiConflicts: false,
+      reason: 'no_locked_model',
+    };
+  }
+
   // A confirmed mismatch may block only the request it actually belongs to.
   if (strict && hasConfirmedModelMismatch(state, policy)) {
     return {
