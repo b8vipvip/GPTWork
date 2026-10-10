@@ -251,6 +251,26 @@ test('a target Picker A click without UI acknowledgement cannot prove model lock
   assert.match(firstLock.error || '', /chat_lock_target_picker_a_selection_unconfirmed/);
 });
 
+test('network-deferred Picker A row clicks require real baseline and target model evidence', async () => {
+  const { progress, sent } = await runPickerA({ deferredSelection: true });
+  assert.equal(sent, 6);
+  assert.equal(progress.verified, 4);
+  for (const row of progress.results.filter(result => result.selectorKey === '__picker_a_chat_lock__')) {
+    assert.equal(row.baselineUiConfirmed, false);
+    assert.equal(row.baselineNetworkConfirmed, true);
+    assert.equal(row.targetPickerConfirmed, true);
+    assert.equal(row.chatLockSupported, true);
+  }
+});
+
+test('wrong served model from baseline probe fails closed before target dispatch', async () => {
+  const { progress } = await runPickerA({ deferredSelection: true, baselineServedMismatch: true });
+  const row = progress.results.find(result => result.model === 'gpt-5.5' && result.selectorKey === '__picker_a_chat_lock__');
+  assert.equal(row.verified, false);
+  assert.equal(row.chatLockSupported, false);
+  assert.match(row.error || '', /chat_lock_baseline_network_unconfirmed/);
+});
+
 test('if official Chat mode cannot be confirmed no Picker A request is sent', async () => {
   const { progress, sent } = await runPickerA({ pickerMode: 'B' });
   assert.equal(sent, 0);
