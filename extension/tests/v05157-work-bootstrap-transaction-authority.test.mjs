@@ -11,7 +11,7 @@ test('Picker-B Chat compatibility keeps an explicit force-transport transaction 
   const end = background.indexOf('function modelVerificationHistoryRecord', start);
   assert.ok(start >= 0 && end > start);
   const block = background.slice(start, end);
-  assert.match(block, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(block, /mode: chatCompatibility \? 'picker-a-ui-lock' : 'observe-native'/);
   assert.match(block, /transportModel: chatCompatibility \? item\.transportModel : null/);
   assert.match(monitor, /\? 'model-discovery-chat-compat'/);
   assert.match(monitor, /forceTransportModel: transportModel/);
