@@ -3275,6 +3275,9 @@ function shouldRetrySharedChatLockReplyLoss({
 // Work-mode verdict, changed conversation, transport request or backend response.
 // This is distinct from the lost-message-port budget: both can happen during
 // the same navigation, but every extra attempt is pre-probe and bounded.
+// v0.5.212 fresh isolated Chat runs surfaced 'Isolated Chat lock surface not ready:
+// composer_not_ready'. The older shared-session-only regex did not recognize
+// that precise error, so neither GPT-5.6 Sol nor GPT-6 received its safe retry.
 function shouldRetrySharedChatLockPreProbeReadiness({
   chatCompatibility, sharedSessionPrepared, probeDispatchStarted, error, retryCount,
 }) {
@@ -3282,7 +3285,7 @@ function shouldRetrySharedChatLockPreProbeReadiness({
     && sharedSessionPrepared === true
     && probeDispatchStarted !== true
     && Number(retryCount || 0) < 1
-    && /^(?:Chat lock shared conversation not ready: composer_not_ready|official_chat_mode_unconfirmed:official_picker_mode_unresolved)$/.test(String(error || ''));
+    && /^(?:Isolated Chat lock surface not ready: composer_not_ready|Chat lock shared conversation not ready: composer_not_ready|official_chat_mode_unconfirmed:official_picker_mode_unresolved)$/.test(String(error || ''));
 }
 
 async function verifyAccountCatalogModels(
