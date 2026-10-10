@@ -56,6 +56,8 @@ async function runPickerA({ nativeResponse = 'gpt-5.5-thinking', lockResponse = 
       return { state };
     },
     pinSharedChatLockConversation: async () => {},
+    shouldRetrySharedChatLockReplyLoss: () => false,
+    shouldRetrySharedChatLockPreProbeReadiness: () => false,
     discoverAccountCatalog: async () => pickerA,
     networkMonitor: {
       isAttached: () => true,
@@ -116,7 +118,7 @@ test('discovery has no Work entry/Picker B stage, even if legacy helper still ex
   assert.doesNotMatch(verifySource, /officialWorkDiscoveryDone/);
   assert.doesNotMatch(verifySource, /loadAccountModelVerificationLedger\(/);
   assert.doesNotMatch(verifySource, /reusedFromServer/);
-  assert.match(autoSource, /await requireVerificationOfficialChatMode\(tabId, \{ model: null \}, \{ switchIfNeeded: true \} \)/);
+  assert.match(autoSource, /await requireVerificationOfficialChatMode\(tabId, \{ model: null \}, \{ switchIfNeeded: true \}\);/);
   assert.doesNotMatch(autoSource, /official_work_model_discovery_incomplete/);
 });
 
