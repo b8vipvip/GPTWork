@@ -52,7 +52,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.212';
+const RUNTIME_CODE_VERSION = '0.5.213';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -3123,7 +3123,7 @@ async function requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded
 
 async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedSession) {
   const targetModel = normalizeConcreteModelId(item?.model);
-  // An actual v0.5.212 discovery mixed three model-lock probes in one
+  // An actual v0.5.213 discovery mixed three model-lock probes in one
   // conversation. Reusing that conversation can bias ChatGPT's served model,
   // and makes a GPT-6 -> GPT-6 passthrough look like a valid probe.
   // Always reset to an independent official Chat surface per model.
@@ -3294,7 +3294,7 @@ function shouldRetrySharedChatLockReplyLoss({
 // Work-mode verdict, changed conversation, transport request or backend response.
 // This is distinct from the lost-message-port budget: both can happen during
 // the same navigation, but every extra attempt is pre-probe and bounded.
-// v0.5.212 fresh isolated Chat runs surfaced 'Isolated Chat lock surface not ready:
+// v0.5.213 fresh isolated Chat runs surfaced 'Isolated Chat lock surface not ready:
 // composer_not_ready'. The older shared-session-only regex did not recognize
 // that precise error, so neither GPT-5.6 Sol nor GPT-6 received its safe retry.
 function shouldRetrySharedChatLockPreProbeReadiness({
