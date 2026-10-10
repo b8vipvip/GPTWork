@@ -16,7 +16,7 @@ test('model discovery separates native observation from Picker-B Chat compatibil
   assert.match(background, /async function discoverOfficialWorkModels/);
   assert.match(background, /mode: 'observe-native'/);
   assert.match(background, /selectorKey: '__picker_b_chat_lock__'/);
-  assert.match(background, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(background, /mode: chatCompatibility \? 'picker-a-ui-lock' : 'observe-native'/);
   assert.match(background, /rawRequestModel === expectedTransport/);
   assert.match(background, /rawResponseProtocolModel === expectedResponse/);
   assert.match(background, /chatLockSupported/);
@@ -131,9 +131,9 @@ test('trusted pointer attaches first and revalidates the exact DOM target after 
 test('model-discovery request authority is owned by explicit native/Chat transactions', () => {
   assert.match(background, /const verificationTransactions = new Map\(\)/);
   assert.match(background, /function verificationTransactionForTab/);
-  assert.match(background, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(background, /mode: chatCompatibility \? 'picker-a-ui-lock' : 'observe-native'/);
   assert.match(networkMonitor, /transaction\?\.mode === 'observe-native'/);
-  assert.match(networkMonitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(networkMonitor, /authorityKind: transaction\?\.mode === 'picker-a-ui-lock'/);
   assert.match(networkMonitor, /\? 'model-discovery-chat-compat'/);
   assert.match(networkMonitor, /forceTransportModel: transportModel/);
 });
@@ -439,7 +439,7 @@ test('v0.5.176 resolves Chat compatibility authority at the raw Fetch transport 
 test('v0.5.176 has separate native-observation and Chat-force discovery authorities', () => {
   assert.match(networkMonitor, /transaction\?\.mode === 'observe-native'/);
   assert.match(networkMonitor, /bypassRewrite: true/);
-  assert.match(networkMonitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(networkMonitor, /authorityKind: transaction\?\.mode === 'picker-a-ui-lock'/);
   assert.match(networkMonitor, /authorityKind: transaction\?\.mode === 'force-transport'/);
   assert.match(networkMonitor, /model-discovery-chat-compat/);
   assert.match(networkMonitor, /authorityTransportModel/);

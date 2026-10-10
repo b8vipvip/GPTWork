@@ -13,7 +13,7 @@ test('Picker A-only discovery no longer executes the historical official Work/Pi
 
   assert.match(body, /progress\.discoveryMode = 'picker-a-chat-only'/);
   assert.match(body, /picker_a_chat_lock_queued/);
-  assert.match(body, /mode: chatCompatibility \? 'force-transport' : 'observe-native'/);
+  assert.match(body, /mode: chatCompatibility \? 'picker-a-ui-lock' : 'observe-native'/);
   assert.doesNotMatch(body, /await discoverOfficialWorkModels\(/);
   assert.doesNotMatch(body, /mergeCatalog\(officialWork\?\.chatCandidates/);
   assert.doesNotMatch(body, /officialWorkDiscoveryDone/);
@@ -63,5 +63,5 @@ test('v0.5.191 rejects an explicitly exposed response model that disagrees with 
   const body = background.slice(verifyStart, verifyEnd);
   assert.match(body, /rawResponseProtocolModel === expectedResponse/);
   assert.match(body, /expectedResponse\s*&&\s*rawResponseProtocolModel === expectedResponse/);
-  assert.match(body, /chat_mode_response_differs_from_official_work/);
+  assert.match(body, /chat_lock_picker_a_request_unconfirmed/);
 });

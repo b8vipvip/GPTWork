@@ -14,7 +14,7 @@ test('v0.5.176 discovery bypasses private normal-policy interception at Fetch bo
   assert.match(privateHook, /this\.verificationTransaction\?\.\(tabId\)/);
   assert.match(privateHook, /verification\?\.model/);
   assert.match(privateHook, /terminalVerificationHandler\.call\(this, tabId, params\)/);
-  assert.match(monitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(monitor, /authorityKind: transaction\?\.mode === 'picker-a-ui-lock'/);
   assert.match(monitor, /model-discovery-chat-compat/);
   assert.match(monitor, /fetchRequestId: requestId/);
 });

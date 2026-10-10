@@ -49,7 +49,7 @@ test('v0.5.123 collector and analyzer preserve causal phase page evidence in the
 
 test('v0.5.123 lineage remains compatible with v0.5.176 discovery authorities', () => {
   assert.match(monitor, /transaction\?\.mode === 'observe-native'/);
-  assert.match(monitor, /authorityKind: 'model-discovery-native'/);
+  assert.match(monitor, /authorityKind: transaction\?\.mode === 'picker-a-ui-lock'/);
   assert.match(monitor, /model-discovery-chat-compat/);
   assert.match(monitor, /function isConversationMetadataEndpoint/);
   assert.match(monitor, /path === '\/backend-api\/conversations'/);

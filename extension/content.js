@@ -1691,7 +1691,7 @@ document.addEventListener('pointerdown', (event) => {
           source: 'verification-model-row-already-checked', desired, selectorKey: wantedKey, label: wantedLabel,
           observation,
         });
-        return { attempted: true, observation };
+        return { attempted: true, observation, uiConfirmed: true };
       }
       const attempted = await modelPickerPointer(candidate, 'click', 'verification-model-row');
       if (!attempted) {
@@ -1825,8 +1825,9 @@ document.addEventListener('pointerdown', (event) => {
     if (!cachedSettings?.enabled || !cachedSettings.autoAlignSelection || !cachedPolicy || visibleGeneratingControl()) return false;
     const observation = collectObservation();
     const desiredModel = cachedPolicy.lockedModels?.[0];
-    const knownModels = new Set(Array.isArray(cachedState?.knownModels) ? cachedState.knownModels : []);
-    const pageModelIsKnown = Boolean(observation.model && knownModels.has(observation.model));
+    // The previous pageModelIsKnown gate suppressed alignment whenever the
+    // current official Picker A model was recognized (for example GPT-6),
+    // precisely when switching to another locked Picker A model is needed.
     const preferred = cachedPolicy.allowedReasoningLevels?.includes(cachedSettings.preferredReasoning)
       ? cachedSettings.preferredReasoning
       : cachedPolicy.allowedReasoningLevels?.[0];
@@ -1836,7 +1837,7 @@ document.addEventListener('pointerdown', (event) => {
     lastAlignAt = Date.now();
 
     let changed = false;
-    if (desiredModel && observation.model && !pageModelIsKnown && observation.model !== desiredModel) {
+    if (desiredModel && observation.model && observation.model !== desiredModel) {
       changed = await chooseExact(MODEL_SELECTORS, desiredModel, normalizeDisplayedModel);
     }
     const afterModel = changed ? collectObservation() : observation;
@@ -2468,6 +2469,8 @@ document.addEventListener('pointerdown', (event) => {
       selectorKey,
       label,
       selectionAttempted: selection.attempted === true,
+      uiConfirmed: selection.uiConfirmed === true,
+      networkDeferred: selection.networkDeferred === true,
       observation: selection.observation || collectObservation(),
       capturedAt: new Date().toISOString(),
     };

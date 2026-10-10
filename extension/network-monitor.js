@@ -219,7 +219,7 @@ export class ChatGptNetworkMonitor {
         authorityStartedAt: null,
       };
     }
-    if (transaction?.mode === 'observe-native') {
+    if (transaction?.mode === 'observe-native' || transaction?.mode === 'picker-a-ui-lock') {
       return {
         ...base,
         preferredReasoning: null,
@@ -229,7 +229,9 @@ export class ChatGptNetworkMonitor {
         forceModel: null,
         forceTransportModel: null,
         responseVerificationEnabled: true,
-        authorityKind: 'model-discovery-native',
+        authorityKind: transaction?.mode === 'picker-a-ui-lock'
+          ? 'model-discovery-picker-a-ui-lock'
+          : 'model-discovery-native',
         authorityModel: model,
         authorityRequestModel: null,
         authorityStartedAt: Number(transaction?.startedAt) || null,
@@ -664,7 +666,9 @@ export class ChatGptNetworkMonitor {
           requestId: params.networkId ? String(params.networkId) : null,
           fetchRequestId: requestId,
           changed: false,
-          reason: 'model_discovery_native_passthrough',
+          reason: configuration.authorityKind === 'model-discovery-picker-a-ui-lock'
+            ? 'model_discovery_picker_a_ui_lock_passthrough'
+            : 'model_discovery_native_passthrough',
           modelBefore: observed.model,
           modelAfter: observed.model,
           transportModelBefore: observed.rawModel || observed.model,

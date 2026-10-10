@@ -76,7 +76,7 @@ test('verification loop retries only before probe dispatch and preserves exact s
  assert.match(verify,/probeDispatchStarted = true;\s*const probe = await sendVerificationReasoningProbe/);
  assert.match(verify,/shouldRetrySharedChatLockPreProbeReadiness\(\{/);
  assert.match(verify,/chat_lock_pre_probe_readiness_retry/);
- assert.match(verify,/const effectiveRewrite = liveState\.lastRewrite\?\.changed === true/);
+ assert.match(verify,/const officialPickerAuthority = Boolean\(/);
  assert.match(verify,/rawResponseProtocolModel === expectedResponse/);
  assert.match(verify,/verified = Boolean\(requestId && requestConfirmed && responseConfirmed\)/);
 });

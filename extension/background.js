@@ -1187,7 +1187,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // legitimately omit Network.requestWillBeSent's networkId at this boundary, so
     // retain the forwarded request as first-class verification evidence instead of
     // waiting forever for a Network requestId that may never be correlated.
-    const discoveryAuthority = ['verification-transaction', 'model-discovery-native', 'model-discovery-chat-compat']
+    const discoveryAuthority = ['verification-transaction', 'model-discovery-native', 'model-discovery-chat-compat', 'model-discovery-picker-a-ui-lock']
       .includes(rewrite.authorityKind);
     if (discoveryAuthority && rewrite.modelAfter && !rewrite.error) {
       state.lastForwardedRequest = {
@@ -3422,7 +3422,7 @@ async function verifyAccountCatalogModels(
       model: item.model || null,
       selectorKey: item.selectorKey || '',
       label: item.label || '',
-      mode: chatCompatibility ? 'force-transport' : 'observe-native',
+      mode: chatCompatibility ? 'picker-a-ui-lock' : 'observe-native',
       transportModel: chatCompatibility ? item.transportModel : null,
       startedAt: transactionStartedAtMs,
     });
@@ -3447,6 +3447,8 @@ async function verifyAccountCatalogModels(
     let baselineModel = null;
     let baselineTransport = null;
     let baselineSelectionAttempted = false;
+    let baselineUiConfirmed = false;
+    let targetPickerConfirmed = false;
     try {
       if (!chatCompatibility) {
         // A native probe is valid only in official Chat, never in a remembered Work tab.
@@ -3480,7 +3482,8 @@ async function verifyAccountCatalogModels(
           label: baseline.label,
         });
         baselineSelectionAttempted = selected?.result?.selectionAttempted === true;
-        if (!baselineSelectionAttempted) {
+        baselineUiConfirmed = selected?.result?.uiConfirmed === true;
+        if (!baselineSelectionAttempted || !baselineUiConfirmed) {
           throw new Error('chat_lock_baseline_picker_a_selection_unconfirmed');
         }
         logRuntime('info', 'discovery', 'chat_lock_distinct_baseline_selected', {
@@ -3488,8 +3491,27 @@ async function verifyAccountCatalogModels(
           observationModel: selected?.result?.observation?.model || null,
           uiConfirmed: selected?.result?.uiConfirmed === true,
         });
-        // Clicking a model row can rerender the composer, so settle and verify
-        // that the test still runs in official Chat before the actual request.
+        // A native Picker A click selected the distinct baseline. Raw model
+        // rewriting alone did not switch ChatGPT's served model in the user's
+        // v0.5.209 logs. Use the exact official Picker A row to select the
+        // target model (the same mechanism used by normal auto-alignment).
+        // Do not claim a Fetch force-transport rewrite as proof of this path.
+        await sleep(700);
+        await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
+        const targetChoice = await sendTabMessage(tabId, {
+          type: 'GPTLOCK_VERIFY_ACCOUNT_MODEL',
+          model: item.model,
+          label: item.label,
+        });
+        targetPickerConfirmed = targetChoice?.result?.selectionAttempted === true
+          && targetChoice?.result?.uiConfirmed === true;
+        if (!targetPickerConfirmed) {
+          throw new Error('chat_lock_target_picker_a_selection_unconfirmed');
+        }
+        logRuntime('info', 'discovery', 'chat_lock_target_picker_a_selected', {
+          tabId, model: item.model, baselineModel,
+          targetPickerConfirmed, selectionModel: targetChoice?.result?.observation?.model || null,
+        });
         await sleep(700);
         await requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded: false });
         transactionStartedAtMs = Date.now();
@@ -3611,56 +3633,47 @@ async function verifyAccountCatalogModels(
         const expectedTransport = normalizeRawProtocolModelId(item.transportModel);
         const expectedResponse = normalizeRawProtocolModelId(item.expectedResponseModel);
         const rewriteCapturedAtMs = Date.parse(liveState.lastRewrite?.capturedAt || '');
-        const authoritativeRewrite = Boolean(
-          requestId
+        // This is a Picker A UI-lock proof, not a claim that changing a JSON
+        // model field forced the backend to serve a different model. Require
+        // the official picker to acknowledge both distinct baseline and target.
+        const officialPickerAuthority = Boolean(
+          baselineSelectionAttempted
+          && baselineUiConfirmed
+          && targetPickerConfirmed
+          && baselineModel
+          && baselineModel !== item.model
+          && baselineTransport
+          && baselineTransport !== expectedTransport
+          && requestId
           && liveState.lastRewrite?.requestId === requestId
           && liveState.lastRequest?.requestId === requestId
-          && liveState.lastRewrite?.authorityKind === 'model-discovery-chat-compat'
+          && liveState.lastRewrite?.authorityKind === 'model-discovery-picker-a-ui-lock'
           && liveState.lastRewrite?.authorityModel === item.model
+          && liveState.lastRewrite?.changed === false
           && Number.isFinite(rewriteCapturedAtMs)
           && rewriteCapturedAtMs >= transactionStartedAtMs - 250
           && !liveState.lastRewrite?.error
         );
-        // The default Chat model can already equal the requested target.
-        // "verification_model_already_exact" is only a passthrough, not a
-        // causal demonstration that the lock changed which model was served.
-        const observedBaselineTransport = normalizeRawProtocolModelId(liveState.lastRewrite?.transportModelBefore);
-        const baselineConfirmed = Boolean(
-          baselineSelectionAttempted
-          && baselineTransport
-          && observedBaselineTransport === baselineTransport
-          && observedBaselineTransport !== expectedTransport
-        );
-        const effectiveRewrite = liveState.lastRewrite?.changed === true
-          && baselineConfirmed;
         requestConfirmed = Boolean(
-          authoritativeRewrite
+          officialPickerAuthority
           && expectedTransport
           && rawRequestModel === expectedTransport
-          && effectiveRewrite
+          && normalizeRawProtocolModelId(liveState.lastRewrite?.transportModelBefore) === expectedTransport
         );
-
         const responseObserved = successfulConversationResponseEvidence(responseEvidence);
-        // A successful stream proves that *something* answered, not that the
-        // desired locked model answered. Both source and Chat must expose matching
-        // authoritative response model IDs before Chat compatibility is admitted.
         const explicitResponseCompatible = Boolean(
-          rawResponseProtocolModel
-          && expectedResponse
-          && rawResponseProtocolModel === expectedResponse
+          rawResponseProtocolModel && expectedResponse && rawResponseProtocolModel === expectedResponse
         );
         responseConfirmed = Boolean(responseObserved && explicitResponseCompatible);
         const responseNetworkError = String(responseEvidence?.diagnostics?.networkError || responseEvidence?.bodyError || '');
         responseIssue = !requestConfirmed
-          ? authoritativeRewrite && !baselineConfirmed
-            ? 'chat_lock_baseline_request_mismatch'
-            : authoritativeRewrite && expectedTransport && rawRequestModel === expectedTransport && !effectiveRewrite
-              ? 'chat_lock_no_effective_rewrite'
-              : 'chat_lock_request_unconfirmed'
+          ? !targetPickerConfirmed || !baselineUiConfirmed
+            ? 'chat_lock_picker_a_selection_unconfirmed'
+            : 'chat_lock_picker_a_request_unconfirmed'
           : responseConfirmed
             ? null
             : rawResponseProtocolModel && expectedResponse && rawResponseProtocolModel !== expectedResponse
-              ? pickerAChatLock ? 'picker_a_chat_lock_response_mismatch' : 'chat_mode_response_differs_from_official_work'
+              ? 'picker_a_chat_lock_response_mismatch'
               : !responseObserved && responseNetworkError
                 ? 'chat_lock_response_interrupted'
                 : !responseObserved
@@ -3676,7 +3689,7 @@ async function verifyAccountCatalogModels(
           : responseObserved
             ? 'network_response_stream'
             : requestConfirmed
-              ? 'fetch_forwarded_request_metadata'
+              ? 'official_picker_a_request_metadata'
               : null;
       } else {
         // Native Picker A must prove the selected business model through both the
@@ -3745,6 +3758,8 @@ async function verifyAccountCatalogModels(
         baselineModel: chatCompatibility ? baselineModel : null,
         baselineTransport: chatCompatibility ? baselineTransport : null,
         baselineSelectionAttempted: chatCompatibility ? baselineSelectionAttempted : false,
+        baselineUiConfirmed: chatCompatibility ? baselineUiConfirmed : false,
+        targetPickerConfirmed: chatCompatibility ? targetPickerConfirmed : false,
         responseNetworkError: String(responseEvidence?.diagnostics?.networkError || responseEvidence?.bodyError || '') || null,
         nativeRequestModel: chatCompatibility
           ? normalizeRawProtocolModelId(item.nativeRequestModel)
@@ -3771,7 +3786,7 @@ async function verifyAccountCatalogModels(
         chatLockResponseConfirmed: chatCompatibility ? responseConfirmed : false,
         chatLockSupported: chatCompatibility ? verified : false,
         chatVerificationBasis: chatCompatibility && verified
-          ? 'forced_transport+response_model'
+          ? 'official_picker_a_selection+request_transport+response_model'
           : null,
         retryCount,
       };
@@ -3808,6 +3823,8 @@ async function verifyAccountCatalogModels(
         baselineModel: result.baselineModel,
         baselineTransport: result.baselineTransport,
         baselineSelectionAttempted: result.baselineSelectionAttempted,
+        baselineUiConfirmed: result.baselineUiConfirmed,
+        targetPickerConfirmed: result.targetPickerConfirmed,
         responseNetworkError: result.responseNetworkError,
         responseIssue,
         evidenceSource,
@@ -3866,6 +3883,8 @@ async function verifyAccountCatalogModels(
         baselineModel: chatCompatibility ? baselineModel : null,
         baselineTransport: chatCompatibility ? baselineTransport : null,
         baselineSelectionAttempted: chatCompatibility ? baselineSelectionAttempted : false,
+        baselineUiConfirmed: chatCompatibility ? baselineUiConfirmed : false,
+        targetPickerConfirmed: chatCompatibility ? targetPickerConfirmed : false,
         verified: false,
         error: errorText(error),
       });
