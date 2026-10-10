@@ -1025,6 +1025,25 @@ async function applyNetworkEvidence(tabId, evidence) {
     return;
   }
 
+  // With no explicit locked models, verification is observational only.
+  // Applying a strict "model_not_allowed" verdict to an empty model list
+  // blocked normal GPT-6 chat after generation 37 had intentionally pruned
+  // lockedModels to [] (observed in the v0.5.211 -> .212 runtime logs).
+  // The discovery transaction above retains its full request/response gates.
+  const normalPolicy = runtimePolicyForTabSync(tabId);
+  if (normalPolicy.lockedModels.length === 0) {
+    state.lastVerification = null;
+    state.evidenceIssue = null;
+    state.lastError = null;
+    state.phase = 'unverified';
+    logRuntime('info', 'discovery', 'response_verification_skipped_no_locked_model', {
+      tabId,
+      requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
+    });
+    await broadcastTabState(tabId);
+    return;
+  }
+
   // Downstream generation can emit many packets carrying the same served-model
   // metadata. Once this exact request is verified, keep that terminal proof unless a
   // later packet introduces contradictory model/reasoning evidence.
