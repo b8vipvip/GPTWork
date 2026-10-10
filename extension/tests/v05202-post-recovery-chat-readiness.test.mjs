@@ -15,6 +15,13 @@ const recoveryError={
 };
 test('pre-probe readiness failures may retry the same model once without bypassing proof',()=>{
  assert.equal(shouldRetry(recoveryError),true);
+ // Exactly what the v0.5.212 live discovery logged after a fresh / navigation:
+ const isolatedComposerFailure='Isolated Chat lock surface not ready: composer_not_ready';
+ assert.equal(shouldRetry({...recoveryError,error:isolatedComposerFailure}),true);
+ assert.equal(shouldRetry({...recoveryError,error:isolatedComposerFailure,retryCount:1}),false);
+ assert.equal(shouldRetry({...recoveryError,error:isolatedComposerFailure,probeDispatchStarted:true}),false);
+ assert.equal(shouldRetry({...recoveryError,error:isolatedComposerFailure,chatCompatibility:false}),false);
+ assert.equal(shouldRetry({...recoveryError,error:isolatedComposerFailure,sharedSessionPrepared:false}),false);
  assert.equal(shouldRetry({...recoveryError,error:'official_chat_mode_unconfirmed:official_picker_mode_unresolved'}),true);
  assert.equal(shouldRetry({...recoveryError,retryCount:1}),false);
  for(const invalid of [
@@ -22,6 +29,8 @@ test('pre-probe readiness failures may retry the same model once without bypassi
   {error:'official_chat_mode_unconfirmed:B'},
   {error:'Chat lock shared conversation changed'},
   {error:'network timeout'},
+  {error:'Isolated Chat lock surface not ready: official_picker_mode_B'},
+  {error:'Isolated Chat lock root document did not become ready'},
  ]) assert.equal(shouldRetry({...recoveryError,...invalid}),false);
 });
 test('late successful content runtime recovery has one grace period for the composer to become ready',async()=>{
@@ -76,6 +85,8 @@ test('verification loop retries only before probe dispatch and preserves exact s
  assert.match(verify,/probeDispatchStarted = true;\s*const probe = await sendVerificationReasoningProbe/);
  assert.match(verify,/shouldRetrySharedChatLockPreProbeReadiness\(\{/);
  assert.match(verify,/chat_lock_pre_probe_readiness_retry/);
+ assert.match(verify,/Number\(sharedChatLockSession\.attempts \|\| 0\) > 0 && !probeDispatchStarted/);
+ assert.match(verify,/preProbeReadinessRetryCounts\.set\(retryKey, readinessRetryCount \+ 1\)/);
  assert.match(verify,/const officialPickerAuthority = Boolean\(/);
  assert.match(verify,/rawResponseProtocolModel === expectedResponse/);
  assert.match(verify,/verified = Boolean\(requestId && requestConfirmed && responseConfirmed\)/);
