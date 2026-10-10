@@ -52,7 +52,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.208';
+const RUNTIME_CODE_VERSION = '0.5.209';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -3096,7 +3096,7 @@ async function requireVerificationOfficialChatMode(tabId, item, { switchIfNeeded
 
 async function prepareSharedChatLockVerificationSurface(tabId, ownerTabId, item, sharedSession) {
   const targetModel = normalizeConcreteModelId(item?.model);
-  // An actual v0.5.208 discovery mixed three model-lock probes in one
+  // An actual v0.5.209 discovery mixed three model-lock probes in one
   // conversation. Reusing that conversation can bias ChatGPT's served model,
   // and makes a GPT-6 -> GPT-6 passthrough look like a valid probe.
   // Always reset to an independent official Chat surface per model.
