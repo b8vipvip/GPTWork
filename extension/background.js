@@ -1200,7 +1200,15 @@ const networkMonitor = new ChatGptNetworkMonitor({
       };
     }
     const verification = verificationTransactionForTab(tabId);
-    if (verification?.model && !discoveryAuthority) {
+    // Fetch may report an unrelated or no-ID lifecycle callback while the
+    // discovery queue advances to the next model. Such callbacks are NOT a
+    // formal verification request and must not flip a successful run to error.
+    // The interception-job ID is present for every formal paused Chat request;
+    // only those may trigger the terminal-authority fail-closed verdict.
+    const formalVerificationFetch = Boolean(rewrite.fetchRequestId)
+      && (rewrite.endpoint === '/backend-api/conversation'
+        || rewrite.endpoint === '/backend-api/f/conversation');
+    if (verification?.model && formalVerificationFetch && !discoveryAuthority) {
       state.lastError = 'verification_request_missing_terminal_authority';
       state.phase = 'error';
       logRuntime('error', 'discovery', 'verification_request_generation_or_authority_mismatch', {
