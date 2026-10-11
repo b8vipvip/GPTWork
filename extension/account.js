@@ -94,6 +94,14 @@ function renderSecurity() {
 
 function renderAccount() {
   const authenticated = Boolean(account?.authenticated);
+  const limitsEnabled = account?.entitlement?.limitsEnabled !== false;
+  document.body.dataset.entitlementLimits = authenticated && !limitsEnabled ? 'off' : 'on';
+  for (const node of document.querySelectorAll('[data-entitlement-limit]')) {
+    if (node.tagName !== 'DIALOG' && !['membershipPlansSection', 'recentOrdersSection'].includes(node.id)) {
+      node.hidden = !authenticated || !limitsEnabled;
+    }
+  }
+  if (!limitsEnabled && el.upgradeDialog?.open) el.upgradeDialog.close();
   el.notLogged.hidden = authenticated;
   el.app.hidden = !authenticated;
   if (!authenticated) return;
