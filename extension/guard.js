@@ -31,8 +31,20 @@ function mismatchAppliesToLatestRequest(state) {
   return verifiedAt >= requestAt;
 }
 
+function mismatchFromEarlierPageSelection(state) {
+  const requestRevision = state.lastRequest?.selectionRevision;
+  const pageRevision = state.selectionRevision;
+  // Only authoritative, explicit Picker A selection transitions advance this
+  // epoch. The request and response remain available for audit, but the old
+  // mismatch is not a decision about what a newly selected model will serve.
+  return Number.isInteger(requestRevision)
+    && Number.isInteger(pageRevision)
+    && requestRevision !== pageRevision;
+}
+
 function hasConfirmedModelMismatch(state, policy) {
   if (state.phase !== 'mismatch' || !verificationReasons(state).includes('model_not_allowed')) return false;
+  if (mismatchFromEarlierPageSelection(state)) return false;
 
   // A reason code is only authoritative while its concrete model is still disallowed.
   // This prevents an old mismatch reason from surviving a policy change while the
@@ -167,6 +179,14 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     };
   }
   if (state.phase === 'mismatch') {
+    if (mismatchFromEarlierPageSelection(state)) {
+      return {
+        ...base,
+        allowKind: 'warning',
+        status: 'unverified',
+        reason: 'previous_request_mismatch_not_current_selection',
+      };
+    }
     return {
       ...base,
       allowKind: 'warning',
