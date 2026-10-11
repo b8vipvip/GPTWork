@@ -4727,7 +4727,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         return {
           policy: state ? runtimePolicyForTabSync(state.tabId) : currentPolicy,
-          settings: state ? effectiveSettingsForState(state) : currentSettings,
+          settings: state ? effectiveSettingsForState(state) : { ...currentSettings, workModeFeatureEnabled: serverWorkFeatureEnabled() },
+          workFeatureGateEnabled: serverWorkFeatureEnabled(),
           nativeStatus: nativeStatus ?? { connected: false },
           tabState: state ? publicTabState(state) : null,
           extensionVersion: chrome.runtime.getManifest().version,
