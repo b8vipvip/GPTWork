@@ -653,6 +653,7 @@ document.addEventListener('pointerdown', (event) => {
       monitor_offline: ['锁定器离线', 'wait'],
       verification_disabled: ['仅请求锁', 'lock'],
       core_offline: ['核心离线', 'wait'],
+      no_locked_model: ['未锁定', 'off'],
       disabled: ['已关闭', 'off'],
     };
     const [label, tone] = labels[guard?.status] || ['检查中', 'wait'];
