@@ -169,7 +169,7 @@ test('real Picker A GPT-5.5 row with retirement subtitle is read as the checked 
   const rows = [
     node({ 'aria-checked': 'false' }, 'GPT-6'),
     node({ 'aria-checked': 'false' }, 'GPT-5.6 Sol'),
-    node({ 'data-state': 'checked' }, 'GPT-5.5\\nLeaving on October 14'),
+    node({ 'data-state': 'checked' }, 'GPT-5.5\nLeaving on October 14'),
   ];
   const popup = node();
   popup.querySelectorAll = selector => selector.includes("menuitemradio") ? rows : [];
