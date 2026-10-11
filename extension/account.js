@@ -115,7 +115,7 @@ function renderAccount() {
   el.deviceUsage.textContent = `${entitlement.usage?.devices ?? 0} / ${entitlement.limits?.devices ?? 0}`;
   el.windowUsage.textContent = `${entitlement.usage?.windows ?? 0} / ${entitlement.limits?.windows ?? 0}`;
   el.levelExpiry.textContent = localDate(entitlement.expiresAt);
-  renderPlans();
+  if (limitsEnabled) renderPlans();
   renderSecurity();
 }
 
