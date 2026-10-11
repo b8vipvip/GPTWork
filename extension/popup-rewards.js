@@ -38,6 +38,7 @@ async function refresh() {
   try { apply((await request('/api/v1/account/rewards')).rewards); } catch {}
 }
 checkin?.addEventListener('click', async () => {
+  if (!entitlementLimitsEnabled) return;
   checkin.disabled = true;
   try {
     const data = await request('/api/v1/account/checkin', { method: 'POST', body: '{}' });
