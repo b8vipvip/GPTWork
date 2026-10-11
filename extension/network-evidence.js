@@ -483,6 +483,17 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
 
   const lockedModels = prioritizeModels(normalizedUnique(configuration.lockedModels, normalizeModelId));
   if (!lockedModels.length) {
+    // No lock means no transport rewrite, not no request evidence.  Preserve
+    // the exact page-owned POST body and only report model identities actually
+    // present in that body.  This remains observational: there is no strict
+    // policy verdict and no guessed model from the composer.
+    const observed = extractRequestEvidence(postData);
+    result.modelBefore = observed.conflicts?.model ? null : observed.model;
+    result.modelAfter = result.modelBefore;
+    result.transportModelBefore = observed.conflicts?.model ? null : observed.rawModel;
+    result.transportModelAfter = result.transportModelBefore;
+    result.reasoningBefore = observed.conflicts?.reasoning ? null : observed.reasoning;
+    result.reasoningAfter = result.reasoningBefore;
     result.reason = 'no_locked_model';
     return result;
   }

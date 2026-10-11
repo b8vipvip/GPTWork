@@ -20,7 +20,7 @@ test('a confirmed HTTP 200 response metadata conflict gets exactly one bounded v
 
 test('model indicator does not present trusted history as the in-flight verification turn', async () => {
   const history = await r('model-status-history.js');
-  assert.match(history, /const suppressHistory = state\?\.autoVerification\?\.running === true;/);
+  assert.match(history, /const suppressHistory = state\?\.autoVerification\?\.running === true \|\| state\?\.phase === 'waiting';/);
   assert.match(history, /const historicalRequest = !suppressHistory && !currentRequest/);
   assert.match(history, /const historicalResponse = !suppressHistory && !currentRequest/);
 });

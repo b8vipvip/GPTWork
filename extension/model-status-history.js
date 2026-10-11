@@ -144,7 +144,7 @@
     // that interval the stored trusted history belongs to the previous turn and must not
     // be rendered as if it were the in-flight request/response. The live indicator should
     // say "waiting" until the new probe produces current network evidence.
-    const suppressHistory = state?.autoVerification?.running === true;
+    const suppressHistory = state?.autoVerification?.running === true || state?.phase === 'waiting';
     const historicalRequest = !suppressHistory && !currentRequest
       && fresh(history?.request, nowMs, maxAgeMs)
       && policyAllows(history?.request?.model, policy)

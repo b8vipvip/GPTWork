@@ -190,15 +190,44 @@
     }) || null;
 
     const stateRequestModel = normalizeModelId(state?.lastRequest?.model);
-    const requestModel = normalizeModelId(selected?.request?.id) || stateRequestModel;
-    const requestHistorical = Boolean(requestModel && selected?.request?.historical);
-    const requestCurrent = selected ? Boolean(selected?.request?.current) : Boolean(stateRequestModel);
+    // A formal, successfully continued Fetch POST is also request evidence
+    // when Network.requestWillBeSent cannot be correlated with it.  Do not
+    // mistake an incidental/no-ID rewrite callback for a real user request.
+    const rewrite = state?.lastRewrite;
+    const forwardedRequestModel = unlocked
+      && rewrite?.fetchRequestId
+      && !rewrite.error
+      && ['/backend-api/conversation', '/backend-api/f/conversation'].includes(rewrite.endpoint)
+      ? normalizeConcreteModelId(rewrite.modelAfter)
+      : null;
+    const requestModel = stateRequestModel || forwardedRequestModel || normalizeModelId(selected?.request?.id);
+    const requestHistorical = Boolean(requestModel && !stateRequestModel && !forwardedRequestModel && selected?.request?.historical);
+    const requestCurrent = Boolean(stateRequestModel || forwardedRequestModel);
 
     const verification = state?.lastVerification;
     const responseCurrent = responseAppliesToLatestRequest(state);
     const fallbackResponseModel = responseCurrent ? normalizeModelId(verification?.model) : null;
-    const responseModel = normalizeModelId(selected?.response?.id) || fallbackResponseModel;
-    const responseHistorical = Boolean(responseModel && selected?.response?.historical);
+    // Empty lock lists skip strict verification by design, but the monitor
+    // still records directly observed served/used response metadata.  Display
+    // that independently of lastVerification without claiming a policy pass.
+    const networkResponse = state?.lastResponseEvidence;
+    const requestAt = Math.max(timestamp(state?.lastRequest?.capturedAt), timestamp(forwardedRequestModel ? rewrite?.capturedAt : null));
+    const responseAt = timestamp(networkResponse?.capturedAt);
+    const responseMatchesRequest = !state?.lastRequest?.requestId
+      || networkResponse?.requestId === state.lastRequest.requestId;
+    const observedResponseModel = unlocked
+      && state?.phase !== 'waiting'
+      && networkResponse?.evidenceSource === 'network_response_metadata'
+      && networkResponse?.fields?.model
+      && !networkResponse?.conflicts?.model
+      && !networkResponse?.bodyError
+      && responseMatchesRequest
+      && responseAt > 0
+      && (!requestAt || responseAt >= requestAt - 1000)
+      ? normalizeConcreteModelId(networkResponse.model)
+      : null;
+    const responseModel = observedResponseModel || normalizeModelId(selected?.response?.id) || fallbackResponseModel;
+    const responseHistorical = Boolean(!observedResponseModel && responseModel && selected?.response?.historical);
     const fallbackResponseConfirmed = Boolean(
       fallbackResponseModel
       && verification?.evidenceSource === 'network_response_metadata'
@@ -208,10 +237,10 @@
       fallbackResponseModel
       && (verification?.reasons?.includes?.('model_not_allowed') || verification?.verdict === 'mismatch')
     );
-    const responseConfirmed = selected?.response?.id
+    const responseConfirmed = observedResponseModel ? false : selected?.response?.id
       ? Boolean(selected.response.confirmed)
       : fallbackResponseConfirmed;
-    const responseMismatch = selected?.response?.id
+    const responseMismatch = observedResponseModel ? false : selected?.response?.id
       ? Boolean(selected.response.mismatch)
       : fallbackResponseMismatch;
 
@@ -231,8 +260,10 @@
       },
       response: {
         id: responseModel,
-        label: responseModel ? modelLabel(responseModel) : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
-        status: responseMismatch
+        label: responseModel
+          ? `${modelLabel(responseModel)}${observedResponseModel ? ' · 响应元数据' : ''}`
+          : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
+        status: observedResponseModel ? 'response' : responseMismatch
           ? 'mismatch'
           : responseHistorical
             ? 'confirmed-history'
