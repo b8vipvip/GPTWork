@@ -1551,6 +1551,7 @@ export function createAccountSystem({
         return json(res, 200, {
           ok: true,
           accountRequired: true,
+          entitlementLimitsEnabled: entitlementLimitsEnabled(),
           emailVerificationRequired: emailVerificationRequired(),
           free: freeConfig(),
           levels: levelDefinitions({ publicOnly: true }),
