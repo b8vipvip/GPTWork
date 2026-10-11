@@ -19,8 +19,10 @@ test('current GPTWork keeps ModelPro redesign authority while using source-first
   assert.match(recovery, /'composer-send-compat\.js'/);
   assert.match(content, /picker-mode-a-redesigned-direct-chat-list/);
   assert.match(content, /verification_model_selection_deferred_to_network/);
-  assert.match(evidence, /composer-redesign-default-sol/);
-  assert.match(evidence, /open-picker-default-sol/);
+  assert.match(evidence, /official-picker-a-checked/);
+  assert.match(evidence, /selectedOfficialPickerAEvidence/);
+  assert.doesNotMatch(evidence, /composer-redesign-default-sol/);
+  assert.doesNotMatch(evidence, /open-picker-default-sol/);
   assert.match(network, /Network\.streamResourceContent/);
   assert.match(network, /initial_conversation_aborted/);
   assert.match(background, /async function discoverOfficialWorkModels/);
