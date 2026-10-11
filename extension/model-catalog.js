@@ -194,8 +194,7 @@
     // when Network.requestWillBeSent cannot be correlated with it.  Do not
     // mistake an incidental/no-ID rewrite callback for a real user request.
     const rewrite = state?.lastRewrite;
-    const forwardedRequestModel = unlocked
-      && rewrite?.fetchRequestId
+    const forwardedRequestModel = rewrite?.fetchRequestId
       && !rewrite.error
       && ['/backend-api/conversation', '/backend-api/f/conversation'].includes(rewrite.endpoint)
       ? normalizeConcreteModelId(rewrite.modelAfter)
