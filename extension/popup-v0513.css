@@ -1,5 +1,8 @@
 @import url('./popup.css');
 
+/* Entitlement-gated rows use flex/grid; HTML hidden must take precedence. */
+[data-entitlement-limit][hidden] { display: none !important; }
+
 /* Primary popup actions stay separate from the status table and fill the full width. */
 .actions {
   display: grid !important;
