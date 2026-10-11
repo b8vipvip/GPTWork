@@ -199,6 +199,54 @@
       )) || null;
   }
 
+  const DIRECT_CHAT_PICKER_A_MODELS = new Set(['gpt-6', 'gpt-5.6-sol', 'gpt-5.5']);
+
+  function selectedOfficialPickerAEvidence() {
+    const trigger = composerModelTrigger();
+    // Only inspect an actively opened model picker owned by the composer.
+    // Radix may portal its menu outside the composer form.
+    if (!trigger || trigger.getAttribute?.('aria-expanded') !== 'true') return null;
+    const controlledId = trigger.getAttribute?.('aria-controls') || '';
+    const controlled = controlledId ? document.getElementById(controlledId) : null;
+    const scopes = [
+      controlled,
+      ...document.querySelectorAll("[role='menu'],[role='listbox'],[data-radix-menu-content]"),
+    ].filter((element, index, all) => element && visible(element) && all.indexOf(element) === index);
+
+    for (const scope of scopes) {
+      const rows = [...scope.querySelectorAll(
+        "[role='menuitemradio'],[role='radio'],[role='option'],[data-testid^='model-switcher-'],[data-model],[data-model-id]"
+      )].filter(visible).map((element) => {
+        const values = evidenceValues(element);
+        const testId = element.getAttribute?.('data-testid') || '';
+        const testIdModel = /^model-switcher-(gpt-[a-z0-9._:-]+)$/i.exec(testId)?.[1] || '';
+        const model = [testIdModel, ...values].map(modelFromText).find(Boolean) || null;
+        const checked = element.getAttribute?.('aria-checked') === 'true'
+          || element.getAttribute?.('aria-selected') === 'true'
+          || element.getAttribute?.('data-state') === 'checked'
+          || element.getAttribute?.('data-state') === 'selected'
+          || element.getAttribute?.('data-selected') === 'true';
+        return { element, model, checked, label: labelOf(element) };
+      });
+      const models = [...new Set(rows.map((row) => row.model).filter(Boolean))];
+      // A menu with a single GPT-labelled command is not the Picker A model
+      // catalog. Also reject Work / Picker B and non-model menu structures.
+      if (models.length < 2 || models.some((model) => !DIRECT_CHAT_PICKER_A_MODELS.has(model))) continue;
+      const selected = rows.filter((row) => row.model && row.checked);
+      const selectedModels = [...new Set(selected.map((row) => row.model))];
+      if (selectedModels.length !== 1) continue;
+      const selectedRow = selected.find((row) => row.model === selectedModels[0]);
+      return {
+        model: selectedModels[0],
+        source: 'official-picker-a-checked',
+        label: selectedRow?.label || selectedModels[0],
+        ambiguous: false,
+        candidates: models,
+      };
+    }
+    return null;
+  }
+
   function redesignedDefaultChatEvidence() {
     const root = composerRoot();
     const trigger = composerModelTrigger(root);
@@ -218,18 +266,8 @@
     const triggerText = normalizeLabel(trigger.innerText || trigger.textContent || '');
     const expanded = trigger.getAttribute?.('aria-expanded') === 'true';
     if (!expanded) {
-      const reasoning = reasoningFromText(triggerText);
-      if (reasoning) {
-        // 2026-09 default Chat redesign hides the default Sol family and renders only
-        // its reasoning level (for example "高"). GPT-5.5 renders "5.5 高", so a
-        // closed, reasoning-only model trigger is the stable signature of default Sol.
-        return {
-          model: 'gpt-5.6-sol',
-          source: 'composer-redesign-default-sol',
-          label: triggerText,
-          inferred: true,
-        };
-      }
+      // "High" / "Medium" denotes reasoning effort, not a unique model.
+      // Live GPT-6 and GPT-5.6 Sol share this reasoning-only composer pill.
       return null;
     }
 
@@ -257,22 +295,14 @@
         inferred: false,
       };
     }
-    const openerText = normalizeLabel(opener.innerText || opener.textContent || '');
-    if (reasoningFromText(openerText)) {
-      // In the same redesigned pair, a reasoning-only summary means the default Sol
-      // row is selected. This lets diagnostics confirm the selection before the menu
-      // is closed, without depending on a removed aria-checked/data-state marker.
-      return {
-        model: 'gpt-5.6-sol',
-        source: 'open-picker-default-sol',
-        label: openerText,
-        inferred: true,
-      };
-    }
+    // A reasoning-only menu summary is not a model identity. Prefer the
+    // exact checked model row from the owned Picker A menu or report unknown.
     return null;
   }
 
   function modelEvidence() {
+    const checkedPicker = selectedOfficialPickerAEvidence();
+    if (checkedPicker) return checkedPicker;
     const root = composerRoot() || document;
     const rows = [];
     const seen = new Set();
@@ -374,8 +404,9 @@
   }
 
   globalThis[KEY] = Object.freeze({
-    version: '1.2.0',
+    version: '1.3.0',
     composerRoot,
+    selectedOfficialPickerAEvidence,
     evidenceValues,
     labelOf,
     visible,
