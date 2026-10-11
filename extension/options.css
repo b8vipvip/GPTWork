@@ -49,6 +49,8 @@ h2 span { margin-left: 6px; color: #64748b; font-size: 13px; font-weight: 500; }
 .boundary.en { margin-top: 0; padding-top: 0; border-top-left-radius: 0; }
 
 .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+/* Layout classes (flex/grid) must never override Work feature gate hiding. */
+[data-work-feature][hidden] { display: none !important; }
 .check-row, .radio-row {
   display: flex;
   align-items: flex-start;
