@@ -1408,7 +1408,7 @@ async function applyServerFeatureSettings() {
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
       autoAlignSelection: remote.autoAlignSelection !== false,
       workModeGuidanceEnabled: remote.workModeGuidanceEnabled !== false,
-      workModeFeatureEnabled: remote.workModeFeatureEnabled !== false,
+      workModeFeatureEnabled: remote.workModeFeatureEnabled === true,
     });
     const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
     const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
