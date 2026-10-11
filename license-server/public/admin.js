@@ -433,6 +433,22 @@ function renderSettings(data) {
   el.alipayEnabled.checked = Boolean(alipay.enabled); el.alipayUrl.value = alipay.payUrl || ''; el.alipayInstructions.value = alipay.instructions || '';
 }
 
+async function loadEntitlementLimitGate() {
+  if (!el.entitlementLimitsEnabled) return;
+  const data = await api('/admin/api/account/settings');
+  el.entitlementLimitsEnabled.checked = data.settings?.entitlementLimitsEnabled !== false;
+}
+
+async function saveEntitlementLimitGate() {
+  if (!el.entitlementLimitsEnabled) return;
+  const data = await api('/admin/api/account/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ entitlementLimitsEnabled: el.entitlementLimitsEnabled.checked }),
+  });
+  el.entitlementLimitsEnabled.checked = data.settings?.entitlementLimitsEnabled !== false;
+  setMessage(el.entitlementLimitGateMessage, '已保存。已登录客户端将在下一次账户心跳后同步；刷新可立即拉取。', 'good');
+}
+
 async function loadSettings() {
   renderSettings(await api('/admin/api/account/settings'));
 }
