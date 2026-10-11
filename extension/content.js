@@ -777,6 +777,27 @@ document.addEventListener('pointerdown', (event) => {
     return selectors.some((selector) => element?.closest?.(selector));
   }
 
+  // ChatGPT can dispatch the formal POST before an async send_started message
+  // reaches the background worker. The first real composer input is an earlier,
+  // read-only opportunity to attach CDP Network response/request capture.
+  // Sending a synthetic Chat message or clicking a model is never required.
+  let lastNormalCaptureArmAt = 0;
+  function prearmNormalChatCapture() {
+    if (cachedSettings?.enabled !== true
+      || cachedSettings?.networkVerificationEnabled !== true
+      || cachedState?.autoVerification?.running === true) return;
+    if (Date.now() - lastNormalCaptureArmAt < 3000) return;
+    lastNormalCaptureArmAt = Date.now();
+    void sendMessage({ type: 'GPTLOCK_ARM_NORMAL_CHAT_CAPTURE' }).catch(() => {});
+  }
+
+  document.addEventListener('input', (event) => {
+    if (matchesAny(event.target, COMPOSER_SELECTORS)) prearmNormalChatCapture();
+  }, true);
+  document.addEventListener('pointerdown', (event) => {
+    if (matchesAny(event.target, SEND_SELECTORS)) prearmNormalChatCapture();
+  }, true);
+
   document.addEventListener('click', (event) => {
     if (matchesAny(event.target, SEND_SELECTORS)) handlePotentialSend(event);
   }, true);
