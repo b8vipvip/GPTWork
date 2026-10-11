@@ -52,7 +52,7 @@ test('website upgrade is canonical while optional order history stays server-con
   assert.match(websiteRuntime, /recentOrders\.hidden = !Boolean\(ordersModule\?\.enabled\)/);
   assert.match(websiteRuntime, /pages\?\.account\?\.modules/);
 
-  assert.match(extensionAccount, /id="membershipPlansSection" hidden aria-hidden="true"/);
+  assert.match(extensionAccount, /id="membershipPlansSection" data-entitlement-limit hidden aria-hidden="true"/);
   assert.match(extensionAccount, /id="recentOrdersSection" hidden aria-hidden="true"/);
   assert.match(extensionAccount, /account-visibility\.js/);
   assert.match(extensionVisibility, /account-membership-plans/);
