@@ -301,7 +301,7 @@
     if (message?.type === 'GPTLOCK_GUARD_STATE') {
       backgroundAllowed = message.settings?.enabled === true;
       workModeGuidanceEnabled = message.settings?.workModeGuidanceEnabled !== false;
-      workModeFeatureEnabled = message.settings?.workModeFeatureEnabled !== false;
+      workModeFeatureEnabled = message.settings?.workModeFeatureEnabled === true;
       verificationOwned = message.state?.autoVerification?.running === true;
       syncEnabled();
       scheduleRefresh();
@@ -357,7 +357,7 @@
           && account?.authenticated === true
           && account?.entitlement?.active === true;
         workModeGuidanceEnabled = response.data?.settings?.workModeGuidanceEnabled !== false;
-        workModeFeatureEnabled = response.data?.settings?.workModeFeatureEnabled !== false;
+        workModeFeatureEnabled = response.data?.settings?.workModeFeatureEnabled === true;
       }
       syncEnabled();
       scheduleRefresh();
