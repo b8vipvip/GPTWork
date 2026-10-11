@@ -1086,6 +1086,7 @@ export function createAccountSystem({
     const code = userLevelCode(user);
     return levelDefinitions().find((item) => item.code === code) || normalLevelConfig();
   }
+  function entitlementLimitsEnabled() { return getSetting('account_entitlement_limits_enabled', '1') !== '0'; }
   function sessionDays() { return getIntSetting('account_session_days', 30, 1, 365); }
   function emailVerificationRequired() { return getSetting('account_email_verification_required', '1') !== '0'; }
   function emailAccessSatisfied(user) { return Boolean(user?.email_verified_at || user?.email_verification_exempt); }
@@ -1131,6 +1132,12 @@ export function createAccountSystem({
         && user.free_expires_at && Date.parse(user.free_expires_at) > Date.now()) {
       active = true;
     }
+    if (!entitlementLimitsEnabled()) {
+      // This is the administrator's explicit global entitlement bypass, not an
+      // authentication or account-status bypass. Active, verified accounts may
+      // use GPTWork without expiry, tier or quota enforcement.
+      active = Boolean(user && user.status === 'active' && emailAccessSatisfied(user));
+    }
     if (user?.max_devices_override !== null && user?.max_devices_override !== undefined) maxDevices = user.max_devices_override;
     if (user?.max_windows_override !== null && user?.max_windows_override !== undefined) maxWindows = user.max_windows_override;
     purgeWindowLeases();
@@ -1139,6 +1146,7 @@ export function createAccountSystem({
       JOIN user_sessions s ON s.id=wl.session_id WHERE s.user_id=? AND s.revoked_at IS NULL AND s.expires_at>?`).get(user.id, nowIso()).count : 0;
     return {
       active,
+      limitsEnabled: entitlementLimitsEnabled(),
       source: 'level',
       expiresAt,
       level: { code: level.code, name: level.name, rank: USER_LEVEL_RANK[level.code] ?? 0 },
@@ -1362,7 +1370,7 @@ export function createAccountSystem({
     const entitlement = entitlementFor(user);
     const limit = Math.max(1, entitlement.limits.devices);
     let count = Number(db.prepare('SELECT COUNT(*) AS count FROM user_devices WHERE user_id=?').get(user.id).count || 0);
-    if (count >= limit) {
+    if (entitlementLimitsEnabled() && count >= limit) {
       const requested = [...new Set((Array.isArray(input.replaceDeviceRecordIds) ? input.replaceDeviceRecordIds : [])
         .map(Number).filter((id) => Number.isInteger(id) && id > 0).slice(0, 128))];
       const requiredReleaseCount = Math.max(1, count - limit + 1);
@@ -1806,7 +1814,9 @@ export function createAccountSystem({
           WHERE s.user_id=? AND s.id<>? AND s.revoked_at IS NULL AND s.expires_at>?`)
           .get(session.user_id, session.id, now).count || 0);
         const remaining = Math.max(0, Number(entitlement.limits.windows || 1) - occupiedByOtherSessions);
-        const allowed = entitlement.active ? requested.slice(0, remaining) : [];
+        const allowed = entitlement.active
+          ? entitlementLimitsEnabled() ? requested.slice(0, remaining) : requested
+          : [];
         const insert = db.prepare('INSERT INTO user_window_leases(session_id,window_key,first_seen_at,last_seen_at) VALUES(?,?,?,?)');
         for (const key of allowed) insert.run(session.id, key, now, now);
         db.prepare('UPDATE user_sessions SET last_seen_at=?,extension_version=? WHERE id=?')
@@ -1869,6 +1879,7 @@ export function createAccountSystem({
     return {
       free: freeConfig(),
       sessionDays: sessionDays(),
+      entitlementLimitsEnabled: entitlementLimitsEnabled(),
       emailVerificationRequired: emailVerificationRequired(),
       smtp: {
         host: smtp.host,
@@ -2178,6 +2189,12 @@ export function createAccountSystem({
         if (input.emailVerificationRequired !== undefined) {
           setSetting('account_email_verification_required', input.emailVerificationRequired ? '1' : '0');
         }
+        if (input.entitlementLimitsEnabled !== undefined) {
+          if (typeof input.entitlementLimitsEnabled !== 'boolean') {
+            fail(400, 'INVALID_ENTITLEMENT_LIMITS_GATE', '权益限制开关必须是布尔值');
+          }
+          setSetting('account_entitlement_limits_enabled', input.entitlementLimitsEnabled ? '1' : '0');
+        }
 
         const smtp = input.smtp || {};
         if (smtp.host !== undefined) {
@@ -2209,6 +2226,7 @@ export function createAccountSystem({
         audit('admin_account_settings_updated', null, {
           smtpConfigured: smtpConfigured(), free: freeConfig(), sessionDays: sessionDays(),
           emailVerificationRequired: emailVerificationRequired(),
+          entitlementLimitsEnabled: entitlementLimitsEnabled(),
         });
         return json(res, 200, { ok: true, settings: adminSettingsPublic() }), true;
       }
