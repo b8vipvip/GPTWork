@@ -10,7 +10,8 @@ const contentSource = await readFile(new URL('../content.js', import.meta.url), 
 test('settings page no longer depends on a bottom Save & sync action', () => {
   assert.doesNotMatch(settingsHtml, /id="save"/);
   assert.doesNotMatch(settingsHtml, /保存并同步\s*\/\s*Save &amp; sync/);
-  assert.match(settingsHtml, /Work 模式和模型锁定按 ChatGPT 标签页隔离/);
+  assert.match(settingsHtml, /请求锁定按 ChatGPT 标签页隔离/);
+  assert.doesNotMatch(settingsHtml, /Work 模式和模型锁定按 ChatGPT 标签页隔离/);
   assert.match(settingsHtml, /模型\/推理配置来自自动识别目录并同步/);
 });
 
