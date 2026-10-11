@@ -130,6 +130,12 @@ async function finishLogin(replaceDeviceRecordIds = []) {
 
 function renderAccount(account) {
   const authenticated = Boolean(account?.authenticated);
+  const limitsEnabled = account?.entitlement?.limitsEnabled !== false;
+  // Server-owned entitlement gate controls every client entitlement surface.
+  // Keep these rows hidden until a concrete account snapshot is available.
+  for (const node of document.querySelectorAll('[data-entitlement-limit]')) {
+    node.hidden = !authenticated || !limitsEnabled;
+  }
   accountAuthenticated = authenticated;
   showAppScreen();
 
