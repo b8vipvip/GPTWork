@@ -182,7 +182,7 @@ function renderAccount(account) {
     else el.enabled.title = `GPTWork 功能可用；当前等级最多 ${limits.windows ?? 1} 个同时窗口`;
   }
   window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
-    detail: { authenticated, active: Boolean(entitlement.active) },
+    detail: { authenticated, active: Boolean(entitlement.active), limitsEnabled },
   }));
 }
 
