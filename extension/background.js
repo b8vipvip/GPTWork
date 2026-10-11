@@ -369,6 +369,7 @@ function createTabState(tabId, url = '') {
     probeArmed: false,
     pageObservation: null,
     selectionRevision: 0,
+    lastKnownPageModel: null,
     lastRewrite: null,
     lastRequest: null,
     lastVerification: null,
@@ -521,6 +522,7 @@ function publicTabState(state) {
   if (!state) return null;
   return {
     contextKey: state.contextKey,
+    selectionRevision: state.selectionRevision,
     core: state.core,
     monitor: state.monitor,
     phase: state.phase,
@@ -4866,12 +4868,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ambiguousModel: Boolean(message.observation?.ambiguousModel),
           candidates: Array.isArray(message.observation?.candidates) ? message.observation.candidates.slice(0, 8) : [],
         };
+        const previousConcreteModel = normalizeConcreteModelId(state.lastKnownPageModel || previous?.model);
+        const observedConcreteModel = normalizeConcreteModelId(state.pageObservation.model);
+        if (observedConcreteModel) state.lastKnownPageModel = observedConcreteModel;
         if (
-          previous?.model && state.pageObservation.model
-          && previous.model !== state.pageObservation.model
+          previousConcreteModel && observedConcreteModel
+          && previousConcreteModel !== observedConcreteModel
         ) {
           // Preserve a monotonically increasing page-selection epoch so a
-          // delayed old response cannot block a later Picker A choice.
+          // delayed old response cannot block a later Picker A choice. An
+          // intervening reasoning-only / unknown DOM frame does not reset the
+          // last actually observed concrete Picker A model.
           state.selectionRevision = (state.selectionRevision || 0) + 1;
           state.phase = 'initial';
           state.lastVerification = null;
