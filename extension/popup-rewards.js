@@ -2,6 +2,13 @@ const API_BASE = 'https://gptlock.mv3.cn';
 const SESSION_KEY = 'gptlockAccountSessionToken';
 const checkin = document.getElementById('accountCheckin');
 const share = document.getElementById('accountShare');
+let entitlementLimitsEnabled = false;
+window.addEventListener('gptlock-entitlement-state', (event) => {
+  entitlementLimitsEnabled = event.detail?.authenticated === true && event.detail?.limitsEnabled === true;
+  if (checkin) checkin.hidden = !entitlementLimitsEnabled;
+  if (share) share.hidden = !entitlementLimitsEnabled;
+  if (entitlementLimitsEnabled) void refresh();
+});
 
 async function token() {
   const stored = await chrome.storage.local.get(SESSION_KEY);
