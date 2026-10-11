@@ -206,4 +206,4 @@ el.upgradeButton?.addEventListener('click', () => { if (account?.entitlement?.li
 el.upgradeClose?.addEventListener('click', () => el.upgradeDialog?.close());
 el.upgradeDialog?.addEventListener('click', (event) => { if (event.target === el.upgradeDialog) el.upgradeDialog.close(); });
 el.refresh.addEventListener('click', () => void load());
-void load().then(() => { if (location.hash === '#upgrade' && account?.authenticated) { renderPlans(); el.upgradeDialog?.showModal(); } });
+void load().then(() => { if (location.hash === '#upgrade' && account?.authenticated && account?.entitlement?.limitsEnabled !== false) { renderPlans(); el.upgradeDialog?.showModal(); } });
