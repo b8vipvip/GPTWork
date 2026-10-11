@@ -1,6 +1,6 @@
 {
   "name": "gptwork-extension",
-  "version": "0.5.218",
+  "version": "0.5.219",
   "private": true,
   "type": "module",
   "scripts": {
