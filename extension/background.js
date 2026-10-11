@@ -368,6 +368,7 @@ function createTabState(tabId, url = '') {
     probeUsed: false,
     probeArmed: false,
     pageObservation: null,
+    selectionRevision: 0,
     lastRewrite: null,
     lastRequest: null,
     lastVerification: null,
@@ -1030,7 +1031,16 @@ async function applyNetworkEvidence(tabId, evidence) {
   // blocked normal GPT-6 chat after generation 37 had intentionally pruned
   // lockedModels to [] (observed in the v0.5.211 -> .212 runtime logs).
   // The discovery transaction above retains its full request/response gates.
-  const normalPolicy = runtimePolicyForTabSync(tabId);
+  //
+  // The policy is immutable for each formal request: a user can switch Picker A
+  // while the previous streamed response is still arriving. Never re-evaluate
+  // that old response against the newly selected page model's lock target.
+  const requestPolicy = state.lastRequest?.requestId === evidenceRequestId
+    ? state.lastRequest.policySnapshot
+    : null;
+  const normalPolicy = requestPolicy
+    ? normalizePolicy(requestPolicy)
+    : runtimePolicyForTabSync(tabId);
   if (normalPolicy.lockedModels.length === 0) {
     state.lastVerification = null;
     state.evidenceIssue = null;
@@ -1086,7 +1096,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       evidenceSource: 'network_response_metadata',
       capturedAt: responseEvidence.capturedAt,
       requestId: `cdp-${tabId}-${responseEvidence.requestId || evidence.requestId}`,
-    }, runtimePolicyForTabSync(tabId));
+    }, normalPolicy);
     state.lastVerification = result;
     state.evidenceIssue = diagnoseEvidenceIssue(responseEvidence, result);
     state.lastError = responseEvidence.bodyError || (responseEvidence.conflicts?.model || responseEvidence.conflicts?.reasoning
@@ -1249,11 +1259,18 @@ const networkMonitor = new ChatGptNetworkMonitor({
   },
   onRequest(tabId, request) {
     const state = ensureTabState(tabId);
+    const policyAtRequest = runtimePolicyForTabSync(tabId);
     state.lastRequest = {
       requestId: request.requestId,
       capturedAt: request.capturedAt,
       model: request.model,
       reasoning: request.reasoning,
+      selectionRevision: state.selectionRevision,
+      policySnapshot: {
+        lockedModels: [...policyAtRequest.lockedModels],
+        allowedReasoningLevels: [...policyAtRequest.allowedReasoningLevels],
+        strictMode: policyAtRequest.strictMode,
+      },
       diagnostics: request.diagnostics ?? null,
     };
     state.probeUsed = true;
@@ -4853,6 +4870,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           previous?.model && state.pageObservation.model
           && previous.model !== state.pageObservation.model
         ) {
+          // Preserve a monotonically increasing page-selection epoch so a
+          // delayed old response cannot block a later Picker A choice.
+          state.selectionRevision = (state.selectionRevision || 0) + 1;
           state.phase = 'initial';
           state.lastVerification = null;
           state.lastEvidenceDiagnostics = null;
