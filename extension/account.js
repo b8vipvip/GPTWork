@@ -202,7 +202,7 @@ el.passwordForm.addEventListener('submit', (event) => {
     .catch((error) => message(el.passwordMessage, `修改失败：${error.message}`, 'bad'));
 });
 
-el.upgradeButton?.addEventListener('click', () => { renderPlans(); el.upgradeDialog?.showModal(); });
+el.upgradeButton?.addEventListener('click', () => { if (account?.entitlement?.limitsEnabled === false) return; renderPlans(); el.upgradeDialog?.showModal(); });
 el.upgradeClose?.addEventListener('click', () => el.upgradeDialog?.close());
 el.upgradeDialog?.addEventListener('click', (event) => { if (event.target === el.upgradeDialog) el.upgradeDialog.close(); });
 el.refresh.addEventListener('click', () => void load());
