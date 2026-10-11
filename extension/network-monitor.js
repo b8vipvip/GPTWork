@@ -626,7 +626,25 @@ export class ChatGptNetworkMonitor {
     });
   }
 
+  postDataEntriesText(request) {
+    const entries = request?.postDataEntries;
+    if (!Array.isArray(entries) || !entries.length) return null;
+    const encoded = [];
+    let estimatedBytes = 0;
+    for (const entry of entries) {
+      if (typeof entry?.bytes !== 'string') return null;
+      estimatedBytes += Math.floor(entry.bytes.length * 3 / 4);
+      if (estimatedBytes > 2 * 1024 * 1024) return null;
+      encoded.push(entry.bytes);
+    }
+    // CDP Network.Request.postData is deprecated and may be absent/truncated.
+    // Decode actual observed binary postDataEntries without altering payloads.
+    return decodeBase64Chunks(encoded) || null;
+  }
+
   async pausedPostData(tabId, params) {
+    const entries = this.postDataEntriesText(params.request);
+    if (entries !== null) return entries;
     if (typeof params.request?.postData === 'string') return params.request.postData;
     if (!params.networkId) return '';
     try {
@@ -786,6 +804,8 @@ export class ChatGptNetworkMonitor {
   }
 
   async requestPostData(tabId, requestId, request) {
+    const entries = this.postDataEntriesText(request);
+    if (entries !== null) return entries;
     if (typeof request?.postData === 'string') return request.postData;
     try {
       const result = await debuggerCall(
