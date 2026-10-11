@@ -181,6 +181,7 @@
     const pageObservation = effectivePageObservation(state);
     const pageModel = normalizeModelId(pageObservation?.model);
     const pageModelChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-checked';
+    const pageModelLastChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-last-checked';
     const unlocked = Array.isArray(currentPolicy?.lockedModels) && currentPolicy.lockedModels.length === 0;
     const historyHelper = globalThis.__GPTLOCK_MODEL_STATUS_HISTORY__;
     const selected = historyHelper?.selectStatus?.({
@@ -194,8 +195,7 @@
     // when Network.requestWillBeSent cannot be correlated with it.  Do not
     // mistake an incidental/no-ID rewrite callback for a real user request.
     const rewrite = state?.lastRewrite;
-    const forwardedRequestModel = unlocked
-      && rewrite?.fetchRequestId
+    const forwardedRequestModel = rewrite?.fetchRequestId
       && !rewrite.error
       && ['/backend-api/conversation', '/backend-api/f/conversation'].includes(rewrite.endpoint)
       ? normalizeConcreteModelId(rewrite.modelAfter)
@@ -247,7 +247,7 @@
     return {
       page: {
         id: pageModel,
-        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : ' · 页面观察'}` : '未确认',
+        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : pageModelLastChecked ? ' · 上次菜单勾选' : ' · 页面观察'}` : '未确认',
         status: pageModel ? 'observed' : 'unknown',
       },
       request: {

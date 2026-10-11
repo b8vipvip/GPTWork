@@ -4926,6 +4926,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await broadcastTabState(sender.tab.id);
         return publicTabState(state);
       }
+      case 'GPTLOCK_ARM_NORMAL_CHAT_CAPTURE': {
+        if (!sender.tab?.id) throw new Error('Early Chat capture requires a tab');
+        const state = ensureTabState(sender.tab.id, sender.tab.url);
+        if (!isChatGptUrl(state.url)
+          || !masterRuntimeEnabled()
+          || !effectiveSettingsForState(state).enabled
+          || currentSettings.networkVerificationEnabled !== true) {
+          return { enabled: false, reason: 'feature_disabled' };
+        }
+        // Input/pointer intent arrives *before* the ChatGPT fetch. Arming Network
+        // only on GPTLOCK_SEND_STARTED races with Fetch.requestPaused: the formal
+        // POST can already be in flight when Network.enable finally completes.
+        // A single response-capture subscription per active tab is idempotent.
+        const alreadyEnabled = networkMonitor.hasResponseCapture(sender.tab.id);
+        const enabled = await networkMonitor.enableResponseCapture(sender.tab.id).catch(() => false);
+        if (!alreadyEnabled) {
+          logRuntime(enabled ? 'info' : 'warn', 'network', 'normal_response_capture_prearmed', {
+            tabId: sender.tab.id, enabled,
+            responseCaptureTabs: networkMonitor.responseCaptureCount(),
+          });
+        }
+        return { enabled };
+      }
       case 'GPTLOCK_SEND_STARTED': {
         if (!sender.tab?.id) throw new Error('Send event requires a tab');
         const state = ensureTabState(sender.tab.id, sender.tab.url);

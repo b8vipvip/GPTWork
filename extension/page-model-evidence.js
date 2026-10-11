@@ -200,6 +200,21 @@
   }
 
   const DIRECT_CHAT_PICKER_A_MODELS = new Set(['gpt-6', 'gpt-5.6-sol', 'gpt-5.5']);
+  const RECENT_CHECKED_PICKER_MAX_AGE_MS = 2 * 60 * 1000;
+  let recentCheckedPicker = null;
+
+  function lastObservedOfficialPickerA() {
+    if (!recentCheckedPicker
+      || recentCheckedPicker.pathname !== (globalThis.location?.pathname || '')
+      || Date.now() - recentCheckedPicker.at > RECENT_CHECKED_PICKER_MAX_AGE_MS) return null;
+    return {
+      model: recentCheckedPicker.model,
+      source: 'official-picker-a-last-checked',
+      label: recentCheckedPicker.label,
+      ambiguous: false,
+      candidates: [recentCheckedPicker.model],
+    };
+  }
 
   function selectedOfficialPickerAEvidence() {
     const trigger = composerModelTrigger();
@@ -243,6 +258,12 @@
       const selectedModels = [...new Set(selected.map((row) => row.model))];
       if (selectedModels.length !== 1) continue;
       const selectedRow = selected.find((row) => row.model === selectedModels[0]);
+      recentCheckedPicker = {
+        model: selectedModels[0],
+        label: selectedRow?.label || selectedModels[0],
+        pathname: globalThis.location?.pathname || '',
+        at: Date.now(),
+      };
       return {
         model: selectedModels[0],
         source: 'official-picker-a-checked',
@@ -372,6 +393,12 @@
           candidates: [redesigned.model],
         };
       }
+      // Closing Radix hides the checked row and exposes only "High".
+      // Retain the most recent *actually checked* model for this conversation
+      // briefly, explicitly marked as historical page observation rather than
+      // a live or network-confirmed model identity.
+      const lastChecked = lastObservedOfficialPickerA();
+      if (lastChecked) return lastChecked;
     }
 
     return {

@@ -119,5 +119,5 @@ test('Work request locking enforces the configured floor even when page observat
   const resolver = runtime.slice(runtime.indexOf('export function requestPolicyForTabSync'), runtime.indexOf('export function effectivePolicyForTabSync'));
   assert.ok(resolver.indexOf('feature.workModeEnabled') < resolver.indexOf('feature.modelLockEnabled'));
   assert.match(resolver, /lockedModels = \[selected && isAtLeastWorkFloor\(selected, floor\) \? selected : floor\]/);
-  assert.match(resolver, /lockedModels = selected && allowed\.includes\(selected\) \? \[selected\] : \[\]/);
+  assert.match(resolver, /lockedModels = selected && allowed\.includes\(selected\) \? \[selected\] : allowed\.slice\(0, 1\)/);
 });

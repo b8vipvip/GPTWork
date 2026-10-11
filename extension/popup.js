@@ -111,6 +111,22 @@ function valuePair(model, reasoning) {
   return model || reasoning ? `${model || 'model ?'} · ${reasoning || 'reasoning ?'}` : '无 / None';
 }
 
+function observedOrdinaryChatResponse(tab) {
+  const response = tab?.lastResponseEvidence;
+  if (tab?.phase === 'waiting'
+    || response?.evidenceSource !== 'network_response_metadata'
+    || !response?.model
+    || !response?.fields?.model
+    || response?.conflicts?.model
+    || response?.bodyError) return null;
+  const requestId = tab?.lastRequest?.requestId;
+  if (requestId && response.requestId !== requestId) return null;
+  const responseAt = Date.parse(response.capturedAt || '');
+  const requestAt = Date.parse(tab?.lastRequest?.capturedAt || tab?.lastRewrite?.capturedAt || '');
+  if (!Number.isFinite(responseAt) || (Number.isFinite(requestAt) && responseAt < requestAt - 1000)) return null;
+  return response;
+}
+
 function autoVerificationAppliesToLatestRequest(auto, tab) {
   const completedAt = Date.parse(auto?.completedAt || '');
   const latestRequestAt = Date.parse(tab?.lastRequest?.capturedAt || '');
@@ -232,11 +248,16 @@ function render(state) {
     ? '已连接，请求会在发送前检查 / Attached'
     : `未连接，聊天保持可用 / Detached${tab?.monitor?.error ? ` · ${tab.monitor.error}` : ''}`;
   elements.pageState.textContent = valuePair(tab?.pageObservation?.model, tab?.pageObservation?.reasoning);
+  const observedResponse = observedOrdinaryChatResponse(tab);
   const responseValue = autoEvidenceConfirmed
     ? valuePair(auto.responseModel, auto.responseReasoning)
     : auto?.completedAt && autoApplies && auto?.requestModel
       ? `未暴露 / Not exposed · 请求已确认 ${auto.requestModel}`
-      : valuePair(tab?.lastVerification?.model, tab?.lastVerification?.reasoning);
+      : tab?.lastVerification?.model
+        ? valuePair(tab.lastVerification.model, tab.lastVerification.reasoning)
+        : observedResponse
+          ? `${valuePair(observedResponse.model, observedResponse.reasoning)} · 响应元数据已观测（未验证）`
+          : valuePair(null, null);
   elements.responseState.textContent = tab?.evidenceIssue && !autoEvidenceConfirmed
     ? `${responseValue} · ${tab.evidenceIssue}`
     : responseValue;

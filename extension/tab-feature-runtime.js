@@ -303,9 +303,15 @@ export function requestPolicyForTabSync(tabId, pageModel) {
     const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
     lockedModels = [selected && isAtLeastWorkFloor(selected, floor) ? selected : floor];
   } else if (feature.modelLockEnabled) {
-    // Outside Work, Model Lock remains a strict allow-list over the page-selected model.
+    // Outside Work, the saved lock selection is authoritative even when
+    // ChatGPT's redesigned composer exposes only a reasoning-only "High" pill.
+    // Losing a readable Picker A model must not silently turn an explicit
+    // model lock into no_locked_model. Prefer a currently observed *allowed*
+    // page selection; otherwise keep a deterministic configured lock target.
+    // Network request and served-response identities are still verified
+    // independently and must never be inferred from this fallback.
     const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
-    lockedModels = selected && allowed.includes(selected) ? [selected] : [];
+    lockedModels = selected && allowed.includes(selected) ? [selected] : allowed.slice(0, 1);
   }
 
   return normalizePolicy({ ...basePolicy, lockedModels });
