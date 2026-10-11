@@ -135,6 +135,7 @@ function applyWebsiteChrome(config) {
 }
 
 function renderRewards(rewards) {
+  if (state.account?.entitlement?.limitsEnabled === false) rewards = null;
   const rewardSection = document.getElementById('rewardSection');
   const checkinButton = document.getElementById('dailyCheckin');
   const shareButton = document.getElementById('copyInvite');
@@ -332,6 +333,7 @@ function renderPaymentBox(result, method) {
   }
 }
 async function createUpgradeOrder(plan, method, button) {
+  if (state.account?.entitlement?.limitsEnabled === false) return;
   const original = button.textContent;
   button.disabled = true; button.textContent = '正在打开…';
   try {
@@ -363,6 +365,12 @@ function renderAccount(data) {
   const account = data.account || {};
   const entitlement = account.entitlement || {};
   state.account = account;
+  const limitsEnabled = entitlement.limitsEnabled !== false;
+  document.body.dataset.entitlementLimits = limitsEnabled ? 'on' : 'off';
+  if (!limitsEnabled) {
+    stopPaymentPoll();
+    document.getElementById('siteUpgradeDialog')?.close();
+  }
   document.getElementById('accountEmail').textContent = text(account.user?.email);
   document.getElementById('entitlementSource').textContent = text(account.level?.name, '普通用户');
   document.getElementById('entitlementExpiry').textContent = dateText(entitlement.expiresAt);
@@ -370,7 +378,7 @@ function renderAccount(data) {
   renderRewards(data.rewards);
   renderSecurity(data);
   renderOrders(data);
-  renderUpgradePlans();
+  if (limitsEnabled) renderUpgradePlans();
 }
 
 async function loadUpgradeConfig() {
@@ -379,6 +387,7 @@ async function loadUpgradeConfig() {
       api('/api/v1/account/config'),
       api('/site/api/payments').catch(() => ({ paymentMethods: [] })),
     ]);
+    document.body.dataset.entitlementLimits = accountConfig.entitlementLimitsEnabled === false ? 'off' : 'on';
     state.config = {
       plans: Array.isArray(accountConfig.plans) ? accountConfig.plans : [],
       paymentMethods: paymentConfig.paymentMethods || accountConfig.paymentMethods || [],
@@ -425,6 +434,7 @@ function installActions() {
     location.reload();
   });
   document.getElementById('dailyCheckin')?.addEventListener('click', async () => {
+    if (state.account?.entitlement?.limitsEnabled === false) return;
     const button = document.getElementById('dailyCheckin');
     button.disabled = true;
     try {
@@ -435,12 +445,14 @@ function installActions() {
     } catch (error) { setNotice(document.getElementById('rewardNotice'), `签到失败：${error.message}`, 'error'); }
   });
   document.getElementById('copyInvite')?.addEventListener('click', async () => {
+    if (state.account?.entitlement?.limitsEnabled === false) return;
     const value = document.getElementById('inviteLink')?.value || '';
     if (!value) return;
     try { await navigator.clipboard.writeText(value); setNotice(document.getElementById('rewardNotice'), '分享链接已复制。对方注册并登录该链接后，你将获得 7 天使用时长。', 'good'); }
     catch { document.getElementById('inviteLink')?.select(); setNotice(document.getElementById('rewardNotice'), '请复制已选中的分享链接。'); }
   });
   document.getElementById('siteUpgrade')?.addEventListener('click', () => {
+    if (state.account?.entitlement?.limitsEnabled === false) return;
     renderUpgradePlans(); document.getElementById('siteUpgradeDialog')?.showModal();
   });
   document.getElementById('siteUpgradeClose')?.addEventListener('click', () => { stopPaymentPoll(); document.getElementById('siteUpgradeDialog')?.close(); });
@@ -473,6 +485,7 @@ function installActions() {
 }
 
 async function redeemPendingShare() {
+  if (state.account?.entitlement?.limitsEnabled === false) return;
   const code = String(new URLSearchParams(location.search).get('invite') || '').trim().toUpperCase();
   if (!code || !state.account?.authenticated) return;
   try {
