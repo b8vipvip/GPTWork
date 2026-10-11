@@ -11,6 +11,7 @@ const el = {
   userPasswordConfirm: $('userPasswordConfirm'), userPasswordMessage: $('userPasswordMessage'), userPasswordClose: $('userPasswordClose'),
   userPasswordCancel: $('userPasswordCancel'), userPasswordSubmit: $('userPasswordSubmit'),
   planCards: $('planCards'), refreshOrders: $('refreshOrders'), ordersBody: $('ordersBody'),
+  entitlementLimitsEnabled: $('entitlementLimitsEnabled'), saveEntitlementLimitGate: $('saveEntitlementLimitGate'), entitlementLimitGateMessage: $('entitlementLimitGateMessage'),
   freeDays: $('freeDays'), freeDevices: $('freeDevices'), sessionDays: $('sessionDays'),
   emailVerificationRequired: $('emailVerificationRequired'),
   smtpHost: $('smtpHost'),
