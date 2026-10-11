@@ -177,7 +177,8 @@ function renderAccount(account) {
   if (el.accountLogout) el.accountLogout.hidden = false;
   if (el.accountUpgrade) el.accountUpgrade.hidden = !limitsEnabled;
   if (el.enabled) {
-    if (!entitlement.active) el.enabled.title = '当前使用时长已到期，请签到、分享或升级用户等级';
+    if (!limitsEnabled) el.enabled.title = 'GPTWork 功能可用';
+    else if (!entitlement.active) el.enabled.title = '当前使用时长已到期，请签到、分享或升级用户等级';
     else el.enabled.title = `GPTWork 功能可用；当前等级最多 ${limits.windows ?? 1} 个同时窗口`;
   }
   window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
