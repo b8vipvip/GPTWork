@@ -1408,7 +1408,7 @@ async function applyServerFeatureSettings() {
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
       autoAlignSelection: remote.autoAlignSelection !== false,
       workModeGuidanceEnabled: remote.workModeGuidanceEnabled !== false,
-      workModeFeatureEnabled: remote.workModeFeatureEnabled !== false,
+      workModeFeatureEnabled: remote.workModeFeatureEnabled === true,
     });
     const nextPolicy = normalizePolicy({ ...currentPolicy, strictMode: remote.strictMode === true });
     const settingsChanged = JSON.stringify(nextSettings) !== JSON.stringify(currentSettings);
@@ -4727,7 +4727,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         return {
           policy: state ? runtimePolicyForTabSync(state.tabId) : currentPolicy,
-          settings: state ? effectiveSettingsForState(state) : currentSettings,
+          settings: state ? effectiveSettingsForState(state) : { ...currentSettings, workModeFeatureEnabled: serverWorkFeatureEnabled() },
+          workFeatureGateEnabled: serverWorkFeatureEnabled(),
           nativeStatus: nativeStatus ?? { connected: false },
           tabState: state ? publicTabState(state) : null,
           extensionVersion: chrome.runtime.getManifest().version,

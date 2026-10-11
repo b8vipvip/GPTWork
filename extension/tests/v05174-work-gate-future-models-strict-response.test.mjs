@@ -24,7 +24,7 @@ test('v0.5.174 server Work feature gate is delivered and enforced across client 
   assert.match(adminHtml, /clientWorkModeFeature/);
   assert.match(adminJs, /workModeFeatureEnabled:el\.workFeature\.checked/);
 
-  assert.match(background, /workModeFeatureEnabled: remote\.workModeFeatureEnabled !== false/);
+  assert.match(background, /workModeFeatureEnabled: remote\.workModeFeatureEnabled === true/);
   assert.match(background, /async function discoverOfficialWorkModels/);
   assert.doesNotMatch(background, /official_work_model_discovery_skipped[\s\S]{0,160}work_feature_disabled/);
 

@@ -19,6 +19,8 @@ h1 small { color: #64748b; font-size: 11px; font-weight: 600; }
 .summary { margin: 15px 0 12px; padding: 13px; border: 1px solid #dbe3ef; border-radius: 13px; background: white; }
 .summary strong { display: block; margin-bottom: 4px; font-size: 14px; }
 .summary p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+/* Explicitly hidden server-gated Work controls must override layout display rules. */
+[data-work-feature][hidden] { display: none !important; }
 .enable-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -2px 0 12px; padding: 10px 12px; border: 1px solid #dbe3ef; border-radius: 13px; background: white; }
 .enable-row > span { display: grid; gap: 1px; font-size: 13px; }
 .enable-row small { color: #94a3b8; font-size: 9px; }

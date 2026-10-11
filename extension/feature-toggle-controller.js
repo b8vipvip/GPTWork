@@ -45,7 +45,7 @@ function showEntitlementRequired() {
 }
 
 function setWorkFeatureAvailable(value) {
-  workFeatureAvailable = value !== false;
+  workFeatureAvailable = value === true;
   for (const node of workFeatureNodes) node.hidden = !workFeatureAvailable;
   if (!workFeatureAvailable && workToggle) workToggle.checked = false;
 }
@@ -88,11 +88,11 @@ async function findChatGptTab() {
 function renderScope(tab) {
   if (!scopeNode) return;
   if (!tab?.id) {
-    scopeNode.textContent = '当前没有可用的 ChatGPT 标签页；Work 模式和模型锁定仅绑定具体 ChatGPT 标签页，不会按窗口共享。';
+    scopeNode.textContent = '当前没有可用的 ChatGPT 标签页；模型锁定仅绑定具体 ChatGPT 标签页，不会按窗口共享。';
     return;
   }
   const title = String(tab.title || 'ChatGPT').replace(/\s+/g, ' ').trim().slice(0, 80);
-  scopeNode.textContent = `当前标签页：${title}（Tab ${tab.id}）。Work 模式和模型锁定只对这个 ChatGPT 标签页生效，同一 Chrome 窗口中的其他 ChatGPT 标签页不会共享状态。`;
+  scopeNode.textContent = `当前标签页：${title}（Tab ${tab.id}）。模型锁定只对这个 ChatGPT 标签页生效，同一 Chrome 窗口中的其他 ChatGPT 标签页不会共享状态。`;
 }
 
 async function reconcile() {
@@ -105,6 +105,7 @@ async function reconcile() {
   currentTabId = nextTabId;
   renderScope(tab);
   if (!Number.isInteger(currentTabId)) {
+    setWorkFeatureAvailable(false);
     currentAccount = { authenticated: false, entitlement: { active: false } };
     syncVisibleToggles({ workModeEnabled: false, modelLockEnabled: false });
     setBusy(false);
@@ -113,15 +114,24 @@ async function reconcile() {
 
   const targetTabId = currentTabId;
   try {
-    const snapshot = await withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: targetTabId }));
+    // The server gate is authoritative. The tab-runtime snapshot is a synced
+    // feature mirror and must not make Work visible while the server control
+    // has not been fetched or explicitly permits Work.
+    const [snapshot, runtime] = await Promise.all([
+      withTimeout(runtimeMessage({ type: 'GPTWORK_TAB_FEATURE_GET', tabId: targetTabId })),
+      withTimeout(runtimeMessage({ type: 'GPTLOCK_GET_STATE', tabId: targetTabId })),
+    ]);
     if (generation !== reconcileGeneration || targetTabId !== currentTabId) return snapshot;
     currentAccount = snapshot?.account || currentAccount;
-    setWorkFeatureAvailable(snapshot?.workModeFeatureEnabled !== false && snapshot?.settings?.workModeFeatureEnabled !== false);
+    setWorkFeatureAvailable(runtime?.workFeatureGateEnabled === true
+      && snapshot?.workModeFeatureEnabled === true
+      && snapshot?.settings?.workModeFeatureEnabled === true);
     syncVisibleToggles(snapshot?.featureState);
     setBusy(false);
     return snapshot;
   } catch (error) {
     if (generation !== reconcileGeneration) return null;
+    setWorkFeatureAvailable(false);
     if (lastFeatureState) syncVisibleToggles(lastFeatureState);
     showMessage('状态刷新暂时延迟，已保留当前标签页功能配置 / State refresh delayed; keeping this tab state.', 'bad');
     setBusy(false);
@@ -200,6 +210,10 @@ window.addEventListener('gptlock-account-changed', scheduleReconcile);
 window.addEventListener('gptlock-account-refresh', scheduleReconcile);
 window.addEventListener('focus', scheduleReconcile);
 window.addEventListener('pageshow', scheduleReconcile);
+
+chrome.storage.onChanged?.addListener?.((changes, area) => {
+  if (area === 'sync' && changes.settings) scheduleReconcile();
+});
 
 chrome.tabs.onActivated?.addListener?.(() => scheduleReconcile());
 chrome.tabs.onUpdated?.addListener?.((tabId, changeInfo) => {
