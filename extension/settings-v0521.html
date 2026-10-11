@@ -21,10 +21,10 @@
 
     <section class="card" aria-labelledby="globalHeading">
       <h2 id="globalHeading">功能开关 <span>Feature gates</span></h2>
-      <p class="help">GPTWork 总开关控制整个扩展运行；Work 模式和模型锁定按 ChatGPT 标签页隔离。即使两个 ChatGPT 标签页位于同一个 Chrome 窗口，它们也各自保持独立状态。</p>
+      <p class="help">GPTWork 总开关控制整个扩展运行；请求锁定按 ChatGPT 标签页隔离。同一 Chrome 窗口内的不同 ChatGPT 标签页各自保持独立状态。</p>
       <label class="check-row wide" data-gptwork-settings-master="true" title="GPTWork 总开关 / GPTWork master switch">
         <input id="enabled" data-gptwork-master-toggle="true" type="checkbox" aria-label="GPTWork 总开关">
-        <span><strong>GPTWork 总开关</strong><small>关闭后立即停止 GPTWork；重新开启时会保留各 ChatGPT 标签页各自的 Work/模型锁定状态。</small></span>
+        <span><strong>GPTWork 总开关</strong><small>关闭后立即停止 GPTWork；重新开启时会保留各 ChatGPT 标签页的模型锁定状态。</small></span>
       </label>
       
       <label class="check-row wide" data-work-feature hidden>
@@ -117,7 +117,7 @@
 
     <footer>
       <p id="formMessage" role="status" aria-live="polite"></p>
-      <p class="permission-note">GPTWork 总开关为全局开关；Work 模式与请求锁定执行状态按 ChatGPT 标签页隔离。模型/推理配置来自自动识别目录并同步。</p>
+      <p class="permission-note">GPTWork 总开关为全局开关；请求锁定执行状态按 ChatGPT 标签页隔离。模型/推理配置来自自动识别目录并同步。</p>
     </footer>
   </main>
   <script src="settings-shell.js"></script>
