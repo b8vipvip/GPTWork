@@ -37,7 +37,7 @@ test('account center exposes canonical check-in, share and upgrade controls', ()
   assert.match(accountRuntime, /\/site\/api\/account\/checkin/);
   assert.match(accountRuntime, /\/site\/api\/account\/invite\/redeem/);
   assert.match(accountRuntime, /renderUpgradePlans/);
-  assert.match(extensionAccount, /<section class="card" id="membershipPlansSection" hidden aria-hidden="true">\s*<div class="section-title"><div><h2>旧版升级兼容<\/h2>/);
+  assert.match(extensionAccount, /<section class="card" id="membershipPlansSection" data-entitlement-limit hidden aria-hidden="true">\s*<div class="section-title"><div><h2>旧版升级兼容<\/h2>/);
   assert.doesNotMatch(extensionAccount, />会员方案</);
 });
 
