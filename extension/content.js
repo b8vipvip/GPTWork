@@ -1744,16 +1744,18 @@ document.addEventListener('pointerdown', (event) => {
           }, 3500, 100)
         : await waitUntil(() => !visible(candidate) || !visibleIntelligencePickerContent(), 1800, 100);
       const observation = collectObservation();
-      // A reasoning-only Composer label such as "High" does not identify the
-      // selected model. The page evidence helper historically inferred Sol from
-      // this generic label, even after the exact GPT-6 row was clicked. Let the
-      // *native request and response* decide that uncertain selection; do not
-      // promote the inferred Composer label to a competing model authority.
-      const inferredOnly = observation.modelEvidenceSource === 'open-picker-default-sol'
-        || observation.modelEvidenceSource === 'composer-redesign-default-sol';
+      // A reasoning-only Composer label such as "High" is not model proof.
+      // Once an exact, owned Picker A row received a trusted click, permit a
+      // provisional transition when DOM model evidence is missing/ambiguous.
+      // The real outgoing request and served backend response are mandatory
+      // before discovery may mark this selection verified.
+      const unknownPageModel = !observation.model
+        || observation.modelEvidenceSource === 'none'
+        || observation.modelEvidenceSource === 'ambiguous-dom';
       const networkDeferred = !confirmed
         && modern.pickerMode === 'A'
-        && (inferredOnly || (observation.model === desired && desired));
+        && Boolean(desired)
+        && (unknownPageModel || observation.model === desired);
       pointerTrace(
         confirmed
           ? 'verification_model_selection_confirmed'
