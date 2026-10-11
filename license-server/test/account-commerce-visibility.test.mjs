@@ -45,7 +45,7 @@ test('website upgrade is canonical while optional order history stays server-con
   assert.match(websiteAccount, /id="siteUpgrade"/);
   assert.match(websiteAccount, /id="siteUpgradeDialog"/);
   assert.doesNotMatch(websiteAccount, /id="membershipPlansSection"/);
-  assert.match(websiteAccount, /id="recentOrdersSection" hidden aria-hidden="true"/);
+  assert.match(websiteAccount, /id="recentOrdersSection" data-entitlement-limit hidden aria-hidden="true"/);
   assert.match(websiteAccount, /account-commerce\.js/);
   assert.doesNotMatch(websiteAccount, /account-visibility\.js/);
   assert.match(websiteRuntime, /account-recent-orders/);
@@ -53,7 +53,7 @@ test('website upgrade is canonical while optional order history stays server-con
   assert.match(websiteRuntime, /pages\?\.account\?\.modules/);
 
   assert.match(extensionAccount, /id="membershipPlansSection" data-entitlement-limit hidden aria-hidden="true"/);
-  assert.match(extensionAccount, /id="recentOrdersSection" hidden aria-hidden="true"/);
+  assert.match(extensionAccount, /id="recentOrdersSection" data-entitlement-limit hidden aria-hidden="true"/);
   assert.match(extensionAccount, /account-visibility\.js/);
   assert.match(extensionVisibility, /account-membership-plans/);
   assert.match(extensionVisibility, /account-recent-orders/);
