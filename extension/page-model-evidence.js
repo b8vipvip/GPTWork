@@ -220,7 +220,14 @@
         const values = evidenceValues(element);
         const testId = element.getAttribute?.('data-testid') || '';
         const testIdModel = /^model-switcher-(gpt-[a-z0-9._:-]+)$/i.exec(testId)?.[1] || '';
-        const model = [testIdModel, ...values].map(modelFromText).find(Boolean) || null;
+        // Live Picker A rows may append retirement copy beneath a known
+        // family label (e.g. "GPT-5.5 Leaving on October 14").  Parse that
+        // ONLY inside the composer-owned official menu, never from arbitrary
+        // page help text or as a new, invented model family.
+        const rowLabel = labelOf(element);
+        const lifecycle55 = /^gpt[- ]?5\.5\s+leaving\s+on\s+[a-z0-9 ,/-]+$/i.test(rowLabel)
+          ? 'gpt-5.5' : null;
+        const model = [testIdModel, ...values].map(modelFromText).find(Boolean) || lifecycle55;
         const checked = element.getAttribute?.('aria-checked') === 'true'
           || element.getAttribute?.('aria-selected') === 'true'
           || element.getAttribute?.('data-state') === 'checked'
