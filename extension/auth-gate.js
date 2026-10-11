@@ -148,7 +148,7 @@ function renderAccount(account) {
     if (el.accountLogout) el.accountLogout.hidden = true;
     if (el.accountUpgrade) el.accountUpgrade.hidden = true;
     window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
-      detail: { authenticated: false, active: false },
+      detail: { authenticated: false, active: false, limitsEnabled: false },
     }));
     return;
   }
