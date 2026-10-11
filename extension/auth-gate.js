@@ -130,6 +130,12 @@ async function finishLogin(replaceDeviceRecordIds = []) {
 
 function renderAccount(account) {
   const authenticated = Boolean(account?.authenticated);
+  const limitsEnabled = account?.entitlement?.limitsEnabled !== false;
+  // Server-owned entitlement gate controls every client entitlement surface.
+  // Keep these rows hidden until a concrete account snapshot is available.
+  for (const node of document.querySelectorAll('[data-entitlement-limit]')) {
+    node.hidden = !authenticated || !limitsEnabled;
+  }
   accountAuthenticated = authenticated;
   showAppScreen();
 
@@ -142,7 +148,7 @@ function renderAccount(account) {
     if (el.accountLogout) el.accountLogout.hidden = true;
     if (el.accountUpgrade) el.accountUpgrade.hidden = true;
     window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
-      detail: { authenticated: false, active: false },
+      detail: { authenticated: false, active: false, limitsEnabled: false },
     }));
     return;
   }
@@ -169,13 +175,14 @@ function renderAccount(account) {
   }
   if (el.accountCenter) el.accountCenter.textContent = '账户中心';
   if (el.accountLogout) el.accountLogout.hidden = false;
-  if (el.accountUpgrade) el.accountUpgrade.hidden = false;
+  if (el.accountUpgrade) el.accountUpgrade.hidden = !limitsEnabled;
   if (el.enabled) {
-    if (!entitlement.active) el.enabled.title = '当前使用时长已到期，请签到、分享或升级用户等级';
+    if (!limitsEnabled) el.enabled.title = 'GPTWork 功能可用';
+    else if (!entitlement.active) el.enabled.title = '当前使用时长已到期，请签到、分享或升级用户等级';
     else el.enabled.title = `GPTWork 功能可用；当前等级最多 ${limits.windows ?? 1} 个同时窗口`;
   }
   window.dispatchEvent(new CustomEvent('gptlock-entitlement-state', {
-    detail: { authenticated, active: Boolean(entitlement.active) },
+    detail: { authenticated, active: Boolean(entitlement.active), limitsEnabled },
   }));
 }
 

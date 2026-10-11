@@ -178,6 +178,65 @@ test('account system verifies email, enforces user levels and rewards, and prote
     assert.equal(instantLogin.data.account.entitlement.source, 'level');
     assert.equal(instantLogin.data.account.level.code, 'normal');
 
+    // Global entitlement limits are enabled by default. Disabling them removes
+    // expiry, device-binding and concurrent-window quotas for authenticated
+    // accounts, without disabling email/account/session security.
+    const originalGate = await jsonRequest(`${base}/admin/api/account/settings`, { headers: { cookie } });
+    assert.equal(originalGate.data.settings.entitlementLimitsEnabled, true);
+    assert.equal(instantLogin.data.account.entitlement.limitsEnabled, true);
+    const invalidEntitlementGate = await jsonRequest(`${base}/admin/api/account/settings`, {
+      method: 'PUT', headers: { cookie }, body: { entitlementLimitsEnabled: 'false' },
+    });
+    assert.equal(invalidEntitlementGate.response.status, 400);
+    assert.equal(invalidEntitlementGate.data.error.code, 'INVALID_ENTITLEMENT_LIMITS_GATE');
+    const gateOff = await jsonRequest(`${base}/admin/api/account/settings`, {
+      method: 'PUT', headers: { cookie }, body: { entitlementLimitsEnabled: false },
+    });
+    assert.equal(gateOff.response.status, 200);
+    assert.equal(gateOff.data.settings.entitlementLimitsEnabled, false);
+    const publicGateOff = await jsonRequest(`${base}/api/v1/account/config`, { headers: { origin: ORIGIN } });
+    assert.equal(publicGateOff.data.entitlementLimitsEnabled, false);
+    const expireInstant = await jsonRequest(`${base}/admin/api/account/users/${instantLogin.data.account.user.id}`, {
+      method: 'PATCH', headers: { cookie }, body: { entitlementExpiresAt: null },
+    });
+    assert.equal(expireInstant.response.status, 200);
+    assert.equal(expireInstant.data.user.entitlement.active, true);
+    assert.equal(expireInstant.data.user.entitlement.limitsEnabled, false);
+    const unlimitedLogin = await jsonRequest(`${base}/api/v1/auth/login`, {
+      method: 'POST', headers: { origin: ORIGIN, 'x-forwarded-for': '203.0.113.21' },
+      body: extensionBody({
+        email: instantEmail, password: initialPassword,
+        deviceId: 'unlimited-device-12345678', browserInstanceId: 'unlimited-browser-12345678',
+      }),
+    });
+    assert.equal(unlimitedLogin.response.status, 200);
+    assert.equal(unlimitedLogin.data.account.entitlement.active, true);
+    const unrestrictedHeartbeat = await jsonRequest(`${base}/api/v1/account/heartbeat`, {
+      method: 'POST', headers: { origin: ORIGIN, authorization: `Bearer ${unlimitedLogin.data.sessionToken}` },
+      body: extensionBody({ windowKeys: ['chrome:12345', 'chrome:12346', 'chrome:12347'] }),
+    });
+    assert.equal(unrestrictedHeartbeat.response.status, 200);
+    assert.equal(unrestrictedHeartbeat.data.authorized, true);
+    assert.deepEqual(unrestrictedHeartbeat.data.allowedWindowKeys, ['chrome:12345', 'chrome:12346', 'chrome:12347']);
+    assert.deepEqual(unrestrictedHeartbeat.data.deniedWindowKeys, []);
+    const gateOn = await jsonRequest(`${base}/admin/api/account/settings`, {
+      method: 'PUT', headers: { cookie }, body: { entitlementLimitsEnabled: true },
+    });
+    assert.equal(gateOn.response.status, 200);
+    assert.equal(gateOn.data.settings.entitlementLimitsEnabled, true);
+    const expiredAgain = await jsonRequest(`${base}/api/v1/account/me`, {
+      headers: { origin: ORIGIN, authorization: `Bearer ${unlimitedLogin.data.sessionToken}` },
+    });
+    assert.equal(expiredAgain.response.status, 200);
+    assert.equal(expiredAgain.data.account.entitlement.active, false);
+    assert.equal(expiredAgain.data.account.entitlement.limitsEnabled, true);
+    const restoreExpiry = await jsonRequest(`${base}/admin/api/account/users/${instantLogin.data.account.user.id}`, {
+      method: 'PATCH', headers: { cookie },
+      body: { entitlementExpiresAt: new Date(Date.now() + 7 * 86400000).toISOString() },
+    });
+    assert.equal(restoreExpiry.response.status, 200);
+    assert.equal(restoreExpiry.data.user.entitlement.active, true);
+
     const enableVerification = await jsonRequest(`${base}/admin/api/account/settings`, {
       method: 'PUT', headers: { cookie }, body: { emailVerificationRequired: true },
     });

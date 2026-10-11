@@ -94,6 +94,14 @@ function renderSecurity() {
 
 function renderAccount() {
   const authenticated = Boolean(account?.authenticated);
+  const limitsEnabled = account?.entitlement?.limitsEnabled !== false;
+  document.body.dataset.entitlementLimits = authenticated && !limitsEnabled ? 'off' : 'on';
+  for (const node of document.querySelectorAll('[data-entitlement-limit]')) {
+    if (node.tagName !== 'DIALOG' && !['membershipPlansSection', 'recentOrdersSection'].includes(node.id)) {
+      node.hidden = !authenticated || !limitsEnabled;
+    }
+  }
+  if (!limitsEnabled && el.upgradeDialog?.open) el.upgradeDialog.close();
   el.notLogged.hidden = authenticated;
   el.app.hidden = !authenticated;
   if (!authenticated) return;
@@ -107,7 +115,7 @@ function renderAccount() {
   el.deviceUsage.textContent = `${entitlement.usage?.devices ?? 0} / ${entitlement.limits?.devices ?? 0}`;
   el.windowUsage.textContent = `${entitlement.usage?.windows ?? 0} / ${entitlement.limits?.windows ?? 0}`;
   el.levelExpiry.textContent = localDate(entitlement.expiresAt);
-  renderPlans();
+  if (limitsEnabled) renderPlans();
   renderSecurity();
 }
 
@@ -194,8 +202,8 @@ el.passwordForm.addEventListener('submit', (event) => {
     .catch((error) => message(el.passwordMessage, `修改失败：${error.message}`, 'bad'));
 });
 
-el.upgradeButton?.addEventListener('click', () => { renderPlans(); el.upgradeDialog?.showModal(); });
+el.upgradeButton?.addEventListener('click', () => { if (account?.entitlement?.limitsEnabled === false) return; renderPlans(); el.upgradeDialog?.showModal(); });
 el.upgradeClose?.addEventListener('click', () => el.upgradeDialog?.close());
 el.upgradeDialog?.addEventListener('click', (event) => { if (event.target === el.upgradeDialog) el.upgradeDialog.close(); });
 el.refresh.addEventListener('click', () => void load());
-void load().then(() => { if (location.hash === '#upgrade' && account?.authenticated) { renderPlans(); el.upgradeDialog?.showModal(); } });
+void load().then(() => { if (location.hash === '#upgrade' && account?.authenticated && account?.entitlement?.limitsEnabled !== false) { renderPlans(); el.upgradeDialog?.showModal(); } });

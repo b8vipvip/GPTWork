@@ -11,6 +11,7 @@ const el = {
   userPasswordConfirm: $('userPasswordConfirm'), userPasswordMessage: $('userPasswordMessage'), userPasswordClose: $('userPasswordClose'),
   userPasswordCancel: $('userPasswordCancel'), userPasswordSubmit: $('userPasswordSubmit'),
   planCards: $('planCards'), refreshOrders: $('refreshOrders'), ordersBody: $('ordersBody'),
+  entitlementLimitsEnabled: $('entitlementLimitsEnabled'), saveEntitlementLimitGate: $('saveEntitlementLimitGate'), entitlementLimitGateMessage: $('entitlementLimitGateMessage'),
   freeDays: $('freeDays'), freeDevices: $('freeDevices'), sessionDays: $('sessionDays'),
   emailVerificationRequired: $('emailVerificationRequired'),
   smtpHost: $('smtpHost'),
@@ -432,6 +433,22 @@ function renderSettings(data) {
   el.alipayEnabled.checked = Boolean(alipay.enabled); el.alipayUrl.value = alipay.payUrl || ''; el.alipayInstructions.value = alipay.instructions || '';
 }
 
+async function loadEntitlementLimitGate() {
+  if (!el.entitlementLimitsEnabled) return;
+  const data = await api('/admin/api/account/settings');
+  el.entitlementLimitsEnabled.checked = data.settings?.entitlementLimitsEnabled !== false;
+}
+
+async function saveEntitlementLimitGate() {
+  if (!el.entitlementLimitsEnabled) return;
+  const data = await api('/admin/api/account/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ entitlementLimitsEnabled: el.entitlementLimitsEnabled.checked }),
+  });
+  el.entitlementLimitsEnabled.checked = data.settings?.entitlementLimitsEnabled !== false;
+  setMessage(el.entitlementLimitGateMessage, '已保存。已登录客户端将在下一次账户心跳后同步；刷新可立即拉取。', 'good');
+}
+
 async function loadSettings() {
   renderSettings(await api('/admin/api/account/settings'));
 }
@@ -547,7 +564,7 @@ async function loadAll() {
     el.login.hidden = true; el.app.hidden = false; el.logout.hidden = false;
     if (page === 'overview') renderDashboard(dashboard);
     else if (page === 'users') { await loadPlans(); await loadUsers(); }
-    else if (page === 'plans') await loadPlans();
+    else if (page === 'plans') await Promise.all([loadPlans(), loadEntitlementLimitGate()]);
     else if (page === 'orders') await loadOrders();
     else if (page === 'settings') await loadSettings();
     else if (page === 'server-logs') await Promise.all([loadRuntimeLogs(), loadAudit()]);
@@ -587,6 +604,11 @@ el.userPasswordSubmit?.addEventListener('click', () => {
 });
 el.userPasswordConfirm?.addEventListener('keydown', (event) => { if (event.key === 'Enter') el.userPasswordSubmit.click(); });
 el.refreshOrders?.addEventListener('click', () => void loadOrders());
+el.saveEntitlementLimitGate?.addEventListener('click', () => {
+  el.saveEntitlementLimitGate.disabled = true;
+  void saveEntitlementLimitGate().catch(error => setMessage(el.entitlementLimitGateMessage, error.message, 'bad'))
+    .finally(() => { el.saveEntitlementLimitGate.disabled = false; });
+});
 el.saveSettings?.addEventListener('click', () => {
   el.saveSettings.disabled = true;
   void saveSettings().catch((error) => setMessage(el.settingsMessage, error.message, 'bad')).finally(() => { el.saveSettings.disabled = false; });

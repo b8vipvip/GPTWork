@@ -2,6 +2,13 @@ const API_BASE = 'https://gptlock.mv3.cn';
 const SESSION_KEY = 'gptlockAccountSessionToken';
 const checkin = document.getElementById('accountCheckin');
 const share = document.getElementById('accountShare');
+let entitlementLimitsEnabled = false;
+window.addEventListener('gptlock-entitlement-state', (event) => {
+  entitlementLimitsEnabled = event.detail?.authenticated === true && event.detail?.limitsEnabled === true;
+  if (checkin) checkin.hidden = !entitlementLimitsEnabled;
+  if (share) share.hidden = !entitlementLimitsEnabled;
+  if (entitlementLimitsEnabled) void refresh();
+});
 
 async function token() {
   const stored = await chrome.storage.local.get(SESSION_KEY);
@@ -27,9 +34,11 @@ function apply(rewards) {
   if (share) share.title = '复制分享链接；成功分享并带来 1 个已验证账户后增加 7 天使用时长';
 }
 async function refresh() {
+  if (!entitlementLimitsEnabled) return;
   try { apply((await request('/api/v1/account/rewards')).rewards); } catch {}
 }
 checkin?.addEventListener('click', async () => {
+  if (!entitlementLimitsEnabled) return;
   checkin.disabled = true;
   try {
     const data = await request('/api/v1/account/checkin', { method: 'POST', body: '{}' });
@@ -42,6 +51,7 @@ checkin?.addEventListener('click', async () => {
   }
 });
 share?.addEventListener('click', async () => {
+  if (!entitlementLimitsEnabled) return;
   const original = share.firstChild?.textContent || '分享';
   try {
     const rewards = (await request('/api/v1/account/rewards')).rewards;
