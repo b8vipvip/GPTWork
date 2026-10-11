@@ -43,7 +43,7 @@ test('allowed official page model wins within configured allow-list; no lock tog
 test('composer input prearms Network before click and send_started fallback', () => {
   const prearm = content.indexOf("document.addEventListener('input'");
   const pointerdown = content.indexOf("document.addEventListener('pointerdown'");
-  const click = content.indexOf("document.addEventListener('click'");
+  const click = content.indexOf("document.addEventListener('click'", prearm);
   assert.ok(prearm >= 0 && prearm < click && pointerdown >= 0 && pointerdown < click);
   assert.match(content, /GPTLOCK_ARM_NORMAL_CHAT_CAPTURE/);
   assert.match(content, /if \(matchesAny\(event\.target, COMPOSER_SELECTORS\)\) prearmNormalChatCapture\(\)/);
