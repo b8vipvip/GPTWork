@@ -345,6 +345,10 @@ export class ChatGptNetworkMonitor {
     return this.responseCaptureTabs.size;
   }
 
+  hasResponseCapture(tabId) {
+    return this.responseCaptureTabs.has(tabId);
+  }
+
   diagnosticsSnapshot({ reset = false } = {}) {
     const now = Date.now();
     const elapsedMs = Math.max(1, now - Number(this.diagnosticCounters.startedAt || now));
