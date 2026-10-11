@@ -56,6 +56,30 @@ test('composer input prearms Network before click and send_started fallback', ()
   assert.match(monitor, /hasResponseCapture\(tabId\)\s*\{\s*return this\.responseCaptureTabs\.has\(tabId\)/);
 });
 
+test('CDP postDataEntries recover the actual UTF-8 request body safely', () => {
+  const start = monitor.indexOf('  postDataEntriesText(request) {');
+  const end = monitor.indexOf('\n  async pausedPostData(tabId, params) {', start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({
+    decodeBase64Chunks(chunks) {
+      return Buffer.concat(chunks.map(value => Buffer.from(value, 'base64'))).toString('utf8');
+    },
+  });
+  vm.runInContext('class Reader {\n' + monitor.slice(start, end) + '\n}\nglobalThis.reader = new Reader();', context);
+  const request = JSON.stringify({ model: 'gpt-6', messages: ['测试 GPT-6'] });
+  const bytes = Buffer.from(request, 'utf8');
+  const midpoint = 22;
+  const entries = [
+    { bytes: bytes.subarray(0, midpoint).toString('base64') },
+    { bytes: bytes.subarray(midpoint).toString('base64') },
+  ];
+  assert.equal(context.reader.postDataEntriesText({ postDataEntries: entries }), request);
+  assert.equal(context.reader.postDataEntriesText({ postDataEntries: [{ bytes: 'YQ==' }, {}] }), null);
+  assert.equal(context.reader.postDataEntriesText({ postDataEntries: [{ bytes: 'YQ=='.repeat(800000) }] }), null);
+  assert.match(monitor, /const entries = this\.postDataEntriesText\(params\.request\)/);
+  assert.match(monitor, /const entries = this\.postDataEntriesText\(request\)/);
+});
+
 function catalogSnapshot(state, policy = { lockedModels: ['gpt-6'] }) {
   const start = catalog.indexOf('  function modelSnapshot(state) {');
   const end = catalog.indexOf('\n  function rememberModels(candidates) {', start);
