@@ -258,9 +258,16 @@ function render(state) {
         : observedResponse
           ? `${valuePair(observedResponse.model, observedResponse.reasoning)} · 响应元数据已观测（未验证）`
           : valuePair(null, null);
-  elements.responseState.textContent = tab?.evidenceIssue && !autoEvidenceConfirmed
-    ? `${responseValue} · ${tab.evidenceIssue}`
+  const previousSelectionResponse = Number.isInteger(tab?.selectionRevision)
+    && Number.isInteger(tab?.lastRequest?.selectionRevision)
+    && tab.selectionRevision !== tab.lastRequest.selectionRevision;
+  const attributedResponseValue = previousSelectionResponse
+    && (tab?.lastVerification?.model || observedResponse)
+    ? `${responseValue} · 上一轮响应（页面已切换）`
     : responseValue;
+  elements.responseState.textContent = tab?.evidenceIssue && !autoEvidenceConfirmed
+    ? `${attributedResponseValue} · ${tab.evidenceIssue}`
+    : attributedResponseValue;
   const nativeErrorCode = native.errorCode || classifyNativeError(native.lastError);
   elements.installHelp.hidden = Boolean(native.connected);
   if (!native.connected) {
@@ -324,6 +331,7 @@ function render(state) {
     conversation_reasoning_not_exposed: '会话详情确认了模型，但没有暴露推理强度元数据。',
     auto_verify_response_timeout: '自动验证等待响应确认超时。',
     page_selection_missing: '页面 DOM 当前未识别出完整模型/推理选择；该项只作辅助，不作为后端模型证明。',
+    previous_request_mismatch_not_current_selection: '上一轮响应与其请求锁定策略存在差异，但页面已经切换模型；该旧响应不阻止新一轮发送。',
   };
   const rewrite = tab?.lastRewrite;
   const rewriteDetail = rewrite
