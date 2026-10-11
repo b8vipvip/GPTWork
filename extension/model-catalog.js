@@ -201,8 +201,12 @@
       ? normalizeConcreteModelId(rewrite.modelAfter)
       : null;
     const requestModel = stateRequestModel || forwardedRequestModel || normalizeModelId(selected?.request?.id);
-    const requestHistorical = Boolean(requestModel && !stateRequestModel && !forwardedRequestModel && selected?.request?.historical);
-    const requestCurrent = Boolean(stateRequestModel || forwardedRequestModel);
+    const previousSelectionRequest = Number.isInteger(state?.selectionRevision)
+      && Number.isInteger(state?.lastRequest?.selectionRevision)
+      && state.selectionRevision !== state.lastRequest.selectionRevision;
+    const requestHistorical = Boolean(requestModel && (previousSelectionRequest
+      || (!stateRequestModel && !forwardedRequestModel && selected?.request?.historical)));
+    const requestCurrent = Boolean(!previousSelectionRequest && (stateRequestModel || forwardedRequestModel));
 
     const verification = state?.lastVerification;
     const responseCurrent = responseAppliesToLatestRequest(state);
@@ -227,7 +231,8 @@
       ? normalizeConcreteModelId(networkResponse.model)
       : null;
     const responseModel = observedResponseModel || normalizeModelId(selected?.response?.id) || fallbackResponseModel;
-    const responseHistorical = Boolean(!observedResponseModel && responseModel && selected?.response?.historical);
+    const responseHistorical = Boolean(responseModel && (previousSelectionRequest
+      || (!observedResponseModel && selected?.response?.historical)));
     const fallbackResponseConfirmed = Boolean(
       fallbackResponseModel
       && verification?.evidenceSource === 'network_response_metadata'
@@ -237,10 +242,10 @@
       fallbackResponseModel
       && (verification?.reasons?.includes?.('model_not_allowed') || verification?.verdict === 'mismatch')
     );
-    const responseConfirmed = observedResponseModel ? false : selected?.response?.id
+    const responseConfirmed = previousSelectionRequest ? false : observedResponseModel ? false : selected?.response?.id
       ? Boolean(selected.response.confirmed)
       : fallbackResponseConfirmed;
-    const responseMismatch = observedResponseModel ? false : selected?.response?.id
+    const responseMismatch = previousSelectionRequest ? false : observedResponseModel ? false : selected?.response?.id
       ? Boolean(selected.response.mismatch)
       : fallbackResponseMismatch;
 
@@ -253,7 +258,7 @@
       request: {
         id: requestModel,
         label: requestModel
-          ? `${modelLabel(requestModel)}${requestHistorical ? ' · 最近请求' : ''}`
+          ? `${modelLabel(requestModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 最近请求' : ''}`
           : unlocked ? '未锁定 · 未捕获请求模型' : '等待请求',
         status: requestHistorical ? 'request-history' : requestModel ? 'request' : 'waiting',
         historical: requestHistorical,
@@ -261,9 +266,9 @@
       response: {
         id: responseModel,
         label: responseModel
-          ? `${modelLabel(responseModel)}${observedResponseModel ? ' · 响应元数据' : ''}`
+          ? `${modelLabel(responseModel)}${previousSelectionRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 响应元数据' : ''}`
           : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
-        status: observedResponseModel ? 'response' : responseMismatch
+        status: previousSelectionRequest ? 'response-history' : observedResponseModel ? 'response' : responseMismatch
           ? 'mismatch'
           : responseHistorical
             ? 'confirmed-history'
