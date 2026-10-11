@@ -34,6 +34,7 @@ function apply(rewards) {
   if (share) share.title = '复制分享链接；成功分享并带来 1 个已验证账户后增加 7 天使用时长';
 }
 async function refresh() {
+  if (!entitlementLimitsEnabled) return;
   try { apply((await request('/api/v1/account/rewards')).rewards); } catch {}
 }
 checkin?.addEventListener('click', async () => {
