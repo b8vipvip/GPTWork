@@ -180,6 +180,8 @@
   function modelSnapshot(state) {
     const pageObservation = effectivePageObservation(state);
     const pageModel = normalizeModelId(pageObservation?.model);
+    const pageModelChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-checked';
+    const unlocked = Array.isArray(currentPolicy?.lockedModels) && currentPolicy.lockedModels.length === 0;
     const historyHelper = globalThis.__GPTLOCK_MODEL_STATUS_HISTORY__;
     const selected = historyHelper?.selectStatus?.({
       state,
@@ -216,20 +218,20 @@
     return {
       page: {
         id: pageModel,
-        label: pageModel ? modelLabel(pageModel) : '未识别',
+        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : ' · 页面观察'}` : '未确认',
         status: pageModel ? 'observed' : 'unknown',
       },
       request: {
         id: requestModel,
         label: requestModel
           ? `${modelLabel(requestModel)}${requestHistorical ? ' · 最近请求' : ''}`
-          : '等待请求',
+          : unlocked ? '未锁定 · 未捕获请求模型' : '等待请求',
         status: requestHistorical ? 'request-history' : requestModel ? 'request' : 'waiting',
         historical: requestHistorical,
       },
       response: {
         id: responseModel,
-        label: responseModel ? modelLabel(responseModel) : requestCurrent ? '等待当前响应' : '等待响应',
+        label: responseModel ? modelLabel(responseModel) : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
         status: responseMismatch
           ? 'mismatch'
           : responseHistorical
