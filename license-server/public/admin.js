@@ -604,6 +604,11 @@ el.userPasswordSubmit?.addEventListener('click', () => {
 });
 el.userPasswordConfirm?.addEventListener('keydown', (event) => { if (event.key === 'Enter') el.userPasswordSubmit.click(); });
 el.refreshOrders?.addEventListener('click', () => void loadOrders());
+el.saveEntitlementLimitGate?.addEventListener('click', () => {
+  el.saveEntitlementLimitGate.disabled = true;
+  void saveEntitlementLimitGate().catch(error => setMessage(el.entitlementLimitGateMessage, error.message, 'bad'))
+    .finally(() => { el.saveEntitlementLimitGate.disabled = false; });
+});
 el.saveSettings?.addEventListener('click', () => {
   el.saveSettings.disabled = true;
   void saveSettings().catch((error) => setMessage(el.settingsMessage, error.message, 'bad')).finally(() => { el.saveSettings.disabled = false; });
