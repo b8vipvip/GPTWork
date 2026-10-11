@@ -126,3 +126,29 @@ test('a checked Picker A row is scoped to the composer-owned aria-controls menu'
   assert.match(page, /const scopes = controlled && visible\(controlled\) \? \[controlled\] : \[\]/);
   assert.doesNotMatch(page, /\.\.\.document\.querySelectorAll\("\[role='menu'\]/);
 });
+
+test('a pending normal Chat turn hides prior request and response history until new evidence arrives', async () => {
+  await import('../model-status-history.js');
+  const history = globalThis.__GPTLOCK_MODEL_STATUS_HISTORY__;
+  const prior = {
+    schemaVersion: 1,
+    request: { model: 'gpt-5.5', capturedAt: t1 },
+    response: { model: 'gpt-5.5', capturedAt: t2, confirmed: true },
+  };
+  const pending = history.selectStatus({
+    state: { phase: 'waiting', lastRequest: null, lastVerification: null },
+    history: prior,
+    policy: { lockedModels: [] },
+    nowMs: Date.parse(t2) + 5000,
+  });
+  assert.equal(pending.request.id, null);
+  assert.equal(pending.response.id, null);
+  const idle = history.selectStatus({
+    state: { phase: 'unverified', lastRequest: null, lastVerification: null },
+    history: prior,
+    policy: { lockedModels: [] },
+    nowMs: Date.parse(t2) + 5000,
+  });
+  assert.equal(idle.request.id, 'gpt-5.5');
+  assert.equal(idle.response.id, 'gpt-5.5');
+});
