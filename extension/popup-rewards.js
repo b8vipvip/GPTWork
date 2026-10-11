@@ -51,6 +51,7 @@ checkin?.addEventListener('click', async () => {
   }
 });
 share?.addEventListener('click', async () => {
+  if (!entitlementLimitsEnabled) return;
   const original = share.firstChild?.textContent || '分享';
   try {
     const rewards = (await request('/api/v1/account/rewards')).rewards;
