@@ -208,10 +208,10 @@
     if (!trigger || trigger.getAttribute?.('aria-expanded') !== 'true') return null;
     const controlledId = trigger.getAttribute?.('aria-controls') || '';
     const controlled = controlledId ? document.getElementById(controlledId) : null;
-    const scopes = [
-      controlled,
-      ...document.querySelectorAll("[role='menu'],[role='listbox'],[data-radix-menu-content]"),
-    ].filter((element, index, all) => element && visible(element) && all.indexOf(element) === index);
+    // The open composer trigger must own the inspected menu through its
+    // aria-controls relation.  Scanning unrelated visible portal menus could
+    // accidentally report another control's checked GPT row as Picker A.
+    const scopes = controlled && visible(controlled) ? [controlled] : [];
 
     for (const scope of scopes) {
       const rows = [...scope.querySelectorAll(
