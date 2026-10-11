@@ -21,6 +21,19 @@
       <p id="loginMessage" class="message"></p>
     </section>
     <div id="app" hidden>
+      <section class="card" aria-labelledby="entitlementGateHeading">
+        <div class="section-title">
+          <div>
+            <h2 id="entitlementGateHeading">权益限制总开关 <span>Entitlement limits</span></h2>
+            <p class="muted">关闭后，所有已登录且状态正常的用户不再受权益到期时间、用户等级、设备数量及并发窗口上限约束；客户端隐藏等级、权益、升级、签到与分享奖励入口。登录验证、账号状态及会话安全仍然生效。</p>
+          </div>
+          <button id="saveEntitlementLimitGate" type="button" class="primary">保存权益限制设置</button>
+        </div>
+        <label class="check"><input id="entitlementLimitsEnabled" type="checkbox" checked>
+          <span>启用权益限制（默认开启；关闭即对已认证用户解除使用额度限制）</span>
+        </label>
+        <p id="entitlementLimitGateMessage" class="message" role="status"></p>
+      </section>
       <section id="plans" class="card">
         <div class="section-title"><div><h2>用户等级</h2><p class="muted">新用户注册后默认普通用户。这里可设置新用户初始有效天数，以及普通、深度、重度用户的设备/窗口权益和深度、重度升级价格。</p></div></div>
         <div id="planCards" class="plan-grid"></div>
