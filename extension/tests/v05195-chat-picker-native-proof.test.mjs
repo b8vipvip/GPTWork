@@ -15,8 +15,9 @@ test('inferred reasoning-only Sol is not an authoritative native selection veto'
   const to = content.indexOf('async function chooseExact(', from);
   assert.ok(from >= 0 && to > from);
   const selection = content.slice(from, to);
-  assert.match(selection, /const inferredOnly = observation\.modelEvidenceSource === 'open-picker-default-sol'/);
-  assert.match(selection, /observation\.modelEvidenceSource === 'composer-redesign-default-sol'/);
+  assert.match(selection, /const unknownPageModel = !observation\.model/);
+  assert.match(selection, /observation\.modelEvidenceSource === 'ambiguous-dom'/);
+  assert.doesNotMatch(selection, /const inferredOnly/);
   assert.match(selection, /const networkDeferred = !confirmed/);
   assert.match(selection, /return \{ attempted: true, observation, uiConfirmed: confirmed, networkDeferred: Boolean\(networkDeferred\) \}/);
   assert.doesNotMatch(selection, /networkDeferred = !confirmed[\s\S]{0,120}desired === 'gpt-5\.5' \|\| desired === 'gpt-5\.6-sol'/);
