@@ -152,3 +152,44 @@ test('a pending normal Chat turn hides prior request and response history until 
   assert.equal(idle.request.id, 'gpt-5.5');
   assert.equal(idle.response.id, 'gpt-5.5');
 });
+
+test('real Picker A GPT-5.5 row with retirement subtitle is read as the checked model', () => {
+  function node(attrs = {}, text = '') {
+    return {
+      innerText: text, textContent: text,
+      getAttribute(name) { return attrs[name] ?? null; },
+      getBoundingClientRect() { return { width: 120, height: 30 }; },
+      querySelectorAll() { return []; },
+    };
+  }
+  const trigger = node({
+    'aria-label': '选择模型', 'aria-haspopup': 'menu',
+    'aria-expanded': 'true', 'aria-controls': 'owned-picker',
+  }, 'High');
+  const rows = [
+    node({ 'aria-checked': 'false' }, 'GPT-6'),
+    node({ 'aria-checked': 'false' }, 'GPT-5.6 Sol'),
+    node({ 'data-state': 'checked' }, 'GPT-5.5\\nLeaving on October 14'),
+  ];
+  const popup = node();
+  popup.querySelectorAll = selector => selector.includes("menuitemradio") ? rows : [];
+  const form = node();
+  form.querySelector = selector => selector === '#prompt-textarea' ? node() : null;
+  form.querySelectorAll = selector =>
+    selector.includes("aria-haspopup") || selector.includes("button,[role='button']")
+      ? [trigger] : [];
+  const document = {
+    querySelectorAll(selector) {
+      if (selector === "form[data-type='unified-composer']" || selector === 'form') return [form];
+      return [];
+    },
+    getElementById(id) { return id === 'owned-picker' ? popup : null; },
+  };
+  const runtime = vm.createContext({
+    document, getComputedStyle() { return { display: 'block', visibility: 'visible' }; },
+  });
+  vm.runInContext(page, runtime);
+  const observed = runtime.__GPTLOCK_PAGE_MODEL_EVIDENCE__.collect();
+  assert.equal(observed.model, 'gpt-5.5');
+  assert.equal(observed.modelSource, 'official-picker-a-checked');
+});
