@@ -564,7 +564,7 @@ async function loadAll() {
     el.login.hidden = true; el.app.hidden = false; el.logout.hidden = false;
     if (page === 'overview') renderDashboard(dashboard);
     else if (page === 'users') { await loadPlans(); await loadUsers(); }
-    else if (page === 'plans') await loadPlans();
+    else if (page === 'plans') await Promise.all([loadPlans(), loadEntitlementLimitGate()]);
     else if (page === 'orders') await loadOrders();
     else if (page === 'settings') await loadSettings();
     else if (page === 'server-logs') await Promise.all([loadRuntimeLogs(), loadAudit()]);
