@@ -396,7 +396,7 @@ test('v0.5.108 shares verified model metadata without treating it as account acc
   assert.match(background, /shared_model_catalog_published/);
   assert.match(background, /requestConfirmed === true/);
   assert.match(verificationPolicy, /pickerModes/);
-  assert.match(catalogOptions, /Server shared catalog · 4\/4 verified/);
+  assert.match(catalogOptions, /管理员已启用 \/ Admin enabled/);
 });
 
 test('v0.5.176 protocol normalizer preserves GPT-5.5 instant identity separately', () => {

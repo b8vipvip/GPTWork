@@ -24,6 +24,7 @@ function requestPolicy({ pageModel = null, enabled = true, locks = ['gpt-6'], st
     normalizeModels(value) { return Array.isArray(value) ? value.filter(Boolean) : []; },
     normalizePolicy(value) { return value; },
     modelMatchesLock,
+    adminAllowedModels: (models) => models,
   });
   vm.runInContext(feature.slice(start, end).replace('export function', 'function')
     + '\nglobalThis.choose = requestPolicyForTabSync;', context);

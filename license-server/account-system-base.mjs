@@ -563,16 +563,9 @@ export function createAccountSystem({
   function sharedModelCatalog({ includeDisabled = false, clientEligibleOnly = false } = {}) {
     const filters = [];
     if (!includeDisabled) filters.push('c.enabled=1');
-    if (clientEligibleOnly) {
-      filters.push(`c.discovered_count>0 AND EXISTS (
-        SELECT 1 FROM shared_model_account_seen eligible
-        WHERE eligible.model_id=c.model_id
-          AND eligible.request_confirmed=1
-          AND eligible.response_confirmed=1
-          AND eligible.chat_lock_request_confirmed=1
-          AND eligible.chat_lock_response_confirmed=1
-      )`);
-    }
+    // Administrative enablement alone determines whether the model is
+    // published as a lock choice; verification evidence remains diagnostic.
+    if (clientEligibleOnly) filters.push('c.enabled=1');
     const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     return db.prepare(`SELECT
         c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
@@ -609,9 +602,9 @@ export function createAccountSystem({
         chatLockRequestConfirmedAccountCount: Number(row.chat_lock_request_confirmed_account_count || 0),
         chatLockVerifiedAccountCount: Number(row.chat_lock_verified_account_count || 0),
         clientEligibleAccountCount: Number(row.client_eligible_account_count || 0),
-        clientEligible: Boolean(row.enabled)
-          && Number(row.discovered_count || 0) > 0
+        clientEligible: Number(row.discovered_count || 0) > 0
           && Number(row.client_eligible_account_count || 0) > 0,
+        lockSelectable: Boolean(row.enabled),
         firstSeenAt: row.first_seen_at,
         lastSeenAt: row.last_seen_at,
       }));

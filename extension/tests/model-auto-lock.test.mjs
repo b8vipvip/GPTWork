@@ -23,6 +23,6 @@ test('tab feature authority derives Work models from the shared discovery catalo
 test('Model lock and Work mode combine only inside the target tab effective policy', () => {
   assert.match(runtime, /feature\.workModeEnabled/);
   assert.match(runtime, /feature\.modelLockEnabled/);
-  assert.match(runtime, /lockedModels: active\.length/);
+  assert.match(runtime, /lockedModels: adminAllowedModels\(active\.length/);
   assert.match(runtime, /TAB_FEATURE_SESSION_KEY/);
 });

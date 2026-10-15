@@ -163,7 +163,7 @@
       text.append(small);
     }
     strong.textContent = String(item?.label || modelLabel(concrete)).slice(0, 120);
-    small.textContent = `${concrete} · 服务端共享模型目录 / Server shared catalog · 4/4 verified`;
+    small.textContent = `${concrete} · 管理员已启用 / Admin enabled${item?.clientEligible?' · 4/4 verified':' · 验证证据未齐'}`;
   }
 
   function enforceSharedOnlyChoices(sharedIds) {
@@ -203,7 +203,7 @@
     ]);
     const shared = (Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [])
       .map((item) => ({ ...item, model: normalizeConcreteModelId(item?.model) }))
-      .filter((item) => item.model);
+      .filter((item) => item.model && item.enabled === true);
     const sharedIds = new Set(shared.map((item) => item.model));
 
     const discoveredRaw = Array.isArray(stored[STORAGE_KEY]) ? stored[STORAGE_KEY] : [];

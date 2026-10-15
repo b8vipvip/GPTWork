@@ -80,7 +80,10 @@ test('admin model management can edit, disable and delete uploaded models', () =
   assert.match(adminJs, /chatLockVerifiedAccountCount/);
   assert.match(adminJs, /method:'PUT'/);
   assert.match(adminJs, /method:'DELETE'/);
-  assert.match(adminJs, /data-field="enabled"/);
+  assert.match(adminJs, /data-action="toggle"/);
+  assert.match(adminJs, /aria-pressed/);
+  assert.match(adminJs, /JSON\.stringify\(\{model,enabled\}\)/);
+  assert.match(adminJs, /JSON\.stringify\(\{model,label,pickerMode\}\)/);
 });
 
 
@@ -101,4 +104,18 @@ test('v0.5.175 migration invalidates legacy request-only verification counts', (
   assert.match(accountSystem, /SET verified_count=\(/);
   assert.match(accountSystem, /s\.response_confirmed=1/);
   assert.match(accountSystem, /generation=generation\+1/);
+});
+
+test('admin enable flag is the only server choice exposure gate; verification is diagnostic', () => {
+  const listStart = accountSystem.indexOf('  function sharedModelCatalog({');
+  const listEnd = accountSystem.indexOf('\n  function sharedModelCatalogTrash()', listStart);
+  const list = accountSystem.slice(listStart, listEnd);
+  assert.match(list, /if \(clientEligibleOnly\) filters\.push\('c\.enabled=1'\)/);
+  assert.doesNotMatch(list, /if \(clientEligibleOnly\)[\s\S]*EXISTS \(/);
+  assert.match(list, /clientEligibleAccountCount/);
+  assert.match(list, /lockSelectable: Boolean\(row\.enabled\)/);
+  assert.match(adminJs, /button\.dataset\.action==='toggle'/);
+  assert.match(adminJs, /model,enabled/);
+  assert.match(adminJs, /method:'PUT'/);
+  assert.match(adminHtml, /“保存”仅保存名称和 Picker/);
 });

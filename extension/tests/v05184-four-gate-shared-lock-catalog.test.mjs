@@ -14,14 +14,12 @@ const [background, content, popup, catalogOptions, verificationPolicy, server] =
   read('../license-server/account-system-base.mjs'),
 ]);
 
-test('v0.5.184 server client catalog requires all four gates on the same account', () => {
+test('admin enabled models are exposed independently from four-stage diagnostic proof', () => {
   assert.match(server, /clientEligibleOnly = false/);
-  assert.match(server, /eligible\.request_confirmed=1/);
-  assert.match(server, /eligible\.response_confirmed=1/);
-  assert.match(server, /eligible\.chat_lock_request_confirmed=1/);
-  assert.match(server, /eligible\.chat_lock_response_confirmed=1/);
+  assert.match(server, /if \(clientEligibleOnly\) filters\.push\('c\.enabled=1'\)/);
   assert.match(server, /sharedModelCatalog\(\{ clientEligibleOnly: true \}\)/);
   assert.match(server, /clientEligibleAccountCount/);
+  assert.match(server, /lockSelectable: Boolean\(row\.enabled\)/);
 });
 
 test('v0.5.184 client sync prunes stale locks and runs after login plus once per runtime version', () => {
@@ -52,7 +50,7 @@ test('v0.5.184 lock model UI is sourced only from the synchronized shared catalo
   assert.match(refresh, /appendSharedChoice/);
   assert.match(refresh, /enforceSharedOnlyChoices/);
   assert.doesNotMatch(refresh, /appendChoice\(model/);
-  assert.match(catalogOptions, /Server shared catalog · 4\/4 verified/);
+  assert.match(catalogOptions, /管理员已启用 \/ Admin enabled/);
 });
 
 test('v0.5.184 Picker A and Picker B both get a distinct forced Chat-lock pass', () => {

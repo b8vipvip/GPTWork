@@ -53,6 +53,7 @@ function lockModelLabel(id, stored = null) {
 function popupModelIds(stored) {
   return [...new Set(
     (Array.isArray(stored?.gptworkSharedKnownModelsV1) ? stored.gptworkSharedKnownModelsV1 : [])
+      .filter((item) => item?.enabled === true)
       .map((item) => normalizeConcreteModelId(item?.model))
       .filter(Boolean),
   )];
