@@ -569,9 +569,9 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   if (result.changed) result.postData = JSON.stringify(parsed);
   result.reason = forceKnownModel
     ? (result.changed ? 'verification_model_forced' : 'verification_model_already_exact')
-    : configuration.preserveModel === true
+    : configuration.preserveModel === true && preserveModel
       ? 'verification_model_passthrough'
-      : pageSelectedKnown
+      : pageSelectedAllowed
         ? 'page_selected_known_model_locked'
         : result.changed ? 'rewritten' : 'already_locked';
   return result;
