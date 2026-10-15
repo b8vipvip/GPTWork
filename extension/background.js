@@ -390,21 +390,35 @@ function ensureTabState(tabId, url = '') {
     tabStates.set(tabId, state);
   } else if (url && state.contextKey !== contextKey(url)) {
     const nextContextKey = contextKey(url);
+    // The first ordinary Chat request may start on / and continue at /c/:id.
+    // Preserve that exact request/response epoch during the one-way new-chat
+    // handoff, just as an explicit discovery does. A different /c/:id still
+    // starts a fresh state, preventing evidence from crossing conversations.
+    const requestTime = Date.parse(state.lastRequest?.capturedAt || '');
+    const activeNewChatRequest = !state.contextKey.startsWith('conversation:')
+      && nextContextKey.startsWith('conversation:')
+      && Boolean(state.lastRequest?.requestId)
+      && Number.isFinite(requestTime)
+      && Date.now() - requestTime >= 0
+      && Date.now() - requestTime < 15 * 60 * 1000;
     const preserveVerificationState = Boolean(
       state.autoVerification?.running
         || verificationTransactionForTab(tabId)
-        || (state.autoVerification && !state.contextKey.startsWith('conversation:') && nextContextKey.startsWith('conversation:')),
+        || (state.autoVerification && !state.contextKey.startsWith('conversation:') && nextContextKey.startsWith('conversation:'))
+        || activeNewChatRequest,
     );
     if (preserveVerificationState) {
       const previousContextKey = state.contextKey;
       state.url = url;
       state.contextKey = nextContextKey;
-      logRuntime('info', 'discovery', 'auto_verify_context_migrated', {
-        tabId,
-        previousContextKey,
-        nextContextKey,
-        running: Boolean(state.autoVerification?.running),
-      });
+      logRuntime('info', activeNewChatRequest ? 'network' : 'discovery',
+        activeNewChatRequest ? 'normal_chat_request_context_migrated' : 'auto_verify_context_migrated', {
+          tabId,
+          previousContextKey,
+          nextContextKey,
+          requestId: activeNewChatRequest ? state.lastRequest.requestId : null,
+          running: Boolean(state.autoVerification?.running),
+        });
     } else {
       const monitor = state.monitor;
       state = createTabState(tabId, url);
@@ -1355,11 +1369,15 @@ async function configureTab(tab) {
     return state;
   }
   const enabled = effectiveSettingsForState(state).enabled;
-  // Navigation from / to /c/:id is part of a new-chat verification turn. Detaching
-  // CDP while ChatGPT creates that conversation loses the first formal request.
-  if (verificationTransactionForTab(tab.id)) await networkMonitor.attach(tab.id);
-  else if (!enabled || tab.status === 'loading') await networkMonitor.detach(tab.id);
-  else await networkMonitor.attach(tab.id);
+  // Do not detach an enabled tab while it navigates from / to /c/:id.
+  // detach() discards CDP request/stream buffers; a loading transition is
+  // not cancellation of the user's active Chat request. On a genuine browser
+  // navigation Chrome will detach the session itself, which is reported by
+  // the monitor and can be restored once the tab reaches complete.
+  if (!enabled) await networkMonitor.detach(tab.id);
+  else if (tab.status !== 'loading' || networkMonitor.isAttached(tab.id)) {
+    await networkMonitor.attach(tab.id);
+  }
   await broadcastTabState(tab.id);
   return state;
 }
