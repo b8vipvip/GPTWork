@@ -39,11 +39,21 @@ function render(data){
     <td><code>${esc(m.nativeRequestModel||'—')}</code><br><small>${esc(m.nativeResponseModel||'—')}</small></td>
     <td><code>${esc(m.chatTransportModel||'—')}</code><br><small>${esc(m.chatResponseModel||'—')}</small></td>
     <td>${Number(m.chatLockVerifiedCount||0)>0?'✅':'—'} (${Number(m.chatLockVerifiedCount||0)})</td>
+    <td class="verification-status-cell">
+      <select data-field="verificationStatusOverride" aria-label="${esc(m.model)} 验证状态">
+        <option value="auto" ${!m.verificationStatusOverride||m.verificationStatusOverride==='auto'?'selected':''}>自动判断</option>
+        <option value="verified" ${m.verificationStatusOverride==='verified'?'selected':''}>人工已验证</option>
+        <option value="pending" ${m.verificationStatusOverride==='pending'?'selected':''}>人工待验证</option>
+        <option value="failed" ${m.verificationStatusOverride==='failed'?'selected':''}>人工验证失败</option>
+      </select>
+      <button type="button" data-action="verification">更新状态</button>
+      <small>${m.verificationStatusSource==='manual'?'人工标记':'自动证据'} · ${({'verified':'已验证','pending':'待验证','failed':'验证失败'})[m.verificationStatus]||'待验证'}${m.verificationStatusSource==='manual'?'（不改变实测证据）':''}</small>
+    </td>
     <td><button type="button" data-action="toggle" aria-pressed="${m.enabled===true?'true':'false'}" ${m.enabled===true?'class="primary"':''}>${m.enabled===true?'停用':'启用'}</button> <small>${m.enabled===true?'前端可锁定':'前端不可锁定'}</small></td>
     <td>发现 ${Number(m.accountCount||0)} / 请求 ${Number(m.requestConfirmedAccountCount||0)} / 原生响应 ${Number(m.verifiedAccountCount||0)} / Chat锁定 ${Number(m.chatLockVerifiedAccountCount||0)}</td>
     <td>${Number(m.discoveredCount||0)}</td><td>${esc(fmt(m.lastSeenAt))}</td>
     <td><button data-action="save">保存</button> <button data-action="delete" class="danger">删除</button></td>
-  </tr>`).join('')||'<tr><td colspan="12" class="muted">活动模型目录为空，可以从客户端执行“发现模型”重新构建。</td></tr>';
+  </tr>`).join('')||'<tr><td colspan="13" class="muted">活动模型目录为空，可以从客户端执行“发现模型”重新构建。</td></tr>';
   el.trashBody.innerHTML=trash.map((m)=>`<tr data-model="${esc(m.model)}">
     <td><input data-select-trash type="checkbox" value="${esc(m.model)}" aria-label="选择回收站模型 ${esc(m.model)}"></td>
     <td><code>${esc(m.model)}</code></td><td>${esc(m.label||m.model)}</td><td>${esc(m.pickerMode||'—')}</td>
@@ -78,6 +88,6 @@ el.body.addEventListener('change',(e)=>{if(e.target.matches('input[data-select-m
 el.trashBody.addEventListener('change',(e)=>{if(e.target.matches('input[data-select-trash]'))syncSelection();});
 el.deleteSelected.addEventListener('click',async()=>{el.deleteSelected.disabled=true;el.message.textContent='';try{await deleteModels(selected(el.body,'input[data-select-model]:checked'));}catch(e){el.message.textContent=e.message;}finally{syncSelection();}});
 el.restoreSelected.addEventListener('click',async()=>{el.restoreSelected.disabled=true;el.message.textContent='';try{await restoreModels(selected(el.trashBody,'input[data-select-trash]:checked'));}catch(e){el.message.textContent=e.message;}finally{syncSelection();}});
-el.body.addEventListener('click',async(e)=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('tr[data-model]');if(!row)return;const model=row.dataset.model;button.disabled=true;el.message.textContent='';try{if(button.dataset.action==='delete')await deleteModels([model]);else if(button.dataset.action==='toggle'){const enabled=row.dataset.enabled!=='true';const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,enabled})});render(data);el.message.textContent=enabled?'已启用：模型进入前端可锁定列表。':'已停用：客户端同步后会移除该模型及其原有锁定选择。';}else{const label=row.querySelector('[data-field="label"]').value;const pickerMode=row.querySelector('[data-field="pickerMode"]').value||null;const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,label,pickerMode})});render(data);el.message.textContent='名称与 Picker 已保存，目录代次已更新。';}}catch(err){el.message.textContent=err.message;}finally{button.disabled=false;syncSelection();}});
+el.body.addEventListener('click',async(e)=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('tr[data-model]');if(!row)return;const model=row.dataset.model;button.disabled=true;el.message.textContent='';try{if(button.dataset.action==='delete')await deleteModels([model]);else if(button.dataset.action==='toggle'){const enabled=row.dataset.enabled!=='true';const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,enabled})});render(data);el.message.textContent=enabled?'已启用：模型进入前端可锁定列表。':'已停用：客户端同步后会移除该模型及其原有锁定选择。';}else if(button.dataset.action==='verification'){const verificationStatusOverride=row.querySelector('[data-field="verificationStatusOverride"]').value;if(verificationStatusOverride==='verified'&&!confirm('手动标记“已验证”只修改管理状态，不代表实际请求/原生响应/Chat 锁定验证成功。确认保存？'))return;const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,verificationStatusOverride})});render(data);el.message.textContent=verificationStatusOverride==='auto'?'已恢复根据真实证据自动判断验证状态。':'人工验证状态已保存；真实证据不变，前端是否可锁定仍由启用状态决定。';}else{const label=row.querySelector('[data-field="label"]').value;const pickerMode=row.querySelector('[data-field="pickerMode"]').value||null;const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,label,pickerMode})});render(data);el.message.textContent='名称与 Picker 已保存，目录代次已更新。';}}catch(err){el.message.textContent=err.message;}finally{button.disabled=false;syncSelection();}});
 el.trashBody.addEventListener('click',async(e)=>{const button=e.target.closest('button[data-action="restore"]');if(!button)return;const row=button.closest('tr[data-model]');if(!row)return;button.disabled=true;el.message.textContent='';try{await restoreModels([row.dataset.model]);}catch(err){el.message.textContent=err.message;}finally{button.disabled=false;syncSelection();}});
 void load();

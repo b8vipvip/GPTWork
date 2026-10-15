@@ -163,7 +163,10 @@
       text.append(small);
     }
     strong.textContent = String(item?.label || modelLabel(concrete)).slice(0, 120);
-    small.textContent = `${concrete} · 管理员已启用 / Admin enabled${item?.clientEligible?' · 4/4 verified':' · 验证证据未齐'}`;
+    const manual = item?.verificationStatusSource === 'manual';
+    const status = ({ verified: '已验证', pending: '待验证', failed: '验证失败' })[item?.verificationStatus] || '待验证';
+    const evidence = item?.clientEligible ? '实测 4/4 通过' : '实测证据未齐';
+    small.textContent = `${concrete} · 管理员已启用 / Admin enabled · ${manual ? `人工标记${status}` : `自动${status}`} · ${evidence}`;
   }
 
   function enforceSharedOnlyChoices(sharedIds) {

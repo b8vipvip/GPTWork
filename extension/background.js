@@ -1877,6 +1877,11 @@ function normalizeClientSharedModels(items) {
       chatLockVerifiedAccountCount: Math.max(0, Number(item?.chatLockVerifiedAccountCount || 0)),
       clientEligibleAccountCount: Math.max(0, Number(item?.clientEligibleAccountCount || 0)),
       clientEligible: item?.clientEligible === true,
+      verificationStatusOverride: ['auto', 'verified', 'pending', 'failed'].includes(item?.verificationStatusOverride)
+        ? item.verificationStatusOverride : 'auto',
+      verificationStatus: ['verified', 'pending', 'failed'].includes(item?.verificationStatus)
+        ? item.verificationStatus : 'pending',
+      verificationStatusSource: item?.verificationStatusSource === 'manual' ? 'manual' : 'automatic',
       enabled: item?.enabled === true,
       lastSeenAt: item?.lastSeenAt || null,
     }))
