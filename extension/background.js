@@ -1268,7 +1268,16 @@ const networkMonitor = new ChatGptNetworkMonitor({
         fetchRequestId: rewrite.fetchRequestId ?? null,
       });
     }
-    logRuntime(rewrite.error ? 'warn' : 'info', 'lock', rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked', {
+    // A no-ID interception callback is diagnostic only. Never give it the
+    // same event name as a formal paused conversation request: the old logs
+    // showed "no_locked_model" with no Fetch or Network request ID immediately
+    // before a separate real GPT-6 request, which falsely suggested that the
+    // latter had bypassed its lock.
+    const formalLockEvent = formalVerificationFetch;
+    const lockEvent = !formalLockEvent
+      ? 'request_lock_observation'
+      : rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked';
+    logRuntime(rewrite.error ? 'warn' : 'info', 'lock', lockEvent, {
       tabId,
       lockedModelsAtInterception: runtimePolicyForTabSync(tabId).lockedModels,
       tabFeatureAtInterception: tabFeatureStateSync(tabId),
