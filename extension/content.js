@@ -2754,7 +2754,14 @@ document.addEventListener('pointerdown', (event) => {
         return Boolean(element.querySelector?.('button,[role="button"],[role="menu"],[role="menuitem"],[role="menuitemradio"],[role="radio"],[aria-haspopup],[data-testid*="model"],[data-testid*="reasoning"],[data-testid*="thinking"]'));
       });
     });
-    if (relevant) scheduleReport();
+    if (relevant) {
+      // Picker A is a short-lived Radix menu. The 900 ms reporting debounce
+      // often fires after the checked row has disappeared, leaving only "High".
+      // Read the actual checked row now while the user-opened menu still exists;
+      // this helper is passive and never opens or clicks ChatGPT controls.
+      globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.selectedOfficialPickerAEvidence?.();
+      scheduleReport();
+    }
     recordMutationCost(mutations.length, startedAt);
   }).observe(document.documentElement, {
     childList: true,
@@ -2763,6 +2770,7 @@ document.addEventListener('pointerdown', (event) => {
     attributeFilter: [
       'aria-label',
       'aria-checked',
+      'aria-expanded',
       'aria-selected',
       'data-state',
       'data-selected',
