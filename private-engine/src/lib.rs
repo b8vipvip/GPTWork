@@ -360,7 +360,10 @@ pub fn evaluate_request(input: &RequestEnvelope) -> RequestDecision {
             .any(|allowed| model_matches_lock(allowed, model))
     });
     let target_model = if page_selected_allowed {
-        decision.model_before.clone().unwrap_or_else(|| locked_models[0].clone())
+        decision
+            .model_before
+            .clone()
+            .unwrap_or_else(|| locked_models[0].clone())
     } else {
         locked_models[0].clone()
     };
