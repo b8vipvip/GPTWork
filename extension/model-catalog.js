@@ -207,6 +207,13 @@
     const requestHistorical = Boolean(requestModel && (previousSelectionRequest
       || (!stateRequestModel && !forwardedRequestModel && selected?.request?.historical)));
     const requestCurrent = Boolean(!previousSelectionRequest && (stateRequestModel || forwardedRequestModel));
+    const requestRewritten = Boolean(
+      requestModel && rewrite?.changed && !rewrite.error
+      && forwardedRequestModel === requestModel
+      && normalizeModelId(rewrite.modelBefore)
+      && normalizeModelId(rewrite.modelBefore) !== requestModel
+    );
+    const pageRequestDifferent = Boolean(pageModel && requestRewritten && pageModel !== requestModel);
 
     const verification = state?.lastVerification;
     const responseCurrent = responseAppliesToLatestRequest(state);
@@ -263,13 +270,13 @@
     return {
       page: {
         id: pageModel,
-        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : pageModelLastChecked ? ' · 上次菜单勾选' : ' · 页面观察'}` : '未确认',
+        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : pageModelLastChecked ? ' · 上次菜单勾选' : ' · 页面观察'}${pageRequestDifferent ? ' · 与已锁定请求不同' : ''}` : '未确认',
         status: pageModel ? 'observed' : 'unknown',
       },
       request: {
         id: requestModel,
         label: requestModel
-          ? `${modelLabel(requestModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 最近请求' : ''}`
+          ? `${modelLabel(requestModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 最近请求' : requestRewritten ? ' · 锁定改写' : ''}`
           : unlocked ? '未锁定 · 未捕获请求模型' : '等待请求',
         status: requestHistorical ? 'request-history' : requestModel ? 'request' : 'waiting',
         historical: requestHistorical,
