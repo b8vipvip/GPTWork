@@ -85,7 +85,10 @@ export function normalizeRawProtocolModelId(value) {
 }
 
 export function normalizeModelId(value) {
-  const model = normalizeRawProtocolModelId(value);
+  const label = String(value ?? '').trim().toLowerCase();
+  const display = label.match(/^gpt(?:\s+|-)(\d+(?:\.\d+)*)(?:(?:\s+|-)([a-z][a-z0-9-]*))?$/);
+  const canonical = display ? 'gpt-' + display[1] + (display[2] ? '-' + display[2] : '') : label;
+  const model = normalizeRawProtocolModelId(canonical);
   if (!model) return null;
   return normalizeKnownFamily(model) ?? MODEL_ALIASES[model] ?? model;
 }
