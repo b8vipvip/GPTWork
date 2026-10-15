@@ -181,6 +181,16 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     };
   }
   if (state.phase === 'mismatch') {
+    // The backend's historical model_not_allowed reason is no longer a
+    // current policy failure when the real served model now matches this
+    // tab's canonical lock identity. Retain the audit record, not the red
+    // mismatch warning or a sticky send block.
+    const servedModel = state.lastVerification?.model;
+    if (verificationReasons(state).includes('model_not_allowed')
+      && servedModel
+      && policy.lockedModels.some((candidate) => modelMatchesLock(candidate, servedModel))) {
+      return { ...base, allowKind: 'warning', status: 'unverified', reason: 'previous_mismatch_now_allowed' };
+    }
     if (mismatchFromEarlierPageSelection(state)) {
       return {
         ...base,
