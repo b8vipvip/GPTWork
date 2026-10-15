@@ -51,7 +51,6 @@ test('checked GPT-6 on home composer follows only its first newly created conver
   assert.equal(observe.collect().modelSource, 'official-picker-a-checked');
 
   expanded = false;
-  rowVisible = false;
   pathname = '/c/6ad036d7-9184-83e8-a6be-9ec1e9656951';
   const first = observe.collect();
   assert.equal(first.model, 'gpt-6');
