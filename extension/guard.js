@@ -1,15 +1,17 @@
+import { modelMatchesLock } from './policy.js';
+
 export function observationMatchesPolicy(observation, policy) {
   return Boolean(
     observation?.model
       && observation?.reasoning
-      && policy.lockedModels.includes(observation.model)
+      && policy.lockedModels.some((candidate) => modelMatchesLock(candidate, observation.model))
       && policy.allowedReasoningLevels.includes(observation.reasoning),
   );
 }
 
 export function observationConflictsPolicy(observation, policy) {
   return Boolean(
-    (observation?.model && !policy.lockedModels.includes(observation.model))
+    (observation?.model && !policy.lockedModels.some((candidate) => modelMatchesLock(candidate, observation.model)))
       || (observation?.reasoning && !policy.allowedReasoningLevels.includes(observation.reasoning)),
   );
 }
@@ -50,7 +52,7 @@ function hasConfirmedModelMismatch(state, policy) {
   // This prevents an old mismatch reason from surviving a policy change while the
   // current response model is now explicitly allowed (for example GPT-5.6 Sol).
   const verifiedModel = state.lastVerification?.model;
-  if (!verifiedModel || policy.lockedModels.includes(verifiedModel)) return false;
+  if (!verifiedModel || policy.lockedModels.some((candidate) => modelMatchesLock(candidate, verifiedModel))) return false;
 
   // A strict-mode block is turn-scoped. Never let an older response mismatch block
   // a newer formal request. Missing correlation data fails open instead of making a
@@ -74,7 +76,7 @@ function hasConfirmedAutoVerification(state, policy) {
       && auto.evidenceSource === 'network_response_metadata'
       && auto.responseModel
       && auto.responseReasoning
-      && policy.lockedModels.includes(auto.responseModel)
+      && policy.lockedModels.some((candidate) => modelMatchesLock(candidate, auto.responseModel))
       && policy.allowedReasoningLevels.includes(auto.responseReasoning)
       && autoVerificationAppliesToLatestRequest(state),
   );
