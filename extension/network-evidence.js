@@ -1,5 +1,7 @@
 import {
   modelTransportId,
+  modelLockFamilyId,
+  modelMatchesLock,
   normalizeModelId,
   normalizeRawProtocolModelId,
   normalizeReasoningLevel,
@@ -512,8 +514,12 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   const knownModels = new Set(normalizedUnique(configuration.knownModels, normalizeModelId));
   const pageSelectedAllowed = Boolean(
     result.modelBefore
-      && lockedModels.includes(result.modelBefore)
-      && (knownModels.has(result.modelBefore) || configuration.preserveModel === true)
+      && lockedModels.some((model) => modelMatchesLock(model, result.modelBefore))
+      && (
+        knownModels.has(result.modelBefore)
+        || knownModels.has(modelLockFamilyId(result.modelBefore))
+        || configuration.preserveModel === true
+      )
   );
   const forcedModel = normalizeModelId(configuration.forceModel);
   const forceKnownModel = Boolean(forcedModel && knownModels.has(forcedModel));

@@ -178,6 +178,14 @@
   }
 
   function modelSnapshot(state) {
+    // Keep this helper inside the single floating-snapshot function so all
+    // rendering paths and focused snapshot regressions share its semantics.
+    function modelLockFamilyId(value) {
+      const model = normalizeConcreteModelId(value);
+      if (!model) return null;
+      const thinking = model.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
+      return thinking ? thinking[1] : model;
+    }
     const pageObservation = effectivePageObservation(state);
     const pageModel = normalizeModelId(pageObservation?.model);
     const pageModelChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-checked';
@@ -213,7 +221,19 @@
       && normalizeModelId(rewrite.modelBefore)
       && normalizeModelId(rewrite.modelBefore) !== requestModel
     );
-    const pageRequestDifferent = Boolean(pageModel && requestRewritten && pageModel !== requestModel);
+    const pageRequestDifferent = Boolean(pageModel && requestRewritten
+      && modelLockFamilyId(pageModel) !== modelLockFamilyId(requestModel));
+    // The floating "锁定模型" represents ONE model from an actually forwarded
+    // request. Never display every checked lock candidate as if it was sent.
+    // Prefer the per-turn immutable policy snapshot, not a later UI selection.
+    const lockedForTurn = Array.isArray(state?.lastRequest?.policySnapshot?.lockedModels)
+      ? state.lastRequest.policySnapshot.lockedModels
+      : currentPolicy?.lockedModels || [];
+    const unlockedTurn = lockedForTurn.length === 0
+      || (!stateRequestModel && rewrite?.reason === 'no_locked_model');
+    const lockedSentModel = requestModel && !unlockedTurn ? modelLockFamilyId(requestModel) : null;
+    const lockedSentMatchesPolicy = Boolean(lockedSentModel
+      && lockedForTurn.some((allowed) => modelLockFamilyId(allowed) === lockedSentModel));
 
     const verification = state?.lastVerification;
     const responseCurrent = responseAppliesToLatestRequest(state);
@@ -274,11 +294,13 @@
         status: pageModel ? 'observed' : 'unknown',
       },
       request: {
-        id: requestModel,
-        label: requestModel
-          ? `${modelLabel(requestModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 最近请求' : requestRewritten ? ' · 锁定改写' : ''}`
-          : unlocked ? '未锁定 · 未捕获请求模型' : '等待请求',
-        status: requestHistorical ? 'request-history' : requestModel ? 'request' : 'waiting',
+        // Internal key stays "request" for compatibility; the visible field is
+        // the final locked model family, never a list of configured choices.
+        id: lockedSentModel,
+        label: lockedSentModel
+          ? `${modelLabel(lockedSentModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 最近请求' : !lockedSentMatchesPolicy ? ' · 不符合锁定' : requestRewritten ? ' · 锁定改写' : ''}`
+          : unlockedTurn ? '未锁定' : '等待请求',
+        status: lockedSentModel ? requestHistorical ? 'request-history' : 'request' : unlockedTurn ? 'unlocked' : 'waiting',
         historical: requestHistorical,
       },
       response: {
@@ -461,7 +483,7 @@
       </style>
       <button type="button" data-tone="unknown" title="GPTWork 模型证据 / Model evidence">
         <span class="model-row" data-source="page" data-status="unknown"><span class="model-key">页面模型</span><span class="model-value">未识别</span></span>
-        <span class="model-row" data-source="request" data-status="waiting"><span class="model-key">请求模型</span><span class="model-value">等待请求</span></span>
+        <span class="model-row" data-source="request" data-status="waiting"><span class="model-key">锁定模型</span><span class="model-value">等待请求</span></span>
         <span class="model-row" data-source="response" data-status="waiting"><span class="model-key">响应模型</span><span class="model-value">等待响应</span></span>
       </button>`;
     root.querySelector('button').addEventListener('click', () => {
@@ -505,7 +527,7 @@
     const responseDetail = snapshot.response.id ? `${snapshot.response.label} (${snapshot.response.id})` : snapshot.response.label;
     button.title = [
       `页面模型：${pageDetail}`,
-      `请求模型：${requestDetail}`,
+      `锁定模型：${requestDetail}`,
       `响应模型：${responseDetail}${snapshot.response.confirmed ? ' · 网络响应已确认' : ''}${snapshot.response.mismatch ? ' · 与锁定策略不一致' : ''}`,
     ].join('\n');
 

@@ -376,3 +376,31 @@ test('verification forceModel is rejected unless it belongs to the known catalog
   assert.equal(result.changed, false);
   assert.equal(result.modelAfter, 'gpt-5.6-sol');
 });
+
+test('GPT N thinking transport is allowed under the matching GPT N lock without rewriting raw evidence', () => {
+  for (const version of ['6', '6.5', '7']) {
+    const base = `gpt-${version}`, thinking = `${base}-thinking`;
+    const original = JSON.stringify({ model: thinking, reasoning_effort: 'high', messages: ['hello'] });
+    const forwarded = rewriteConversationPostData(original, {
+      lockedModels: [base],
+      knownModels: [base],
+      allowedReasoningLevels: ['high'],
+      preferredReasoning: 'high',
+    });
+    assert.equal(forwarded.changed, false, version);
+    assert.equal(forwarded.transportModelAfter, thinking, version);
+    assert.equal(forwarded.modelAfter, thinking, version);
+    assert.equal(forwarded.reason, 'page_selected_known_model_locked', version);
+  }
+});
+
+test('base GPT lock never accepts different generations or unrelated tiers', () => {
+  for (const model of ['gpt-5.6-thinking', 'gpt-6.5-thinking', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6-instant', 'gpt-7-thinking']) {
+    const result = rewriteConversationPostData(JSON.stringify({ model }), {
+      lockedModels: ['gpt-6'], knownModels: ['gpt-6', model],
+      allowedReasoningLevels: ['high'],
+    });
+    assert.equal(result.modelAfter, 'gpt-6', model);
+    assert.equal(result.changed, true, model);
+  }
+});

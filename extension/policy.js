@@ -95,6 +95,21 @@ export function normalizeConcreteModelId(value) {
   return model && !NON_CONCRETE_MODEL_IDS.has(model) ? model : null;
 }
 
+// Only the explicit base GPT-N(.N...) / GPT-N(.N...)-thinking pair
+// shares lock-policy identity. Keep the raw protocol model untouched in every
+// request/response record; Sol, Astra, Instant and other tiers remain distinct.
+export function modelLockFamilyId(value) {
+  const normalized = normalizeConcreteModelId(value);
+  if (!normalized) return null;
+  const thinking = normalized.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
+  return thinking ? thinking[1] : normalized;
+}
+
+export function modelMatchesLock(lockedModel, observedModel) {
+  const locked = modelLockFamilyId(lockedModel);
+  return Boolean(locked && locked === modelLockFamilyId(observedModel));
+}
+
 export function modelTransportId(value, overrides = null) {
   const model = normalizeModelId(value);
   if (!model) return null;

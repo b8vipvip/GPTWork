@@ -25,13 +25,20 @@
     return Boolean(capturedAt && nowMs - capturedAt >= 0 && nowMs - capturedAt <= maxAgeMs);
   }
 
-  function policyAllows(model, policy) {
+  function lockFamily(model) {
     const normalized = normalizeModelId(model);
-    if (!normalized) return false;
+    if (!normalized) return null;
+    const thinking = normalized.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
+    return thinking ? thinking[1] : normalized;
+  }
+
+  function policyAllows(model, policy) {
+    const observed = lockFamily(model);
+    if (!observed) return false;
     const locked = Array.isArray(policy?.lockedModels)
-      ? policy.lockedModels.map(normalizeModelId).filter(Boolean)
+      ? policy.lockedModels.map(lockFamily).filter(Boolean)
       : [];
-    return !locked.length || locked.includes(normalized);
+    return !locked.length || locked.includes(observed);
   }
 
   function safePrevious(previous) {

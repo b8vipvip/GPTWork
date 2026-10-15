@@ -27,7 +27,7 @@ test('model indicator renders page request and response evidence simultaneously'
   assert.match(source, /data-source="request"/);
   assert.match(source, /data-source="response"/);
   assert.match(source, /页面模型/);
-  assert.match(source, /请求模型/);
+  assert.match(source, /锁定模型/);
   assert.match(source, /响应模型/);
   assert.match(source, /modelSnapshot/);
   assert.match(source, /updateRow\(button, 'page'/);

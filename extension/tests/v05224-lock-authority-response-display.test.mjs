@@ -32,7 +32,7 @@ function snapshot(state) {
   return runtime.snapshot(state);
 }
 
-function pageRequest({ responseModel = 'gpt-6-thinking', responseRequestId = 'r1', verdict = 'mismatch' } = {}) {
+function pageRequest({ responseModel = 'gpt-6-thinking', responseRequestId = 'r1', verdict = 'verified' } = {}) {
   return {
     selectionRevision: 0,
     phase: verdict,
@@ -49,6 +49,7 @@ function pageRequest({ responseModel = 'gpt-6-thinking', responseRequestId = 'r1
     lastRequest: {
       requestId: 'r1', capturedAt: t0,
       model: 'gpt-6', reasoning: 'high', selectionRevision: 0,
+      policySnapshot: { lockedModels: ['gpt-6'] },
     },
     lastResponseEvidence: {
       requestId: responseRequestId, capturedAt: t1,
@@ -81,7 +82,7 @@ test('a known but disallowed GPT-5.6 Sol page model is rewritten to explicit GPT
   assert.deepEqual(JSON.parse(result.postData).messages, ['test']);
 });
 
-test('direct GPT-6 Thinking served response is shown despite failed lock verification', () => {
+test('direct GPT-6 Thinking response remains raw even when accepted as GPT-6 lock family', () => {
   const result = snapshot(pageRequest());
   assert.equal(result.page.id, 'gpt-5.6-sol');
   assert.match(result.page.label, /与已锁定请求不同/);
@@ -89,12 +90,12 @@ test('direct GPT-6 Thinking served response is shown despite failed lock verific
   assert.match(result.request.label, /锁定改写/);
   assert.equal(result.response.id, 'gpt-6-thinking');
   assert.match(result.response.label, /实际响应/);
-  assert.equal(result.response.mismatch, true);
-  assert.equal(result.response.confirmed, false);
+  assert.equal(result.response.mismatch, false);
+  assert.equal(result.response.confirmed, true);
 });
 
 test('even a response using the disallowed page model is reported as actually served', () => {
-  const result = snapshot(pageRequest({ responseModel: 'gpt-5.6-sol' }));
+  const result = snapshot(pageRequest({ responseModel: 'gpt-5.6-sol', verdict: 'mismatch' }));
   assert.equal(result.response.id, 'gpt-5.6-sol');
   assert.equal(result.response.mismatch, true);
   assert.equal(result.request.id, 'gpt-6');
