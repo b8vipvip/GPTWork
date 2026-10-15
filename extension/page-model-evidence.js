@@ -204,9 +204,18 @@
   let recentCheckedPicker = null;
 
   function lastObservedOfficialPickerA() {
-    if (!recentCheckedPicker
-      || recentCheckedPicker.pathname !== (globalThis.location?.pathname || '')
-      || Date.now() - recentCheckedPicker.at > RECENT_CHECKED_PICKER_MAX_AGE_MS) return null;
+    if (!recentCheckedPicker || Date.now() - recentCheckedPicker.at > RECENT_CHECKED_PICKER_MAX_AGE_MS) return null;
+    const pathname = globalThis.location?.pathname || '';
+    if (recentCheckedPicker.pathname !== pathname) {
+      // The user's checked Picker A row on the ChatGPT home composer belongs
+      // to the first conversation created from that same live page. Preserve
+      // only that one-way / -> /c/:id SPA transition, never /c/:a -> /c/:b.
+      if (recentCheckedPicker.pathname === '/' && /^\/c\/[a-z0-9_-]+$/i.test(pathname)) {
+        recentCheckedPicker.pathname = pathname;
+      } else {
+        return null;
+      }
+    }
     return {
       model: recentCheckedPicker.model,
       source: 'official-picker-a-last-checked',
