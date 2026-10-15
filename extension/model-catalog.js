@@ -49,13 +49,6 @@
     return model && !NON_CONCRETE_MODEL_IDS.has(model) ? model : null;
   }
 
-  function modelLockFamilyId(value) {
-    const model = normalizeConcreteModelId(value);
-    if (!model) return null;
-    const thinking = model.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
-    return thinking ? thinking[1] : model;
-  }
-
   function normalizeDisplayedModel(text) {
     if (!text) return null;
     const compact = String(text).trim().toLowerCase().replace(/\s+/g, '-');
@@ -185,6 +178,14 @@
   }
 
   function modelSnapshot(state) {
+    // Keep this helper inside the single floating-snapshot function so all
+    // rendering paths and focused snapshot regressions share its semantics.
+    function modelLockFamilyId(value) {
+      const model = normalizeConcreteModelId(value);
+      if (!model) return null;
+      const thinking = model.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
+      return thinking ? thinking[1] : model;
+    }
     const pageObservation = effectivePageObservation(state);
     const pageModel = normalizeModelId(pageObservation?.model);
     const pageModelChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-checked';
