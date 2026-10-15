@@ -59,6 +59,6 @@ test('opened model menu without a selected row leaves model unconfirmed',()=>{
 test('normal unlocked status is explicit and model evidence provenance is shown',()=>{
   assert.ok(content.includes("no_locked_model: ['未锁定', 'off']"));
   assert.ok(catalog.includes("pageModelChecked ? ' · 菜单勾选'"));
-  assert.match(catalog,/未锁定 · 未捕获请求模型/);
+  assert.match(catalog,/unlockedTurn \? '未锁定' : '等待请求'/);
   assert.match(catalog,/尚无后端响应证据/);
 });
