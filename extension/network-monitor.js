@@ -1024,6 +1024,25 @@ export class ChatGptNetworkMonitor {
           : 'incomplete_metadata' },
         streamContext,
       });
+      // A finished response without authoritative model metadata is an
+      // *unverified* response, not a response that should display "waiting"
+      // indefinitely. Initial handoff responses remain pending because a
+      // downstream SSE/WebSocket may still provide genuine served-model proof.
+      // A later authoritative downstream packet may upgrade this verdict.
+      if (record.downstream || !handoff) {
+        this.onEvidence(tabId, {
+          requestId: record.requestId,
+          capturedAt: new Date().toISOString(),
+          status: record.status,
+          model: null,
+          reasoning: null,
+          conflicts: evidence.conflicts,
+          fields: evidence.fields,
+          bodyError: null,
+          streamContext,
+          diagnostics: { ...diagnostics, verificationSuppressedReason: 'response_model_not_exposed' },
+        });
+      }
       body = '';
       return;
     }
