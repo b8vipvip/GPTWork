@@ -34,7 +34,11 @@
   const observers = new Set();
   const performanceObservers = new Set();
   const resizeObservers = new Set();
+  // Weak index gives constant-time listener identity lookup. The shutdown registry
+  // intentionally retains only WeakRefs: a removed ChatGPT DOM node must not stay
+  // alive merely because GPTWork observed its event listener.
   const eventListeners = new Set();
+  const eventListenerIndex = new WeakMap();
   const chromeEventListeners = new Set();
   const chromeEventPatches = [];
   let disposed = false;
@@ -238,6 +242,7 @@
   }
 
   function diagnosticsSnapshot({ resetCallbacks = false, resetDiagnosticLongTasks = false } = {}) {
+    compactTrackedListeners();
     const callbacks = {};
     for (const [kind, value] of callbackStats) {
       callbacks[kind] = {
@@ -323,12 +328,51 @@
     };
   }
 
+  function compactTrackedListeners() {
+    for (const record of eventListeners) {
+      if (!record.targetRef.deref() || !record.wrappedRef.deref()) {
+        eventListeners.delete(record);
+      }
+    }
+  }
+
+  function listenerSlot(target, type, capture, create = false) {
+    let byType = eventListenerIndex.get(target);
+    if (!byType && create) {
+      byType = new Map();
+      eventListenerIndex.set(target, byType);
+    }
+    if (!byType) return null;
+    let slots = byType.get(type);
+    if (!slots && create) {
+      slots = { capture: new WeakMap(), bubble: new WeakMap() };
+      byType.set(type, slots);
+    }
+    return slots ? (capture ? slots.capture : slots.bubble) : null;
+  }
+
+  function releaseTrackedListener(target, type, listener, capture, record) {
+    if (target && listener) {
+      const slot = listenerSlot(target, type, capture);
+      if (slot?.get(listener) === record) slot.delete(listener);
+    }
+    eventListeners.delete(record);
+    const signal = record?.signalRef?.deref();
+    if (signal && record?.abortCleanup) {
+      try { original.removeEventListener.call(signal, 'abort', record.abortCleanup); } catch {}
+    }
+    if (record) record.abortCleanup = null;
+  }
+
   function removeTrackedListeners() {
     if (typeof original.removeEventListener !== 'function') return;
     for (const record of eventListeners) {
-      try {
-        original.removeEventListener.call(record.target, record.type, record.wrapped || record.listener, record.options);
-      } catch {}
+      const target = record.targetRef.deref();
+      const wrapped = record.wrappedRef.deref();
+      if (target && wrapped) {
+        try { original.removeEventListener.call(target, record.type, wrapped, record.capture); } catch {}
+      }
+      releaseTrackedListener(target, record.type, record.listenerRef.deref(), record.capture, record);
     }
     eventListeners.clear();
   }
@@ -551,42 +595,76 @@
 
   function trackedAddEventListener(type, listener, options) {
     if (typeof original.addEventListener !== 'function') return undefined;
+    // DOM rejects non-listeners on its own. Do not index invalid values or already
+    // aborted signal registrations that the browser will never install.
+    if (!listener || (typeof listener !== 'function' && typeof listener !== 'object')) {
+      return original.addEventListener.call(this, type, listener, options);
+    }
+    if (options?.signal?.aborted === true) {
+      return original.addEventListener.call(this, type, listener, options);
+    }
     const capture = typeof options === 'boolean' ? options : options?.capture === true;
-    const existing = [...eventListeners].find((record) => (
-      record.target === this
-      && record.type === type
-      && record.listener === listener
-      && record.capture === capture
-    ));
-    if (existing) return original.addEventListener.call(this, type, existing.wrapped || listener, options);
+    const slot = listenerSlot(this, type, capture, true);
+    const existing = slot.get(listener);
+    if (existing) {
+      const wrapped = existing.wrappedRef.deref();
+      if (wrapped) return original.addEventListener.call(this, type, wrapped, options);
+      releaseTrackedListener(this, type, listener, capture, existing);
+    }
+
+    const targetRef = new WeakRef(this);
+    const listenerRef = new WeakRef(listener);
+    let record;
+    // Stack attribution is expensive. Collect it only in an explicit diagnostic
+    // capture; normal browsing must not construct one Error stack per DOM handler.
+    const source = diagnosticCaptureActive ? callbackSource(`domEvent:${type}`) : 'domEvent:before-capture';
     let wrapped = listener;
-    const source = callbackSource(`domEvent:${type}`);
+    const invoke = (context, args) => {
+      if (options?.once === true) {
+        releaseTrackedListener(targetRef.deref(), type, listener, capture, record);
+      }
+      if (typeof listener === 'function') {
+        return measureCallback('domEvent', listener.bind(context), args, source);
+      }
+      return measureCallback('domEvent', listener.handleEvent.bind(listener), args, source);
+    };
     if (typeof listener === 'function') {
       wrapped = function measuredDomEventListener(...args) {
-        return measureCallback('domEvent', listener.bind(this), args, source);
+        return invoke(this, args);
       };
-    } else if (listener && typeof listener.handleEvent === 'function') {
-      wrapped = {
-        handleEvent(...args) {
-          return measureCallback('domEvent', listener.handleEvent.bind(listener), args, source);
-        },
-      };
+    } else if (typeof listener.handleEvent === 'function') {
+      wrapped = { handleEvent(...args) { return invoke(this, args); } };
+    } else {
+      return original.addEventListener.call(this, type, listener, options);
     }
-    eventListeners.add({ target: this, type, listener, wrapped, options, capture });
-    return original.addEventListener.call(this, type, wrapped, options);
+    // Register with the browser BEFORE recording anything: invalid options must
+    // not create phantom listeners. WeakRefs avoid retaining detached DOM trees.
+    const result = original.addEventListener.call(this, type, wrapped, options);
+    record = {
+      targetRef, listenerRef, wrappedRef: new WeakRef(wrapped),
+      type, capture, signalRef: options?.signal ? new WeakRef(options.signal) : null,
+      abortCleanup: null,
+    };
+    slot.set(listener, record);
+    eventListeners.add(record);
+    if (options?.signal && typeof options.signal.addEventListener === 'function') {
+      const onAbort = () => releaseTrackedListener(targetRef.deref(), type, listener, capture, record);
+      record.abortCleanup = onAbort;
+      original.addEventListener.call(options.signal, 'abort', onAbort, { once: true });
+      if (options.signal.aborted) onAbort();
+    }
+    return result;
   }
 
   function trackedRemoveEventListener(type, listener, options) {
     const capture = typeof options === 'boolean' ? options : options?.capture === true;
-    const record = [...eventListeners].find((item) => (
-      item.target === this
-      && item.type === type
-      && item.listener === listener
-      && item.capture === capture
-    ));
+    const record = listener && (typeof listener === 'object' || typeof listener === 'function')
+      ? listenerSlot(this, type, capture)?.get(listener)
+      : null;
     if (!record) return original.removeEventListener.call(this, type, listener, options);
-    eventListeners.delete(record);
-    return original.removeEventListener.call(this, type, record.wrapped || listener, options);
+    const wrapped = record.wrappedRef.deref();
+    releaseTrackedListener(this, type, listener, capture, record);
+    return original.removeEventListener.call(this, type, wrapped || listener, options);
   }
 
   function patchChromeEvent(event) {
