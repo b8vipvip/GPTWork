@@ -309,7 +309,9 @@
         id: responseModel,
         label: responseModel
           ? `${modelLabel(responseModel)}${previousSelectionRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 实际响应' : ''}`
-          : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
+          : state?.phase === 'waiting' && state?.lastRequest?.requestId
+            ? '生成中 · 等待真实响应模型证据'
+            : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
         status: previousSelectionRequest ? 'response-history' : observedResponseModel ? 'response' : responseMismatch
           ? 'mismatch'
           : responseHistorical
