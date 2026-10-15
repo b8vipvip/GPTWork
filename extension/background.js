@@ -52,7 +52,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.221';
+const RUNTIME_CODE_VERSION = '0.5.222';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1406,7 +1406,7 @@ async function applyServerFeatureSettings() {
     const nextSettings = normalizeSettings({
       ...currentSettings,
       networkVerificationEnabled: remote.responseVerificationEnabled !== false,
-      autoAlignSelection: remote.autoAlignSelection !== false,
+      autoAlignSelection: false, // Never revive legacy page alignment from server configuration.
       workModeGuidanceEnabled: remote.workModeGuidanceEnabled !== false,
       workModeFeatureEnabled: remote.workModeFeatureEnabled === true,
     });
@@ -4817,12 +4817,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GPTLOCK_TRUSTED_POINTER_PREPARE': {
         if (!sender.tab?.id) throw new Error('Trusted pointer preparation requires a tab');
+        // Ordinary Chat is observation-only. A discovery task is the sole
+        // authority permitted to mutate the live ChatGPT page via CDP.
+        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true) {
+          throw new Error('discovery_ui_action_not_authorized');
+        }
         const attached = networkMonitor.isAttached(sender.tab.id) || await networkMonitor.attach(sender.tab.id);
         if (!attached) throw new Error('Debugger is not attached for trusted pointer input');
         return { attached: true };
       }
       case 'GPTLOCK_TRUSTED_KEY': {
         if (!sender.tab?.id) throw new Error('Trusted keyboard input requires a tab');
+        // Ordinary Chat is observation-only. A discovery task is the sole
+        // authority permitted to mutate the live ChatGPT page via CDP.
+        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true) {
+          throw new Error('discovery_ui_action_not_authorized');
+        }
         const key = String(message.key || '');
         if (key !== 'Enter') throw new Error('Unsupported trusted key');
         logRuntime('info', 'ui-keyboard', 'cdp_dispatch', {
@@ -4836,6 +4846,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GPTLOCK_TRUSTED_POINTER': {
         if (!sender.tab?.id) throw new Error('Trusted pointer input requires a tab');
+        // Ordinary Chat is observation-only. A discovery task is the sole
+        // authority permitted to mutate the live ChatGPT page via CDP.
+        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true) {
+          throw new Error('discovery_ui_action_not_authorized');
+        }
         const x = Number(message.x);
         const y = Number(message.y);
         if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) {

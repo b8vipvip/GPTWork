@@ -11,9 +11,10 @@ test('auto alignment does not probe generic ChatGPT menu/composer/form buttons',
   assert.doesNotMatch(content, /'form button'/);
 });
 
-test('unknown page model/reasoning values are never force-clicked', () => {
-  assert.match(content, /desiredModel && observation\.model && observation\.model !== desiredModel/);
-  assert.match(content, /preferred && !changed && afterModel\.reasoning && afterModel\.reasoning !== preferred/);
+test('model and reasoning controls are never automatically clicked outside discovery', () => {
+  assert.match(content, /if \(!force \|\| !autoVerificationRunning \|\| visibleGeneratingControl\(\)\) return false/);
+  assert.match(content, /if \(!desiredModel \|\| !observation\.model \|\| observation\.model === desiredModel\) return false/);
+  assert.doesNotMatch(content, /scheduleAlign\(\)/);
 });
 
 test('floating status is anchored bottom-right and broad role-button scan is observation-only', () => {

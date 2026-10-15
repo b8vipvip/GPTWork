@@ -12,7 +12,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   enabled: false,
   networkVerificationEnabled: true,
   firstRequestMode: 'allow_once',
-  autoAlignSelection: true,
+  autoAlignSelection: false,
   workModeGuidanceEnabled: true,
   workModeFeatureEnabled: true,
   preferredReasoning: 'high',
@@ -196,9 +196,9 @@ export function normalizeSettings(input) {
     firstRequestMode: ['allow_once', 'block'].includes(source.firstRequestMode)
       ? source.firstRequestMode
       : DEFAULT_SETTINGS.firstRequestMode,
-    autoAlignSelection: typeof source.autoAlignSelection === 'boolean'
-      ? source.autoAlignSelection
-      : DEFAULT_SETTINGS.autoAlignSelection,
+    // Retained as an inert compatibility field for older server/client settings.
+    // No configuration may permit background page model clicks outside discovery.
+    autoAlignSelection: false,
     workModeGuidanceEnabled: typeof source.workModeGuidanceEnabled === 'boolean'
       ? source.workModeGuidanceEnabled
       : DEFAULT_SETTINGS.workModeGuidanceEnabled,
