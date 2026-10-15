@@ -29,3 +29,56 @@ export function withForwardedRequestEvidence(request, rewrite) {
     requestEvidenceSource: 'fetch_continued',
   };
 }
+
+ 
+// Fetch.requestPaused and Network.requestWillBeSent are asynchronous CDP event
+// streams. The page may navigate from / to /c/:id between them, replacing the
+// per-conversation tab state. Keep only successful, ID-correlated terminal Fetch
+// decisions in a bounded tab/request ledger so Network cannot fall back to a
+// stale pre-Fetch body or to an unrelated request's rewrite.
+export class ForwardedRequestLedger {
+  constructor({ ttlMs = 120_000, maxEntries = 128 } = {}) {
+    this.ttlMs = ttlMs;
+    this.maxEntries = maxEntries;
+    this.entries = new Map();
+  }
+
+  key(tabId, requestId) {
+    return Number.isInteger(Number(tabId)) && requestId
+      ? `${Number(tabId)}:${String(requestId)}` : null;
+  }
+
+  prune(now = Date.now()) {
+    for (const [key, entry] of this.entries) {
+      if (now - entry.at > this.ttlMs) this.entries.delete(key);
+    }
+    while (this.entries.size > this.maxEntries) {
+      this.entries.delete(this.entries.keys().next().value);
+    }
+  }
+
+  remember(tabId, rewrite, now = Date.now()) {
+    const key = this.key(tabId, rewrite?.requestId);
+    if (!key || !rewrite?.fetchRequestId || rewrite.error
+      || !OFFICIAL_ENDPOINTS.has(rewrite.endpoint)
+      || typeof rewrite.modelAfter !== 'string' || !rewrite.modelAfter) return false;
+    this.prune(now);
+    this.entries.delete(key);
+    this.entries.set(key, { at: now, rewrite });
+    this.prune(now);
+    return true;
+  }
+
+  find(tabId, requestId, now = Date.now()) {
+    this.prune(now);
+    const key = this.key(tabId, requestId);
+    return key ? this.entries.get(key)?.rewrite ?? null : null;
+  }
+
+  clearTab(tabId) {
+    const prefix = `${Number(tabId)}:`;
+    for (const key of this.entries.keys()) {
+      if (key.startsWith(prefix)) this.entries.delete(key);
+    }
+  }
+}
