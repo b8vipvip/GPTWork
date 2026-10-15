@@ -10,9 +10,10 @@
     'gpt-6-sol-wm': 'gpt-6-sol',
     'gpt-6-luna-wm': 'gpt-6-luna',
     'gpt-5-6': 'gpt-5.6-sol',
+    'gpt-5.6': 'gpt-5.6-sol',
   });
   const FAMILY_ALIASES = Object.freeze({
-    'gpt-5.6-sol': ['gpt-5.6 sol', 'gpt 5.6 sol', '5.6 sol'],
+    'gpt-5.6-sol': ['gpt-5.6 sol', 'gpt 5.6 sol', '5.6 sol', 'gpt-5.6', 'gpt 5.6', '5.6'],
     'gpt-5.6-terra': ['gpt-5.6 terra', 'gpt 5.6 terra', '5.6 terra'],
     'gpt-5.6-luna': ['gpt-5.6 luna', 'gpt 5.6 luna', '5.6 luna'],
     'gpt-5.5': ['gpt-5.5', 'gpt 5.5', '5.5'],

@@ -30,6 +30,8 @@
   function lockFamily(model) {
     const normalized = normalizeModelId(model);
     if (!normalized) return null;
+    if (normalized === 'gpt-5.6' || normalized === 'gpt-5.6-thinking'
+      || normalized === 'gpt-5-6-thinking') return 'gpt-5.6-sol';
     const thinking = normalized.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
     return thinking ? thinking[1] : normalized;
   }

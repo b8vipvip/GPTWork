@@ -169,6 +169,7 @@ pub fn normalize_model_id(value: &str) -> Option<String> {
     }
     Some(match model.as_str() {
         "gpt-5.6-sol-wm" | "gpt-5-6" => "gpt-5.6-sol".to_string(),
+        "gpt-5-6-thinking" => "gpt-5.6-thinking".to_string(),
         "gpt-6-astra-wm" => "gpt-6-astra".to_string(),
         "gpt-6-sol-wm" => "gpt-6-sol".to_string(),
         _ if model.starts_with("gpt-6-astra.") || model.starts_with("gpt-6-astra:") => {
@@ -185,6 +186,9 @@ pub fn normalize_model_id(value: &str) -> Option<String> {
 // extension verifier. Never alias Sol, Astra, Instant, or unrelated model tiers.
 fn model_lock_family_id(value: &str) -> Option<String> {
     let normalized = normalize_model_id(value)?;
+    if normalized == "gpt-5.6" || normalized == "gpt-5.6-thinking" {
+        return Some("gpt-5.6-sol".to_string());
+    }
     if let Some(base) = normalized.strip_suffix("-thinking") {
         if let Some(version) = base.strip_prefix("gpt-") {
             if version.split('.').all(|segment| {

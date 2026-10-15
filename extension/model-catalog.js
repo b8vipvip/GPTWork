@@ -13,6 +13,7 @@
     'gpt-5.6-sol-wm': 'gpt-5.6-sol',
     'gpt-5-5-instant': 'gpt-5.5',
     'gpt-5-6': 'gpt-5.6-sol',
+    'gpt-5-6-thinking': 'gpt-5.6-thinking',
     'gpt-6-astra-wm': 'gpt-6-astra',
     'gpt-6-sol-wm': 'gpt-6-sol',
   });
@@ -68,7 +69,7 @@
   function modelLabel(value) {
     const model = normalizeModelId(value);
     if (!model) return '未识别 / Unknown';
-    if (model === 'gpt-5.6-sol') return 'GPT-5.6 Sol';
+    if (['gpt-5.6-sol', 'gpt-5.6-thinking', 'gpt-5.6'].includes(model)) return 'GPT-5.6 Sol';
     if (model === 'gpt-5.5') return 'GPT-5.5';
     if (model.startsWith('gpt-')) {
       return model
@@ -185,6 +186,7 @@
     function modelLockFamilyId(value) {
       const model = normalizeConcreteModelId(value);
       if (!model) return null;
+      if (model === 'gpt-5.6' || model === 'gpt-5.6-thinking') return 'gpt-5.6-sol';
       const thinking = model.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
       return thinking ? thinking[1] : model;
     }

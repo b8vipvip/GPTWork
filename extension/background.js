@@ -11,6 +11,7 @@ import {
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { evaluateGuard } from './guard.js';
+import { withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
 import {
   appendDiagnosticSseCapture,
@@ -1239,6 +1240,24 @@ const networkMonitor = new ChatGptNetworkMonitor({
       error: rewrite.error ?? null,
     };
     if (rewrite.error) state.lastError = rewrite.error;
+    // Network.requestWillBeSent can report the pre-Fetch body even after
+    // Fetch.continueRequest accepted a changed POST. Preserve both observations,
+    // but let the matching, successfully continued Fetch decision own the
+    // displayed forwarded request model. Never join unrelated request IDs.
+    if (state.lastRequest) {
+      const reconciled = withForwardedRequestEvidence(state.lastRequest, state.lastRewrite);
+      if (reconciled !== state.lastRequest) {
+        state.lastRequest = reconciled;
+        logRuntime('info', 'network', 'formal_request_forwarded_model_correlated', {
+          tabId,
+          requestId: reconciled.requestId,
+          observedModel: reconciled.observedModel,
+          forwardedModel: reconciled.model,
+          fetchRequestId: reconciled.forwardedFetchRequestId,
+          changed: reconciled.requestRewritten,
+        });
+      }
+    }
     // Fetch interception is the terminal request authority. Work-mode requests can
     // legitimately omit Network.requestWillBeSent's networkId at this boundary, so
     // retain the forwarded request as first-class verification evidence instead of
@@ -1298,7 +1317,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
   onRequest(tabId, request) {
     const state = ensureTabState(tabId);
     const policyAtRequest = runtimePolicyForTabSync(tabId);
-    state.lastRequest = {
+    const observedRequest = {
       requestId: request.requestId,
       capturedAt: request.capturedAt,
       model: request.model,
@@ -1311,6 +1330,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       },
       diagnostics: request.diagnostics ?? null,
     };
+    state.lastRequest = withForwardedRequestEvidence(observedRequest, state.lastRewrite);
     state.probeUsed = true;
     state.probeArmed = false;
     if (currentSettings.networkVerificationEnabled) state.phase = 'waiting';
@@ -1323,8 +1343,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
     logRuntime('info', 'network', 'formal_conversation_request_detected', {
       tabId,
       requestId: request.requestId,
-      model: request.model,
-      reasoning: request.reasoning,
+      model: state.lastRequest.model,
+      reasoning: state.lastRequest.reasoning,
+      observedModel: state.lastRequest.observedModel ?? request.model,
+      forwardedFetchRequestId: state.lastRequest.forwardedFetchRequestId ?? null,
+      requestEvidenceSource: state.lastRequest.requestEvidenceSource ?? 'network_request_metadata',
       lockedModelsAtRequest: [...policyAtRequest.lockedModels],
       conflicts: request.conflicts,
       fields: request.fields,
