@@ -124,3 +124,27 @@ test('only GPT number series and exact -thinking counterpart share a lock identi
   assert.equal(modelMatchesLock('gpt-5.6-sol', 'gpt-5.6-thinking'), false);
   assert.equal(modelMatchesLock('gpt-6', 'auto'), false);
 });
+
+test('display labels GPT 6 / GPT-6 and Sol/Thinking spacing share exact canonical IDs', () => {
+  for (const [display, expected] of [
+    ['GPT 6', 'gpt-6'],
+    ['GPT-6', 'gpt-6'],
+    ['gpt 5.6', 'gpt-5.6'],
+    ['GPT 6 Sol', 'gpt-6-sol'],
+    ['GPT-6 Sol', 'gpt-6-sol'],
+    ['gpt 6 thinking', 'gpt-6-thinking'],
+    ['GPT 6.5 Thinking', 'gpt-6.5-thinking'],
+    ['GPT 7 Thinking', 'gpt-7-thinking'],
+  ]) {
+    assert.equal(normalizeModelId(display), expected, display);
+    assert.equal(modelMatchesLock(display, expected), true, display);
+  }
+  assert.equal(modelMatchesLock('GPT 6', 'gpt-6-thinking'), true);
+  assert.equal(modelMatchesLock('GPT 7', 'gpt-7-thinking'), true);
+  assert.equal(modelMatchesLock('GPT 6 Sol', 'gpt-6-thinking'), false);
+  assert.equal(modelMatchesLock('GPT 6 Thinking', 'gpt-6-sol'), false);
+  assert.equal(modelMatchesLock('GPT 6', 'gpt-6-sol'), false);
+  assert.deepEqual(normalizePolicy({
+    lockedModels: ['GPT 6', 'gpt-6', 'GPT 6 Sol', 'gpt-6-sol'],
+  }).lockedModels, ['gpt-6', 'gpt-6-sol']);
+});
