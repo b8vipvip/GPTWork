@@ -148,7 +148,8 @@ test('stale model_not_allowed reason cannot block when the verified model is now
     settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
-  assert.equal(guard.status, 'mismatch');
+  assert.equal(guard.status, 'unverified');
+  assert.equal(guard.reason, 'previous_mismatch_now_allowed');
 });
 
 test('uncorrelated mismatch evidence fails open instead of permanently blocking chat', () => {
