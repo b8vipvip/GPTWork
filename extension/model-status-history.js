@@ -10,7 +10,9 @@
   });
 
   function normalizeModelId(value) {
-    const model = String(value ?? '').trim().toLowerCase();
+    const label = String(value ?? '').trim().toLowerCase();
+    const display = label.match(/^gpt(?:\s+|-)(\d+(?:\.\d+)*)(?:(?:\s+|-)([a-z][a-z0-9-]*))?$/);
+    const model = display ? 'gpt-' + display[1] + (display[2] ? '-' + display[2] : '') : label;
     if (!/^[a-z0-9._:-]{1,128}$/.test(model)) return null;
     return MODEL_ALIASES[model] ?? model;
   }

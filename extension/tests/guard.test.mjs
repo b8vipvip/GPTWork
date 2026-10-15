@@ -148,7 +148,8 @@ test('stale model_not_allowed reason cannot block when the verified model is now
     settings: ENABLED_SETTINGS,
   });
   assert.equal(guard.canSend, true);
-  assert.equal(guard.status, 'mismatch');
+  assert.equal(guard.status, 'unverified');
+  assert.equal(guard.reason, 'previous_mismatch_now_allowed');
 });
 
 test('uncorrelated mismatch evidence fails open instead of permanently blocking chat', () => {
@@ -286,4 +287,40 @@ test('global disable bypasses enforcement and reports an explicit disabled state
   assert.equal(guard.allowKind, 'disabled');
   assert.equal(guard.status, 'disabled');
   assert.equal(guard.reason, 'gptlock_disabled');
+});
+
+test('previous model_not_allowed verdict cannot block when GPT 6 label matches actual gpt-6-thinking response', () => {
+  const snapshot = state({
+    phase: 'mismatch',
+    lastRequest: { capturedAt: '2026-08-26T12:55:18.000Z' },
+    lastVerification: confirmedMismatch({
+      model: 'gpt-6-thinking',
+      verifiedAt: '2026-08-26T12:55:20.000Z',
+    }),
+    pageObservation: { model: 'GPT 6', reasoning: 'high' },
+  });
+  const guard = evaluateGuard({
+    state: snapshot,
+    policy: { ...DEFAULT_POLICY, lockedModels: ['GPT 6'] },
+    settings: ENABLED_SETTINGS,
+  });
+  assert.equal(guard.canSend, true);
+  assert.equal(guard.uiMatches, true);
+  assert.equal(guard.status, 'unverified');
+  assert.equal(guard.reason, 'previous_mismatch_now_allowed');
+});
+
+test('GPT 6 Sol is not the same locked family as GPT 6 Thinking', () => {
+  const guard = evaluateGuard({
+    state: state({
+      phase: 'mismatch',
+      lastRequest: { capturedAt: '2026-08-26T12:55:18.000Z' },
+      lastVerification: confirmedMismatch({ model: 'gpt-6-sol' }),
+      pageObservation: { model: 'GPT 6 Sol', reasoning: 'high' },
+    }),
+    policy: { ...DEFAULT_POLICY, lockedModels: ['gpt-6'] },
+    settings: ENABLED_SETTINGS,
+  });
+  assert.equal(guard.canSend, false);
+  assert.equal(guard.reason, 'model_not_allowed');
 });
