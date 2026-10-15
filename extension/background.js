@@ -1243,7 +1243,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       reasoningFields: rewrite.reasoningFields ?? [],
       policySnapshot: interceptionPolicy ? {
         lockedModels: [...interceptionPolicy.lockedModels],
-        allowedReasoningLevels: [...interceptionPolicy.allowedReasoningLevels],
+        allowedReasoningLevels: [...(interceptionPolicy.allowedReasoningLevels || [])],
         strictMode: interceptionPolicy.strictMode,
       } : null,
       authorityKind: rewrite.authorityKind ?? null,
