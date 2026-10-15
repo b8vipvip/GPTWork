@@ -337,8 +337,6 @@
       historyOptions,
       autoProbeRunning,
       autoVerificationRunning: autoVerificationRunning || cachedState?.autoVerification?.running === true,
-      lastAlignAttempt,
-      lastAlignAt,
       pointerTraceSeq,
     };
     if (event.isTrusted !== true) {
