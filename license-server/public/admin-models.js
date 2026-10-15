@@ -31,7 +31,7 @@ function render(data){
   const trash=Array.isArray(data.trash)?data.trash:[];
   el.generation.textContent=`目录代次 ${Number(data.generation||0)} · ${models.length} 个活动模型`;
   el.trashCount.textContent=`${trash.length} 个已删除模型`;
-  el.body.innerHTML=models.map((m)=>`<tr data-model="${esc(m.model)}">
+  el.body.innerHTML=models.map((m)=>`<tr data-model="${esc(m.model)}" data-enabled="${m.enabled===true?'true':'false'}">
     <td><input data-select-model type="checkbox" value="${esc(m.model)}" aria-label="选择 ${esc(m.model)}"></td>
     <td><code>${esc(m.model)}</code></td>
     <td><input data-field="label" value="${esc(m.label||m.model)}" maxlength="120"></td>
@@ -39,7 +39,7 @@ function render(data){
     <td><code>${esc(m.nativeRequestModel||'—')}</code><br><small>${esc(m.nativeResponseModel||'—')}</small></td>
     <td><code>${esc(m.chatTransportModel||'—')}</code><br><small>${esc(m.chatResponseModel||'—')}</small></td>
     <td>${Number(m.chatLockVerifiedCount||0)>0?'✅':'—'} (${Number(m.chatLockVerifiedCount||0)})</td>
-    <td><input data-field="enabled" type="checkbox" ${m.enabled!==false?'checked':''}></td>
+    <td><button type="button" data-action="toggle" aria-pressed="${m.enabled===true?'true':'false'}" ${m.enabled===true?'class="primary"':''}>${m.enabled===true?'停用':'启用'}</button> <small>${m.enabled===true?'前端可锁定':'前端不可锁定'}</small></td>
     <td>发现 ${Number(m.accountCount||0)} / 请求 ${Number(m.requestConfirmedAccountCount||0)} / 原生响应 ${Number(m.verifiedAccountCount||0)} / Chat锁定 ${Number(m.chatLockVerifiedAccountCount||0)}</td>
     <td>${Number(m.discoveredCount||0)}</td><td>${esc(fmt(m.lastSeenAt))}</td>
     <td><button data-action="save">保存</button> <button data-action="delete" class="danger">删除</button></td>
@@ -78,6 +78,6 @@ el.body.addEventListener('change',(e)=>{if(e.target.matches('input[data-select-m
 el.trashBody.addEventListener('change',(e)=>{if(e.target.matches('input[data-select-trash]'))syncSelection();});
 el.deleteSelected.addEventListener('click',async()=>{el.deleteSelected.disabled=true;el.message.textContent='';try{await deleteModels(selected(el.body,'input[data-select-model]:checked'));}catch(e){el.message.textContent=e.message;}finally{syncSelection();}});
 el.restoreSelected.addEventListener('click',async()=>{el.restoreSelected.disabled=true;el.message.textContent='';try{await restoreModels(selected(el.trashBody,'input[data-select-trash]:checked'));}catch(e){el.message.textContent=e.message;}finally{syncSelection();}});
-el.body.addEventListener('click',async(e)=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('tr[data-model]');if(!row)return;const model=row.dataset.model;button.disabled=true;el.message.textContent='';try{if(button.dataset.action==='delete')await deleteModels([model]);else{const label=row.querySelector('[data-field="label"]').value;const pickerMode=row.querySelector('[data-field="pickerMode"]').value||null;const enabled=row.querySelector('[data-field="enabled"]').checked;const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,label,pickerMode,enabled})});render(data);el.message.textContent='模型设置已保存并提升目录代次。';}}catch(err){el.message.textContent=err.message;}finally{button.disabled=false;syncSelection();}});
+el.body.addEventListener('click',async(e)=>{const button=e.target.closest('button[data-action]');if(!button)return;const row=button.closest('tr[data-model]');if(!row)return;const model=row.dataset.model;button.disabled=true;el.message.textContent='';try{if(button.dataset.action==='delete')await deleteModels([model]);else if(button.dataset.action==='toggle'){const enabled=row.dataset.enabled!=='true';const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,enabled})});render(data);el.message.textContent=enabled?'已启用：模型进入前端可锁定列表。':'已停用：客户端同步后会移除该模型及其原有锁定选择。';}else{const label=row.querySelector('[data-field="label"]').value;const pickerMode=row.querySelector('[data-field="pickerMode"]').value||null;const data=await api('/admin/api/account/model-catalog',{method:'PUT',body:JSON.stringify({model,label,pickerMode})});render(data);el.message.textContent='名称与 Picker 已保存，目录代次已更新。';}}catch(err){el.message.textContent=err.message;}finally{button.disabled=false;syncSelection();}});
 el.trashBody.addEventListener('click',async(e)=>{const button=e.target.closest('button[data-action="restore"]');if(!button)return;const row=button.closest('tr[data-model]');if(!row)return;button.disabled=true;el.message.textContent='';try{await restoreModels([row.dataset.model]);}catch(err){el.message.textContent=err.message;}finally{button.disabled=false;syncSelection();}});
 void load();
