@@ -101,7 +101,7 @@ log_sqlite_diagnostics() {
 sqlite_preflight() {
   if ! run_as_runtime env DB_PATH_ENV="$DB_PATH" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    import { accessSync, constants, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
+    import { accessSync, constants, existsSync, unlinkSync } from "node:fs";
     import { dirname, join } from "node:path";
     import { randomUUID } from "node:crypto";
     const path=process.env.DB_PATH_ENV, dir=dirname(path);
@@ -110,9 +110,19 @@ sqlite_preflight() {
     for(const sidecar of [path+"-wal",path+"-shm"]){
       if(existsSync(sidecar)) accessSync(sidecar,constants.R_OK|constants.W_OK);
     }
-    const probe=join(dir,`.gptwork-sqlite-access-${randomUUID()}`);
-    const fd=openSync(probe,"wx",0o600);
-    try { closeSync(fd); } finally { unlinkSync(probe); }
+    // Probe WAL/SHM resizing on a unique disposable database in the same
+    // directory, never by writing to the live production database.
+    const probe=join(dir,`.gptwork-sqlite-access-${randomUUID()}.sqlite3`);
+    try {
+      const scratch=new DatabaseSync(probe);
+      try {
+        scratch.exec("PRAGMA journal_mode=WAL; CREATE TABLE probe(x INTEGER); INSERT INTO probe VALUES(1)");
+      } finally { scratch.close(); }
+    } finally {
+      for(const suffix of ["","-wal","-shm"]){
+        if(existsSync(probe+suffix)) unlinkSync(probe+suffix);
+      }
+    }
     const db=new DatabaseSync(path,{readOnly:true});
     try { db.prepare("SELECT name FROM sqlite_master LIMIT 1").get(); }
     finally { db.close(); }
