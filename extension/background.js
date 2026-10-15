@@ -1220,6 +1220,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
   onRewrite(tabId, rewrite) {
     const state = ensureTabState(tabId);
     const capturedAt = new Date().toISOString();
+    const isFormalFetch = Boolean(rewrite.fetchRequestId)
+      && ['/backend-api/conversation', '/backend-api/f/conversation'].includes(rewrite.endpoint);
+    const interceptionPolicy = isFormalFetch ? runtimePolicyForTabSync(tabId) : null;
     state.lastRewrite = {
       capturedAt,
       endpoint: rewrite.endpoint ?? null,
@@ -1234,6 +1237,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
       reasoningBefore: rewrite.reasoningBefore ?? null,
       reasoningAfter: rewrite.reasoningAfter ?? null,
       reasoningFields: rewrite.reasoningFields ?? [],
+      policySnapshot: interceptionPolicy ? {
+        lockedModels: [...interceptionPolicy.lockedModels],
+        allowedReasoningLevels: [...interceptionPolicy.allowedReasoningLevels],
+        strictMode: interceptionPolicy.strictMode,
+      } : null,
       authorityKind: rewrite.authorityKind ?? null,
       authorityModel: rewrite.authorityModel ?? null,
       authorityStartedAt: rewrite.authorityStartedAt ?? null,
@@ -1280,9 +1288,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // formal verification request and must not flip a successful run to error.
     // The interception-job ID is present for every formal paused Chat request;
     // only those may trigger the terminal-authority fail-closed verdict.
-    const formalVerificationFetch = Boolean(rewrite.fetchRequestId)
-      && (rewrite.endpoint === '/backend-api/conversation'
-        || rewrite.endpoint === '/backend-api/f/conversation');
+    const formalVerificationFetch = isFormalFetch;
     if (verification?.model && formalVerificationFetch && !discoveryAuthority) {
       state.lastError = 'verification_request_missing_terminal_authority';
       state.phase = 'error';
@@ -1306,7 +1312,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       : rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked';
     logRuntime(rewrite.error ? 'warn' : 'info', 'lock', lockEvent, {
       tabId,
-      lockedModelsAtInterception: runtimePolicyForTabSync(tabId).lockedModels,
+      lockedModelsAtInterception: state.lastRewrite.policySnapshot?.lockedModels ?? runtimePolicyForTabSync(tabId).lockedModels,
       tabFeatureAtInterception: tabFeatureStateSync(tabId),
       verificationActive: Boolean(verification),
       verificationModel: verification?.model ?? null,
@@ -1348,7 +1354,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
       observedModel: state.lastRequest.observedModel ?? request.model,
       forwardedFetchRequestId: state.lastRequest.forwardedFetchRequestId ?? null,
       requestEvidenceSource: state.lastRequest.requestEvidenceSource ?? 'network_request_metadata',
-      lockedModelsAtRequest: [...policyAtRequest.lockedModels],
+      lockedModelsAtRequest: [...state.lastRequest.policySnapshot.lockedModels],
+      policySource: state.lastRequest.requestEvidenceSource === 'fetch_continued'
+        ? 'fetch-interception-snapshot' : 'network-observation-snapshot',
       conflicts: request.conflicts,
       fields: request.fields,
       diagnostics: request.diagnostics,

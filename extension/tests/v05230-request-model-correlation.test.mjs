@@ -33,6 +33,12 @@ test('real 2026-10-15 request reconciles Fetch.continueRequest with pre-Fetch Ne
   assert.equal(result.forwardedFetchRequestId, forwarded.fetchRequestId);
   assert.equal(result.requestRewritten, true);
   assert.deepEqual(result.policySnapshot.lockedModels, ['gpt-6']);
+  const changedDuringDispatch = withForwardedRequestEvidence(
+    { ...initial, policySnapshot: { lockedModels: ['gpt-5.6-sol', 'gpt-6'] } },
+    { ...forwarded, policySnapshot: { lockedModels: ['gpt-6'] } },
+  );
+  assert.deepEqual(changedDuringDispatch.policySnapshot.lockedModels, ['gpt-6'],
+    'the lock at terminal Fetch interception must survive a later UI policy change');
   assert.strictEqual(withForwardedRequestEvidence(result, forwarded), result);
 });
 

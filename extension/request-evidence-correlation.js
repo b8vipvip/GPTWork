@@ -14,6 +14,11 @@ export function withForwardedRequestEvidence(request, rewrite) {
   // evidence that Fetch.continueRequest sent it unchanged.
   return {
     ...request,
+    // Lock permission belongs to the same Fetch decision as the forwarded
+    // transport. Do not silently resnapshot a later page selection in Network.
+    policySnapshot: Array.isArray(rewrite.policySnapshot?.lockedModels)
+      ? rewrite.policySnapshot
+      : request.policySnapshot,
     observedModel: request.observedModel ?? request.model ?? null,
     observedReasoning: request.observedReasoning ?? request.reasoning ?? null,
     model: rewrite.modelAfter,
