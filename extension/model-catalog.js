@@ -303,7 +303,7 @@
         // the final locked model family, never a list of configured choices.
         id: lockedSentModel,
         label: lockedSentModel
-          ? `${modelLabel(lockedSentModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 上一轮请求' : !lockedSentMatchesPolicy ? ' · 不符合锁定' : requestRewritten ? ' · 锁定改写' : ''}`
+          ? `${modelLabel(lockedSentModel)}${previousSelectionRequest ? ' · 上一轮请求' : requestHistorical ? ' · 最近请求' : !lockedSentMatchesPolicy ? ' · 不符合锁定' : requestRewritten ? ' · 锁定改写' : ''}`
           : unlockedTurn ? '未锁定' : '等待请求',
         status: lockedSentModel ? requestHistorical ? 'request-history' : 'request' : unlockedTurn ? 'unlocked' : 'waiting',
         historical: requestHistorical,

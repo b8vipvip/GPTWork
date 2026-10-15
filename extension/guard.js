@@ -51,9 +51,10 @@ function requestLockPolicyIsCurrent(state, policy) {
   const previous = state.lastRequest?.policySnapshot?.lockedModels;
   if (!Array.isArray(previous)) return true; // legacy state: retain existing rules
   const current = Array.isArray(policy?.lockedModels) ? policy.lockedModels : [];
-  return previous.length === current.length
-    && previous.every((model) => current.some((candidate) => modelMatchesLock(model, candidate)))
-    && current.every((model) => previous.some((candidate) => modelMatchesLock(model, candidate)));
+  // A request can legitimately narrow a multi-model allow-list to one
+  // Picker A model. That subset is still a current lock. Only when its old
+  // model is no longer permitted is the old mismatch historical.
+  return previous.every((model) => current.some((candidate) => modelMatchesLock(model, candidate)));
 }
 
 function hasConfirmedModelMismatch(state, policy) {
@@ -198,12 +199,6 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     // current policy failure when the real served model now matches this
     // tab's canonical lock identity. Retain the audit record, not the red
     // mismatch warning or a sticky send block.
-    const servedModel = state.lastVerification?.model;
-    if (verificationReasons(state).includes('model_not_allowed')
-      && servedModel
-      && policy.lockedModels.some((candidate) => modelMatchesLock(candidate, servedModel))) {
-      return { ...base, allowKind: 'warning', status: 'unverified', reason: 'previous_mismatch_now_allowed' };
-    }
     if (!requestLockPolicyIsCurrent(state, policy)) {
       return {
         ...base,
@@ -211,6 +206,12 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
         status: 'unverified',
         reason: 'previous_request_policy_changed',
       };
+    }
+    const servedModel = state.lastVerification?.model;
+    if (verificationReasons(state).includes('model_not_allowed')
+      && servedModel
+      && policy.lockedModels.some((candidate) => modelMatchesLock(candidate, servedModel))) {
+      return { ...base, allowKind: 'warning', status: 'unverified', reason: 'previous_mismatch_now_allowed' };
     }
     if (mismatchFromEarlierPageSelection(state)) {
       return {

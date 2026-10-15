@@ -16,6 +16,7 @@ function run(rewrite) {
   const events = [];
   const runtime = {
     ensureTabState: () => state,
+    forwardedRequestLedger: { remember() {} },
     verificationTransactionForTab: () => ({ model: 'gpt-5.6-sol' }),
     runtimePolicyForTabSync: () => ({ lockedModels: ['gpt-5.6-sol'] }),
     tabFeatureStateSync: () => ({ modelLockEnabled: true, workModeEnabled: false }),
