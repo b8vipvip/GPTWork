@@ -99,7 +99,7 @@ test('no-lock direct served-model response is visible as observation without a s
   assert.equal(snapshot.response.status, 'response');
   assert.equal(snapshot.response.confirmed, false);
   assert.equal(snapshot.response.mismatch, false);
-  assert.match(snapshot.response.label, /响应元数据/);
+  assert.match(snapshot.response.label, /实际响应/);
 });
 
 test('no-lock response fails closed on stale, conflicting, missing-authority or in-flight data', () => {
