@@ -1854,11 +1854,9 @@ async function resolveUnknownCatalogNames(tabId, rows) {
 }
 
 function sharedModelClientEligible(item) {
-  if (item?.clientEligible === true || Number(item?.clientEligibleAccountCount || 0) > 0) return true;
-  return Number(item?.discoveredCount || 0) > 0
-    && Number(item?.requestConfirmedAccountCount || 0) > 0
-    && Number(item?.verifiedAccountCount || 0) > 0
-    && Number(item?.chatLockVerifiedAccountCount || 0) > 0;
+  // Server administrative enablement is the only front-end lock-list gate.
+  // Verification evidence is diagnostic and never overrides this control.
+  return item?.enabled === true;
 }
 
 function normalizeClientSharedModels(items) {
@@ -1879,6 +1877,7 @@ function normalizeClientSharedModels(items) {
       chatLockVerifiedAccountCount: Math.max(0, Number(item?.chatLockVerifiedAccountCount || 0)),
       clientEligibleAccountCount: Math.max(0, Number(item?.clientEligibleAccountCount || 0)),
       clientEligible: item?.clientEligible === true,
+      enabled: item?.enabled === true,
       lastSeenAt: item?.lastSeenAt || null,
     }))
     .filter((item) => item.model && sharedModelClientEligible(item));
@@ -1889,7 +1888,7 @@ async function applyClientSharedModelCatalog(rawModels, {
   accountId = Number(accountState?.user?.id || 0),
   reason = 'sync',
 } = {}) {
-  const stored = await chrome.storage.sync.get([SHARED_KNOWN_MODELS_KEY, 'policy']);
+  const stored = await chrome.storage.sync.get([SHARED_KNOWN_MODELS_KEY, 'policy', 'gptworkModelLockSelection']);
   const previous = Array.isArray(stored[SHARED_KNOWN_MODELS_KEY]) ? stored[SHARED_KNOWN_MODELS_KEY] : [];
   const models = normalizeClientSharedModels(rawModels);
   const allowed = new Set(models.map((item) => item.model));
@@ -1903,6 +1902,13 @@ async function applyClientSharedModelCatalog(rawModels, {
   const patch = {};
   if (JSON.stringify(previous) !== JSON.stringify(models)) patch[SHARED_KNOWN_MODELS_KEY] = models;
   if (JSON.stringify(policy) !== JSON.stringify(nextPolicy)) patch.policy = nextPolicy;
+  // Remove disabled models from the tab's independent selection cache, too.
+  if (Array.isArray(stored.gptworkModelLockSelection)) {
+    const selection = stored.gptworkModelLockSelection.filter((model) => allowed.has(model));
+    if (JSON.stringify(selection) !== JSON.stringify(stored.gptworkModelLockSelection)) {
+      patch.gptworkModelLockSelection = selection;
+    }
+  }
   if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
   currentPolicy = nextPolicy;
 
