@@ -512,8 +512,8 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   const knownModels = new Set(normalizedUnique(configuration.knownModels, normalizeModelId));
   const pageSelectedAllowed = Boolean(
     result.modelBefore
-      && knownModels.has(result.modelBefore)
       && lockedModels.includes(result.modelBefore)
+      && (knownModels.has(result.modelBefore) || configuration.preserveModel === true)
   );
   const forcedModel = normalizeModelId(configuration.forceModel);
   const forceKnownModel = Boolean(forcedModel && knownModels.has(forcedModel));
