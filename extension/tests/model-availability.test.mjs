@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import vm from 'node:vm';
 
 import {
   ACCOUNT_MODEL_CATALOG_SOURCE,
@@ -150,7 +151,7 @@ test('runtime waits for auto verification completion and auto-selects newly disc
   assert.match(runtimeSource, /MODEL_SELECTION_SEEN_KEY/);
   assert.match(runtimeSource, /discovered\.filter\(isHigherThanSol\)/);
   assert.match(runtimeSource, /models\[model\]\?\.status === 'available'/);
-  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(\(model\) => approved\(model\) && !unavailable\.has\(model\)\)/);
+  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(selectable\)/);
 });
 
 test('settings gray only explicitly unavailable models and show the requested explanation', () => {
@@ -162,4 +163,65 @@ test('settings gray only explicitly unavailable models and show the requested ex
   assert.match(optionsSource, /MODEL_UNAVAILABLE_MESSAGE/);
   assert.match(settingsShellSource, /import\('\.\/model-availability-options\.js'\)/);
   assert.match(backgroundEntrySource, /model-availability-runtime\.js/);
+});
+
+test('administrator-enabled catalog models remain selectable despite local negative probes', () => {
+  assert.match(runtimeSource, /const selectable = \(model\) => approved\(model\) && \(hasAdminCatalog \|\| !unavailable\.has\(model\)\)/);
+  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(selectable\)/);
+  assert.match(runtimeSource, /normalizeModels\(active\)\.filter\(selectable\)/);
+  assert.match(optionsSource, /const adminEnabled = row\.dataset\.sharedKnownModel/);
+  assert.match(optionsSource, /if \(unavailable && !adminEnabled\)/);
+  assert.match(optionsSource, /model-availability-warning/);
+});
+
+test('enabled catalog survives local unavailable evidence, while disabled models are pruned', async () => {
+  const start = runtimeSource.indexOf('async function reconcileSelectionAndPolicy(');
+  const end = runtimeSource.indexOf('\nasync function applyAvailabilityProbe(', start);
+  assert.ok(start >= 0 && end > start);
+  const source = runtimeSource.slice(start, end) + '\nglobalThis.reconcile = reconcileSelectionAndPolicy;';
+  async function run(sharedCatalog) {
+    const syncData = {
+      policy: { lockedModels: ['gpt-6', 'gpt-5.6-sol'] },
+      gptworkModelLockSelection: ['gpt-6', 'gpt-5.6-sol'],
+      gptworkModelLockSelectionSeenV1: [],
+      ...(sharedCatalog === undefined ? {} : { gptworkSharedKnownModelsV1: sharedCatalog }),
+    };
+    const patch = {};
+    const context = vm.createContext({
+      chrome: { storage: {
+        local: { get: async () => ({ gptworkModelLockEnabled: true, gptworkWorkModeEnabled: false }) },
+        sync: { get: async () => syncData, set: async (next) => Object.assign(patch, next) },
+      } },
+      WORK_MODE_KEY: 'gptworkWorkModeEnabled', MODEL_LOCK_KEY: 'gptworkModelLockEnabled',
+      MODEL_SELECTION_KEY: 'gptworkModelLockSelection',
+      MODEL_SELECTION_SEEN_KEY: 'gptworkModelLockSelectionSeenV1',
+      DISCOVERED_MODELS_KEY: 'discoveredModels',
+      DISCOVERED_EVIDENCE_KEY: 'discoveredModelEvidence',
+      SHARED_KNOWN_MODELS_KEY: 'gptworkSharedKnownModelsV1',
+      ASTRA_POLICY_MIGRATION_KEY: 'astraPolicyMigrationV1',
+      SOL_MODEL_ID: 'gpt-5.6-sol', ASTRA_MODEL_ID: 'gpt-6-astra',
+      normalizeAvailabilityState: (value) => value,
+      unavailableModelIds: () => ['gpt-6'],
+      trustedDiscoveredModels: () => [],
+      knownHigherModels: () => [],
+      isHigherThanSol: () => false,
+      normalizeConcreteModelId: (value) => value || null,
+      normalizeModels: (values) => [...new Set((Array.isArray(values) ? values : []).filter(Boolean))],
+      normalizePolicy: (value) => value,
+      DEFAULT_POLICY: { lockedModels: [] },
+      sameJson: (left, right) => JSON.stringify(left) === JSON.stringify(right),
+    });
+    vm.runInContext(source, context);
+    await context.reconcile({ models: { 'gpt-6': { status: 'unavailable' } } });
+    return patch;
+  }
+
+  const enabled = await run([{ model: 'gpt-6', enabled: true }, { model: 'gpt-5.6-sol', enabled: false }]);
+  assert.deepEqual(Array.from(enabled.gptworkModelLockSelection), ['gpt-6']);
+  assert.deepEqual(Array.from(enabled.policy.lockedModels), ['gpt-6']);
+  const disabled = await run([{ model: 'gpt-6', enabled: false }]);
+  assert.deepEqual(Array.from(disabled.gptworkModelLockSelection), []);
+  assert.deepEqual(Array.from(disabled.policy.lockedModels), []);
+  const legacy = await run(undefined);
+  assert.ok(!legacy.gptworkModelLockSelection.includes('gpt-6'), 'legacy account availability still applies without a synchronized admin catalog');
 });

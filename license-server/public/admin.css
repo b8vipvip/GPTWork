@@ -3,3 +3,8 @@
 
 .sidebar nav a.active,.sidebar nav a[aria-current="page"]{background:#2563eb;color:#fff;box-shadow:0 8px 22px rgba(37,99,235,.22)}
 body[data-admin-page] #app>.card,body[data-admin-page] #app>.stats-grid{margin-top:0}
+
+.verification-status-cell{min-width:200px;max-width:235px;white-space:normal}
+.verification-status-cell select{width:100%;max-width:230px;font-size:11px;padding:6px 8px;margin-bottom:5px}
+.verification-status-cell button{padding:6px 9px;margin-bottom:5px}
+.verification-status-cell small{display:block;color:#64748b;font-size:10px;line-height:1.5;white-space:normal}

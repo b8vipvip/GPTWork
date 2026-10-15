@@ -53,7 +53,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.231';
+const RUNTIME_CODE_VERSION = '0.5.232';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1877,6 +1877,11 @@ function normalizeClientSharedModels(items) {
       chatLockVerifiedAccountCount: Math.max(0, Number(item?.chatLockVerifiedAccountCount || 0)),
       clientEligibleAccountCount: Math.max(0, Number(item?.clientEligibleAccountCount || 0)),
       clientEligible: item?.clientEligible === true,
+      verificationStatusOverride: ['auto', 'verified', 'pending', 'failed'].includes(item?.verificationStatusOverride)
+        ? item.verificationStatusOverride : 'auto',
+      verificationStatus: ['verified', 'pending', 'failed'].includes(item?.verificationStatus)
+        ? item.verificationStatus : 'pending',
+      verificationStatusSource: item?.verificationStatusSource === 'manual' ? 'manual' : 'automatic',
       enabled: item?.enabled === true,
       lastSeenAt: item?.lastSeenAt || null,
     }))

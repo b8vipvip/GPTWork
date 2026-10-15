@@ -119,3 +119,20 @@ test('admin enable flag is the only server choice exposure gate; verification is
   assert.match(adminJs, /method:'PUT'/);
   assert.match(adminHtml, /“保存”仅保存名称和 Picker/);
 });
+
+test('manual model verification status is independently editable and keeps four-stage account evidence immutable', () => {
+  assert.match(accountSystem, /ensureColumn\('shared_model_catalog', 'verification_status_override'/);
+  assert.match(accountSystem, /ensureColumn\('shared_model_catalog_trash', 'verification_status_override'/);
+  assert.match(accountSystem, /verificationStatusOverride: row\.verification_status_override \|\| 'auto'/);
+  assert.match(accountSystem, /verificationStatusSource: row\.verification_status_override !== 'auto' \? 'manual' : 'automatic'/);
+  assert.match(accountSystem, /'INVALID_MODEL_VERIFICATION_STATUS'/);
+  assert.match(accountSystem, /verification_status_override=excluded\.verification_status_override/);
+  assert.match(accountSystem, /trash\.verification_status_override \|\| 'auto'/);
+  assert.match(accountSystem, /current\.verification_status_override \|\| 'auto',deletedAt/);
+  assert.match(adminHtml, /<th>验证状态<\/th>/);
+  assert.match(adminJs, /data-field="verificationStatusOverride"/);
+  assert.match(adminJs, /data-action="verification"/);
+  assert.match(adminJs, /JSON\.stringify\(\{model,verificationStatusOverride\}\)/);
+  assert.match(background, /verificationStatusSource: item\?\.verificationStatusSource === 'manual'/);
+  assert.match(accountSystem, /if \(clientEligibleOnly\) filters\.push\('c\.enabled=1'\)/);
+});

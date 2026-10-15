@@ -245,7 +245,9 @@ export function createAccountSystem({
     verified_count INTEGER NOT NULL DEFAULT 0 CHECK(verified_count >= 0),
     chat_lock_verified_count INTEGER NOT NULL DEFAULT 0 CHECK(chat_lock_verified_count >= 0),
     first_seen_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    verification_status_override TEXT NOT NULL DEFAULT 'auto'
+      CHECK(verification_status_override IN ('auto','verified','pending','failed'))
   ) STRICT;
   CREATE TABLE IF NOT EXISTS shared_model_catalog_state (
     id INTEGER PRIMARY KEY CHECK(id=1),
@@ -266,6 +268,8 @@ export function createAccountSystem({
     last_seen_at TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
     discovered_count INTEGER NOT NULL DEFAULT 0 CHECK(discovered_count >= 0),
+    verification_status_override TEXT NOT NULL DEFAULT 'auto'
+      CHECK(verification_status_override IN ('auto','verified','pending','failed')),
     deleted_at TEXT NOT NULL
   ) STRICT;
   CREATE TABLE IF NOT EXISTS shared_model_account_seen_trash (
@@ -336,6 +340,10 @@ export function createAccountSystem({
   ensureColumn('users', 'email_verification_exempt', 'email_verification_exempt INTEGER NOT NULL DEFAULT 0 CHECK(email_verification_exempt IN (0,1))');
   ensureColumn('users', 'user_level', "user_level TEXT NOT NULL DEFAULT 'normal'");
   ensureColumn('shared_model_catalog', 'enabled', 'enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))');
+  ensureColumn('shared_model_catalog', 'verification_status_override',
+    "verification_status_override TEXT NOT NULL DEFAULT 'auto' CHECK(verification_status_override IN ('auto','verified','pending','failed'))");
+  ensureColumn('shared_model_catalog_trash', 'verification_status_override',
+    "verification_status_override TEXT NOT NULL DEFAULT 'auto' CHECK(verification_status_override IN ('auto','verified','pending','failed'))");
   ensureColumn('shared_model_catalog', 'discovered_count', 'discovered_count INTEGER NOT NULL DEFAULT 0 CHECK(discovered_count >= 0)');
   ensureColumn('shared_model_catalog', 'native_request_model', 'native_request_model TEXT');
   ensureColumn('shared_model_catalog', 'native_response_model', 'native_response_model TEXT');
@@ -568,7 +576,7 @@ export function createAccountSystem({
     if (clientEligibleOnly) filters.push('c.enabled=1');
     const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
     return db.prepare(`SELECT
-        c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
+        c.model_id,c.display_name,c.picker_mode,c.enabled,c.verification_status_override,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
         c.native_request_model,c.native_response_model,c.chat_transport_model,c.chat_response_model,
         c.first_seen_at,c.last_seen_at,
         (SELECT COUNT(*) FROM shared_model_account_seen s WHERE s.model_id=c.model_id) AS account_count,
@@ -604,6 +612,13 @@ export function createAccountSystem({
         clientEligibleAccountCount: Number(row.client_eligible_account_count || 0),
         clientEligible: Number(row.discovered_count || 0) > 0
           && Number(row.client_eligible_account_count || 0) > 0,
+        // Manual status is an administrative annotation, never fabricated
+        // account proof or a second gate on the front-end lockable catalog.
+        verificationStatusOverride: row.verification_status_override || 'auto',
+        verificationStatus: row.verification_status_override !== 'auto'
+          ? row.verification_status_override
+          : (Number(row.client_eligible_account_count || 0) > 0 ? 'verified' : 'pending'),
+        verificationStatusSource: row.verification_status_override !== 'auto' ? 'manual' : 'automatic',
         lockSelectable: Boolean(row.enabled),
         firstSeenAt: row.first_seen_at,
         lastSeenAt: row.last_seen_at,
@@ -612,7 +627,7 @@ export function createAccountSystem({
 
   function sharedModelCatalogTrash() {
     return db.prepare(`SELECT
-        c.model_id,c.display_name,c.picker_mode,c.enabled,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
+        c.model_id,c.display_name,c.picker_mode,c.enabled,c.verification_status_override,c.discovered_count,c.verified_count,c.chat_lock_verified_count,
         c.native_request_model,c.native_response_model,c.chat_transport_model,c.chat_response_model,
         c.first_seen_at,c.last_seen_at,c.deleted_at,
         (SELECT COUNT(*) FROM shared_model_account_seen_trash s WHERE s.model_id=c.model_id) AS account_count,
@@ -637,6 +652,7 @@ export function createAccountSystem({
         requestConfirmedAccountCount: Number(row.request_confirmed_account_count || 0),
         verifiedAccountCount: Number(row.verified_account_count || 0),
         chatLockVerifiedAccountCount: Number(row.chat_lock_verified_account_count || 0),
+        verificationStatusOverride: row.verification_status_override || 'auto',
         firstSeenAt: row.first_seen_at,
         lastSeenAt: row.last_seen_at,
         deletedAt: row.deleted_at,
@@ -833,13 +849,28 @@ export function createAccountSystem({
       ? (current.picker_mode || null)
       : (['A', 'B'].includes(input.pickerMode) ? input.pickerMode : null);
     const enabled = input.enabled === undefined ? Boolean(current.enabled) : input.enabled !== false;
+    const verificationStatusOverride = input.verificationStatusOverride === undefined
+      ? (current.verification_status_override || 'auto')
+      : input.verificationStatusOverride;
+    if (typeof verificationStatusOverride !== 'string'
+      || !['auto', 'verified', 'pending', 'failed'].includes(verificationStatusOverride)) {
+      fail(400, 'INVALID_MODEL_VERIFICATION_STATUS', '模型验证状态必须为自动、人工已验证、待验证或验证失败');
+    }
     const changed = label !== current.display_name
       || pickerMode !== (current.picker_mode || null)
-      || Number(enabled) !== Number(current.enabled);
+      || Number(enabled) !== Number(current.enabled)
+      || verificationStatusOverride !== (current.verification_status_override || 'auto');
     if (changed) {
-      db.prepare('UPDATE shared_model_catalog SET display_name=?,picker_mode=?,enabled=? WHERE model_id=?')
-        .run(label, pickerMode, enabled ? 1 : 0, model);
-      bumpSharedModelCatalogGeneration();
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.prepare('UPDATE shared_model_catalog SET display_name=?,picker_mode=?,enabled=?,verification_status_override=? WHERE model_id=?')
+          .run(label, pickerMode, enabled ? 1 : 0, verificationStatusOverride, model);
+        bumpSharedModelCatalogGeneration();
+        db.exec('COMMIT');
+      } catch (error) {
+        try { db.exec('ROLLBACK'); } catch {}
+        throw error;
+      }
     }
     return {
       generation: sharedModelCatalogGeneration(),
@@ -859,15 +890,17 @@ export function createAccountSystem({
     const selectEvidence = db.prepare('SELECT * FROM shared_model_account_seen WHERE model_id=? ORDER BY user_id');
     const saveTrash = db.prepare(`INSERT INTO shared_model_catalog_trash(
         model_id,display_name,picker_mode,native_request_model,native_response_model,chat_transport_model,chat_response_model,
-        verified_count,chat_lock_verified_count,first_seen_at,last_seen_at,enabled,discovered_count,deleted_at
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        verified_count,chat_lock_verified_count,first_seen_at,last_seen_at,enabled,discovered_count,verification_status_override,deleted_at
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(model_id) DO UPDATE SET
         display_name=excluded.display_name,picker_mode=excluded.picker_mode,
         native_request_model=excluded.native_request_model,native_response_model=excluded.native_response_model,
         chat_transport_model=excluded.chat_transport_model,chat_response_model=excluded.chat_response_model,
         verified_count=excluded.verified_count,chat_lock_verified_count=excluded.chat_lock_verified_count,
         first_seen_at=excluded.first_seen_at,last_seen_at=excluded.last_seen_at,enabled=excluded.enabled,
-        discovered_count=excluded.discovered_count,deleted_at=excluded.deleted_at`);
+        discovered_count=excluded.discovered_count,
+        verification_status_override=excluded.verification_status_override,
+        deleted_at=excluded.deleted_at`);
     const clearTrashEvidence = db.prepare('DELETE FROM shared_model_account_seen_trash WHERE model_id=?');
     const saveTrashEvidence = db.prepare(`INSERT OR REPLACE INTO shared_model_account_seen_trash(
         user_id,model_id,request_confirmed,response_confirmed,native_request_model,native_response_model,
@@ -888,7 +921,8 @@ export function createAccountSystem({
         saveTrash.run(
           current.model_id,current.display_name,current.picker_mode,current.native_request_model,current.native_response_model,
           current.chat_transport_model,current.chat_response_model,current.verified_count,current.chat_lock_verified_count,
-          current.first_seen_at,current.last_seen_at,current.enabled,current.discovered_count,deletedAt,
+          current.first_seen_at,current.last_seen_at,current.enabled,current.discovered_count,
+          current.verification_status_override || 'auto',deletedAt,
         );
         clearTrashEvidence.run(model);
         for (const row of selectEvidence.all(model)) {
@@ -931,8 +965,8 @@ export function createAccountSystem({
     const userExists = db.prepare('SELECT id FROM users WHERE id=?');
     const restoreCatalog = db.prepare(`INSERT INTO shared_model_catalog(
         model_id,display_name,picker_mode,native_request_model,native_response_model,chat_transport_model,chat_response_model,
-        verified_count,chat_lock_verified_count,first_seen_at,last_seen_at,enabled,discovered_count
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        verified_count,chat_lock_verified_count,first_seen_at,last_seen_at,enabled,discovered_count,verification_status_override
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const restoreEvidence = db.prepare(`INSERT OR REPLACE INTO shared_model_account_seen(
         user_id,model_id,request_confirmed,response_confirmed,native_request_model,native_response_model,
         chat_transport_model,chat_response_model,chat_lock_request_confirmed,chat_lock_response_confirmed,
@@ -959,6 +993,7 @@ export function createAccountSystem({
           trash.model_id,trash.display_name,trash.picker_mode,trash.native_request_model,trash.native_response_model,
           trash.chat_transport_model,trash.chat_response_model,trash.verified_count,trash.chat_lock_verified_count,
           trash.first_seen_at,trash.last_seen_at,trash.enabled,trash.discovered_count,
+          trash.verification_status_override || 'auto',
         );
         for (const row of selectTrashEvidence.all(model)) {
           if (!userExists.get(row.user_id)) continue;
@@ -1928,6 +1963,7 @@ export function createAccountSystem({
           model: normalizeSharedModelId(input.model),
           enabled: input.enabled,
           pickerMode: input.pickerMode ?? null,
+          verificationStatusOverride: input.verificationStatusOverride,
           generation: result.generation,
         });
         return json(res, 200, { ok: true, ...result }), true;

@@ -26,6 +26,8 @@ function installStyle() {
     .check-row.model-unavailable strong,
     .check-row.model-unavailable small { color: #94a3b8; }
     .check-row.model-unavailable input { opacity: .48; cursor: not-allowed; }
+    .check-row.model-availability-warning { border-color: #fbbf24; }
+    .check-row.model-availability-warning small { color: #92400e; }
     .model-unavailable-tooltip {
       display: none !important;
       position: absolute;
@@ -76,8 +78,11 @@ function applyRow(input) {
   const row = input.closest('.check-row');
   if (!row) return;
   const unavailable = availabilityFor(input)?.status === 'unavailable';
+  // Only server catalog enablement decides whether a synchronized model can
+  // be selected. Local negative probes may warn, but cannot disable it.
+  const adminEnabled = row.dataset.sharedKnownModel === normalizeConcreteModelId(input.value);
 
-  if (unavailable) {
+  if (unavailable && !adminEnabled) {
     row.classList.add('model-unavailable');
     row.dataset.modelUnavailable = 'true';
     row.title = MODEL_UNAVAILABLE_MESSAGE;
@@ -96,9 +101,15 @@ function applyRow(input) {
     delete input.dataset.availabilityDisabled;
   }
   row.classList.remove('model-unavailable');
+  row.classList.toggle('model-availability-warning', unavailable && adminEnabled);
   delete row.dataset.modelUnavailable;
   delete row.dataset.tooltipOpen;
-  if (row.title === MODEL_UNAVAILABLE_MESSAGE) row.removeAttribute('title');
+  if (unavailable && adminEnabled) {
+    row.title = '当前账户的自动探测显示不可用，但管理员已启用此模型，仍可尝试锁定';
+  } else if (row.title === MODEL_UNAVAILABLE_MESSAGE
+    || row.title === '当前账户的自动探测显示不可用，但管理员已启用此模型，仍可尝试锁定') {
+    row.removeAttribute('title');
+  }
   if (row.tabIndex === 0) row.removeAttribute('tabindex');
   row.querySelector('.model-unavailable-tooltip')?.remove();
 }
