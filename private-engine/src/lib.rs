@@ -850,6 +850,33 @@ mod tests {
     }
 
     #[test]
+    fn gpt_5_6_sol_picker_and_gpt_5_6_thinking_protocol_share_lock_identity() {
+        assert!(model_matches_lock("gpt-5.6-sol", "gpt-5-6-thinking"));
+        assert!(model_matches_lock("gpt-5.6-sol", "gpt-5.6-thinking"));
+        assert!(!model_matches_lock("gpt-6", "gpt-5-6-thinking"));
+        assert!(!model_matches_lock("gpt-5.6-terra", "gpt-5-6-thinking"));
+
+        let request = RequestEnvelope {
+            host: "chatgpt.com".into(),
+            path: "/backend-api/f/conversation".into(),
+            method: "POST".into(),
+            post_data: json!({"model":"gpt-5-6-thinking","thinking_effort":"high"}).to_string(),
+            locked_models: vec!["gpt-6".into(), "gpt-5.6-sol".into()],
+            allowed_reasoning_levels: vec!["high".into()],
+            preferred_reasoning: Some("high".into()),
+        };
+        let decision = evaluate_request(&request);
+        assert!(decision.official_conversation);
+        assert!(!decision.changed);
+        assert_eq!(decision.reason, "already_locked");
+        assert_eq!(decision.model_after.as_deref(), Some("gpt-5.6-thinking"));
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-5-6-thinking")
+        );
+    }
+
+    #[test]
     fn preserves_real_gpt6_thinking_protocol_under_multi_model_lock() {
         let request = RequestEnvelope {
             host: "chatgpt.com".into(),
