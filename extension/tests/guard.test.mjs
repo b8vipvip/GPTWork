@@ -305,7 +305,8 @@ test('previous model_not_allowed verdict cannot block when GPT 6 label matches a
   });
   assert.equal(guard.canSend, true);
   assert.equal(guard.uiMatches, true);
-  assert.equal(guard.reason, null);
+  assert.equal(guard.status, 'unverified');
+  assert.equal(guard.reason, 'previous_mismatch_now_allowed');
 });
 
 test('GPT 6 Sol is not the same locked family as GPT 6 Thinking', () => {
