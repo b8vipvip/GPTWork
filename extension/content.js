@@ -62,14 +62,11 @@
   // elements causally owned by the active composer trigger.
 
   let reportTimer = null;
-  let alignTimer = null;
   let previousFingerprint = '';
   let cachedState = null;
   let cachedPolicy = null;
   let cachedSettings = null;
   let lastUrl = location.href;
-  let lastAlignAttempt = '';
-  let lastAlignAt = 0;
   let sendConsumedAt = 0;
   let indicator = null;
   let autoProbeRunning = false;
@@ -690,7 +687,6 @@ document.addEventListener('pointerdown', (event) => {
     if (payload?.policy) cachedPolicy = payload.policy;
     if (payload?.settings) cachedSettings = payload.settings;
     renderIndicator();
-    scheduleAlign();
   }
 
   function failOpenStaleRuntime() {
@@ -1076,6 +1072,9 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   async function trustedPointer(element, action = 'click', source = 'unspecified') {
+    // Local capability check; the service worker independently enforces the same
+    // discovery-only boundary immediately before issuing trusted CDP input.
+    if (!autoVerificationRunning) return false;
     const traceId = ++pointerTraceSeq;
     if (!element || !visible(element)) {
       pointerTrace('rejected_invisible', { traceId, action, source, target: compactElementProbe(element) });
@@ -1843,38 +1842,16 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   async function alignSelection({ force = false } = {}) {
-    // Verification owns the model UI for its entire transaction. Background alignment
-    // is suspended instead of becoming a second model-selection authority.
-    if (cachedState?.autoVerification?.running) return false;
-    if (!cachedSettings?.enabled || !cachedSettings.autoAlignSelection || !cachedPolicy || visibleGeneratingControl()) return false;
+    // Never align models during ordinary Chat. This method exists solely as a
+    // discovery probe helper and must be explicitly forced by that active task.
+    // Server/local autoAlignSelection values do not authorize page UI mutation.
+    if (!force || !autoVerificationRunning || visibleGeneratingControl()) return false;
     const observation = collectObservation();
-    const desiredModel = cachedPolicy.lockedModels?.[0];
-    // The previous pageModelIsKnown gate suppressed alignment whenever the
-    // current official Picker A model was recognized (for example GPT-6),
-    // precisely when switching to another locked Picker A model is needed.
-    const preferred = cachedPolicy.allowedReasoningLevels?.includes(cachedSettings.preferredReasoning)
-      ? cachedSettings.preferredReasoning
-      : cachedPolicy.allowedReasoningLevels?.[0];
-    const signature = JSON.stringify([location.pathname, desiredModel, preferred, observation.model, observation.reasoning, force]);
-    if (!force && signature === lastAlignAttempt && Date.now() - lastAlignAt < 30000) return false;
-    lastAlignAttempt = signature;
-    lastAlignAt = Date.now();
-
-    let changed = false;
-    if (desiredModel && observation.model && observation.model !== desiredModel) {
-      changed = await chooseExact(MODEL_SELECTORS, desiredModel, normalizeDisplayedModel);
-    }
-    const afterModel = changed ? collectObservation() : observation;
-    if (preferred && !changed && afterModel.reasoning && afterModel.reasoning !== preferred) {
-      changed = await chooseExact(REASONING_SELECTORS, preferred, normalizeDisplayedReasoning);
-    }
+    const desiredModel = cachedPolicy?.lockedModels?.[0];
+    if (!desiredModel || !observation.model || observation.model === desiredModel) return false;
+    const changed = await chooseExact(MODEL_SELECTORS, desiredModel, normalizeDisplayedModel);
     if (changed) window.setTimeout(() => void report(), 700);
     return changed;
-  }
-
-  function scheduleAlign() {
-    clearTimeout(alignTimer);
-    alignTimer = window.setTimeout(() => void alignSelection(), 900);
   }
 
   function scheduleReport() {
@@ -1888,7 +1865,6 @@ document.addEventListener('pointerdown', (event) => {
           .catch(() => {});
       }
       void report();
-      scheduleAlign();
     }, 900);
   }
 
