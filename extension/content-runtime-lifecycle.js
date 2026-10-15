@@ -648,7 +648,7 @@
     slot.set(listener, record);
     eventListeners.add(record);
     if (options?.signal && typeof options.signal.addEventListener === 'function') {
-      const onAbort = () => releaseTrackedListener(targetRef.deref(), type, listener, capture, record);
+      const onAbort = () => releaseTrackedListener(targetRef.deref(), type, listenerRef.deref(), capture, record);
       record.abortCleanup = onAbort;
       original.addEventListener.call(options.signal, 'abort', onAbort, { once: true });
       if (options.signal.aborted) onAbort();
