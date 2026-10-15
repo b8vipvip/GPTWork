@@ -141,6 +141,7 @@ test('two selected Chat lock models remain allowed while official Picker A expos
     normalizeModels: (models) => models,
     normalizePolicy: (policy) => policy,
     modelMatchesLock,
+    adminAllowedModels: (models) => models,
   };
   vm.runInNewContext(source, context);
   assert.deepEqual(
@@ -163,4 +164,27 @@ test('two selected Chat lock models remain allowed while official Picker A expos
     ['gpt-5.6-sol', 'gpt-6'],
     'a disallowed page model never acquires new permission',
   );
+});
+
+test('admin-disabled model cannot re-enter tab request lock from stale selection', () => {
+  const start = runtime.indexOf('export function requestPolicyForTabSync(');
+  const end = runtime.indexOf('export function effectivePolicyForTabSync(', start);
+  const source = runtime.slice(start, end).replace('export function ', 'function ')
+    + '\n globalThis.resolve = requestPolicyForTabSync;';
+  const enabled = new Set(['gpt-6']);
+  const context = {
+    masterEnabled: true, workFeatureEnabled: false,
+    basePolicy: { lockedModels: ['gpt-5.6-sol', 'gpt-6'], allowedReasoningLevels: ['high'] },
+    modelLockSelection: ['gpt-5.6-sol', 'gpt-6'],
+    tabFeatureStateSync: () => ({ workModeEnabled: false, modelLockEnabled: true }),
+    normalizeConcreteModelId: (value) => value || null,
+    normalizeModels: (models) => models,
+    normalizePolicy: (policy) => policy,
+    modelMatchesLock,
+    adminAllowedModels: (models) => models.filter((model) => enabled.has(model)),
+  };
+  vm.runInNewContext(source, context);
+  assert.deepEqual(Array.from(context.resolve(3, null).lockedModels), ['gpt-6']);
+  enabled.clear();
+  assert.deepEqual(Array.from(context.resolve(3, null).lockedModels), []);
 });

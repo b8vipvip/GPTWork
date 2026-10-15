@@ -150,7 +150,7 @@ test('runtime waits for auto verification completion and auto-selects newly disc
   assert.match(runtimeSource, /MODEL_SELECTION_SEEN_KEY/);
   assert.match(runtimeSource, /discovered\.filter\(isHigherThanSol\)/);
   assert.match(runtimeSource, /models\[model\]\?\.status === 'available'/);
-  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(\(model\) => !unavailable\.has\(model\)\)/);
+  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(\(model\) => approved\(model\) && !unavailable\.has\(model\)\)/);
 });
 
 test('settings gray only explicitly unavailable models and show the requested explanation', () => {
