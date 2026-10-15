@@ -122,11 +122,11 @@ test('v0.5.114 verification can ignore only a stale generating control after ter
 });
 
 
-test('v0.5.116 keeps known page selection authoritative across UI alignment and request lock', () => {
+test('v0.5.222 keeps known page selection authoritative without automatic page UI alignment', () => {
   assert.match(backgroundSource, /knownModels: \[\.\.\.sharedKnownModelIds\]/);
-  assert.match(backgroundSource, /knownModels: \[\.\.\.sharedKnownModelIds\]/);
-  assert.match(contentSource, /desiredModel && observation\.model && observation\.model !== desiredModel/);
-  assert.match(contentSource, /cachedSettings\.autoAlignSelection/);
+  assert.match(contentSource, /if \(!force \|\| !autoVerificationRunning \|\| visibleGeneratingControl\(\)\) return false/);
+  assert.doesNotMatch(contentSource, /scheduleAlign\(\)/);
+  assert.match(backgroundSource, /discovery_ui_action_not_authorized/);
 });
 
 test('v0.5.116 rejects reasoning-decorated pseudo model rows', () => {
