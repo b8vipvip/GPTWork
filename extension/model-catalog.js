@@ -219,8 +219,9 @@
     const responseAt = timestamp(networkResponse?.capturedAt);
     const responseMatchesRequest = !state?.lastRequest?.requestId
       || networkResponse?.requestId === state.lastRequest.requestId;
-    const observedResponseModel = unlocked
-      && state?.phase !== 'waiting'
+    // A genuine served/resolved/used model is evidence even if it is NOT
+    // permitted by the lock. Keep evidence identity independent from verdict.
+    const observedResponseModel = state?.phase !== 'waiting'
       && networkResponse?.evidenceSource === 'network_response_metadata'
       && networkResponse?.fields?.model
       && !networkResponse?.conflicts?.model
@@ -242,12 +243,22 @@
       fallbackResponseModel
       && (verification?.reasons?.includes?.('model_not_allowed') || verification?.verdict === 'mismatch')
     );
-    const responseConfirmed = previousSelectionRequest ? false : observedResponseModel ? false : selected?.response?.id
-      ? Boolean(selected.response.confirmed)
-      : fallbackResponseConfirmed;
-    const responseMismatch = previousSelectionRequest ? false : observedResponseModel ? false : selected?.response?.id
-      ? Boolean(selected.response.mismatch)
-      : fallbackResponseMismatch;
+    const observedResponseEvaluated = Boolean(
+      observedResponseModel
+      && responseCurrent
+      && verification?.evidenceSource === 'network_response_metadata'
+      && normalizeModelId(verification?.model) === observedResponseModel
+    );
+    const responseConfirmed = previousSelectionRequest ? false : observedResponseModel
+      ? Boolean(observedResponseEvaluated && verification?.verdict === 'verified')
+      : selected?.response?.id
+        ? Boolean(selected.response.confirmed)
+        : fallbackResponseConfirmed;
+    const responseMismatch = previousSelectionRequest ? false : observedResponseModel
+      ? Boolean(observedResponseEvaluated && fallbackResponseMismatch)
+      : selected?.response?.id
+        ? Boolean(selected.response.mismatch)
+        : fallbackResponseMismatch;
 
     return {
       page: {
@@ -266,7 +277,7 @@
       response: {
         id: responseModel,
         label: responseModel
-          ? `${modelLabel(responseModel)}${previousSelectionRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 响应元数据' : ''}`
+          ? `${modelLabel(responseModel)}${previousSelectionRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 实际响应' : ''}`
           : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
         status: previousSelectionRequest ? 'response-history' : observedResponseModel ? 'response' : responseMismatch
           ? 'mismatch'
