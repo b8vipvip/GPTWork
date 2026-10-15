@@ -23,12 +23,17 @@ function errorCode(error, fallback = 'private_request_authority_unavailable') {
 }
 
 async function continueUnmodified(monitor, tabId, requestId, endpoint, reason, error = null) {
-  monitor.onRewrite?.(tabId, {
-    endpoint,
-    changed: false,
-    reason,
-    error: error ? errorCode(error) : null,
-  });
+  // A paused history/list/prepare request is not a lock attempt. Do not
+  // overwrite lastRewrite or fill the runtime log with incidental GET requests.
+  // Actual failures remain observable.
+  if (reason !== 'private_request_not_official') {
+    monitor.onRewrite?.(tabId, {
+      endpoint,
+      changed: false,
+      reason,
+      error: error ? errorCode(error) : null,
+    });
+  }
   try {
     await monitor.continuePaused(tabId, requestId);
   } catch (continueError) {
@@ -100,7 +105,10 @@ export function installPrivateRequestRoutingHook() {
     let postData;
     try {
       postData = await this.pausedPostData(tabId, params);
-      const payload = buildPrivateRequestPayload(request, postData, this.configuration());
+      // The private engine is the one terminal request mutation authority, but
+      // its policy MUST come from this exact ChatGPT tab. configuration() without
+      // tabId resolves an empty lock and silently passes user requests through.
+      const payload = buildPrivateRequestPayload(request, postData, this.configuration(tabId));
       const windowKey = await privateCoreChannel.windowKeyForTab(tabId);
       const rawDecision = await privateCoreChannel.request('evaluate_request', payload, 'request', { windowKey });
       decision = normalizePrivateRequestDecision(rawDecision);
@@ -133,6 +141,8 @@ export function installPrivateRequestRoutingHook() {
       await this.continuePaused(tabId, requestId, rewrittenPostData);
       this.onRewrite?.(tabId, {
         endpoint,
+        requestId: params.networkId ? String(params.networkId) : null,
+        fetchRequestId: requestId,
         changed: decision.changed,
         reason: decision.reason,
         modelBefore: decision.modelBefore,
