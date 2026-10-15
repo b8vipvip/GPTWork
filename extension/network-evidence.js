@@ -504,16 +504,21 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
 
   result.transportModelBefore = parsed.model;
   result.modelBefore = normalizeModelId(parsed.model);
-  // The page-selected request model is authoritative only when it belongs to the
-  // known-model catalog. This preserves the user's visible ChatGPT selection while
-  // still preventing an unknown/untrusted model id from bypassing the lock policy.
-  // If the page model is unknown, fall back to the strongest explicit locked model.
+  // Model-lock allow-list is authoritative for a normal outgoing request.
+  // A recognizable page-selected model is not automatically an *allowed*
+  // model. GPTWork must never silently forward an unapproved GPT-5.6 Sol
+  // payload when the user has enabled a GPT-6-only lock.
+  // Discovery's explicit forceModel remains a separate transaction authority.
   const knownModels = new Set(normalizedUnique(configuration.knownModels, normalizeModelId));
-  const pageSelectedKnown = Boolean(result.modelBefore && knownModels.has(result.modelBefore));
+  const pageSelectedAllowed = Boolean(
+    result.modelBefore
+      && lockedModels.includes(result.modelBefore)
+      && (knownModels.has(result.modelBefore) || configuration.preserveModel === true)
+  );
   const forcedModel = normalizeModelId(configuration.forceModel);
   const forceKnownModel = Boolean(forcedModel && knownModels.has(forcedModel));
-  const targetModel = forceKnownModel ? forcedModel : pageSelectedKnown ? result.modelBefore : lockedModels[0];
-  const preserveModel = configuration.preserveModel === true || (!forceKnownModel && pageSelectedKnown);
+  const targetModel = forceKnownModel ? forcedModel : pageSelectedAllowed ? result.modelBefore : lockedModels[0];
+  const preserveModel = !forceKnownModel && pageSelectedAllowed;
   const forcedTransport = normalizeRawProtocolModelId(configuration.forceTransportModel);
   const targetTransport = preserveModel
     ? parsed.model
@@ -564,9 +569,9 @@ export function rewriteConversationPostData(postData = '', configuration = {}) {
   if (result.changed) result.postData = JSON.stringify(parsed);
   result.reason = forceKnownModel
     ? (result.changed ? 'verification_model_forced' : 'verification_model_already_exact')
-    : configuration.preserveModel === true
+    : configuration.preserveModel === true && preserveModel
       ? 'verification_model_passthrough'
-      : pageSelectedKnown
+      : pageSelectedAllowed
         ? 'page_selected_known_model_locked'
         : result.changed ? 'rewritten' : 'already_locked';
   return result;
