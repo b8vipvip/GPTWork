@@ -5,6 +5,8 @@ import {
   DEFAULT_POLICY,
   DEFAULT_SETTINGS,
   modelTransportId,
+  modelLockFamilyId,
+  modelMatchesLock,
   normalizeModelId,
   normalizePolicy,
   normalizeReasoningLevel,
@@ -104,4 +106,21 @@ test('ModelPro v0.1.38 Work transports cover all Picker-B profiles', () => {
     assert.equal(modelTransportId(model), transport);
     assert.equal(normalizeModelId(transport), model);
   }
+});
+
+test('only GPT number series and exact -thinking counterpart share a lock identity', () => {
+  for (const version of ['6', '6.5', '7', '7.2.1']) {
+    const base = `gpt-${version}`;
+    const thinking = `${base}-thinking`;
+    assert.equal(modelLockFamilyId(base), base);
+    assert.equal(modelLockFamilyId(thinking), base);
+    assert.equal(modelMatchesLock(base, thinking), true);
+    assert.equal(modelMatchesLock(thinking, base), true);
+    assert.equal(normalizeModelId(thinking), thinking, 'network protocol ID must remain raw');
+  }
+  for (const other of ['gpt-5.6-thinking', 'gpt-7-thinking', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6-instant', 'gpt-6-thinking-extra', 'gpt-6.5-thinking']) {
+    assert.equal(modelMatchesLock('gpt-6', other), false, other);
+  }
+  assert.equal(modelMatchesLock('gpt-5.6-sol', 'gpt-5.6-thinking'), false);
+  assert.equal(modelMatchesLock('gpt-6', 'auto'), false);
 });
