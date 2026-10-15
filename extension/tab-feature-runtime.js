@@ -1,4 +1,4 @@
-import { normalizeConcreteModelId, normalizePolicy, normalizeSettings, prioritizeModels } from './policy.js';
+import { modelMatchesLock, normalizeConcreteModelId, normalizePolicy, normalizeSettings, prioritizeModels } from './policy.js';
 import { appendRuntimeLog } from './runtime-log.js';
 import { scheduleAccountRefresh } from './account-refresh-scheduler.js';
 
@@ -303,15 +303,15 @@ export function requestPolicyForTabSync(tabId, pageModel) {
     const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
     lockedModels = [selected && isAtLeastWorkFloor(selected, floor) ? selected : floor];
   } else if (feature.modelLockEnabled) {
-    // Outside Work, the saved lock selection is authoritative even when
-    // ChatGPT's redesigned composer exposes only a reasoning-only "High" pill.
-    // Losing a readable Picker A model must not silently turn an explicit
-    // model lock into no_locked_model. Prefer a currently observed *allowed*
-    // page selection; otherwise keep a deterministic configured lock target.
-    // Network request and served-response identities are still verified
-    // independently and must never be inferred from this fallback.
+    // The user's checked lock selection is an allow-list. A confirmed Picker A
+    // model may narrow this request to one allowed family, but ChatGPT's closed
+    // picker often exposes only "High" and no model identity. In that case keep
+    // ALL explicitly allowed models; never silently replace the allow-list with
+    // its first member and misclassify a valid GPT-6 request as disallowed.
+    // The actual outgoing request and served response remain independent evidence.
     const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
-    lockedModels = selected && allowed.includes(selected) ? [selected] : allowed.slice(0, 1);
+    const selectedLock = selected ? allowed.find((model) => modelMatchesLock(model, selected)) : null;
+    lockedModels = selectedLock ? [selectedLock] : allowed;
   }
 
   return normalizePolicy({ ...basePolicy, lockedModels });

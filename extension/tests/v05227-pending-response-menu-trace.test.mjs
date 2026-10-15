@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
 
-const [content, catalog] = await Promise.all([
+const [content, catalog, background] = await Promise.all([
   readFile(new URL('../content.js', import.meta.url), 'utf8'),
   readFile(new URL('../model-catalog.js', import.meta.url), 'utf8'),
+  readFile(new URL('../background.js', import.meta.url), 'utf8'),
 ]);
 
 test('passive external-menu observation does not refer to removed alignment state', () => {
@@ -86,4 +87,22 @@ test('no formal request does not falsely claim ongoing generation', () => {
   const snapshot = runtime.snapshot({ phase: 'waiting' });
   assert.equal(snapshot.response.id, null);
   assert.doesNotMatch(snapshot.response.label, /生成中/);
+});
+
+test('confirmed model mismatch is not falsely diagnosed as missing response metadata', () => {
+  const start = background.indexOf('function diagnoseEvidenceIssue(evidence, result) {');
+  const end = background.indexOf('\nasync function applyNetworkEvidence(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = vm.createContext({});
+  vm.runInContext(background.slice(start, end) + '\nglobalThis.diagnose = diagnoseEvidenceIssue;', context);
+  const evidence = { diagnostics: { bodyFormat: 'json' }, conflicts: { model: false, reasoning: false } };
+  assert.equal(context.diagnose(evidence, {
+    verdict: 'mismatch', reason: 'model_not_allowed', reasons: ['model_not_allowed'],
+  }), 'response_model_not_allowed');
+  assert.equal(context.diagnose(evidence, {
+    verdict: 'mismatch', reason: 'reasoning_not_allowed', reasons: ['reasoning_not_allowed'],
+  }), 'response_reasoning_not_allowed');
+  assert.equal(context.diagnose(evidence, { verdict: 'unverified', reason: 'reasoning_missing' }), 'response_reasoning_not_exposed');
+  assert.equal(context.diagnose(evidence, { verdict: 'unverified', reason: 'unconfirmed' }), 'response_metadata_incomplete');
+  assert.equal(context.diagnose(evidence, { verdict: 'verified' }), null);
 });

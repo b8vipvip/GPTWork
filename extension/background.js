@@ -52,7 +52,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.227';
+const RUNTIME_CODE_VERSION = '0.5.228';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -954,6 +954,14 @@ function diagnoseEvidenceIssue(evidence, result) {
   if (format === 'unparsed') return 'response_body_unparseable';
   if (result.reason === 'model_missing') return 'response_model_not_exposed';
   if (result.reason === 'reasoning_missing') return 'response_reasoning_not_exposed';
+  // A concrete disallowed served model is a policy mismatch, not missing
+  // response metadata. Keep incomplete exclusively for inconclusive evidence.
+  if (result.reasons?.includes?.('model_not_allowed') || result.reason === 'model_not_allowed') {
+    return 'response_model_not_allowed';
+  }
+  if (result.reasons?.includes?.('reasoning_not_allowed') || result.reason === 'reasoning_not_allowed') {
+    return 'response_reasoning_not_allowed';
+  }
   return result.verdict === 'verified' ? null : 'response_metadata_incomplete';
 }
 
@@ -1268,7 +1276,16 @@ const networkMonitor = new ChatGptNetworkMonitor({
         fetchRequestId: rewrite.fetchRequestId ?? null,
       });
     }
-    logRuntime(rewrite.error ? 'warn' : 'info', 'lock', rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked', {
+    // A no-ID interception callback is diagnostic only. Never give it the
+    // same event name as a formal paused conversation request: the old logs
+    // showed "no_locked_model" with no Fetch or Network request ID immediately
+    // before a separate real GPT-6 request, which falsely suggested that the
+    // latter had bypassed its lock.
+    const formalLockEvent = formalVerificationFetch;
+    const lockEvent = !formalLockEvent
+      ? 'request_lock_observation'
+      : rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked';
+    logRuntime(rewrite.error ? 'warn' : 'info', 'lock', lockEvent, {
       tabId,
       lockedModelsAtInterception: runtimePolicyForTabSync(tabId).lockedModels,
       tabFeatureAtInterception: tabFeatureStateSync(tabId),

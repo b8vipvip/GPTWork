@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import vm from 'node:vm';
+import { modelMatchesLock } from '../policy.js';
 
 const runtime = fs.readFileSync(new URL('../tab-feature-runtime.js', import.meta.url), 'utf8');
 const background = fs.readFileSync(new URL('../background.js', import.meta.url), 'utf8');
@@ -119,5 +121,46 @@ test('Work request locking enforces the configured floor even when page observat
   const resolver = runtime.slice(runtime.indexOf('export function requestPolicyForTabSync'), runtime.indexOf('export function effectivePolicyForTabSync'));
   assert.ok(resolver.indexOf('feature.workModeEnabled') < resolver.indexOf('feature.modelLockEnabled'));
   assert.match(resolver, /lockedModels = \[selected && isAtLeastWorkFloor\(selected, floor\) \? selected : floor\]/);
-  assert.match(resolver, /lockedModels = selected && allowed\.includes\(selected\) \? \[selected\] : allowed\.slice\(0, 1\)/);
+  assert.match(resolver, /const selectedLock = selected \? allowed\.find\(\(model\) => modelMatchesLock\(model, selected\)\) : null/);
+  assert.match(resolver, /lockedModels = selectedLock \? \[selectedLock\] : allowed/);
+});
+
+test('two selected Chat lock models remain allowed while official Picker A exposes only High', () => {
+  const start = runtime.indexOf('export function requestPolicyForTabSync(');
+  const end = runtime.indexOf('export function effectivePolicyForTabSync(', start);
+  assert.ok(start >= 0 && end > start);
+  const source = runtime.slice(start, end).replace('export function ', 'function ')
+    + '\n globalThis.requestPolicyForTabSync = requestPolicyForTabSync;';
+  const context = {
+    masterEnabled: true,
+    workFeatureEnabled: false,
+    basePolicy: { lockedModels: ['gpt-5.6-sol'], allowedReasoningLevels: ['high'], strictMode: true },
+    modelLockSelection: ['gpt-5.6-sol', 'gpt-6'],
+    tabFeatureStateSync: () => ({ workModeEnabled: false, modelLockEnabled: true }),
+    normalizeConcreteModelId: (model) => model || null,
+    normalizeModels: (models) => models,
+    normalizePolicy: (policy) => policy,
+    modelMatchesLock,
+  };
+  vm.runInNewContext(source, context);
+  assert.deepEqual(
+    Array.from(context.requestPolicyForTabSync(1, null).lockedModels),
+    ['gpt-5.6-sol', 'gpt-6'],
+    'a reasoning-only High pill must not silently discard the allowed GPT-6 family',
+  );
+  assert.deepEqual(
+    Array.from(context.requestPolicyForTabSync(1, 'gpt-6').lockedModels),
+    ['gpt-6'],
+    'an explicitly observed checked Picker A row still narrows this request',
+  );
+  assert.deepEqual(
+    Array.from(context.requestPolicyForTabSync(1, 'gpt-6-thinking').lockedModels),
+    ['gpt-6'],
+    'network thinking suffix shares the GPT-6 lock family',
+  );
+  assert.deepEqual(
+    Array.from(context.requestPolicyForTabSync(1, 'gpt-5.5').lockedModels),
+    ['gpt-5.6-sol', 'gpt-6'],
+    'a disallowed page model never acquires new permission',
+  );
 });

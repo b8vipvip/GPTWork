@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { modelMatchesLock } from '../policy.js';
 
 const read = path => readFile(new URL('../' + path, import.meta.url), 'utf8');
 const [feature, background, content, monitor, catalog, page, popup] = await Promise.all([
@@ -22,6 +23,7 @@ function requestPolicy({ pageModel = null, enabled = true, locks = ['gpt-6'], st
     normalizeConcreteModelId(value) { return typeof value === 'string' && /^gpt-/.test(value) ? value : null; },
     normalizeModels(value) { return Array.isArray(value) ? value.filter(Boolean) : []; },
     normalizePolicy(value) { return value; },
+    modelMatchesLock,
   });
   vm.runInContext(feature.slice(start, end).replace('export function', 'function')
     + '\nglobalThis.choose = requestPolicyForTabSync;', context);
@@ -35,7 +37,7 @@ test('normal Chat with High-only page retains explicitly configured GPT-6 lock',
 
 test('allowed official page model wins within configured allow-list; no lock toggle is respected', () => {
   assert.deepEqual(requestPolicy({ pageModel: 'gpt-5.6-sol', locks: ['gpt-6', 'gpt-5.6-sol'] }), ['gpt-5.6-sol']);
-  assert.deepEqual(requestPolicy({ pageModel: null, locks: ['gpt-6', 'gpt-5.6-sol'] }), ['gpt-6']);
+  assert.deepEqual(requestPolicy({ pageModel: null, locks: ['gpt-6', 'gpt-5.6-sol'] }), ['gpt-6', 'gpt-5.6-sol']);
   assert.deepEqual(requestPolicy({ pageModel: 'gpt-6', locks: ['gpt-6'], enabled: false }), []);
   assert.deepEqual(requestPolicy({ pageModel: null, locks: [], stored: [] }), []);
 });
