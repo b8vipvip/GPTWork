@@ -181,6 +181,29 @@ pub fn normalize_model_id(value: &str) -> Option<String> {
     })
 }
 
+// Share the same exact GPT-N / GPT-N-thinking lock family contract as the
+// extension verifier. Never alias Sol, Astra, Instant, or unrelated model tiers.
+fn model_lock_family_id(value: &str) -> Option<String> {
+    let normalized = normalize_model_id(value)?;
+    if let Some(base) = normalized.strip_suffix("-thinking") {
+        if let Some(version) = base.strip_prefix("gpt-") {
+            if version.split('.').all(|segment| {
+                !segment.is_empty() && segment.chars().all(|character| character.is_ascii_digit())
+            }) {
+                return Some(base.to_string());
+            }
+        }
+    }
+    Some(normalized)
+}
+
+fn model_matches_lock(locked: &str, requested: &str) -> bool {
+    matches!(
+        (model_lock_family_id(locked), model_lock_family_id(requested)),
+        (Some(left), Some(right)) if left == right
+    )
+}
+
 pub fn model_transport_id(value: &str) -> Option<String> {
     let model = normalize_model_id(value)?;
     Some(match model.as_str() {
@@ -326,10 +349,21 @@ pub fn evaluate_request(input: &RequestEnvelope) -> RequestDecision {
 
     decision.transport_model_before = Some(raw_model.clone());
     decision.model_before = normalize_model_id(&raw_model);
-    // A multi-model policy is ordered by capability. Always request the strongest
-    // selected model first; the remaining models are fallbacks, not equal peers.
-    let target_model = locked_models[0].clone();
-    let target_transport = if decision.model_before.as_deref() == Some(target_model.as_str()) {
+    // The explicit selection is an allow-list, not a mandate to upgrade all
+    // permitted requests to the highest-tier model. Preserve an actual outgoing
+    // protocol model only if it matches one of the selected lock families.
+    // This also preserves official "gpt-6-thinking" when "gpt-6" is allowed.
+    // Requests outside the allow-list are rewritten to the strongest fallback.
+    let page_selected_allowed = decision
+        .model_before
+        .as_deref()
+        .is_some_and(|model| locked_models.iter().any(|allowed| model_matches_lock(allowed, model)));
+    let target_model = if page_selected_allowed {
+        decision.model_before.clone().unwrap_or_else(|| locked_models[0].clone())
+    } else {
+        locked_models[0].clone()
+    };
+    let target_transport = if page_selected_allowed {
         raw_model.clone()
     } else {
         match model_transport_id(&target_model) {
@@ -785,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_allowed_sol_request_to_stronger_selected_astra() {
+    fn preserves_allowed_sol_request_in_multi_model_policy() {
         let request = RequestEnvelope {
             host: "chatgpt.com".into(),
             path: "/backend-api/f/conversation".into(),
@@ -797,13 +831,52 @@ mod tests {
         };
         let decision = evaluate_request(&request);
         assert!(decision.official_conversation);
-        assert!(decision.changed);
+        assert!(!decision.changed);
         assert_eq!(decision.model_before.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(decision.model_after.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-5.6-sol-wm"));
+        assert_eq!(decision.reason, "already_locked");
+    }
+
+    #[test]
+    fn preserves_real_gpt6_thinking_protocol_under_multi_model_lock() {
+        let request = RequestEnvelope {
+            host: "chatgpt.com".into(),
+            path: "/backend-api/f/conversation".into(),
+            method: "POST".into(),
+            post_data: json!({"model":"gpt-6-thinking","thinking_effort":"high"}).to_string(),
+            locked_models: vec!["gpt-5.6-sol".into(), "gpt-6".into()],
+            allowed_reasoning_levels: vec!["high".into()],
+            preferred_reasoning: Some("high".into()),
+        };
+        let decision = evaluate_request(&request);
+        assert!(decision.official_conversation);
+        assert!(!decision.changed);
+        assert_eq!(decision.reason, "already_locked");
+        assert_eq!(decision.model_after.as_deref(), Some("gpt-6-thinking"));
+        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-thinking"));
+        assert!(model_matches_lock("gpt-6", "gpt-6-thinking"));
+        assert!(!model_matches_lock("gpt-6-sol", "gpt-6-thinking"));
+        assert!(!model_matches_lock("gpt-6-astra", "gpt-6-thinking"));
+    }
+
+    #[test]
+    fn rewrites_disallowed_model_to_highest_explicitly_allowed_fallback() {
+        let request = RequestEnvelope {
+            host: "chatgpt.com".into(),
+            path: "/backend-api/f/conversation".into(),
+            method: "POST".into(),
+            post_data: json!({"model":"gpt-5.5","thinking_effort":"high"}).to_string(),
+            locked_models: vec!["gpt-5.6-sol".into(), "gpt-6-astra".into()],
+            allowed_reasoning_levels: vec!["high".into()],
+            preferred_reasoning: Some("high".into()),
+        };
+        let decision = evaluate_request(&request);
+        assert!(decision.official_conversation);
+        assert!(decision.changed);
+        assert_eq!(decision.model_before.as_deref(), Some("gpt-5.5"));
         assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
-        assert_eq!(
-            decision.transport_model_after.as_deref(),
-            Some("gpt-6-astra-wm")
-        );
+        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-astra-wm"));
     }
 
     #[test]
