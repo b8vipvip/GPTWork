@@ -23,11 +23,7 @@ function snapshot(state, lockedModels = ['gpt-6', 'gpt-5.6-sol']) {
     responseAppliesToLatestRequest() { return true; },
   });
   const fn = catalog.slice(start, end);
-  const helper = catalog.slice(
-    catalog.indexOf('  function modelLockFamilyId(value) {'),
-    catalog.indexOf('  function normalizeDisplayedModel(text) {'),
-  );
-  vm.runInContext(helper + fn + '\nglobalThis.snapshot = modelSnapshot;', env);
+  vm.runInContext(fn + '\nglobalThis.snapshot = modelSnapshot;', env);
   return env.snapshot(state);
 }
 
@@ -85,7 +81,7 @@ test('saved response history treats thinking family as allowed but keeps raw res
   assert.equal(helper.policyAllows('gpt-6', { lockedModels: ['gpt-6-thinking'] }), true);
   assert.equal(helper.policyAllows('gpt-7-thinking', { lockedModels: ['gpt-6'] }), false);
   const state = {
-    lastRequest: { model: 'gpt-6-thinking' },
+    lastRequest: { model: 'gpt-6-thinking', capturedAt: new Date(Date.now() - 1000).toISOString() },
     lastVerification: {
       model: 'gpt-6-thinking',
       verifiedAt: new Date().toISOString(),
