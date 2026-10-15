@@ -954,6 +954,14 @@ function diagnoseEvidenceIssue(evidence, result) {
   if (format === 'unparsed') return 'response_body_unparseable';
   if (result.reason === 'model_missing') return 'response_model_not_exposed';
   if (result.reason === 'reasoning_missing') return 'response_reasoning_not_exposed';
+  // A concrete disallowed served model is a policy mismatch, not missing
+  // response metadata. Keep incomplete exclusively for inconclusive evidence.
+  if (result.reasons?.includes?.('model_not_allowed') || result.reason === 'model_not_allowed') {
+    return 'response_model_not_allowed';
+  }
+  if (result.reasons?.includes?.('reasoning_not_allowed') || result.reason === 'reasoning_not_allowed') {
+    return 'response_reasoning_not_allowed';
+  }
   return result.verdict === 'verified' ? null : 'response_metadata_incomplete';
 }
 
