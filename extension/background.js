@@ -1173,6 +1173,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     return {
       lockedModels: policy.lockedModels,
       allowedReasoningLevels: policy.allowedReasoningLevels,
+      strictMode: policy.strictMode,
       preferredReasoning: currentSettings.preferredReasoning,
       preserveModel: false,
       preserveReasoning: false,
@@ -1222,7 +1223,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
     const capturedAt = new Date().toISOString();
     const isFormalFetch = Boolean(rewrite.fetchRequestId)
       && ['/backend-api/conversation', '/backend-api/f/conversation'].includes(rewrite.endpoint);
-    const interceptionPolicy = isFormalFetch ? runtimePolicyForTabSync(tabId) : null;
+    const interceptionPolicy = isFormalFetch
+      ? (Array.isArray(rewrite.policySnapshot?.lockedModels)
+        ? rewrite.policySnapshot : runtimePolicyForTabSync(tabId))
+      : null;
     state.lastRewrite = {
       capturedAt,
       endpoint: rewrite.endpoint ?? null,

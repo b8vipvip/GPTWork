@@ -63,6 +63,7 @@ test('private terminal request takes the exact tab lock and correlates the forma
   assert.equal(observed.rewrites[0][1].fetchRequestId, 'fetch-42');
   assert.equal(observed.rewrites[0][1].requestId, 'network-42');
   assert.equal(observed.rewrites[0][1].reason, 'already_locked');
+  assert.deepEqual(observed.rewrites[0][1].policySnapshot.lockedModels, ['gpt-5.6-sol', 'gpt-6']);
 });
 
 test('incidental private nonofficial requests never replace the formal lock verdict', async () => {
