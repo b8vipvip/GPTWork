@@ -17,6 +17,8 @@ function run(rewrite) {
   const runtime = {
     ensureTabState: () => state,
     verificationTransactionForTab: () => ({ model: 'gpt-5.6-sol' }),
+    runtimePolicyForTabSync: () => ({ lockedModels: ['gpt-5.6-sol'] }),
+    tabFeatureStateSync: () => ({ modelLockEnabled: true, workModeEnabled: false }),
     logRuntime: (_level, _component, event) => events.push(event),
     broadcastTabState: async () => {},
   };
