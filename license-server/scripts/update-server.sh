@@ -77,6 +77,61 @@ CURRENT_PERCENT=0
 DB_IDENTITY_BEFORE=""
 SETTINGS_SNAPSHOT=""
 
+# Root must not open the live SQLite database: WAL/SHM files can become
+# root-owned, causing SQLITE_IOERR_SHMSIZE (extended code 4874) on restart.
+run_as_runtime() {
+  runuser -u "$RUNTIME_USER" -g "$RUNTIME_GROUP" -- "$@"
+}
+
+log_sqlite_diagnostics() {
+  log "SQLite storage diagnostics: db=$DB_PATH runtime=$RUNTIME_USER:$RUNTIME_GROUP"
+  local candidate
+  for candidate in "$(dirname "$DB_PATH")" "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
+    if [[ -e "$candidate" ]]; then
+      stat -Lc '%A %U:%G %s %n' "$candidate" >>"$LOG_FILE" 2>&1 || true
+    fi
+  done
+  df -h "$DB_PATH" >>"$LOG_FILE" 2>&1 || true
+  df -i "$DB_PATH" >>"$LOG_FILE" 2>&1 || true
+  if command -v findmnt >/dev/null 2>&1; then
+    findmnt -T "$DB_PATH" -o TARGET,FSTYPE,OPTIONS --noheadings >>"$LOG_FILE" 2>&1 || true
+  fi
+}
+
+sqlite_preflight() {
+  if ! run_as_runtime env DB_PATH_ENV="$DB_PATH" "$NODE_BIN" --input-type=module -e '
+    import { DatabaseSync } from "node:sqlite";
+    import { accessSync, constants, existsSync, unlinkSync } from "node:fs";
+    import { dirname, join } from "node:path";
+    import { randomUUID } from "node:crypto";
+    const path=process.env.DB_PATH_ENV, dir=dirname(path);
+    accessSync(path,constants.R_OK|constants.W_OK);
+    accessSync(dir,constants.W_OK|constants.X_OK);
+    for(const sidecar of [path+"-wal",path+"-shm"]){
+      if(existsSync(sidecar)) accessSync(sidecar,constants.R_OK|constants.W_OK);
+    }
+    // Probe WAL/SHM resizing on a unique disposable database in the same
+    // directory, never by writing to the live production database.
+    const probe=join(dir,`.gptwork-sqlite-access-${randomUUID()}.sqlite3`);
+    try {
+      const scratch=new DatabaseSync(probe);
+      try {
+        scratch.exec("PRAGMA journal_mode=WAL; CREATE TABLE probe(x INTEGER); INSERT INTO probe VALUES(1)");
+      } finally { scratch.close(); }
+    } finally {
+      for(const suffix of ["","-wal","-shm"]){
+        if(existsSync(probe+suffix)) unlinkSync(probe+suffix);
+      }
+    }
+    const db=new DatabaseSync(path,{readOnly:true});
+    try { db.prepare("SELECT name FROM sqlite_master LIMIT 1").get(); }
+    finally { db.close(); }
+  ' >>"$LOG_FILE" 2>&1; then
+    log_sqlite_diagnostics
+    fail "SQLite 运行用户无法访问数据库/WAL/SHM 或目录（可能触发 SQLITE_IOERR_SHMSIZE 4874）；已在部署前停止更新，请检查 update.log 中的文件权限、磁盘空间和挂载状态"
+  fi
+}
+
 log() {
   printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG_FILE"
 }
@@ -115,7 +170,23 @@ fail() {
     write_status rolling_back rollback 94 "更新失败，正在回滚到上一版本" "$message" || true
     log "Rolling back to $FROM_COMMIT"
     git -C "$REPO_DIR" reset --hard "$FROM_COMMIT" >>"$LOG_FILE" 2>&1 || true
-    systemctl restart "$SERVICE" >>"$LOG_FILE" 2>&1 || true
+    if ! systemctl restart "$SERVICE" >>"$LOG_FILE" 2>&1; then
+      log "WARNING: rollback code restored but service restart failed"
+      message="$message；回滚后服务重启失败，请检查 SQLite WAL/SHM 权限及磁盘状态"
+      log_sqlite_diagnostics
+    else
+      local rollback_url="http://${GPTLOCK_LICENSE_HOST:-127.0.0.1}:${GPTLOCK_LICENSE_PORT:-3188}/api/v1/health"
+      local rollback_ok=0
+      for _ in $(seq 1 10); do
+        if curl --fail --silent --max-time 2 "$rollback_url" >/dev/null 2>&1; then rollback_ok=1; break; fi
+        sleep 1
+      done
+      if [[ "$rollback_ok" != "1" ]]; then
+        log "WARNING: rollback code restored but service health check failed"
+        message="$message；回滚后健康检查仍失败，请检查 SQLite WAL/SHM 权限及磁盘状态"
+        log_sqlite_diagnostics
+      fi
+    fi
     ROLLBACK_COMMIT="$FROM_COMMIT"
   fi
   write_status failed "$failed_stage" "$failed_percent" "更新失败（阶段：$failed_stage）" "$message" || true
@@ -138,7 +209,7 @@ EOF
 
 snapshot_app_settings() {
   SETTINGS_SNAPSHOT="$BACKUP_DIR/app-settings-$(date -u +%Y%m%dT%H%M%SZ)-${FROM_COMMIT:0:8}.json"
-  DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
+  run_as_runtime env DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { writeFileSync } from "node:fs";
     const db=new DatabaseSync(process.env.DB_PATH_ENV);
@@ -152,7 +223,7 @@ snapshot_app_settings() {
 }
 
 verify_app_settings() {
-  DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
+  run_as_runtime env DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { readFileSync } from "node:fs";
     const before=JSON.parse(readFileSync(process.env.SNAPSHOT_ENV,"utf8")).rows||[];
@@ -167,7 +238,7 @@ verify_app_settings() {
 }
 
 restore_app_settings() {
-  DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
+  run_as_runtime env DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { readFileSync } from "node:fs";
     const before=JSON.parse(readFileSync(process.env.SNAPSHOT_ENV,"utf8")).rows||[];
@@ -202,12 +273,16 @@ command -v curl >/dev/null || fail "curl 不可用"
 command -v timeout >/dev/null || fail "timeout 不可用"
 command -v readlink >/dev/null || fail "readlink 不可用"
 command -v stat >/dev/null || fail "stat 不可用"
+command -v runuser >/dev/null || fail "runuser 不可用，无法以服务账户安全备份 SQLite"
+id "$RUNTIME_USER" >/dev/null 2>&1 || fail "SQLite 服务运行用户不存在: $RUNTIME_USER"
+getent group "$RUNTIME_GROUP" >/dev/null 2>&1 || fail "SQLite 服务运行用户组不存在: $RUNTIME_GROUP"
 [[ -x "$NODE_BIN" ]] || fail "Node 22 不可用: $NODE_BIN"
 [[ -f "$FETCH_HELPER" ]] || fail "GitHub 传输助手不存在: $FETCH_HELPER"
 [[ "$DB_PATH" == /* ]] || fail "持久化数据库路径必须为绝对路径"
 [[ -f "$DB_PATH" ]] || fail "持久化数据库不存在，拒绝更新以避免初始化空数据库: $DB_PATH"
 DB_IDENTITY_BEFORE="$(stat -Lc '%d:%i' "$DB_PATH")"
 [[ -n "$DB_IDENTITY_BEFORE" ]] || fail "无法识别当前持久化数据库"
+sqlite_preflight
 pin_persistent_paths
 REMOTE_URL="$(git -C "$REPO_DIR" remote get-url origin)"
 bash "$FETCH_HELPER" --validate-url "$REMOTE_URL" || fail "Git origin 不是受信任的 b8vipvip/GPTLock 仓库"
@@ -247,15 +322,20 @@ write_status running test 62 "正在执行新版本自动化测试"
 (cd "$STAGE_DIR/license-server" && GPTLOCK_UPDATE_ALLOW_WITHOUT_SYSTEMD=1 "$NODE_BIN" --test test/*.test.mjs) >>"$LOG_FILE" 2>&1
 
 write_status running backup 70 "测试通过，正在保护并备份运行数据"
+# Snapshot and backup are created by the same identity that owns SQLite.
+chown "$RUNTIME_USER:$RUNTIME_GROUP" "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+sqlite_preflight
 snapshot_app_settings
 BACKUP_PATH="$BACKUP_DIR/gptlock-license-$(date -u +%Y%m%dT%H%M%SZ)-${FROM_COMMIT:0:8}.sqlite3"
-DB_PATH_ENV="$DB_PATH" BACKUP_PATH_ENV="$BACKUP_PATH" "$NODE_BIN" --input-type=module -e '
+run_as_runtime env DB_PATH_ENV="$DB_PATH" BACKUP_PATH_ENV="$BACKUP_PATH" "$NODE_BIN" --input-type=module -e '
   import { DatabaseSync, backup } from "node:sqlite";
   const db=new DatabaseSync(process.env.DB_PATH_ENV);
   await backup(db, process.env.BACKUP_PATH_ENV);
   db.close();
 ' >>"$LOG_FILE" 2>&1
 chmod 600 "$BACKUP_PATH" || true
+sqlite_preflight
 log "Database backup: $BACKUP_PATH"
 
 write_status running deploy 80 "正在部署已验证的最新代码"
@@ -275,6 +355,7 @@ for _ in $(seq 1 30); do
 done
 if [[ "$HEALTH_OK" != "1" ]]; then
   log "Health check failed for $HEALTH_URL; collecting service diagnostics before rollback"
+  log_sqlite_diagnostics
   systemctl status "$SERVICE" --no-pager -l >>"$LOG_FILE" 2>&1 || true
   journalctl -u "$SERVICE" -n 100 --no-pager >>"$LOG_FILE" 2>&1 || true
   fail "新版本启动后健康检查失败"
