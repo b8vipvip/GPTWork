@@ -13,6 +13,7 @@ import { DEFAULT_POLICY, normalizeConcreteModelId, normalizePolicy } from './pol
 const RUNTIME_LOG_STORAGE_KEY = 'runtimeLogs';
 const DISCOVERED_MODELS_KEY = 'discoveredModels';
 const DISCOVERED_EVIDENCE_KEY = 'discoveredModelEvidence';
+const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
 const ASTRA_POLICY_MIGRATION_KEY = 'astraPolicyMigrationV1';
 const WORK_MODE_KEY = 'gptworkWorkModeEnabled';
 const MODEL_LOCK_KEY = 'gptworkModelLockEnabled';
@@ -80,6 +81,7 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
       MODEL_SELECTION_SEEN_KEY,
       DISCOVERED_MODELS_KEY,
       DISCOVERED_EVIDENCE_KEY,
+      SHARED_KNOWN_MODELS_KEY,
       ASTRA_POLICY_MIGRATION_KEY,
     ]),
   ]);
@@ -87,6 +89,12 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
   const availability = normalizeAvailabilityState(availabilityValue);
   const unavailable = new Set(unavailableModelIds(availability));
   const discovered = trustedDiscoveredModels(synced);
+  const hasAdminCatalog = Array.isArray(synced[SHARED_KNOWN_MODELS_KEY]);
+  const adminAllowed = new Set((hasAdminCatalog ? synced[SHARED_KNOWN_MODELS_KEY] : [])
+    .filter((item) => item?.enabled === true)
+    .map((item) => normalizeConcreteModelId(item?.model))
+    .filter(Boolean));
+  const approved = (model) => !hasAdminCatalog || adminAllowed.has(model);
   const policy = normalizePolicy(synced.policy ?? DEFAULT_POLICY);
   const selectionWasExplicit = Array.isArray(synced[MODEL_SELECTION_KEY]);
   let selection = normalizeModels(selectionWasExplicit ? synced[MODEL_SELECTION_KEY] : policy.lockedModels);
@@ -94,7 +102,7 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
   const autoCandidates = [...new Set([
     ...knownHigherModels(),
     ...discovered.filter(isHigherThanSol),
-  ])];
+  ])].filter(approved);
   const restoredSet = new Set(normalizeModels(restored));
 
   // Astra already had a one-shot migration before this availability feature existed.
@@ -114,8 +122,8 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
     seen.add(model);
   }
 
-  selection = normalizeModels(selection).filter((model) => !unavailable.has(model));
-  if (!selection.length) selection = [SOL_MODEL_ID];
+  selection = normalizeModels(selection).filter((model) => approved(model) && !unavailable.has(model));
+  if (!selection.length && approved(SOL_MODEL_ID) && !unavailable.has(SOL_MODEL_ID)) selection = [SOL_MODEL_ID];
 
   const syncPatch = {};
   if (!sameJson(normalizeModels(synced[MODEL_SELECTION_KEY]), selection) || !selectionWasExplicit) {
@@ -139,8 +147,7 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
       );
     }
     if (modelLockEnabled) active.push(...selection);
-    const lockedModels = normalizeModels(active).filter((model) => !unavailable.has(model));
-    if (!lockedModels.length) lockedModels.push(SOL_MODEL_ID);
+    const lockedModels = normalizeModels(active).filter((model) => approved(model) && !unavailable.has(model));
     if (!sameJson(normalizeModels(policy.lockedModels), lockedModels)) {
       syncPatch.policy = { ...policy, lockedModels };
     }
@@ -272,6 +279,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     changes[DISCOVERED_MODELS_KEY]
     || changes[DISCOVERED_EVIDENCE_KEY]
     || changes.policy
+    || changes[SHARED_KNOWN_MODELS_KEY]
     || changes[MODEL_SELECTION_KEY]
   )) {
     enqueue(async () => {

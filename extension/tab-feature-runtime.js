@@ -12,6 +12,7 @@ export const MASTER_KEY = 'gptworkEnabledLocal';
 export const WINDOW_QUOTA_MESSAGE = '当前账户并发窗口超限';
 
 const MODEL_SELECTION_KEY = 'gptworkModelLockSelection';
+const SHARED_KNOWN_MODELS_KEY = 'gptworkSharedKnownModelsV1';
 const DISCOVERED_MODELS_KEY = 'discoveredModels';
 const ACCOUNT_SNAPSHOT_KEY = 'gptlockAccountSnapshot';
 export const DEFAULT_WORK_MODEL = 'gpt-6-astra';
@@ -34,6 +35,7 @@ const tabWindowIds = new Map();
 let basePolicy = normalizePolicy(null);
 let modelLockSelection = [];
 let discoveredModels = [];
+let adminAllowedModelIds = null;
 let masterEnabled = false;
 let workFeatureEnabled = true;
 let initialized = false;
@@ -57,6 +59,13 @@ function normalizeModels(values) {
     .filter(Boolean))];
 }
 
+function adminAllowedModels(values) {
+  const models = normalizeModels(values);
+  return adminAllowedModelIds instanceof Set
+    ? models.filter((model) => adminAllowedModelIds.has(model))
+    : models;
+}
+
 function sameModels(left, right) {
   return JSON.stringify(normalizeModels(left)) === JSON.stringify(normalizeModels(right));
 }
@@ -70,10 +79,10 @@ function isAtLeastWorkFloor(model, floor = basePolicy.workDefaultModel) {
 
 function workModels() {
   const floor = normalizeConcreteModelId(basePolicy.workDefaultModel) || DEFAULT_WORK_MODEL;
-  return [...new Set([
+  return adminAllowedModels([
     floor,
     ...normalizeModels(discoveredModels).filter((model) => isAtLeastWorkFloor(model, floor)),
-  ])];
+  ]);
 }
 
 function rememberTabWindow(tab) {
@@ -203,7 +212,7 @@ export async function initializeTabFeatureRuntime() {
         LEGACY_MODEL_LOCK_KEY,
         MASTER_KEY,
       ]),
-      chrome.storage.sync.get(['policy', 'settings', MODEL_SELECTION_KEY, DISCOVERED_MODELS_KEY]),
+      chrome.storage.sync.get(['policy', 'settings', MODEL_SELECTION_KEY, DISCOVERED_MODELS_KEY, SHARED_KNOWN_MODELS_KEY]),
       chrome.tabs.query({ url: 'https://chatgpt.com/*' }),
     ]);
 
@@ -213,6 +222,12 @@ export async function initializeTabFeatureRuntime() {
     workFeatureEnabled = normalizeSettings(syncStored.settings).workModeFeatureEnabled !== false;
     modelLockSelection = normalizeModels(syncStored[MODEL_SELECTION_KEY]);
     discoveredModels = normalizeModels(syncStored[DISCOVERED_MODELS_KEY]);
+    if (Array.isArray(syncStored[SHARED_KNOWN_MODELS_KEY])) {
+      adminAllowedModelIds = new Set(syncStored[SHARED_KNOWN_MODELS_KEY]
+        .filter((item) => item?.enabled === true)
+        .map((item) => normalizeConcreteModelId(item?.model))
+        .filter(Boolean));
+    }
     masterEnabled = localStored[MASTER_KEY] === true;
     await restoreExplicitModelSelectionForMigration(localStored);
     await migrateLegacyFlags(localStored, tabs);
@@ -314,7 +329,7 @@ export function requestPolicyForTabSync(tabId, pageModel) {
     lockedModels = selectedLock ? [selectedLock] : allowed;
   }
 
-  return normalizePolicy({ ...basePolicy, lockedModels });
+  return normalizePolicy({ ...basePolicy, lockedModels: adminAllowedModels(lockedModels) });
 }
 
 export function effectivePolicyForTabSync(tabId) {
@@ -326,7 +341,7 @@ export function effectivePolicyForTabSync(tabId) {
   }
   return normalizePolicy({
     ...basePolicy,
-    lockedModels: active.length ? [...new Set(active)] : basePolicy.lockedModels,
+    lockedModels: adminAllowedModels(active.length ? [...new Set(active)] : basePolicy.lockedModels),
   });
 }
 
@@ -630,7 +645,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     basePolicy = normalizePolicy(changes.policy.newValue);
     if (!selectionWriteInFlight) {
       const nextSelection = normalizeModels(basePolicy.lockedModels);
-      if (nextSelection.length) {
+      {
         modelLockSelection = nextSelection;
         if (!changes[MODEL_SELECTION_KEY]) {
           selectionWriteInFlight = true;
@@ -662,6 +677,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes[DISCOVERED_MODELS_KEY]) {
     discoveredModels = normalizeModels(changes[DISCOVERED_MODELS_KEY].newValue);
+    changed = true;
+  }
+  if (changes[SHARED_KNOWN_MODELS_KEY]) {
+    const nextShared = changes[SHARED_KNOWN_MODELS_KEY].newValue;
+    adminAllowedModelIds = new Set((Array.isArray(nextShared) ? nextShared : [])
+      .filter((item) => item?.enabled === true)
+      .map((item) => normalizeConcreteModelId(item?.model))
+      .filter(Boolean));
     changed = true;
   }
   if (!changed) return;
