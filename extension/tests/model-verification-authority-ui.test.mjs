@@ -345,8 +345,10 @@ test('v0.5.103 runtime log delivery is event-driven from one canonical browser l
 });
 
 
-test('v0.5.104 verification survives new-chat navigation without CDP detach', () => {
-  assert.match(background, /verificationTransactionForTab\(tab\.id\)\) await networkMonitor\.attach/);
+test('v0.5.223 normal chat and discovery both survive new-chat navigation without CDP detach', () => {
+  assert.match(background, /if \(!enabled\) await networkMonitor\.detach\(tab\.id\)/);
+  assert.match(background, /tab\.status !== 'loading' \|\| networkMonitor\.isAttached\(tab\.id\)/);
+  assert.match(background, /activeNewChatRequest/);
   assert.match(networkMonitor, /forceModel: model/);
 });
 
