@@ -324,7 +324,10 @@ export function requestPolicyForTabSync(tabId, pageModel) {
     // ALL explicitly allowed models; never silently replace the allow-list with
     // its first member and misclassify a valid GPT-6 request as disallowed.
     // The actual outgoing request and served response remain independent evidence.
-    const allowed = modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels);
+    // The persisted policy is the only runtime lock authority. The legacy
+    // selection key is a UI/migration mirror and can lag behind policy updates;
+    // reading it here caused a stale Sol lock while the popup showed GPT-6.
+    const allowed = normalizeModels(basePolicy.lockedModels);
     const selectedLock = selected ? allowed.find((model) => modelMatchesLock(model, selected)) : null;
     lockedModels = selectedLock ? [selectedLock] : allowed;
   }
@@ -337,7 +340,7 @@ export function effectivePolicyForTabSync(tabId) {
   const active = [];
   if (workFeatureEnabled && feature.workModeEnabled) active.push(...workModels());
   if (feature.modelLockEnabled) {
-    active.push(...(modelLockSelection.length ? modelLockSelection : normalizeModels(basePolicy.lockedModels)));
+    active.push(...normalizeModels(basePolicy.lockedModels));
   }
   return normalizePolicy({
     ...basePolicy,

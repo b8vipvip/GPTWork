@@ -134,8 +134,8 @@ test('two selected Chat lock models remain allowed while official Picker A expos
   const context = {
     masterEnabled: true,
     workFeatureEnabled: false,
-    basePolicy: { lockedModels: ['gpt-5.6-sol'], allowedReasoningLevels: ['high'], strictMode: true },
-    modelLockSelection: ['gpt-5.6-sol', 'gpt-6'],
+    basePolicy: { lockedModels: ['gpt-5.6-sol', 'gpt-6'], allowedReasoningLevels: ['high'], strictMode: true },
+    modelLockSelection: ['gpt-5.6-sol'], // stale legacy mirror must not override canonical policy
     tabFeatureStateSync: () => ({ workModeEnabled: false, modelLockEnabled: true }),
     normalizeConcreteModelId: (model) => model || null,
     normalizeModels: (models) => models,

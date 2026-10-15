@@ -11,7 +11,7 @@ import {
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { evaluateGuard } from './guard.js';
-import { withForwardedRequestEvidence } from './request-evidence-correlation.js';
+import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
 import {
   appendDiagnosticSseCapture,
@@ -53,7 +53,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.233';
+const RUNTIME_CODE_VERSION = '0.5.234';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -89,6 +89,7 @@ const tabStates = new Map();
 // temporarily change request-lock behavior while a catalog model is being probed.
 // It is intentionally independent of URL/context state migration.
 const verificationTransactions = new Map();
+const forwardedRequestLedger = new ForwardedRequestLedger();
 // Automatic model verification is single-flight per tab. Register the task before
 // autoVerify() can yield so duplicate starts join one picker/composer transaction.
 const autoVerificationTasks = new Map();
@@ -1252,6 +1253,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       error: rewrite.error ?? null,
     };
     if (rewrite.error) state.lastError = rewrite.error;
+    forwardedRequestLedger.remember(tabId, state.lastRewrite);
     // Network.requestWillBeSent can report the pre-Fetch body even after
     // Fetch.continueRequest accepted a changed POST. Preserve both observations,
     // but let the matching, successfully continued Fetch decision own the
@@ -1340,7 +1342,12 @@ const networkMonitor = new ChatGptNetworkMonitor({
       },
       diagnostics: request.diagnostics ?? null,
     };
-    state.lastRequest = withForwardedRequestEvidence(observedRequest, state.lastRewrite);
+    // The Fetch terminal decision survives a new-chat URL state transition.
+    // A tab-global lastRewrite alone can be reset or replaced before Network
+    // observes the same request, leaving forwardedFetchRequestId null.
+    const forwarded = forwardedRequestLedger.find(tabId, request.requestId)
+      || state.lastRewrite;
+    state.lastRequest = withForwardedRequestEvidence(observedRequest, forwarded);
     state.probeUsed = true;
     state.probeArmed = false;
     if (currentSettings.networkVerificationEnabled) state.phase = 'waiting';
@@ -4676,6 +4683,7 @@ chrome.windows.onRemoved.addListener(() => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url && !isChatGptUrl(changeInfo.url)) {
     tabStates.delete(tabId);
+    forwardedRequestLedger.clearTab(tabId);
     if (networkMonitor.isAttached(tabId)) void networkMonitor.detach(tabId);
     return;
   }
@@ -4686,6 +4694,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabStates.delete(tabId);
+  forwardedRequestLedger.clearTab(tabId);
   if (networkMonitor.isAttached(tabId)) void networkMonitor.detach(tabId);
 });
 

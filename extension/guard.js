@@ -44,9 +44,23 @@ function mismatchFromEarlierPageSelection(state) {
     && requestRevision !== pageRevision;
 }
 
+// The last response is audited against the policy at its own Fetch request.
+// A later user lock edit does not retroactively authorize a strict block for
+// a different, not-yet-sent request. Compare lock *identities*, not UI labels.
+function requestLockPolicyIsCurrent(state, policy) {
+  const previous = state.lastRequest?.policySnapshot?.lockedModels;
+  if (!Array.isArray(previous)) return true; // legacy state: retain existing rules
+  const current = Array.isArray(policy?.lockedModels) ? policy.lockedModels : [];
+  // A request can legitimately narrow a multi-model allow-list to one
+  // Picker A model. That subset is still a current lock. Only when its old
+  // model is no longer permitted is the old mismatch historical.
+  return previous.every((model) => current.some((candidate) => modelMatchesLock(model, candidate)));
+}
+
 function hasConfirmedModelMismatch(state, policy) {
   if (state.phase !== 'mismatch' || !verificationReasons(state).includes('model_not_allowed')) return false;
   if (mismatchFromEarlierPageSelection(state)) return false;
+  if (!requestLockPolicyIsCurrent(state, policy)) return false;
 
   // A reason code is only authoritative while its concrete model is still disallowed.
   // This prevents an old mismatch reason from surviving a policy change while the
@@ -185,6 +199,14 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     // current policy failure when the real served model now matches this
     // tab's canonical lock identity. Retain the audit record, not the red
     // mismatch warning or a sticky send block.
+    if (!requestLockPolicyIsCurrent(state, policy)) {
+      return {
+        ...base,
+        allowKind: 'warning',
+        status: 'unverified',
+        reason: 'previous_request_policy_changed',
+      };
+    }
     const servedModel = state.lastVerification?.model;
     if (verificationReasons(state).includes('model_not_allowed')
       && servedModel

@@ -256,7 +256,10 @@ function render(state) {
   const evaluatedObservedResponse = Boolean(observedResponse
     && tab?.lastVerification?.evidenceSource === 'network_response_metadata'
     && tab.lastVerification.model === observedResponse.model);
-  const responseVerdictLabel = evaluatedObservedResponse
+  const previousPolicyResponse = guard?.reason === 'previous_request_policy_changed';
+  const responseVerdictLabel = previousPolicyResponse
+    ? ' · 上一轮锁定策略下的响应'
+    : evaluatedObservedResponse
     ? tab.lastVerification.verdict === 'verified'
       ? ' · 策略已验证'
       : tab.lastVerification.verdict === 'mismatch'
@@ -272,15 +275,17 @@ function render(state) {
         : tab?.lastVerification?.model
           ? valuePair(tab.lastVerification.model, tab.lastVerification.reasoning)
           : valuePair(null, null);
-  const previousSelectionResponse = Number.isInteger(tab?.selectionRevision)
+  const previousSelectionResponse = previousPolicyResponse || Number.isInteger(tab?.selectionRevision)
     && Number.isInteger(tab?.lastRequest?.selectionRevision)
     && tab.selectionRevision !== tab.lastRequest.selectionRevision;
-  const attributedResponseValue = previousSelectionResponse
+  const attributedResponseValue = previousPolicyResponse
     && (tab?.lastVerification?.model || observedResponse)
-    ? `${responseValue} · 上一轮响应（页面已切换）`
-    : responseValue;
+    ? `${responseValue} · 旧策略请求（当前锁定已改变）`
+    : previousSelectionResponse && (tab?.lastVerification?.model || observedResponse)
+      ? `${responseValue} · 上一轮响应（页面已切换）`
+      : responseValue;
   elements.responseState.textContent = tab?.evidenceIssue && !autoEvidenceConfirmed
-    ? `${attributedResponseValue} · ${tab.evidenceIssue}`
+    ? `${attributedResponseValue} · ${previousPolicyResponse ? '历史审计：' : ''}${tab.evidenceIssue}`
     : attributedResponseValue;
   const nativeErrorCode = native.errorCode || classifyNativeError(native.lastError);
   elements.installHelp.hidden = Boolean(native.connected);
@@ -346,6 +351,7 @@ function render(state) {
     auto_verify_response_timeout: '自动验证等待响应确认超时。',
     page_selection_missing: '页面 DOM 当前未识别出完整模型/推理选择；该项只作辅助，不作为后端模型证明。',
     previous_request_mismatch_not_current_selection: '上一轮响应与其请求锁定策略存在差异，但页面已经切换模型；该旧响应不阻止新一轮发送。',
+    previous_request_policy_changed: '当前锁定策略已经改变；上一轮响应仍保留审计，但不会阻止新一轮发送。',
   };
   const rewrite = tab?.lastRewrite;
   const rewriteDetail = rewrite
