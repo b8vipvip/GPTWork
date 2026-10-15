@@ -76,7 +76,8 @@ test('formal no-lock Fetch model is a request observation even when Network even
       capturedAt: t1, modelAfter: 'gpt-6-thinking',
     },
   });
-  assert.equal(valid.request.id, 'gpt-6-thinking');
+  assert.equal(valid.request.id, null);
+  assert.equal(valid.request.label, '未锁定');
   assert.equal(valid.request.historical, false);
   assert.equal(modelSnapshot({ lastRewrite: {
     fetchRequestId: null, endpoint: '/backend-api/f/conversation', modelAfter: 'gpt-6-thinking',
@@ -94,7 +95,8 @@ test('no-lock direct served-model response is visible as observation without a s
     lastResponseEvidence: observedResponse(),
   };
   const snapshot = modelSnapshot(state);
-  assert.equal(snapshot.request.id, 'gpt-6-thinking');
+  assert.equal(snapshot.request.id, null);
+  assert.equal(snapshot.request.label, '未锁定');
   assert.equal(snapshot.response.id, 'gpt-6-thinking');
   assert.equal(snapshot.response.status, 'response');
   assert.equal(snapshot.response.confirmed, false);
