@@ -135,7 +135,8 @@ test('popup only shows attributable served response metadata as observation', ()
   assert.equal(lastResponse({ ...tab, lastResponseEvidence: { ...tab.lastResponseEvidence, fields: {} } }), null);
   assert.equal(lastResponse({ ...tab, lastResponseEvidence: { ...tab.lastResponseEvidence, conflicts: { model: true } } }), null);
   assert.equal(lastResponse({ ...tab, lastResponseEvidence: { ...tab.lastResponseEvidence, capturedAt: '2026-10-11T03:40:00.000Z' } }), null);
-  assert.match(popup, /响应元数据已观测（未验证）/);
+  assert.match(popup, /响应元数据已观测/);
+  assert.match(popup, /与锁定策略不一致/);
 });
 
 test('closed High-only menu retains only an actual, recent checked Picker A row', () => {
