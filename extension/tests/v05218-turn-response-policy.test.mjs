@@ -21,14 +21,14 @@ function state(selectionRevision, requestRevision) {
     pageObservation: { model: 'gpt-6', reasoning: 'high' },
     lastRequest: {
       requestId: 'network-request-1',
-      model: 'gpt-5.6-thinking',
+      model: 'gpt-5.5',
       capturedAt: '2026-10-11T05:18:01.997Z',
       selectionRevision: requestRevision,
       policySnapshot: { ...policy, lockedModels: ['gpt-5.6-sol'] },
     },
     lastVerification: {
       requestId: 'cdp-12-network-request-1',
-      model: 'gpt-5.6-thinking',
+      model: 'gpt-5.5',
       verdict: 'mismatch',
       reason: 'model_not_allowed',
       reasons: ['model_not_allowed'],
@@ -46,7 +46,7 @@ test('same Picker A epoch: a confirmed served-model mismatch keeps strict guard'
   assert.equal(result.reason, 'model_not_allowed');
 });
 
-test('real GPT-5.6 to GPT-6 switch: old late response cannot block the next turn', () => {
+test('real GPT-5.5 to GPT-6 switch: old late response cannot block the next turn', () => {
   const result = evaluateGuard({
     state: state(3, 2), policy, settings,
   });

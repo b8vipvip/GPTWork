@@ -104,6 +104,10 @@ export function normalizeConcreteModelId(value) {
 export function modelLockFamilyId(value) {
   const normalized = normalizeConcreteModelId(value);
   if (!normalized) return null;
+  // The redesigned ChatGPT Picker A calls this family "GPT-5.6 Sol", while
+  // its official conversation transport uses gpt-5-6-thinking. Keep the
+  // protocol ID intact for diagnostics; only the policy identity is shared.
+  if (normalized === 'gpt-5.6' || normalized === 'gpt-5.6-thinking') return 'gpt-5.6-sol';
   const thinking = normalized.match(/^(gpt-\d+(?:\.\d+)*)-thinking$/);
   return thinking ? thinking[1] : normalized;
 }

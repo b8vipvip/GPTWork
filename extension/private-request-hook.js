@@ -103,12 +103,14 @@ export function installPrivateRequestRoutingHook() {
 
     let decision;
     let postData;
+    let policyConfiguration = null;
     try {
       postData = await this.pausedPostData(tabId, params);
       // The private engine is the one terminal request mutation authority, but
       // its policy MUST come from this exact ChatGPT tab. configuration() without
       // tabId resolves an empty lock and silently passes user requests through.
-      const payload = buildPrivateRequestPayload(request, postData, this.configuration(tabId));
+      policyConfiguration = this.configuration(tabId);
+      const payload = buildPrivateRequestPayload(request, postData, policyConfiguration);
       const windowKey = await privateCoreChannel.windowKeyForTab(tabId);
       const rawDecision = await privateCoreChannel.request('evaluate_request', payload, 'request', { windowKey });
       decision = normalizePrivateRequestDecision(rawDecision);
@@ -152,6 +154,13 @@ export function installPrivateRequestRoutingHook() {
         reasoningBefore: decision.reasoningBefore,
         reasoningAfter: decision.reasoningAfter,
         reasoningFields: decision.reasoningFields,
+        // Carry exactly the lock policy supplied to the one private mutation
+        // authority, rather than re-reading a potentially changed page policy.
+        policySnapshot: {
+          lockedModels: [...(policyConfiguration?.lockedModels || [])],
+          allowedReasoningLevels: [...(policyConfiguration?.allowedReasoningLevels || [])],
+          strictMode: policyConfiguration?.strictMode === true,
+        },
       });
     } catch (error) {
       await continueAfterDecisionFailure(this, tabId, requestId, endpoint, decision, error);

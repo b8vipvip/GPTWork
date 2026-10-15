@@ -121,7 +121,8 @@ test('only GPT number series and exact -thinking counterpart share a lock identi
   for (const other of ['gpt-5.6-thinking', 'gpt-7-thinking', 'gpt-6-sol', 'gpt-6-astra', 'gpt-6-instant', 'gpt-6-thinking-extra', 'gpt-6.5-thinking']) {
     assert.equal(modelMatchesLock('gpt-6', other), false, other);
   }
-  assert.equal(modelMatchesLock('gpt-5.6-sol', 'gpt-5.6-thinking'), false);
+  assert.equal(modelMatchesLock('gpt-5.6-sol', 'gpt-5.6-thinking'), true);
+  assert.equal(modelMatchesLock('gpt-5.6-sol', 'gpt-5.5'), false);
   assert.equal(modelMatchesLock('gpt-6', 'auto'), false);
 });
 
