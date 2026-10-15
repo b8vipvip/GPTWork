@@ -968,6 +968,7 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   function dispatchSyntheticPointer(element, action = 'click') {
+    if (!autoVerificationRunning) return false;
     const point = elementCenter(element);
     if (!point) return false;
     const common = {
@@ -1033,6 +1034,7 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   async function modelPickerPointer(element, action = 'click', source = 'model-picker') {
+    if (!autoVerificationRunning) return false;
     // chrome.debugger's infobar, picker animations, and compositor movement can make
     // an otherwise correct owned row briefly fail the center-point hit test. Retry
     // the SAME DOM element only; never fall back to a global/coordinate candidate.
@@ -1128,6 +1130,9 @@ document.addEventListener('pointerdown', (event) => {
       pointerTrace('dispatched', { traceId, action, source, point, target: compactElementProbe(element), hit: compactElementProbe(hit) });
       return true;
     } catch {
+      // Discovery may have been stopped while awaiting CDP. Never synthesize
+      // page input after the authority has been revoked.
+      if (!autoVerificationRunning) return false;
       // Synthetic fallback keeps the same DOM element as the sole action authority.
       // It never falls back to coordinates, global menus, or another candidate.
       if (!element.isConnected || !visible(element)) return false;
