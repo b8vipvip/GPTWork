@@ -95,6 +95,10 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
     .map((item) => normalizeConcreteModelId(item?.model))
     .filter(Boolean));
   const approved = (model) => !hasAdminCatalog || adminAllowed.has(model);
+  // The synchronized administrator catalog owns frontend lock selection.
+  // Account-local availability probes remain diagnostics; they must not
+  // veto an administratively enabled model or silently erase saved locks.
+  const selectable = (model) => approved(model) && (hasAdminCatalog || !unavailable.has(model));
   const policy = normalizePolicy(synced.policy ?? DEFAULT_POLICY);
   const selectionWasExplicit = Array.isArray(synced[MODEL_SELECTION_KEY]);
   let selection = normalizeModels(selectionWasExplicit ? synced[MODEL_SELECTION_KEY] : policy.lockedModels);
@@ -111,7 +115,7 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
   if (synced[ASTRA_POLICY_MIGRATION_KEY] === true) seen.add(ASTRA_MODEL_ID);
 
   for (const model of autoCandidates) {
-    if (unavailable.has(model)) continue;
+    if (!selectable(model)) continue;
     if (restoredSet.has(model)) {
       if (!selection.includes(model)) selection.push(model);
       seen.add(model);
@@ -122,8 +126,8 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
     seen.add(model);
   }
 
-  selection = normalizeModels(selection).filter((model) => approved(model) && !unavailable.has(model));
-  if (!selection.length && approved(SOL_MODEL_ID) && !unavailable.has(SOL_MODEL_ID)) selection = [SOL_MODEL_ID];
+  selection = normalizeModels(selection).filter(selectable);
+  if (!selection.length && selectable(SOL_MODEL_ID)) selection = [SOL_MODEL_ID];
 
   const syncPatch = {};
   if (!sameJson(normalizeModels(synced[MODEL_SELECTION_KEY]), selection) || !selectionWasExplicit) {
@@ -147,7 +151,7 @@ async function reconcileSelectionAndPolicy(availabilityValue, { restored = [] } 
       );
     }
     if (modelLockEnabled) active.push(...selection);
-    const lockedModels = normalizeModels(active).filter((model) => approved(model) && !unavailable.has(model));
+    const lockedModels = normalizeModels(active).filter(selectable);
     if (!sameJson(normalizeModels(policy.lockedModels), lockedModels)) {
       syncPatch.policy = { ...policy, lockedModels };
     }

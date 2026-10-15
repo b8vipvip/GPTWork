@@ -150,7 +150,7 @@ test('runtime waits for auto verification completion and auto-selects newly disc
   assert.match(runtimeSource, /MODEL_SELECTION_SEEN_KEY/);
   assert.match(runtimeSource, /discovered\.filter\(isHigherThanSol\)/);
   assert.match(runtimeSource, /models\[model\]\?\.status === 'available'/);
-  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(\(model\) => approved\(model\) && !unavailable\.has\(model\)\)/);
+  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(selectable\)/);
 });
 
 test('settings gray only explicitly unavailable models and show the requested explanation', () => {
@@ -162,4 +162,13 @@ test('settings gray only explicitly unavailable models and show the requested ex
   assert.match(optionsSource, /MODEL_UNAVAILABLE_MESSAGE/);
   assert.match(settingsShellSource, /import\('\.\/model-availability-options\.js'\)/);
   assert.match(backgroundEntrySource, /model-availability-runtime\.js/);
+});
+
+test('administrator-enabled catalog models remain selectable despite local negative probes', () => {
+  assert.match(runtimeSource, /const selectable = \(model\) => approved\(model\) && \(hasAdminCatalog \|\| !unavailable\.has\(model\)\)/);
+  assert.match(runtimeSource, /selection = normalizeModels\(selection\)\.filter\(selectable\)/);
+  assert.match(runtimeSource, /normalizeModels\(active\)\.filter\(selectable\)/);
+  assert.match(optionsSource, /const adminEnabled = row\.dataset\.sharedKnownModel/);
+  assert.match(optionsSource, /if \(unavailable && !adminEnabled\)/);
+  assert.match(optionsSource, /model-availability-warning/);
 });
