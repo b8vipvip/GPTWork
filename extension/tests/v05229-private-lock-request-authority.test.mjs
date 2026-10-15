@@ -42,7 +42,7 @@ test('private terminal request takes the exact tab lock and correlates the forma
       };
     },
   };
-  vm.runInNewContext(source.slice(entry), {
+  vm.runInNewContext(source.slice(entry).replace('export function installPrivateRequestRoutingHook()', 'function installPrivateRequestRoutingHook()'), {
     ChatGptNetworkMonitor: Monitor,
     privateCoreChannel, buildPrivateRequestPayload, safeRequestEndpoint,
     normalizePrivateRequestDecision(value) { return value; },
@@ -75,7 +75,7 @@ test('incidental private nonofficial requests never replace the formal lock verd
     onRewrite(...args) { events.push(['rewrite', ...args]); }
     async handlePausedRequest() {}
   }
-  vm.runInNewContext(source.slice(entry), {
+  vm.runInNewContext(source.slice(entry).replace('export function installPrivateRequestRoutingHook()', 'function installPrivateRequestRoutingHook()'), {
     ChatGptNetworkMonitor: Monitor,
     privateCoreChannel: {
       async isAvailable() { return true; },
