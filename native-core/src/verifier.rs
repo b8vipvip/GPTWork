@@ -117,12 +117,30 @@ fn canonical_model_id(value: &str) -> Option<String> {
     Some(normalized)
 }
 
+// A plain GPT version and its explicit -thinking protocol sibling share
+// authorization identity. Other model tiers remain distinct. Importantly,
+// VerificationResult.model retains the actual canonical response identity.
+fn model_lock_family(model: &str) -> &str {
+    if let Some(versioned) = model.strip_suffix("-thinking") {
+        if let Some(version) = versioned.strip_prefix("gpt-") {
+            if !version.is_empty()
+                && version
+                    .split('.')
+                    .all(|segment| !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit()))
+            {
+                return versioned;
+            }
+        }
+    }
+    model
+}
+
 fn policy_allows_model(policy: &Policy, model: &str) -> bool {
     policy
         .locked_models
         .iter()
         .filter_map(|value| canonical_model_id(value))
-        .any(|allowed| allowed == model)
+        .any(|allowed| model_lock_family(&allowed) == model_lock_family(model))
 }
 
 pub fn verify(
@@ -363,6 +381,58 @@ mod tests {
         assert_eq!(result.decision, PolicyDecision::Warn);
         assert!(result.allowed);
         assert_eq!(result.reason, Some(ReasonCode::ReasoningNotAllowed));
+    }
+
+    #[test]
+    fn base_gpt_and_thinking_protocol_models_share_lock_identity_but_keep_real_response() {
+        for (base, thinking) in [
+            ("gpt-6", "gpt-6-thinking"),
+            ("gpt-6.5", "gpt-6.5-thinking"),
+            ("gpt-7", "gpt-7-thinking"),
+        ] {
+            let policy = Policy {
+                locked_models: vec![base.to_owned()],
+                allowed_reasoning_levels: vec!["high".to_owned()],
+                strict_mode: true,
+            };
+            let result = verify(
+                &policy,
+                "revision",
+                request(EvidenceSource::NetworkResponseMetadata, thinking, "high"),
+            );
+            assert_eq!(result.verdict, Verdict::Verified, "{base}");
+            assert_eq!(result.model.as_deref(), Some(thinking));
+
+            let reverse = Policy {
+                locked_models: vec![thinking.to_owned()],
+                ..policy
+            };
+            assert_eq!(
+                verify(
+                    &reverse,
+                    "revision",
+                    request(EvidenceSource::NetworkResponseMetadata, base, "high"),
+                ).verdict,
+                Verdict::Verified
+            );
+        }
+    }
+
+    #[test]
+    fn different_gpt_generations_and_other_tiers_do_not_match_thinking_family() {
+        let policy = Policy {
+            locked_models: vec!["gpt-6".to_owned()],
+            allowed_reasoning_levels: vec!["high".to_owned()],
+            strict_mode: true,
+        };
+        for observed in ["gpt-6.5-thinking", "gpt-7-thinking", "gpt-6-sol", "gpt-6-astra", "gpt-6-instant", "gpt-6-thinking-extra"] {
+            let result = verify(
+                &policy, "revision",
+                request(EvidenceSource::NetworkResponseMetadata, observed, "high"),
+            );
+            assert_eq!(result.verdict, Verdict::Mismatch, "{observed}");
+            assert_eq!(result.model.as_deref(), Some(observed));
+        }
     }
 
     #[test]
