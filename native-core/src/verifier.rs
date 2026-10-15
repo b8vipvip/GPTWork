@@ -124,9 +124,9 @@ fn model_lock_family(model: &str) -> &str {
     if let Some(versioned) = model.strip_suffix("-thinking") {
         if let Some(version) = versioned.strip_prefix("gpt-") {
             if !version.is_empty()
-                && version
-                    .split('.')
-                    .all(|segment| !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit()))
+                && version.split('.').all(|segment| {
+                    !segment.is_empty() && segment.bytes().all(|b| b.is_ascii_digit())
+                })
             {
                 return versioned;
             }
@@ -412,7 +412,8 @@ mod tests {
                     &reverse,
                     "revision",
                     request(EvidenceSource::NetworkResponseMetadata, base, "high"),
-                ).verdict,
+                )
+                .verdict,
                 Verdict::Verified
             );
         }
@@ -425,9 +426,17 @@ mod tests {
             allowed_reasoning_levels: vec!["high".to_owned()],
             strict_mode: true,
         };
-        for observed in ["gpt-6.5-thinking", "gpt-7-thinking", "gpt-6-sol", "gpt-6-astra", "gpt-6-instant", "gpt-6-thinking-extra"] {
+        for observed in [
+            "gpt-6.5-thinking",
+            "gpt-7-thinking",
+            "gpt-6-sol",
+            "gpt-6-astra",
+            "gpt-6-instant",
+            "gpt-6-thinking-extra",
+        ] {
             let result = verify(
-                &policy, "revision",
+                &policy,
+                "revision",
                 request(EvidenceSource::NetworkResponseMetadata, observed, "high"),
             );
             assert_eq!(result.verdict, Verdict::Mismatch, "{observed}");
