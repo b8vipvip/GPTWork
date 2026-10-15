@@ -77,6 +77,51 @@ CURRENT_PERCENT=0
 DB_IDENTITY_BEFORE=""
 SETTINGS_SNAPSHOT=""
 
+# Root must not open the live SQLite database: WAL/SHM files can become
+# root-owned, causing SQLITE_IOERR_SHMSIZE (extended code 4874) on restart.
+run_as_runtime() {
+  runuser -u "$RUNTIME_USER" -g "$RUNTIME_GROUP" -- "$@"
+}
+
+log_sqlite_diagnostics() {
+  log "SQLite storage diagnostics: db=$DB_PATH runtime=$RUNTIME_USER:$RUNTIME_GROUP"
+  local candidate
+  for candidate in "$(dirname "$DB_PATH")" "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"; do
+    if [[ -e "$candidate" ]]; then
+      stat -Lc '%A %U:%G %s %n' "$candidate" >>"$LOG_FILE" 2>&1 || true
+    fi
+  done
+  df -h "$DB_PATH" >>"$LOG_FILE" 2>&1 || true
+  df -i "$DB_PATH" >>"$LOG_FILE" 2>&1 || true
+  if command -v findmnt >/dev/null 2>&1; then
+    findmnt -T "$DB_PATH" -o TARGET,FSTYPE,OPTIONS --noheadings >>"$LOG_FILE" 2>&1 || true
+  fi
+}
+
+sqlite_preflight() {
+  if ! run_as_runtime env DB_PATH_ENV="$DB_PATH" "$NODE_BIN" --input-type=module -e '
+    import { DatabaseSync } from "node:sqlite";
+    import { accessSync, constants, existsSync, openSync, closeSync, unlinkSync } from "node:fs";
+    import { dirname, join } from "node:path";
+    import { randomUUID } from "node:crypto";
+    const path=process.env.DB_PATH_ENV, dir=dirname(path);
+    accessSync(path,constants.R_OK|constants.W_OK);
+    accessSync(dir,constants.W_OK|constants.X_OK);
+    for(const sidecar of [path+"-wal",path+"-shm"]){
+      if(existsSync(sidecar)) accessSync(sidecar,constants.R_OK|constants.W_OK);
+    }
+    const probe=join(dir,`.gptwork-sqlite-access-${randomUUID()}`);
+    const fd=openSync(probe,"wx",0o600);
+    try { closeSync(fd); } finally { unlinkSync(probe); }
+    const db=new DatabaseSync(path,{readOnly:true});
+    try { db.prepare("SELECT name FROM sqlite_master LIMIT 1").get(); }
+    finally { db.close(); }
+  ' >>"$LOG_FILE" 2>&1; then
+    log_sqlite_diagnostics
+    fail "SQLite 运行用户无法访问数据库/WAL/SHM 或目录（可能触发 SQLITE_IOERR_SHMSIZE 4874）；已在部署前停止更新，请检查 update.log 中的文件权限、磁盘空间和挂载状态"
+  fi
+}
+
 log() {
   printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG_FILE"
 }
@@ -115,7 +160,23 @@ fail() {
     write_status rolling_back rollback 94 "更新失败，正在回滚到上一版本" "$message" || true
     log "Rolling back to $FROM_COMMIT"
     git -C "$REPO_DIR" reset --hard "$FROM_COMMIT" >>"$LOG_FILE" 2>&1 || true
-    systemctl restart "$SERVICE" >>"$LOG_FILE" 2>&1 || true
+    if ! systemctl restart "$SERVICE" >>"$LOG_FILE" 2>&1; then
+      log "WARNING: rollback code restored but service restart failed"
+      message="$message；回滚后服务重启失败，请检查 SQLite WAL/SHM 权限及磁盘状态"
+      log_sqlite_diagnostics
+    else
+      local rollback_url="http://${GPTLOCK_LICENSE_HOST:-127.0.0.1}:${GPTLOCK_LICENSE_PORT:-3188}/api/v1/health"
+      local rollback_ok=0
+      for _ in $(seq 1 10); do
+        if curl --fail --silent --max-time 2 "$rollback_url" >/dev/null 2>&1; then rollback_ok=1; break; fi
+        sleep 1
+      done
+      if [[ "$rollback_ok" != "1" ]]; then
+        log "WARNING: rollback code restored but service health check failed"
+        message="$message；回滚后健康检查仍失败，请检查 SQLite WAL/SHM 权限及磁盘状态"
+        log_sqlite_diagnostics
+      fi
+    fi
     ROLLBACK_COMMIT="$FROM_COMMIT"
   fi
   write_status failed "$failed_stage" "$failed_percent" "更新失败（阶段：$failed_stage）" "$message" || true
@@ -138,7 +199,7 @@ EOF
 
 snapshot_app_settings() {
   SETTINGS_SNAPSHOT="$BACKUP_DIR/app-settings-$(date -u +%Y%m%dT%H%M%SZ)-${FROM_COMMIT:0:8}.json"
-  DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
+  run_as_runtime env DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { writeFileSync } from "node:fs";
     const db=new DatabaseSync(process.env.DB_PATH_ENV);
@@ -152,7 +213,7 @@ snapshot_app_settings() {
 }
 
 verify_app_settings() {
-  DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
+  run_as_runtime env DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { readFileSync } from "node:fs";
     const before=JSON.parse(readFileSync(process.env.SNAPSHOT_ENV,"utf8")).rows||[];
@@ -167,7 +228,7 @@ verify_app_settings() {
 }
 
 restore_app_settings() {
-  DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
+  run_as_runtime env DB_PATH_ENV="$DB_PATH" SNAPSHOT_ENV="$SETTINGS_SNAPSHOT" "$NODE_BIN" --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
     import { readFileSync } from "node:fs";
     const before=JSON.parse(readFileSync(process.env.SNAPSHOT_ENV,"utf8")).rows||[];
