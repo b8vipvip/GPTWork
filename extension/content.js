@@ -829,12 +829,16 @@ document.addEventListener('pointerdown', (event) => {
       observation.candidates,
     ]);
     if (fingerprint === previousFingerprint) return;
-    previousFingerprint = fingerprint;
     try {
       const state = await sendMessage({ type: 'GPTLOCK_PAGE_OBSERVATION', observation });
+      // Only acknowledge a snapshot after the background actually accepts it.
+      // A startup/reload failure must not permanently suppress an unchanged
+      // page selection from all later reports.
+      previousFingerprint = fingerprint;
       updateCache({ state });
     } catch {
-      // The service worker or native host may be unavailable during browser startup.
+      // Keep the previous fingerprint so the next page event can retry.
+      // No clicks or model mutations are permitted by passive observation.
     }
   }
 
