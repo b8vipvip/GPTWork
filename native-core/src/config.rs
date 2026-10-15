@@ -104,7 +104,25 @@ where
 }
 
 pub fn normalize_model_id(value: &str) -> Result<String> {
-    let value = value.trim().to_ascii_lowercase();
+    let lowered = value.trim().to_ascii_lowercase();
+    // Accept official picker typography (GPT 6 / GPT-6 Sol) as the same
+    // identifier, while keeping different suffixes such as Sol and Thinking
+    // distinct. No spaces are introduced into raw transport IDs.
+    let tokens: Vec<&str> = lowered.split_ascii_whitespace().collect();
+    let candidate = if tokens.len() > 1 {
+        let joined = tokens.join("-");
+        let version = joined.strip_prefix("gpt-").unwrap_or("").split('-').next().unwrap_or("");
+        if !version.is_empty()
+            && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            joined
+        } else {
+            lowered
+        }
+    } else {
+        lowered
+    };
+    let value = candidate;
     if value.is_empty() {
         bail!("model id is empty / 模型标识不能为空");
     }
@@ -366,6 +384,22 @@ mod tests {
         let policy = policy.normalized().unwrap();
         assert_eq!(policy.locked_models, ["gpt-5.6-sol"]);
         assert_eq!(policy.allowed_reasoning_levels, ["extra-high"]);
+    }
+
+    #[test]
+    fn gpt_picker_label_spacing_is_equivalent_to_hyphenated_identifiers() {
+        for (label, expected) in [
+            ("gpt 6", "gpt-6"),
+            ("GPT 5.6", "gpt-5.6"),
+            ("gpt 6 sol", "gpt-6-sol"),
+            ("GPT-6 Sol", "gpt-6-sol"),
+            ("gpt 6 thinking", "gpt-6-thinking"),
+            ("gpt 6.5 thinking", "gpt-6.5-thinking"),
+        ] {
+            assert_eq!(normalize_model_id(label).unwrap(), expected);
+        }
+        assert_ne!(normalize_model_id("gpt 6 sol").unwrap(), normalize_model_id("gpt 6 thinking").unwrap());
+        assert!(normalize_model_id("some unrelated model").is_err());
     }
 
     #[test]
