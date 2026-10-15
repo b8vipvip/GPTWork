@@ -111,9 +111,16 @@ pub fn normalize_model_id(value: &str) -> Result<String> {
     let tokens: Vec<&str> = lowered.split_ascii_whitespace().collect();
     let candidate = if tokens.len() > 1 {
         let joined = tokens.join("-");
-        let version = joined.strip_prefix("gpt-").unwrap_or("").split('-').next().unwrap_or("");
+        let version = joined
+            .strip_prefix("gpt-")
+            .unwrap_or("")
+            .split('-')
+            .next()
+            .unwrap_or("");
         if !version.is_empty()
-            && version.split('.').all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+            && version
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
         {
             joined
         } else {
@@ -398,7 +405,10 @@ mod tests {
         ] {
             assert_eq!(normalize_model_id(label).unwrap(), expected);
         }
-        assert_ne!(normalize_model_id("gpt 6 sol").unwrap(), normalize_model_id("gpt 6 thinking").unwrap());
+        assert_ne!(
+            normalize_model_id("gpt 6 sol").unwrap(),
+            normalize_model_id("gpt 6 thinking").unwrap()
+        );
         assert!(normalize_model_id("some unrelated model").is_err());
     }
 
