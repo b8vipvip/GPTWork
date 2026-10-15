@@ -25,6 +25,7 @@ test('v0.5.124 background owns capture lifetime across the causal phase transact
 
 test('v0.5.124 removeEventListener preserves DOM capture semantics', () => {
   assert.match(lifecycle, /const capture = typeof options === 'boolean' \? options : options\?\.capture === true/);
-  assert.match(lifecycle, /item\.listener === listener[\s\S]*item\.capture === capture/);
+  assert.match(lifecycle, /listenerSlot\(this, type, capture\)\?\.get\(listener\)/);
+  assert.match(lifecycle, /releaseTrackedListener\(this, type, listener, capture, record\)/);
   assert.match(lifecycle, /eventListeners\.delete\(record\)/);
 });
