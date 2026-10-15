@@ -278,12 +278,14 @@ function render(state) {
   const previousSelectionResponse = previousPolicyResponse || Number.isInteger(tab?.selectionRevision)
     && Number.isInteger(tab?.lastRequest?.selectionRevision)
     && tab.selectionRevision !== tab.lastRequest.selectionRevision;
-  const attributedResponseValue = previousSelectionResponse
+  const attributedResponseValue = previousPolicyResponse
     && (tab?.lastVerification?.model || observedResponse)
-    ? `${responseValue} · 上一轮响应（页面已切换）`
-    : responseValue;
+    ? `${responseValue} · 旧策略请求（当前锁定已改变）`
+    : previousSelectionResponse && (tab?.lastVerification?.model || observedResponse)
+      ? `${responseValue} · 上一轮响应（页面已切换）`
+      : responseValue;
   elements.responseState.textContent = tab?.evidenceIssue && !autoEvidenceConfirmed
-    ? `${attributedResponseValue} · ${tab.evidenceIssue}`
+    ? `${attributedResponseValue} · ${previousPolicyResponse ? '历史审计：' : ''}${tab.evidenceIssue}`
     : attributedResponseValue;
   const nativeErrorCode = native.errorCode || classifyNativeError(native.lastError);
   elements.installHelp.hidden = Boolean(native.connected);
