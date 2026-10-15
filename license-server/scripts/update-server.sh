@@ -263,12 +263,16 @@ command -v curl >/dev/null || fail "curl 不可用"
 command -v timeout >/dev/null || fail "timeout 不可用"
 command -v readlink >/dev/null || fail "readlink 不可用"
 command -v stat >/dev/null || fail "stat 不可用"
+command -v runuser >/dev/null || fail "runuser 不可用，无法以服务账户安全备份 SQLite"
+id "$RUNTIME_USER" >/dev/null 2>&1 || fail "SQLite 服务运行用户不存在: $RUNTIME_USER"
+getent group "$RUNTIME_GROUP" >/dev/null 2>&1 || fail "SQLite 服务运行用户组不存在: $RUNTIME_GROUP"
 [[ -x "$NODE_BIN" ]] || fail "Node 22 不可用: $NODE_BIN"
 [[ -f "$FETCH_HELPER" ]] || fail "GitHub 传输助手不存在: $FETCH_HELPER"
 [[ "$DB_PATH" == /* ]] || fail "持久化数据库路径必须为绝对路径"
 [[ -f "$DB_PATH" ]] || fail "持久化数据库不存在，拒绝更新以避免初始化空数据库: $DB_PATH"
 DB_IDENTITY_BEFORE="$(stat -Lc '%d:%i' "$DB_PATH")"
 [[ -n "$DB_IDENTITY_BEFORE" ]] || fail "无法识别当前持久化数据库"
+sqlite_preflight
 pin_persistent_paths
 REMOTE_URL="$(git -C "$REPO_DIR" remote get-url origin)"
 bash "$FETCH_HELPER" --validate-url "$REMOTE_URL" || fail "Git origin 不是受信任的 b8vipvip/GPTLock 仓库"
@@ -308,15 +312,20 @@ write_status running test 62 "正在执行新版本自动化测试"
 (cd "$STAGE_DIR/license-server" && GPTLOCK_UPDATE_ALLOW_WITHOUT_SYSTEMD=1 "$NODE_BIN" --test test/*.test.mjs) >>"$LOG_FILE" 2>&1
 
 write_status running backup 70 "测试通过，正在保护并备份运行数据"
+# Snapshot and backup are created by the same identity that owns SQLite.
+chown "$RUNTIME_USER:$RUNTIME_GROUP" "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+sqlite_preflight
 snapshot_app_settings
 BACKUP_PATH="$BACKUP_DIR/gptlock-license-$(date -u +%Y%m%dT%H%M%SZ)-${FROM_COMMIT:0:8}.sqlite3"
-DB_PATH_ENV="$DB_PATH" BACKUP_PATH_ENV="$BACKUP_PATH" "$NODE_BIN" --input-type=module -e '
+run_as_runtime env DB_PATH_ENV="$DB_PATH" BACKUP_PATH_ENV="$BACKUP_PATH" "$NODE_BIN" --input-type=module -e '
   import { DatabaseSync, backup } from "node:sqlite";
   const db=new DatabaseSync(process.env.DB_PATH_ENV);
   await backup(db, process.env.BACKUP_PATH_ENV);
   db.close();
 ' >>"$LOG_FILE" 2>&1
 chmod 600 "$BACKUP_PATH" || true
+sqlite_preflight
 log "Database backup: $BACKUP_PATH"
 
 write_status running deploy 80 "正在部署已验证的最新代码"
@@ -336,6 +345,7 @@ for _ in $(seq 1 30); do
 done
 if [[ "$HEALTH_OK" != "1" ]]; then
   log "Health check failed for $HEALTH_URL; collecting service diagnostics before rollback"
+  log_sqlite_diagnostics
   systemctl status "$SERVICE" --no-pager -l >>"$LOG_FILE" 2>&1 || true
   journalctl -u "$SERVICE" -n 100 --no-pager >>"$LOG_FILE" 2>&1 || true
   fail "新版本启动后健康检查失败"
