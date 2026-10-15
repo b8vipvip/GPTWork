@@ -354,10 +354,11 @@ pub fn evaluate_request(input: &RequestEnvelope) -> RequestDecision {
     // protocol model only if it matches one of the selected lock families.
     // This also preserves official "gpt-6-thinking" when "gpt-6" is allowed.
     // Requests outside the allow-list are rewritten to the strongest fallback.
-    let page_selected_allowed = decision
-        .model_before
-        .as_deref()
-        .is_some_and(|model| locked_models.iter().any(|allowed| model_matches_lock(allowed, model)));
+    let page_selected_allowed = decision.model_before.as_deref().is_some_and(|model| {
+        locked_models
+            .iter()
+            .any(|allowed| model_matches_lock(allowed, model))
+    });
     let target_model = if page_selected_allowed {
         decision.model_before.clone().unwrap_or_else(|| locked_models[0].clone())
     } else {
@@ -834,7 +835,10 @@ mod tests {
         assert!(!decision.changed);
         assert_eq!(decision.model_before.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(decision.model_after.as_deref(), Some("gpt-5.6-sol"));
-        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-5.6-sol-wm"));
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-5.6-sol-wm")
+        );
         assert_eq!(decision.reason, "already_locked");
     }
 
@@ -854,7 +858,10 @@ mod tests {
         assert!(!decision.changed);
         assert_eq!(decision.reason, "already_locked");
         assert_eq!(decision.model_after.as_deref(), Some("gpt-6-thinking"));
-        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-thinking"));
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-6-thinking")
+        );
         assert!(model_matches_lock("gpt-6", "gpt-6-thinking"));
         assert!(!model_matches_lock("gpt-6-sol", "gpt-6-thinking"));
         assert!(!model_matches_lock("gpt-6-astra", "gpt-6-thinking"));
@@ -876,7 +883,10 @@ mod tests {
         assert!(decision.changed);
         assert_eq!(decision.model_before.as_deref(), Some("gpt-5.5"));
         assert_eq!(decision.model_after.as_deref(), Some("gpt-6-astra"));
-        assert_eq!(decision.transport_model_after.as_deref(), Some("gpt-6-astra-wm"));
+        assert_eq!(
+            decision.transport_model_after.as_deref(),
+            Some("gpt-6-astra-wm")
+        );
     }
 
     #[test]
