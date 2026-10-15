@@ -310,17 +310,32 @@ test('extracts model and thinking effort from nested ChatGPT WebSocket encoded_i
   assert.match(result.fields.reasoning, /thinking_effort/);
 });
 
-test('locks normal requests to the page-selected model when it is in the known catalog', () => {
-  const source = JSON.stringify({ model: 'gpt-5.6-terra', thinking_effort: 'high' });
+test('a known but disallowed page model cannot bypass the explicit allow-list', () => {
+  const source = JSON.stringify({ model: 'gpt-5.6-terra', thinking_effort: 'high', messages: ['unchanged'] });
   const result = rewriteConversationPostData(source, {
     lockedModels: ['gpt-6-astra', 'gpt-5.6-sol'],
     knownModels: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'],
     allowedReasoningLevels: ['high'],
     preferredReasoning: 'high',
   });
-  assert.equal(result.changed, false);
+  assert.equal(result.changed, true);
   assert.equal(result.modelBefore, 'gpt-5.6-terra');
-  assert.equal(result.modelAfter, 'gpt-5.6-terra');
+  assert.equal(result.modelAfter, 'gpt-6-astra');
+  assert.equal(result.transportModelAfter, 'gpt-6-astra-wm');
+  assert.equal(result.reason, 'rewritten');
+  assert.deepEqual(JSON.parse(result.postData).messages, ['unchanged']);
+});
+
+test('a page model inside the explicit lock list is preserved without opening the official picker', () => {
+  const source = JSON.stringify({ model: 'gpt-5.6-sol-wm', thinking_effort: 'high' });
+  const result = rewriteConversationPostData(source, {
+    lockedModels: ['gpt-6-astra', 'gpt-5.6-sol'],
+    knownModels: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra'],
+    allowedReasoningLevels: ['high'],
+    preferredReasoning: 'high',
+  });
+  assert.equal(result.changed, false);
+  assert.equal(result.modelAfter, 'gpt-5.6-sol');
   assert.equal(result.reason, 'page_selected_known_model_locked');
 });
 
