@@ -1121,6 +1121,9 @@ async function applyNetworkEvidence(tabId, evidence) {
     state.phase = result.verdict;
     logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'discovery', 'response_evaluated', {
       tabId,
+      policySource: requestPolicy ? 'request-snapshot' : 'live-tab-policy',
+      lockedModelsAtVerification: [...normalPolicy.lockedModels],
+      originalResponseModel: responseEvidence.model ?? null,
       requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       verdict: result.verdict,
       decision: result.decision,
@@ -1267,6 +1270,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
     }
     logRuntime(rewrite.error ? 'warn' : 'info', 'lock', rewrite.changed ? 'request_lock_rewritten' : 'request_lock_checked', {
       tabId,
+      lockedModelsAtInterception: runtimePolicyForTabSync(tabId).lockedModels,
+      tabFeatureAtInterception: tabFeatureStateSync(tabId),
       verificationActive: Boolean(verification),
       verificationModel: verification?.model ?? null,
       ...state.lastRewrite,
@@ -1303,6 +1308,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       requestId: request.requestId,
       model: request.model,
       reasoning: request.reasoning,
+      lockedModelsAtRequest: [...policyAtRequest.lockedModels],
       conflicts: request.conflicts,
       fields: request.fields,
       diagnostics: request.diagnostics,
