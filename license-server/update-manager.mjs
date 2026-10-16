@@ -123,7 +123,9 @@ export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
       ok: true,
       updaterReady: updater.ready,
       updater,
-      bootstrapCommand,
+      bootstrapCommand: updater.serviceInstalled && updater.watcherInstalled
+        ? `sudo systemctl daemon-reload && sudo systemctl enable --now ${UPDATE_PATH_UNIT}`
+        : bootstrapCommand,
       productVersion: productVersion(),
       serverVersion: packageVersion(),
       currentCommit: commit || null,
