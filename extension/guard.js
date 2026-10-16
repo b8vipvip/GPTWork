@@ -140,8 +140,8 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
   if (state.phase === 'mismatch') {
     // The backend's historical model_not_allowed reason is no longer a
     // current policy failure when the real served model now matches this
-    // tab's canonical lock identity. Retain the audit record without attributing it to the current
-    // lock. A real current mismatch remains a warning, never a send block.
+    // tab's canonical lock identity. Keep its audit record, but do not
+    // attribute it to the current lock. A real mismatch remains warning-only.
     if (!requestLockPolicyIsCurrent(state, policy)) {
       return {
         ...base,
