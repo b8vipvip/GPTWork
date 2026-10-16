@@ -28,6 +28,10 @@
         <div class="progress-track"><div id="updateProgress" class="progress-bar"></div></div>
         <div class="update-status-row"><strong id="updatePercent">0%</strong><span id="updateMessage">尚未执行版本更新</span></div>
         <p id="updateWarning" class="warning" hidden></p>
+        <div id="updateBootstrap" class="update-bootstrap" hidden>
+          <div><strong id="updateBootstrapTitle">需要安装 / 修复服务器更新器</strong><p id="updateBootstrapHint" class="muted">首次部署或 watcher 丢失时，请在服务器终端以 root 执行一次下面的命令。</p></div>
+          <div class="field-with-button"><code id="updateBootstrapCommand"></code><button id="copyUpdateBootstrap" type="button">复制命令</button></div>
+        </div>
         <p class="muted">首次部署更新器需要在服务器终端安装一次 systemd watcher；安装完成后，之后的官网与服务端代码更新都可直接在本页完成，无需给 Web 服务 sudo 权限。</p>
         <pre id="updateLog" class="logbox">暂无更新日志</pre>
       </section>
