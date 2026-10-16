@@ -19,7 +19,7 @@ const el = {
   wechatEnabled: $('wechatEnabled'), wechatUrl: $('wechatUrl'), wechatInstructions: $('wechatInstructions'),
   alipayEnabled: $('alipayEnabled'), alipayUrl: $('alipayUrl'), alipayInstructions: $('alipayInstructions'), saveSettings: $('saveSettings'), settingsMessage: $('settingsMessage'),
   runtimeLog: $('runtimeLog'), refreshRuntime: $('refreshRuntime'), exportRuntime: $('exportRuntime'), audit: $('audit'),
-  updateButton: $('updateButton'), serverVersion: $('serverVersion'), currentCommit: $('currentCommit'), targetRef: $('targetRef'), updateProgress: $('updateProgress'), updatePercent: $('updatePercent'), updateMessage: $('updateMessage'), updateWarning: $('updateWarning'), updateLog: $('updateLog'),
+  updateButton: $('updateButton'), serverVersion: $('serverVersion'), currentCommit: $('currentCommit'), targetRef: $('targetRef'), updateProgress: $('updateProgress'), updatePercent: $('updatePercent'), updateMessage: $('updateMessage'), updateWarning: $('updateWarning'), updateBootstrap: $('updateBootstrap'), updateBootstrapTitle: $('updateBootstrapTitle'), updateBootstrapHint: $('updateBootstrapHint'), updateBootstrapCommand: $('updateBootstrapCommand'), copyUpdateBootstrap: $('copyUpdateBootstrap'), updateLog: $('updateLog'),
 };
 
 const ACTIVE_UPDATE_STATES = new Set(['queued', 'running', 'restarting', 'rolling_back']);
@@ -532,16 +532,50 @@ async function exportRuntimeLogs() {
 
 function renderUpdate(data) {
   const status = data.status || {};
+  const updater = data.updater || {};
   const active = ACTIVE_UPDATE_STATES.has(status.status);
   const percent = Math.max(0, Math.min(100, Number(status.percent || 0)));
+  const updaterReady = Boolean(data.updaterReady);
+  const needsBootstrap = !updaterReady;
   el.serverVersion.textContent = data.serverVersion || 'unknown';
   el.currentCommit.textContent = shortCommit(data.currentCommit); el.currentCommit.title = data.currentCommit || '';
   el.targetRef.textContent = data.targetRef || 'main';
   el.updateProgress.style.width = `${percent}%`; el.updatePercent.textContent = `${percent}%`;
   el.updateMessage.textContent = status.message || '尚未执行版本更新';
   el.updateLog.textContent = Array.isArray(data.log) && data.log.length ? data.log.join('\n') : '暂无更新日志'; el.updateLog.scrollTop = el.updateLog.scrollHeight;
-  el.updateButton.disabled = active || !data.updaterReady; el.updateButton.textContent = active ? '正在更新…' : '版本更新';
-  el.updateWarning.hidden = data.updaterReady; el.updateWarning.textContent = data.updaterReady ? '' : '系统更新器尚未安装，请先安装 updater systemd 单元。';
+  el.updateButton.disabled = active || !updaterReady; el.updateButton.textContent = active ? '正在更新…' : '版本更新';
+
+  el.updateBootstrap.hidden = !needsBootstrap;
+  el.updateBootstrapCommand.textContent = data.bootstrapCommand || 'sudo bash scripts/install-updater-systemd.sh';
+  if (!updater.serviceInstalled) {
+    el.updateBootstrapTitle.textContent = '需要安装服务器更新器';
+    el.updateBootstrapHint.textContent = '当前没有检测到更新执行器服务。请在服务器终端以 root 执行一次下面的命令。';
+  } else if (!updater.watcherInstalled) {
+    el.updateBootstrapTitle.textContent = '需要补装 systemd watcher';
+    el.updateBootstrapHint.textContent = '更新执行器服务已经存在，但 watcher 单元缺失。请执行一次安装/修复命令；不会删除或重建现有生产数据库。';
+  } else if (!updater.active) {
+    el.updateBootstrapTitle.textContent = '需要启动 systemd watcher';
+    el.updateBootstrapHint.textContent = 'watcher 单元已经安装，但当前没有运行。请执行一次安装/修复命令。';
+  } else if (!updater.enabled) {
+    el.updateBootstrapTitle.textContent = '需要启用 systemd watcher 开机启动';
+    el.updateBootstrapHint.textContent = 'watcher 当前正在运行，但没有设置开机自动启动。请执行一次安装/修复命令。';
+  } else {
+    el.updateBootstrapTitle.textContent = '需要修复服务器更新器';
+    el.updateBootstrapHint.textContent = '更新器当前未就绪。请在服务器终端执行一次安装/修复命令。';
+  }
+
+  el.updateWarning.hidden = updaterReady;
+  if (!updaterReady) {
+    el.updateWarning.textContent = !updater.serviceInstalled
+      ? '系统更新器尚未安装，请执行下方安装/修复命令。'
+      : !updater.watcherInstalled
+        ? '更新执行器服务已安装，但 systemd watcher 尚未安装。'
+        : !updater.active
+          ? 'systemd watcher 已安装但当前未运行。'
+          : 'systemd watcher 已运行但未设置开机自动启动。';
+  } else {
+    el.updateWarning.textContent = '';
+  }
   if (status.status === 'failed' && status.error) { el.updateWarning.hidden = false; el.updateWarning.textContent = `更新失败：${status.error}`; }
   if (updateWasActive && !active && status.status === 'succeeded') el.updateMessage.textContent = `${status.message || '更新完成'}，后台已切换到新版本。`;
   updateWasActive = active;
@@ -620,6 +654,19 @@ el.saveSmtpSettings?.addEventListener('click', () => {
 el.sendTestEmail?.addEventListener('click', () => void sendTestEmail());
 el.refreshRuntime?.addEventListener('click', () => void Promise.all([loadRuntimeLogs(), loadAudit()]));
 el.exportRuntime?.addEventListener('click', () => void exportRuntimeLogs());
+el.copyUpdateBootstrap?.addEventListener('click', async () => {
+  const command = el.updateBootstrapCommand?.textContent?.trim();
+  if (!command) return;
+  try {
+    await navigator.clipboard.writeText(command);
+    const original = el.copyUpdateBootstrap.textContent;
+    el.copyUpdateBootstrap.textContent = '已复制';
+    setTimeout(() => { el.copyUpdateBootstrap.textContent = original; }, 1500);
+  } catch (error) {
+    el.updateWarning.hidden = false;
+    el.updateWarning.textContent = '无法自动复制，请手动复制下方命令。';
+  }
+});
 el.updateButton?.addEventListener('click', async () => {
   try {
     el.updateButton.disabled = true; el.updateButton.textContent = '正在提交…';

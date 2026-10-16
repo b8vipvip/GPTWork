@@ -153,7 +153,7 @@ PathExists=$REQUEST_FILE
 Unit=gptlock-license-update.service
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=paths.target
 EOF
 
 systemctl daemon-reload

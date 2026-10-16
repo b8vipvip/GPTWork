@@ -18,7 +18,27 @@ test('systemd installer pins the currently active database as an absolute persis
   assert.match(source, /20-gptwork-persistent-data\.conf/);
   assert.match(source, /Environment="GPTLOCK_LICENSE_DB=\$DB_PATH"/);
   assert.match(source, /Environment="GPTLOCK_UPDATE_DB_PATH=\$DB_PATH"/);
+  assert.match(source, /gptlock-license-update\.path/);
+  assert.match(source, /systemctl daemon-reload/);
+  assert.match(source, /systemctl enable --now gptlock-license-update\.path/);
+  assert.match(source, /WantedBy=paths\.target/);
   assert.match(source, /Persistent database not found/);
+});
+
+test('admin update state distinguishes an installed executor service from a missing watcher', () => {
+  const manager = read('update-manager.mjs');
+  const admin = read('public/admin.js');
+  const page = read('public/admin-update.html');
+  assert.match(manager, /UPDATE_SERVICE_UNIT = 'gptlock-license-update\.service'/);
+  assert.match(manager, /serviceInstalled: Boolean\(installedService\)/);
+  assert.match(manager, /watcherInstalled: Boolean\(installedPath\)/);
+  assert.match(manager, /watcherActive/);
+  assert.match(manager, /watcherEnabled/);
+  assert.match(manager, /Boolean\(installedPath\) && watcherActive && watcherEnabled/);
+  assert.match(admin, /更新执行器服务已安装，但 systemd watcher 尚未安装/);
+  assert.match(admin, /data\.bootstrapCommand/);
+  assert.match(page, /id="updateBootstrap"/);
+  assert.match(page, /id="copyUpdateBootstrap"/);
 });
 
 test('server updater refuses database replacement and preserves pre-existing app settings', () => {
