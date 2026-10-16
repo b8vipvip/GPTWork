@@ -555,10 +555,10 @@ function renderUpdate(data) {
     el.updateBootstrapHint.textContent = '更新执行器服务已经存在，但 watcher 单元缺失。请执行一次安装/修复命令；不会删除或重建现有生产数据库。';
   } else if (!updater.active) {
     el.updateBootstrapTitle.textContent = '需要启动 systemd watcher';
-    el.updateBootstrapHint.textContent = 'watcher 单元已经安装，但当前没有运行。请执行一次安装/修复命令。';
+    el.updateBootstrapHint.textContent = 'watcher 已安装但没有运行。请执行下面的 systemctl 命令恢复监听；若失败请检查更新执行器服务及其脚本路径。';
   } else if (!updater.enabled) {
     el.updateBootstrapTitle.textContent = '需要启用 systemd watcher 开机启动';
-    el.updateBootstrapHint.textContent = 'watcher 当前正在运行，但没有设置开机自动启动。请执行一次安装/修复命令。';
+    el.updateBootstrapHint.textContent = 'watcher 当前正在运行但没有开机启用。请执行下面的 systemctl 命令启用。';
   } else {
     el.updateBootstrapTitle.textContent = '需要修复服务器更新器';
     el.updateBootstrapHint.textContent = '更新器当前未就绪。请在服务器终端执行一次安装/修复命令。';

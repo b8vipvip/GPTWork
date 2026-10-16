@@ -50,6 +50,18 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 
+// A .path watcher is not sufficient: systemd must also have the on-demand
+// .service executor installed. The oneshot service itself is normally inactive
+// until a request arrives, so do NOT require serviceActive or serviceEnabled.
+export function isUpdaterReady({
+  serviceInstalled, watcherInstalled, watcherActive, watcherEnabled,
+  allowWithoutSystemd = false,
+}) {
+  return Boolean(allowWithoutSystemd || (
+    serviceInstalled && watcherInstalled && watcherActive && watcherEnabled
+  ));
+}
+
 export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
   // dbPath may come from a legacy relative GPTLOCK_LICENSE_DB. Resolve it in the
   // running server process before deriving updater files so the web process and
@@ -91,7 +103,11 @@ export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
       watcherInstalled: Boolean(installedPath),
       active: watcherActive,
       enabled: watcherEnabled,
-      ready: allowWithoutSystemd || (Boolean(installedPath) && watcherActive && watcherEnabled),
+      ready: isUpdaterReady({
+        serviceInstalled: Boolean(installedService),
+        watcherInstalled: Boolean(installedPath),
+        watcherActive, watcherEnabled, allowWithoutSystemd,
+      }),
       unit: UPDATE_PATH_UNIT,
       serviceUnit: UPDATE_SERVICE_UNIT,
       testBypass: allowWithoutSystemd,
@@ -107,7 +123,9 @@ export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
       ok: true,
       updaterReady: updater.ready,
       updater,
-      bootstrapCommand,
+      bootstrapCommand: updater.serviceInstalled && updater.watcherInstalled
+        ? `sudo systemctl daemon-reload && sudo systemctl enable --now ${UPDATE_PATH_UNIT}`
+        : bootstrapCommand,
       productVersion: productVersion(),
       serverVersion: packageVersion(),
       currentCommit: commit || null,
@@ -119,9 +137,11 @@ export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
 
   function request() {
     const updater = updaterState();
-    if (!updater.ready && env.GPTLOCK_UPDATE_ALLOW_WITHOUT_SYSTEMD !== '1') {
+    if (!updater.ready) {
       let message = '系统更新器尚未安装，请先在服务器执行一次安装/修复命令';
-      if (updater.serviceInstalled && !updater.watcherInstalled) {
+      if (!updater.serviceInstalled) {
+        message = '更新执行器 systemd service 尚未安装；请在服务器执行安装/修复命令';
+      } else if (!updater.watcherInstalled) {
         message = '更新执行器服务已安装，但 systemd watcher 尚未安装；请在服务器执行安装/修复命令';
       } else if (updater.watcherInstalled && !updater.active) {
         message = 'systemd watcher 已安装但当前未运行，请在服务器执行安装/修复命令';

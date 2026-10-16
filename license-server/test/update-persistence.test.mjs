@@ -34,7 +34,9 @@ test('admin update state distinguishes an installed executor service from a miss
   assert.match(manager, /watcherInstalled: Boolean\(installedPath\)/);
   assert.match(manager, /watcherActive/);
   assert.match(manager, /watcherEnabled/);
-  assert.match(manager, /Boolean\(installedPath\) && watcherActive && watcherEnabled/);
+  assert.match(manager, /serviceInstalled && watcherInstalled && watcherActive && watcherEnabled/);
+  assert.match(manager, /updater\.serviceInstalled && updater\.watcherInstalled/);
+  assert.match(manager, /systemctl daemon-reload && sudo systemctl enable --now/);
   assert.match(admin, /更新执行器服务已安装，但 systemd watcher 尚未安装/);
   assert.match(admin, /data\.bootstrapCommand/);
   assert.match(page, /id="updateBootstrap"/);
