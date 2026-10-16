@@ -639,7 +639,7 @@ document.addEventListener('pointerdown', (event) => {
     const labels = {
       lock_ready: ['请求已锁', 'lock'],
       verified: ['已确认', 'good'],
-      mismatch: [guard?.canSend ? '有告警' : '模型不符', guard?.canSend ? 'wait' : 'bad'],
+      mismatch: [guard?.reason === 'model_not_allowed' ? '模型不符' : '有告警', 'wait'],
       preflight_mismatch: ['页面不同', 'wait'],
       preflight_unknown: ['页面未知', 'wait'],
       waiting: ['等待确认', 'wait'],

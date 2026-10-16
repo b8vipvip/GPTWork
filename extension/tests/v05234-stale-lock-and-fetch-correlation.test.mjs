@@ -46,7 +46,9 @@ test('21:19 old Sol request mismatch is real, but must not block 21:25 GPT-6 loc
   const sol = evaluateGuard({
     state, policy: { lockedModels: ['gpt-5.6-sol'], allowedReasoningLevels: ['high'], strictMode: true }, settings,
   });
-  assert.equal(sol.canSend, false, 'the original Sol request mismatch remains auditable and strict');
+  assert.equal(sol.canSend, true, 'the original Sol request mismatch remains auditable but must not block another send');
+  assert.equal(sol.allowKind, 'warning');
+  assert.equal(sol.status, 'mismatch');
   assert.equal(sol.reason, 'model_not_allowed');
   const gpt6 = evaluateGuard({
     state, policy: { lockedModels: ['gpt-6'], allowedReasoningLevels: ['high'], strictMode: true }, settings,
@@ -73,7 +75,7 @@ test('a newly changed lock never retroactively blocks the response to a prior al
   assert.equal(changed.reason, 'previous_request_policy_changed');
 });
 
-test('same request policy identity still blocks, including raw GPT-6 Thinking alias', () => {
+test('same request policy identity still reports a mismatch without blocking, including raw GPT-6 Thinking alias', () => {
   const request = {
     ...oldRequest,
     policySnapshot: { ...oldRequest.policySnapshot, lockedModels: ['gpt-6-thinking'] },
@@ -83,7 +85,10 @@ test('same request policy identity still blocks, including raw GPT-6 Thinking al
     policy: { lockedModels: ['gpt-6'], allowedReasoningLevels: ['high'], strictMode: true },
     settings,
   });
-  assert.equal(bad.canSend, false);
+  assert.equal(bad.canSend, true);
+  assert.equal(bad.allowKind, 'warning');
+  assert.equal(bad.status, 'mismatch');
+  assert.equal(bad.reason, 'model_not_allowed');
   assert.equal(modelMatchesLock('gpt-6-thinking', 'gpt-6'), true);
 });
 
@@ -158,4 +163,10 @@ test('floating model and popup mark prior policy response as history rather than
   assert.match(snap.response.label, /上一轮响应/);
   assert.match(popup, /previous_request_policy_changed/);
   assert.match(popup, /上一轮锁定策略下的响应/);
+});
+
+test('UI and badge describe the confirmed model mismatch as warning-only', () => {
+  assert.match(popup, /响应确认模型与锁定策略不一致，已记录告警；不会阻止继续发送/);
+  assert.doesNotMatch(popup, /强制模式已阻断后续发送/);
+  assert.match(background, /guard\.status === 'mismatch'\) \{\s*\/\/ A served-model mismatch is auditable/);
 });

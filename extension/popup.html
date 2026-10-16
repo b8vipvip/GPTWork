@@ -114,7 +114,7 @@
       <div><dt>响应确认 <small>Response evidence</small></dt><dd id="responseState">—</dd></div>
     </dl>
 
-    <p class="boundary">GPTWork 会在正式聊天 POST 发出前尝试锁定顶层模型/已有推理字段；响应元数据只用于附加确认。缺字段或验证异常不会中断聊天，只有已确认的模型不匹配才会在强制模式下阻断后续发送。<br><span>Formal chat POSTs are locked before send; response metadata is supplementary confirmation.</span></p>
+    <p class="boundary">GPTWork 会在正式聊天 POST 发出前尝试锁定顶层模型/已有推理字段；响应元数据只用于附加确认。缺字段、验证异常或已确认的响应模型不匹配都只记录告警，不会阻止后续发送。<br><span>Formal chat POSTs are locked before send; response metadata is supplementary confirmation.</span></p>
 
     <div class="actions" aria-label="GPTWork 快捷操作">
       <button id="autoVerify" type="button" class="primary auto" title="自动验证 / Auto verify">自动验证</button>

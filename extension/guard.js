@@ -20,19 +20,6 @@ function verificationReasons(state) {
   return Array.isArray(state.lastVerification?.reasons) ? state.lastVerification.reasons : [];
 }
 
-function timestamp(value) {
-  const parsed = Date.parse(value || '');
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function mismatchAppliesToLatestRequest(state) {
-  const verifiedAt = timestamp(state.lastVerification?.verifiedAt);
-  const requestAt = timestamp(state.lastRequest?.capturedAt);
-  if (requestAt === null) return verifiedAt !== null;
-  if (verifiedAt === null) return false;
-  return verifiedAt >= requestAt;
-}
-
 function mismatchFromEarlierPageSelection(state) {
   const requestRevision = state.lastRequest?.selectionRevision;
   const pageRevision = state.selectionRevision;
@@ -45,8 +32,8 @@ function mismatchFromEarlierPageSelection(state) {
 }
 
 // The last response is audited against the policy at its own Fetch request.
-// A later user lock edit does not retroactively authorize a strict block for
-// a different, not-yet-sent request. Compare lock *identities*, not UI labels.
+// A later user lock edit must not turn a historical response into a current
+// mismatch warning. Compare lock *identities*, not UI labels.
 function requestLockPolicyIsCurrent(state, policy) {
   const previous = state.lastRequest?.policySnapshot?.lockedModels;
   if (!Array.isArray(previous)) return true; // legacy state: retain existing rules
@@ -55,23 +42,6 @@ function requestLockPolicyIsCurrent(state, policy) {
   // Picker A model. That subset is still a current lock. Only when its old
   // model is no longer permitted is the old mismatch historical.
   return previous.every((model) => current.some((candidate) => modelMatchesLock(model, candidate)));
-}
-
-function hasConfirmedModelMismatch(state, policy) {
-  if (state.phase !== 'mismatch' || !verificationReasons(state).includes('model_not_allowed')) return false;
-  if (mismatchFromEarlierPageSelection(state)) return false;
-  if (!requestLockPolicyIsCurrent(state, policy)) return false;
-
-  // A reason code is only authoritative while its concrete model is still disallowed.
-  // This prevents an old mismatch reason from surviving a policy change while the
-  // current response model is now explicitly allowed (for example GPT-5.6 Sol).
-  const verifiedModel = state.lastVerification?.model;
-  if (!verifiedModel || policy.lockedModels.some((candidate) => modelMatchesLock(candidate, verifiedModel))) return false;
-
-  // A strict-mode block is turn-scoped. Never let an older response mismatch block
-  // a newer formal request. Missing correlation data fails open instead of making a
-  // stale browser-page listener permanently disable ChatGPT sending.
-  return mismatchAppliesToLatestRequest(state);
 }
 
 function autoVerificationAppliesToLatestRequest(state) {
@@ -139,17 +109,6 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     };
   }
 
-  // A confirmed mismatch may block only the request it actually belongs to.
-  if (strict && hasConfirmedModelMismatch(state, policy)) {
-    return {
-      ...base,
-      canSend: false,
-      allowKind: 'blocked',
-      status: 'mismatch',
-      reason: 'model_not_allowed',
-    };
-  }
-
   if (!state.monitor?.attached) {
     return {
       ...base,
@@ -175,30 +134,14 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     };
   }
 
-  // Auto verification is a turn-level result. ChatGPT can emit additional WebSocket
-  // frames after the model-bearing frame; those frames often contain no model fields.
-  // Keep the verified result sticky only for the same turn, when it was backed by
-  // network response metadata and both model and reasoning still satisfy the policy.
-  if (hasConfirmedAutoVerification(state, policy)) {
-    return { ...base, allowKind: 'locked', status: 'verified' };
-  }
-
-  if (state.phase === 'verified') {
-    return { ...base, allowKind: 'locked', status: 'verified' };
-  }
-  if (state.phase === 'waiting') {
-    return {
-      ...base,
-      allowKind: 'locked',
-      status: 'waiting',
-      reason: 'waiting_for_response_metadata',
-    };
-  }
+  // A confirmed mismatch takes precedence over an earlier successful auto
+  // verification. Keep the true served-model verdict, but never prevent another
+  // user send because of a previous response.
   if (state.phase === 'mismatch') {
     // The backend's historical model_not_allowed reason is no longer a
     // current policy failure when the real served model now matches this
-    // tab's canonical lock identity. Retain the audit record, not the red
-    // mismatch warning or a sticky send block.
+    // tab's canonical lock identity. Retain the audit record without attributing it to the current
+    // lock. A real current mismatch remains a warning, never a send block.
     if (!requestLockPolicyIsCurrent(state, policy)) {
       return {
         ...base,
@@ -226,6 +169,26 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
       allowKind: 'warning',
       status: 'mismatch',
       reason: state.lastVerification?.reason || 'policy_mismatch',
+    };
+  }
+
+  // Auto verification is a turn-level result. ChatGPT can emit additional WebSocket
+  // frames after the model-bearing frame; those frames often contain no model fields.
+  // Keep the verified result sticky only for the same turn, when it was backed by
+  // network response metadata and both model and reasoning still satisfy the policy.
+  if (hasConfirmedAutoVerification(state, policy)) {
+    return { ...base, allowKind: 'locked', status: 'verified' };
+  }
+
+  if (state.phase === 'verified') {
+    return { ...base, allowKind: 'locked', status: 'verified' };
+  }
+  if (state.phase === 'waiting') {
+    return {
+      ...base,
+      allowKind: 'locked',
+      status: 'waiting',
+      reason: 'waiting_for_response_metadata',
     };
   }
   if (state.phase === 'unverified') {

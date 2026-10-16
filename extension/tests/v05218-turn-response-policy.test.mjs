@@ -38,11 +38,13 @@ function state(selectionRevision, requestRevision) {
   };
 }
 
-test('same Picker A epoch: a confirmed served-model mismatch keeps strict guard', () => {
+test('same Picker A epoch: a confirmed served-model mismatch warns but does not block', () => {
   const result = evaluateGuard({
     state: state(2, 2), policy, settings,
   });
-  assert.equal(result.canSend, false);
+  assert.equal(result.canSend, true);
+  assert.equal(result.allowKind, 'warning');
+  assert.equal(result.status, 'mismatch');
   assert.equal(result.reason, 'model_not_allowed');
 });
 
@@ -56,11 +58,13 @@ test('real GPT-5.5 to GPT-6 switch: old late response cannot block the next turn
   assert.equal(result.reason, 'previous_request_mismatch_not_current_selection');
 });
 
-test('a new request in the current epoch still blocks if its own served model mismatches', () => {
+test('a new request in the current epoch still records a mismatch without blocking', () => {
   const result = evaluateGuard({
     state: state(3, 3), policy, settings,
   });
-  assert.equal(result.canSend, false);
+  assert.equal(result.canSend, true);
+  assert.equal(result.allowKind, 'warning');
+  assert.equal(result.reason, 'model_not_allowed');
 });
 
 function responsePolicySnapshot(request, responseRequestId, currentPolicy) {

@@ -53,7 +53,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.236';
+const RUNTIME_CODE_VERSION = '0.5.237';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -567,9 +567,10 @@ async function updateTabBadge(state) {
   if (guard.status === 'verified') {
     text = 'OK';
     color = '#15803d';
-  } else if (guard.status === 'mismatch' && !guard.canSend) {
+  } else if (guard.status === 'mismatch') {
+    // A served-model mismatch is auditable, not a reason to block ChatGPT.
     text = '!';
-    color = '#b91c1c';
+    color = '#b45309';
   } else if (guard.status === 'waiting') {
     text = '…';
     color = '#b45309';
