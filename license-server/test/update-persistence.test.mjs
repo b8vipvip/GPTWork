@@ -21,6 +21,7 @@ test('systemd installer pins the currently active database as an absolute persis
   assert.match(source, /gptlock-license-update\.path/);
   assert.match(source, /systemctl daemon-reload/);
   assert.match(source, /systemctl enable --now gptlock-license-update\.path/);
+  assert.match(source, /WantedBy=paths\.target/);
   assert.match(source, /Persistent database not found/);
 });
 
