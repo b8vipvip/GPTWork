@@ -4,6 +4,11 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const ACTIVE = new Set(['queued', 'running', 'restarting', 'rolling_back']);
+const UPDATE_SERVICE_UNIT = 'gptlock-license-update.service';
+const UPDATE_SERVICE_FILES = [
+  '/etc/systemd/system/gptlock-license-update.service',
+  '/usr/lib/systemd/system/gptlock-license-update.service',
+];
 const UPDATE_PATH_UNIT = 'gptlock-license-update.path';
 const UPDATE_PATH_FILES = [
   '/etc/systemd/system/gptlock-license-update.path',
@@ -70,16 +75,25 @@ export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
   }
 
   function updaterState() {
+    const installedService = UPDATE_SERVICE_FILES.find((path) => existsSync(path)) || null;
     const installedPath = UPDATE_PATH_FILES.find((path) => existsSync(path)) || null;
     const allowWithoutSystemd = env.GPTLOCK_UPDATE_ALLOW_WITHOUT_SYSTEMD === '1';
-    const active = installedPath ? commandOk('systemctl', ['is-active', '--quiet', UPDATE_PATH_UNIT]) : false;
-    const enabled = installedPath ? commandOk('systemctl', ['is-enabled', '--quiet', UPDATE_PATH_UNIT]) : false;
+    const serviceActive = installedService ? commandOk('systemctl', ['is-active', '--quiet', UPDATE_SERVICE_UNIT]) : false;
+    const serviceEnabled = installedService ? commandOk('systemctl', ['is-enabled', '--quiet', UPDATE_SERVICE_UNIT]) : false;
+    const watcherActive = installedPath ? commandOk('systemctl', ['is-active', '--quiet', UPDATE_PATH_UNIT]) : false;
+    const watcherEnabled = installedPath ? commandOk('systemctl', ['is-enabled', '--quiet', UPDATE_PATH_UNIT]) : false;
     return {
+      // installed remains the watcher installation state for compatibility.
       installed: Boolean(installedPath),
-      active,
-      enabled,
-      ready: allowWithoutSystemd || (Boolean(installedPath) && active),
+      serviceInstalled: Boolean(installedService),
+      serviceActive,
+      serviceEnabled,
+      watcherInstalled: Boolean(installedPath),
+      active: watcherActive,
+      enabled: watcherEnabled,
+      ready: allowWithoutSystemd || (Boolean(installedPath) && watcherActive && watcherEnabled),
       unit: UPDATE_PATH_UNIT,
+      serviceUnit: UPDATE_SERVICE_UNIT,
       testBypass: allowWithoutSystemd,
     };
   }
@@ -106,9 +120,15 @@ export function createUpdateManager({ serverRoot, dbPath, env = process.env }) {
   function request() {
     const updater = updaterState();
     if (!updater.ready && env.GPTLOCK_UPDATE_ALLOW_WITHOUT_SYSTEMD !== '1') {
-      const error = new Error(updater.installed
-        ? '系统更新器已安装但监听单元未运行，请在服务器执行安装/修复命令后重试'
-        : '系统更新器尚未安装，请先在服务器执行一次安装命令');
+      let message = '系统更新器尚未安装，请先在服务器执行一次安装/修复命令';
+      if (updater.serviceInstalled && !updater.watcherInstalled) {
+        message = '更新执行器服务已安装，但 systemd watcher 尚未安装；请在服务器执行安装/修复命令';
+      } else if (updater.watcherInstalled && !updater.active) {
+        message = 'systemd watcher 已安装但当前未运行，请在服务器执行安装/修复命令';
+      } else if (updater.watcherInstalled && !updater.enabled) {
+        message = 'systemd watcher 已运行但未设置开机自动启动，请在服务器执行安装/修复命令';
+      }
+      const error = new Error(message);
       error.status = 503;
       throw error;
     }
