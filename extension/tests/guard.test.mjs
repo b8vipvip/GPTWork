@@ -84,7 +84,7 @@ test('waiting, unverified and verification errors do not interrupt chat', () => 
   }
 });
 
-test('strict mode blocks only a confirmed response model mismatch for the latest request', () => {
+test('strict mode warns on confirmed response model mismatch without blocking subsequent sends', () => {
   const guard = evaluateGuard({
     state: state({
       phase: 'mismatch',
@@ -94,8 +94,8 @@ test('strict mode blocks only a confirmed response model mismatch for the latest
     policy: DEFAULT_POLICY,
     settings: ENABLED_SETTINGS,
   });
-  assert.equal(guard.canSend, false);
-  assert.equal(guard.allowKind, 'blocked');
+  assert.equal(guard.canSend, true);
+  assert.equal(guard.allowKind, 'warning');
   assert.equal(guard.status, 'mismatch');
   assert.equal(guard.reason, 'model_not_allowed');
 });
@@ -115,10 +115,11 @@ test('empty model-lock list never blocks normal Chat after a previously confirme
   assert.equal(guard.reason, 'no_locked_model');
   assert.equal(guard.uiConflicts, false);
 
-  // Strictness and mismatching back-end metadata still apply when an actual
-  // model lock is configured. Disabling the final lock is the only exemption.
+  // The configured lock still reports a real served-model mismatch, but
+  // the result is diagnostic rather than an authorization to block a send.
   const locked = evaluateGuard({ state: oldMismatch, policy: DEFAULT_POLICY, settings: ENABLED_SETTINGS });
-  assert.equal(locked.canSend, false);
+  assert.equal(locked.canSend, true);
+  assert.equal(locked.allowKind, 'warning');
   assert.equal(locked.reason, 'model_not_allowed');
 });
 
@@ -233,7 +234,7 @@ test('sticky auto verification requires complete allowed backend evidence', () =
   assert.equal(guard.status, 'unverified');
 });
 
-test('confirmed mismatch for the latest request overrides an earlier successful auto verification', () => {
+test('confirmed mismatch is warned rather than masked by an earlier successful auto verification', () => {
   const guard = evaluateGuard({
     state: state({
       phase: 'mismatch',
@@ -244,7 +245,8 @@ test('confirmed mismatch for the latest request overrides an earlier successful 
     policy: DEFAULT_POLICY,
     settings: ENABLED_SETTINGS,
   });
-  assert.equal(guard.canSend, false);
+  assert.equal(guard.canSend, true);
+  assert.equal(guard.allowKind, 'warning');
   assert.equal(guard.status, 'mismatch');
 });
 
@@ -321,6 +323,25 @@ test('GPT 6 Sol is not the same locked family as GPT 6 Thinking', () => {
     policy: { ...DEFAULT_POLICY, lockedModels: ['gpt-6'] },
     settings: ENABLED_SETTINGS,
   });
-  assert.equal(guard.canSend, false);
+  assert.equal(guard.canSend, true);
+  assert.equal(guard.allowKind, 'warning');
   assert.equal(guard.reason, 'model_not_allowed');
+});
+
+test('strict and warn modes both keep confirmed mismatch evidence while allowing sends', () => {
+  for (const strictMode of [true, false]) {
+    const policy = { ...DEFAULT_POLICY, strictMode };
+    const latest = state({
+      phase: 'mismatch',
+      lastRequest: { capturedAt: '2026-08-26T12:55:18.000Z' },
+      lastVerification: confirmedMismatch(),
+    });
+    const guard = evaluateGuard({ state: latest, policy, settings: ENABLED_SETTINGS });
+    assert.equal(guard.canSend, true, `strictMode=${strictMode}`);
+    assert.equal(guard.allowKind, 'warning');
+    assert.equal(guard.status, 'mismatch');
+    assert.equal(guard.reason, 'model_not_allowed');
+    assert.equal(latest.lastVerification.model, 'gpt-5.5');
+    assert.equal(latest.lastVerification.verdict, 'mismatch');
+  }
 });

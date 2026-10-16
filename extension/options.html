@@ -92,14 +92,14 @@
 
     <section class="card" aria-labelledby="modeHeading">
       <h2 id="modeHeading">处理模式 <span>Enforcement mode</span></h2>
-      <p class="help">请求锁定优先保证正常聊天。核心离线、页面识别缺失、响应字段缺失或推理强度确认异常只告警；只有响应明确确认实际模型不在锁定列表时，强制模式才阻断后续发送。</p>
+      <p class="help">请求锁定优先保证正常聊天。无论提醒或强制模式，响应模型不匹配、核心离线、页面识别缺失及响应验证异常都只记录告警，不会阻断后续发送；正式请求仍会尝试按策略锁定模型。</p>
       <label class="radio-row">
         <input type="radio" name="mode" value="false">
         <span><strong>提醒</strong><small>Warn — 永不因响应确认结果阻断</small></span>
       </label>
       <label class="radio-row">
         <input type="radio" name="mode" value="true">
-        <span><strong>强制</strong><small>Strict — only a confirmed response-model mismatch blocks subsequent sends</small></span>
+        <span><strong>强制</strong><small>Strict — lock formal requests; confirmed response mismatch warns but never blocks sends</small></span>
       </label>
     </section>
 

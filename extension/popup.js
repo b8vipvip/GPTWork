@@ -298,9 +298,11 @@ function render(state) {
   const states = {
     lock_ready: ['请求拦截已就绪 / Interceptor ready', '正式聊天请求会在发送前按锁定策略检查/改写；此状态只表示请求层就绪，不代表后端响应已经确认。', 'good'],
     verified: ['锁定已确认 / Verified', '已取得符合策略的后端响应元数据；这是响应层确认，不依赖页面模型文字。', 'good'],
-    mismatch: guard?.canSend
-      ? ['确认有告警 / Warning', '响应确认存在非模型级异常；聊天保持可用。', 'wait']
-      : ['模型不匹配 / Model mismatch', '服务器响应确认模型不符合锁定策略，强制模式已阻断后续发送。', 'bad'],
+    mismatch: ['响应不匹配 / Response mismatch',
+      guard?.reason === 'model_not_allowed'
+        ? '响应确认模型与锁定策略不一致，已记录告警；不会阻止继续发送。'
+        : '响应验证发现不一致，已记录告警；不会阻止继续发送。',
+      'wait'],
     unverified: ['响应未完全确认 / Unverified', '当前最新帧没有同时提供可信模型与推理强度；如果本轮自动验证此前已取得完整后端证据，会保留该轮已确认结果。', 'wait'],
     waiting: ['请求已锁，等待确认 / Waiting', '本次正式请求已进入发送流程，正在等待后端响应元数据确认。', 'wait'],
     preflight_mismatch: ['页面选择不同 / UI differs', '页面文字与策略不同，但页面状态只作辅助；正式请求仍会在网络层尝试锁定。', 'wait'],
