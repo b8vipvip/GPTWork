@@ -338,7 +338,7 @@
         id: responseModel,
         label: responseModel
           ? `${modelLabel(responseModel)}${familyOnlyResponse ? ' · 仅家族标识，变体未确认' : provisionalResponse ? ' · 流未完整，待核验' : previousSelectionRequest || previousPolicyRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 实际响应' : ''}`
-          : responsePendingForLatestRequest ? '等待本轮真实响应'
+          : responsePendingForLatestRequest ? state?.phase === 'waiting' ? '生成中 · 等待真实响应模型证据' : '等待本轮真实响应'
             : state?.phase === 'waiting' && state?.lastRequest?.requestId
             ? '生成中 · 等待真实响应模型证据'
             : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
