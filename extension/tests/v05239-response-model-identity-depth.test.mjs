@@ -62,7 +62,7 @@ test('non-serving model_slug is logged separately and cannot override served-mod
   }) + '\n\n';
   const result = extractResponseEvidence({ body, mimeType: 'text/event-stream' });
   assert.equal(result.model, 'gpt-6');
-  assert.equal(result.fields.model, 'v.message.metadata.resolved_model_slug'.replace(/^v\./, 'message.'));
+  assert.equal(result.fields.model, 'message.metadata.resolved_model_slug');
   assert.ok(result.diagnostics.contextModelCandidateValues.includes('gpt-6-astra'));
   assert.ok(result.diagnostics.defaultModelCandidateValues.includes('gpt-5.6-sol'));
   assert.deepEqual(result.diagnostics.modelCandidateValues, ['gpt-6']);
