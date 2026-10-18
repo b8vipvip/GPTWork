@@ -53,7 +53,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.237';
+const RUNTIME_CODE_VERSION = '0.5.238';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1714,6 +1714,21 @@ function getPlatformInfo() {
   });
 }
 
+function normalizePickerAObservation(value) {
+  const models = Array.isArray(value?.models)
+    ? [...new Set(value.models.map(normalizeConcreteModelId).filter(Boolean))].slice(0, 8)
+    : [];
+  const observed = value?.observed === true && models.length >= 2;
+  const selected = normalizeConcreteModelId(value?.selectedModel);
+  return {
+    observed,
+    source: observed ? 'official-picker-a-menu' : 'not_observed',
+    models: observed ? models : [],
+    selectedModel: observed && models.includes(selected) ? selected : null,
+    ambiguousSelection: observed && value?.ambiguousSelection === true,
+  };
+}
+
 async function collectPageObservation(tabId, state) {
   try {
     const response = await sendTabMessage(tabId, { type: 'GPTLOCK_COLLECT_PAGE_STATE' });
@@ -1730,6 +1745,7 @@ async function collectPageObservation(tabId, state) {
         reasoningLabel: observation.reasoningLabel ?? '',
         ambiguousModel: Boolean(observation.ambiguousModel),
         candidates: Array.isArray(observation.candidates) ? observation.candidates.slice(0, 8) : [],
+        pickerA: normalizePickerAObservation(observation.pickerA),
       };
       return { collected: true, error: null };
     }
@@ -4980,7 +4996,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           reasoningLabel: message.observation?.reasoningLabel ?? '',
           ambiguousModel: Boolean(message.observation?.ambiguousModel),
           candidates: Array.isArray(message.observation?.candidates) ? message.observation.candidates.slice(0, 8) : [],
+          pickerA: normalizePickerAObservation(message.observation?.pickerA),
         };
+        const pickerA = state.pageObservation.pickerA;
+        if (pickerA.observed && JSON.stringify(previous?.pickerA) !== JSON.stringify(pickerA)) {
+          logRuntime('info', 'page', 'official_picker_a_catalog_observed', {
+            tabId: sender.tab.id,
+            pageModel: state.pageObservation.model,
+            modelEvidenceSource: state.pageObservation.modelEvidenceSource,
+            menuModels: pickerA.models,
+            menuSelectedModel: pickerA.selectedModel,
+            pageModelListed: pickerA.models.includes(state.pageObservation.model),
+          });
+        }
         const previousConcreteModel = normalizeConcreteModelId(state.lastKnownPageModel || previous?.model);
         const observedConcreteModel = normalizeConcreteModelId(state.pageObservation.model);
         if (observedConcreteModel) state.lastKnownPageModel = observedConcreteModel;

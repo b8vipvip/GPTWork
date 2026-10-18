@@ -194,6 +194,11 @@
     const pageModel = normalizeModelId(pageObservation?.model);
     const pageModelChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-checked';
     const pageModelLastChecked = pageObservation?.modelEvidenceSource === 'official-picker-a-last-checked';
+    const pickerA = pageObservation?.pickerA;
+    const menuObserved = pickerA?.observed === true && Array.isArray(pickerA.models) && pickerA.models.length >= 2;
+    const menuModels = menuObserved ? pickerA.models.map(normalizeModelId).filter(Boolean) : [];
+    const menuSelectedModel = menuObserved ? normalizeModelId(pickerA.selectedModel) : null;
+    const menuMissingPage = Boolean(pageModel && menuObserved && !menuModels.includes(pageModel));
     const unlocked = Array.isArray(currentPolicy?.lockedModels) && currentPolicy.lockedModels.length === 0;
     const historyHelper = globalThis.__GPTLOCK_MODEL_STATUS_HISTORY__;
     const selected = historyHelper?.selectStatus?.({
@@ -295,8 +300,17 @@
     return {
       page: {
         id: pageModel,
-        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : pageModelLastChecked ? ' · 上次菜单勾选' : ' · 页面观察'}${pageRequestDifferent ? ' · 与已锁定请求不同' : ''}` : '未确认',
+        label: pageModel ? `${modelLabel(pageModel)}${pageModelChecked ? ' · 菜单勾选' : pageModelLastChecked ? ' · 上次菜单勾选' : pageObservation?.modelEvidenceSource === 'composer-current-display' ? ' · 当前控件显示' : ' · 页面观察'}${menuMissingPage ? ' · 菜单未列出' : ''}${pageRequestDifferent ? ' · 与已锁定请求不同' : ''}` : '未确认',
         status: pageModel ? 'observed' : 'unknown',
+      },
+      picker: {
+        id: null,
+        label: menuObserved ? menuModels.map(modelLabel).join(' / ') : '未观察（打开菜单查看）',
+        status: menuObserved ? 'observed' : 'unknown',
+        observed: menuObserved,
+        models: menuModels,
+        selectedModel: menuSelectedModel,
+        pageModelListed: pageModel && menuObserved ? !menuMissingPage : null,
       },
       request: {
         // Internal key stays "request" for compatibility; the visible field is
@@ -490,6 +504,7 @@
       </style>
       <button type="button" data-tone="unknown" title="GPTWork 模型证据 / Model evidence">
         <span class="model-row" data-source="page" data-status="unknown"><span class="model-key">页面模型</span><span class="model-value">未识别</span></span>
+        <span class="model-row" data-source="picker" data-status="unknown"><span class="model-key">菜单模型</span><span class="model-value">未观察</span></span>
         <span class="model-row" data-source="request" data-status="waiting"><span class="model-key">锁定模型</span><span class="model-value">等待请求</span></span>
         <span class="model-row" data-source="response" data-status="waiting"><span class="model-key">响应模型</span><span class="model-value">等待响应</span></span>
       </button>`;
@@ -518,6 +533,7 @@
     const snapshot = modelSnapshot(lastState);
 
     updateRow(button, 'page', snapshot.page);
+    updateRow(button, 'picker', snapshot.picker);
     updateRow(button, 'request', snapshot.request);
     updateRow(button, 'response', snapshot.response);
 
@@ -534,6 +550,7 @@
     const responseDetail = snapshot.response.id ? `${snapshot.response.label} (${snapshot.response.id})` : snapshot.response.label;
     button.title = [
       `页面模型：${pageDetail}`,
+      `官方菜单：${snapshot.picker.label}${snapshot.picker.selectedModel ? ` · 勾选 ${modelLabel(snapshot.picker.selectedModel)}` : ''}${snapshot.picker.pageModelListed === false ? ' · 当前显示模型未列出（不等于不可请求）' : ''}`,
       `锁定模型：${requestDetail}`,
       `响应模型：${responseDetail}${snapshot.response.confirmed ? ' · 网络响应已确认' : ''}${snapshot.response.mismatch ? ' · 与锁定策略不一致' : ''}`,
     ].join('\n');
@@ -556,15 +573,21 @@
     pageRefreshTimer = null;
     const validated = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.collect?.();
     const model = validated ? normalizeModelId(validated.model) : detectPageModel();
-    const previousModel = normalizeModelId(localPageObservation?.model);
-    if (model !== previousModel) {
-      localPageObservation = model ? {
-        model,
-        evidenceSource: 'page_dom_live',
-        modelEvidenceSource: validated?.modelSource || 'legacy-fallback',
-        modelLabel: validated?.modelLabel || '',
-        capturedAt: new Date().toISOString(),
-      } : null;
+    const pickerA = validated?.pickerA || null;
+    const nextObservation = model || pickerA?.observed ? {
+      model: model || null,
+      evidenceSource: 'page_dom_live',
+      modelEvidenceSource: validated?.modelSource || 'legacy-fallback',
+      modelLabel: validated?.modelLabel || '',
+      pickerA,
+      capturedAt: new Date().toISOString(),
+    } : null;
+    const fingerprint = (value) => JSON.stringify([
+      value?.model || null, value?.modelEvidenceSource || null, value?.modelLabel || '',
+      value?.pickerA || null,
+    ]);
+    if (fingerprint(nextObservation) !== fingerprint(localPageObservation)) {
+      localPageObservation = nextObservation;
       // Page DOM remains useful for the live indicator, but it is not strong enough
       // evidence to permanently add a lockable model. Network request/response evidence
       // will promote the model after a real conversation request.
@@ -630,7 +653,7 @@
     childList: true,
     subtree: true,
     attributes: true,
-    attributeFilter: ['aria-label', 'aria-checked', 'aria-selected', 'data-state', 'data-selected', 'data-value', 'data-model', 'data-model-id', 'title', 'data-testid'],
+    attributeFilter: ['aria-label', 'aria-checked', 'aria-expanded', 'aria-selected', 'data-state', 'data-selected', 'data-value', 'data-model', 'data-model-id', 'title', 'data-testid'],
   });
 
   window.addEventListener('resize', schedulePosition, { passive: true });

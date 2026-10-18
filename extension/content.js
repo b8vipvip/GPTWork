@@ -467,6 +467,7 @@ document.addEventListener('pointerdown', (event) => {
         reasoningLabel: validated.reasoningLabel || '',
         ambiguousModel: Boolean(validated.ambiguous),
         candidates: Array.isArray(validated.candidates) ? validated.candidates.slice(0, 8) : [],
+        pickerA: validated.pickerA || null,
         capturedAt: new Date().toISOString(),
       };
     }
@@ -825,6 +826,7 @@ document.addEventListener('pointerdown', (event) => {
       observation.reasoningLabel,
       observation.ambiguousModel,
       observation.candidates,
+      observation.pickerA,
     ]);
     if (fingerprint === previousFingerprint) return;
     try {

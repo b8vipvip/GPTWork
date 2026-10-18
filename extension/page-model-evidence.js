@@ -226,63 +226,62 @@
     };
   }
 
-  function selectedOfficialPickerAEvidence() {
+  // Picker A menu availability is independent from the current composer display.
+  function officialPickerACatalogEvidence() {
     const trigger = composerModelTrigger();
-    // Only inspect an actively opened model picker owned by the composer.
-    // Radix may portal its menu outside the composer form.
     if (!trigger || trigger.getAttribute?.('aria-expanded') !== 'true') return null;
     const controlledId = trigger.getAttribute?.('aria-controls') || '';
     const controlled = controlledId ? document.getElementById(controlledId) : null;
-    // The open composer trigger must own the inspected menu through its
-    // aria-controls relation.  Scanning unrelated visible portal menus could
-    // accidentally report another control's checked GPT row as Picker A.
     const scopes = controlled && visible(controlled) ? [controlled] : [];
+    const scope = scopes[0] || null;
+    if (!scope) return null;
+    const rows = [...scope.querySelectorAll(
+      "[role='menuitemradio'],[role='radio'],[role='option'],[data-testid^='model-switcher-'],[data-model],[data-model-id]"
+    )].filter(visible).map((element) => {
+      const values = evidenceValues(element);
+      const testId = element.getAttribute?.('data-testid') || '';
+      const testIdModel = /^model-switcher-(gpt-[a-z0-9._:-]+)$/i.exec(testId)?.[1] || '';
+      const label = labelOf(element);
+      const lifecycle55 = /^gpt[- ]?5\.5\s+leaving\s+on\s+[a-z0-9 ,/-]+$/i.test(label)
+        ? 'gpt-5.5' : null;
+      const model = [testIdModel, ...values].map(modelFromText).find(Boolean) || lifecycle55;
+      const checked = element.getAttribute?.('aria-checked') === 'true'
+        || element.getAttribute?.('aria-selected') === 'true'
+        || element.getAttribute?.('data-state') === 'checked'
+        || element.getAttribute?.('data-state') === 'selected'
+        || element.getAttribute?.('data-selected') === 'true';
+      return { model, checked, label };
+    });
+    const models = [...new Set(rows.map((row) => row.model).filter(Boolean))];
+    // A one-row command menu or Work Picker B is not the official Chat Picker A.
+    if (models.length < 2 || models.some((model) => !DIRECT_CHAT_PICKER_A_MODELS.has(model))) return null;
+    const checkedModels = [...new Set(rows.filter((row) => row.checked && row.model).map((row) => row.model))];
+    const selectedModel = checkedModels.length === 1 ? checkedModels[0] : null;
+    return {
+      models,
+      selectedModel,
+      selectedLabel: selectedModel ? rows.find((row) => row.checked && row.model === selectedModel)?.label || selectedModel : '',
+      ambiguousSelection: checkedModels.length > 1,
+      source: 'official-picker-a-menu',
+    };
+  }
 
-    for (const scope of scopes) {
-      const rows = [...scope.querySelectorAll(
-        "[role='menuitemradio'],[role='radio'],[role='option'],[data-testid^='model-switcher-'],[data-model],[data-model-id]"
-      )].filter(visible).map((element) => {
-        const values = evidenceValues(element);
-        const testId = element.getAttribute?.('data-testid') || '';
-        const testIdModel = /^model-switcher-(gpt-[a-z0-9._:-]+)$/i.exec(testId)?.[1] || '';
-        // Live Picker A rows may append retirement copy beneath a known
-        // family label (e.g. "GPT-5.5 Leaving on October 14").  Parse that
-        // ONLY inside the composer-owned official menu, never from arbitrary
-        // page help text or as a new, invented model family.
-        const rowLabel = labelOf(element);
-        const lifecycle55 = /^gpt[- ]?5\.5\s+leaving\s+on\s+[a-z0-9 ,/-]+$/i.test(rowLabel)
-          ? 'gpt-5.5' : null;
-        const model = [testIdModel, ...values].map(modelFromText).find(Boolean) || lifecycle55;
-        const checked = element.getAttribute?.('aria-checked') === 'true'
-          || element.getAttribute?.('aria-selected') === 'true'
-          || element.getAttribute?.('data-state') === 'checked'
-          || element.getAttribute?.('data-state') === 'selected'
-          || element.getAttribute?.('data-selected') === 'true';
-        return { element, model, checked, label: labelOf(element) };
-      });
-      const models = [...new Set(rows.map((row) => row.model).filter(Boolean))];
-      // A menu with a single GPT-labelled command is not the Picker A model
-      // catalog. Also reject Work / Picker B and non-model menu structures.
-      if (models.length < 2 || models.some((model) => !DIRECT_CHAT_PICKER_A_MODELS.has(model))) continue;
-      const selected = rows.filter((row) => row.model && row.checked);
-      const selectedModels = [...new Set(selected.map((row) => row.model))];
-      if (selectedModels.length !== 1) continue;
-      const selectedRow = selected.find((row) => row.model === selectedModels[0]);
-      recentCheckedPicker = {
-        model: selectedModels[0],
-        label: selectedRow?.label || selectedModels[0],
-        pathname: globalThis.location?.pathname || '',
-        at: Date.now(),
-      };
-      return {
-        model: selectedModels[0],
-        source: 'official-picker-a-checked',
-        label: selectedRow?.label || selectedModels[0],
-        ambiguous: false,
-        candidates: models,
-      };
-    }
-    return null;
+  function selectedOfficialPickerAEvidence() {
+    const catalog = officialPickerACatalogEvidence();
+    if (!catalog?.selectedModel || catalog.ambiguousSelection) return null;
+    recentCheckedPicker = {
+      model: catalog.selectedModel,
+      label: catalog.selectedLabel,
+      pathname: globalThis.location?.pathname || '',
+      at: Date.now(),
+    };
+    return {
+      model: catalog.selectedModel,
+      source: 'official-picker-a-checked',
+      label: catalog.selectedLabel,
+      ambiguous: false,
+      candidates: catalog.models,
+    };
   }
 
   function redesignedDefaultChatEvidence() {
@@ -435,6 +434,7 @@
   function collect() {
     const model = modelEvidence();
     const reasoning = reasoningEvidence();
+    const catalog = officialPickerACatalogEvidence();
     return {
       model: model.model,
       reasoning: reasoning.reasoning,
@@ -444,12 +444,19 @@
       reasoningLabel: reasoning.label,
       ambiguous: model.ambiguous,
       candidates: model.candidates,
+      pickerA: catalog
+        ? { observed: true, source: catalog.source, models: catalog.models,
+            selectedModel: catalog.selectedModel, ambiguousSelection: catalog.ambiguousSelection }
+        : { observed: false, source: 'not_observed', models: [],
+            selectedModel: null, ambiguousSelection: false },
     };
   }
 
   globalThis[KEY] = Object.freeze({
     version: '1.3.0',
     composerRoot,
+    composerModelTrigger,
+    officialPickerACatalogEvidence,
     selectedOfficialPickerAEvidence,
     evidenceValues,
     labelOf,

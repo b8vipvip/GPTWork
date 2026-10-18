@@ -4,22 +4,16 @@
   if (!base || base.astraPatchApplied) return;
 
   const ASTRA_MODEL_ID = 'gpt-6-astra';
-  const SELECTED_MODEL_SELECTORS = Object.freeze([
+  // Only a composer-owned CURRENT control can establish its displayed model.
+  // Unselected menu choices or unrelated buttons must not override Picker A.
+  const CURRENT_DISPLAY_SELECTORS = [
+    "button[class*='composer-pill']",
+    "button[data-testid='model-switcher-dropdown-button']",
     "[aria-checked='true']",
     "[aria-selected='true']",
     "[data-state='checked']",
     "[data-state='selected']",
     "[data-selected='true']",
-    "button[class*='composer-pill']",
-    "button[data-testid*='model' i]",
-  ]);
-  const MODEL_CONTROL_SELECTOR = [
-    "button",
-    "[role='button']",
-    "[aria-label]",
-    "[data-value]",
-    "[data-model]",
-    "[data-model-id]",
   ].join(',');
 
   function normalizedLabel(value) {
@@ -35,12 +29,8 @@
     const text = normalizedLabel(value);
     if (!text) return null;
     const compact = text.replace(/\s+/g, '-');
-    if (/(?:^|[^a-z0-9])(?:gpt-)?6(?:\.0)?-astra(?=$|[^a-z0-9])/.test(compact)) {
-      return ASTRA_MODEL_ID;
-    }
-    if (/(?:^|[^a-z0-9])gpt-6-astra(?:[-_.:][a-z0-9._:-]+)(?=$|[^a-z0-9])/.test(compact)) {
-      return ASTRA_MODEL_ID;
-    }
+    if (/(?:^|[^a-z0-9])(?:gpt-)?6(?:\.0)?-astra(?=$|[^a-z0-9])/.test(compact)) return ASTRA_MODEL_ID;
+    if (/(?:^|[^a-z0-9])gpt-6-astra(?:[-_.:][a-z0-9._:-]+)(?=$|[^a-z0-9])/.test(compact)) return ASTRA_MODEL_ID;
     return null;
   }
 
@@ -48,60 +38,36 @@
     return astraFromText(value) || base.modelFromText(value);
   }
 
-  function astraRow(element, selected = false) {
-    if (!base.visible(element)) return null;
-    const values = base.evidenceValues(element);
-    const label = values.find((value) => astraFromText(value));
-    if (!label) return null;
-    return {
-      model: ASTRA_MODEL_ID,
-      source: 'composer-dom',
-      label,
-      selected,
-    };
-  }
-
-  function astraEvidence() {
-    const root = base.composerRoot?.() || document;
-    const rows = [];
+  function currentAstraDisplay() {
+    const root = base.composerRoot?.();
+    if (!root) return null;
+    const trigger = base.composerModelTrigger?.(root);
+    const controls = [trigger, ...root.querySelectorAll(CURRENT_DISPLAY_SELECTORS)].filter(Boolean);
     const seen = new Set();
-
-    for (const selector of SELECTED_MODEL_SELECTORS) {
-      for (const element of root.querySelectorAll(selector)) {
-        if (seen.has(element)) continue;
-        seen.add(element);
-        const row = astraRow(element, true);
-        if (row) rows.push(row);
-      }
-    }
-
-    for (const element of root.querySelectorAll(MODEL_CONTROL_SELECTOR)) {
-      if (seen.has(element)) continue;
+    for (const element of controls) {
+      if (seen.has(element) || !base.visible(element)) continue;
       seen.add(element);
-      const row = astraRow(element, false);
-      if (row) rows.push(row);
+      const label = base.evidenceValues(element).find(astraFromText);
+      if (!label) continue;
+      return {
+        model: ASTRA_MODEL_ID,
+        source: 'composer-current-display',
+        label,
+        ambiguous: false,
+        candidates: [ASTRA_MODEL_ID],
+      };
     }
-
-    if (!rows.length) return null;
-    const selected = rows.find((row) => row.selected) || rows[0];
-    return {
-      model: ASTRA_MODEL_ID,
-      source: selected.source,
-      label: selected.label,
-      ambiguous: false,
-      candidates: [ASTRA_MODEL_ID],
-    };
+    return null;
   }
 
   function modelEvidence() {
-    const astra = astraEvidence();
-    if (astra) return astra;
-    return base.modelEvidence();
+    return currentAstraDisplay() || base.modelEvidence();
   }
 
   function collect() {
     const model = modelEvidence();
     const reasoning = base.reasoningEvidence();
+    const catalog = base.officialPickerACatalogEvidence?.();
     return {
       model: model.model,
       reasoning: reasoning.reasoning,
@@ -111,12 +77,17 @@
       reasoningLabel: reasoning.label,
       ambiguous: model.ambiguous,
       candidates: model.candidates,
+      pickerA: catalog
+        ? { observed: true, source: catalog.source, models: catalog.models,
+            selectedModel: catalog.selectedModel, ambiguousSelection: catalog.ambiguousSelection }
+        : { observed: false, source: 'not_observed', models: [],
+            selectedModel: null, ambiguousSelection: false },
     };
   }
 
   globalThis[KEY] = Object.freeze({
     ...base,
-    version: '1.2.0-astra',
+    version: '1.3.0-astra',
     astraPatchApplied: true,
     astraFromText,
     modelFromText,
