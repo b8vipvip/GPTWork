@@ -192,11 +192,16 @@ function inspectObjects(values, mode = 'response') {
         .map((candidate) => candidate.rawValue)
         .filter(Boolean))].slice(-12),
       reasoningCandidateValues: [...new Set(candidates.reasoning.map((candidate) => candidate.value))].slice(-12),
-      // Non-serving model_slug/default_model_slug are intentionally separate.
-      contextModelCandidatePaths: [...new Set(candidates.contextModel.map((candidate) => candidate.path))].slice(-12),
-      contextModelCandidateValues: [...new Set(candidates.contextModel.map((candidate) => candidate.value))].slice(-12),
-      defaultModelCandidatePaths: [...new Set(candidates.defaultModel.map((candidate) => candidate.path))].slice(-12),
-      defaultModelCandidateValues: [...new Set(candidates.defaultModel.map((candidate) => candidate.value))].slice(-12),
+      // Non-serving model_slug/default_model_slug are diagnostic only.
+      // Preserve the historical empty-diagnostics contract.
+      ...(candidates.contextModel.length ? {
+        contextModelCandidatePaths: [...new Set(candidates.contextModel.map((candidate) => candidate.path))].slice(-12),
+        contextModelCandidateValues: [...new Set(candidates.contextModel.map((candidate) => candidate.value))].slice(-12),
+      } : {}),
+      ...(candidates.defaultModel.length ? {
+        defaultModelCandidatePaths: [...new Set(candidates.defaultModel.map((candidate) => candidate.path))].slice(-12),
+        defaultModelCandidateValues: [...new Set(candidates.defaultModel.map((candidate) => candidate.value))].slice(-12),
+      } : {}),
     },
   };
 }
