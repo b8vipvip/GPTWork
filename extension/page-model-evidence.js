@@ -231,8 +231,10 @@
     const trigger = composerModelTrigger();
     if (!trigger || trigger.getAttribute?.('aria-expanded') !== 'true') return null;
     const controlledId = trigger.getAttribute?.('aria-controls') || '';
-    const scope = controlledId ? document.getElementById(controlledId) : null;
-    if (!scope || !visible(scope)) return null;
+    const controlled = controlledId ? document.getElementById(controlledId) : null;
+    const scopes = controlled && visible(controlled) ? [controlled] : [];
+    const scope = scopes[0] || null;
+    if (!scope) return null;
     const rows = [...scope.querySelectorAll(
       "[role='menuitemradio'],[role='radio'],[role='option'],[data-testid^='model-switcher-'],[data-model],[data-model-id]"
     )].filter(visible).map((element) => {
