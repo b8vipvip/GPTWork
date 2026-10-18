@@ -256,9 +256,18 @@
     const responseAt = timestamp(networkResponse?.capturedAt);
     const responseMatchesRequest = !state?.lastRequest?.requestId
       || networkResponse?.requestId === state.lastRequest.requestId;
+    // A newly intercepted Fetch request may precede the Network.requestWillBeSent
+    // callback. Do not display the previous turn's response as the new turn's.
+    const newestVerificationAt = Math.max(responseAt, timestamp(verification?.verifiedAt));
+    const responsePendingForLatestRequest = requestAt > 0
+      && (!newestVerificationAt || newestVerificationAt < requestAt - 1000);
+    const responseIdentity = state?.responseModelIdentity?.status || null;
+    const familyOnlyResponse = responseIdentity === 'family_only';
+    const provisionalResponse = responseIdentity === 'provisional_difference';
     // A genuine served/resolved/used model is evidence even if it is NOT
     // permitted by the lock. Keep evidence identity independent from verdict.
-    const observedResponseModel = state?.phase !== 'waiting'
+    const observedResponseModel = !responsePendingForLatestRequest
+      && state?.phase !== 'waiting'
       && networkResponse?.evidenceSource === 'network_response_metadata'
       && networkResponse?.fields?.model
       && !networkResponse?.conflicts?.model
@@ -268,7 +277,8 @@
       && (!requestAt || responseAt >= requestAt - 1000)
       ? normalizeConcreteModelId(networkResponse.model)
       : null;
-    const responseModel = observedResponseModel || normalizeModelId(selected?.response?.id) || fallbackResponseModel;
+    const responseModel = observedResponseModel
+      || (!responsePendingForLatestRequest ? normalizeModelId(selected?.response?.id) || fallbackResponseModel : null);
     const responseHistorical = Boolean(responseModel && (previousPolicyRequest || previousSelectionRequest
       || (!observedResponseModel && selected?.response?.historical)));
     const fallbackResponseConfirmed = Boolean(
@@ -286,12 +296,14 @@
       && verification?.evidenceSource === 'network_response_metadata'
       && normalizeModelId(verification?.model) === observedResponseModel
     );
-    const responseConfirmed = previousPolicyRequest || previousSelectionRequest ? false : observedResponseModel
+    const responseConfirmed = familyOnlyResponse || provisionalResponse || responsePendingForLatestRequest
+      || previousPolicyRequest || previousSelectionRequest ? false : observedResponseModel
       ? Boolean(observedResponseEvaluated && verification?.verdict === 'verified')
       : selected?.response?.id
         ? Boolean(selected.response.confirmed)
         : fallbackResponseConfirmed;
-    const responseMismatch = previousPolicyRequest || previousSelectionRequest ? false : observedResponseModel
+    const responseMismatch = familyOnlyResponse || provisionalResponse || responsePendingForLatestRequest
+      || previousPolicyRequest || previousSelectionRequest ? false : observedResponseModel
       ? Boolean(observedResponseEvaluated && fallbackResponseMismatch)
       : selected?.response?.id
         ? Boolean(selected.response.mismatch)
@@ -325,11 +337,13 @@
       response: {
         id: responseModel,
         label: responseModel
-          ? `${modelLabel(responseModel)}${previousSelectionRequest || previousPolicyRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 实际响应' : ''}`
-          : state?.phase === 'waiting' && state?.lastRequest?.requestId
+          ? `${modelLabel(responseModel)}${familyOnlyResponse ? ' · 仅家族标识，变体未确认' : provisionalResponse ? ' · 流未完整，待核验' : previousSelectionRequest || previousPolicyRequest ? ' · 上一轮响应' : observedResponseModel ? ' · 实际响应' : ''}`
+          : responsePendingForLatestRequest ? state?.phase === 'waiting' ? '生成中 · 等待真实响应模型证据' : '等待本轮真实响应'
+            : state?.phase === 'waiting' && state?.lastRequest?.requestId
             ? '生成中 · 等待真实响应模型证据'
             : unlocked ? '尚无后端响应证据' : requestCurrent ? '等待当前响应' : '等待响应',
-        status: previousSelectionRequest || previousPolicyRequest ? 'response-history' : observedResponseModel ? 'response' : responseMismatch
+        status: responsePendingForLatestRequest ? 'waiting' : familyOnlyResponse || provisionalResponse ? 'unknown'
+          : previousSelectionRequest || previousPolicyRequest ? 'response-history' : observedResponseModel ? 'response' : responseMismatch
           ? 'mismatch'
           : responseHistorical
             ? 'confirmed-history'

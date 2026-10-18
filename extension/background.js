@@ -10,6 +10,7 @@ import {
   toNativePolicy,
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
+import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
@@ -53,7 +54,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.238';
+const RUNTIME_CODE_VERSION = '0.5.239';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -376,6 +377,7 @@ function createTabState(tabId, url = '') {
     lastRequest: null,
     lastVerification: null,
     lastResponseEvidence: null,
+    responseModelIdentity: null,
     lastEvidenceDiagnostics: null,
     streamTracking: null,
     evidenceIssue: null,
@@ -549,6 +551,7 @@ function publicTabState(state) {
     lastRequest: state.lastRequest,
     lastVerification: state.lastVerification,
     lastResponseEvidence: state.lastResponseEvidence,
+    responseModelIdentity: state.responseModelIdentity,
     lastEvidenceDiagnostics: state.lastEvidenceDiagnostics,
     streamTracking: state.streamTracking,
     evidenceIssue: state.evidenceIssue,
@@ -1100,6 +1103,19 @@ async function applyNetworkEvidence(tabId, evidence) {
   );
   if (priorVerified && !addsContradiction) return;
 
+  const modelIdentity = classifyResponseModelIdentity({
+    requestModel: state.lastRequest?.requestId === evidenceRequestId ? state.lastRequest.model : null,
+    responseModel: responseEvidence.model,
+    responseField: responseEvidence.fields?.model,
+    modelConflict: responseEvidence.conflicts?.model,
+    terminalEvent: responseEvidence.diagnostics?.terminalEvent,
+    networkError: responseEvidence.diagnostics?.networkError,
+    streamCaptureOverflowed: responseEvidence.diagnostics?.streamCaptureOverflowed,
+  });
+  state.responseModelIdentity = modelIdentity;
+  const inconclusiveVariant = modelIdentity.status === 'family_only'
+    || modelIdentity.status === 'provisional_difference';
+
   try {
     const modelObservation = verificationResponseObservation(tabId, responseEvidence);
     if (modelObservation.downgraded) {
@@ -1118,14 +1134,18 @@ async function applyNetworkEvidence(tabId, evidence) {
       });
     }
     const result = await verifyObservation({
-      model: modelObservation.model,
+      model: inconclusiveVariant ? null : modelObservation.model,
       reasoning: responseEvidence.conflicts?.reasoning ? null : responseEvidence.reasoning,
       evidenceSource: 'network_response_metadata',
       capturedAt: responseEvidence.capturedAt,
       requestId: `cdp-${tabId}-${responseEvidence.requestId || evidence.requestId}`,
     }, normalPolicy);
     state.lastVerification = result;
-    state.evidenceIssue = diagnoseEvidenceIssue(responseEvidence, result);
+    state.evidenceIssue = modelIdentity.status === 'family_only'
+      ? 'response_model_variant_unresolved'
+      : modelIdentity.status === 'provisional_difference'
+        ? 'response_model_stream_incomplete'
+        : diagnoseEvidenceIssue(responseEvidence, result);
     state.lastError = responseEvidence.bodyError || (responseEvidence.conflicts?.model || responseEvidence.conflicts?.reasoning
       ? 'conflicting_response_metadata'
       : null);
@@ -1135,6 +1155,10 @@ async function applyNetworkEvidence(tabId, evidence) {
       policySource: requestPolicy ? 'request-snapshot' : 'live-tab-policy',
       lockedModelsAtVerification: [...normalPolicy.lockedModels],
       originalResponseModel: responseEvidence.model ?? null,
+      rawResponseModel: responseEvidence.rawModel ?? null,
+      responseModelField: responseEvidence.fields?.model ?? null,
+      modelIdentity,
+      requestModel: modelIdentity.requestedModel,
       requestId: evidence?.streamContext?.initialRequestId ?? evidence.requestId ?? null,
       verdict: result.verdict,
       decision: result.decision,
@@ -1357,6 +1381,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       : null;
     state.evidenceIssue = null;
     state.lastResponseEvidence = null;
+    state.responseModelIdentity = null;
     state.lastEvidenceDiagnostics = null;
     logRuntime('info', 'network', 'formal_conversation_request_detected', {
       tabId,
@@ -4595,6 +4620,7 @@ function diagnosticTabState(state) {
     } : null,
     lastVerification: state.lastVerification,
     lastResponseEvidence: state.lastResponseEvidence,
+    responseModelIdentity: state.responseModelIdentity,
     lastEvidenceDiagnostics: state.lastEvidenceDiagnostics,
     streamTracking: state.streamTracking,
     evidenceIssue: state.evidenceIssue,

@@ -125,6 +125,10 @@ function collectCandidates(value, candidates, path = [], depth = 0, mode = 'resp
       const model = rawModel ? normalizeModelId(rawModel) : null;
       const score = pathScore(path, key, 'model', mode);
       if (model && score > 0) candidates.model.push({ value: model, rawValue: rawModel, score, path: nextPath.join('.') });
+      else if (model && candidates.contextModel.length < 128) {
+        // Routing/display metadata is diagnostic only; never make it served proof.
+        candidates.contextModel.push({ value: model, path: nextPath.join('.') });
+      }
     }
     if (DIAGNOSTIC_MODEL_KEYS.has(key)) {
       const rawModel = rawModelFrom(child);
@@ -159,7 +163,7 @@ function selectCandidate(candidates) {
 }
 
 function inspectObjects(values, mode = 'response') {
-  const candidates = { model: [], defaultModel: [], reasoning: [] };
+  const candidates = { model: [], defaultModel: [], contextModel: [], reasoning: [] };
   for (const value of values) collectCandidates(value, candidates, [], 0, mode);
   const model = selectCandidate(candidates.model);
   const reasoning = selectCandidate(candidates.reasoning);
@@ -188,6 +192,16 @@ function inspectObjects(values, mode = 'response') {
         .map((candidate) => candidate.rawValue)
         .filter(Boolean))].slice(-12),
       reasoningCandidateValues: [...new Set(candidates.reasoning.map((candidate) => candidate.value))].slice(-12),
+      // Non-serving model_slug/default_model_slug are diagnostic only.
+      // Preserve the historical empty-diagnostics contract.
+      ...(candidates.contextModel.length ? {
+        contextModelCandidatePaths: [...new Set(candidates.contextModel.map((candidate) => candidate.path))].slice(-12),
+        contextModelCandidateValues: [...new Set(candidates.contextModel.map((candidate) => candidate.value))].slice(-12),
+      } : {}),
+      ...(candidates.defaultModel.length ? {
+        defaultModelCandidatePaths: [...new Set(candidates.defaultModel.map((candidate) => candidate.path))].slice(-12),
+        defaultModelCandidateValues: [...new Set(candidates.defaultModel.map((candidate) => candidate.value))].slice(-12),
+      } : {}),
     },
   };
 }
