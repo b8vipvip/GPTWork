@@ -5053,6 +5053,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabId: sender.tab.id,
           contextKey: state.contextKey,
           action,
+          automated: message.automated === true,
           selectedModel: action === 'menu_model_clicked' ? model : null,
           pageModelBefore: state.pageObservation?.model ?? null,
           currentRequestId: state.lastRequest?.requestId ?? null,
