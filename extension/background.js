@@ -12,7 +12,7 @@ import {
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { conversationKeyFromUrl, modelOriginScene, originSnapshotFields } from './astra-origin-trace.js';
 import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, ASTRA_DEBUG_TIMEOUT_MS, ASTRA_DEBUG_HISTORY_KEY,
-  isAstraDebugRequest, publicAstraDebugProbe } from './astra-debug-probe.js';
+  isAstraDebugRequest, detectAstraDebugSseTerminal, publicAstraDebugProbe } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
@@ -354,6 +354,7 @@ async function startDebugAstra(tabId) {
     responseDefaultModel: null,
     responseEvidenceSource: null,
     streamStage: null,
+    sseTerminalObserved: false,
     networkError: null,
     sendMethod: null,
     assistantSettled: null,
@@ -1848,6 +1849,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
         responseDefaultModel: evidence?.defaultModel || debug.responseDefaultModel,
         responseEvidenceSource: evidence?.evidenceSource || 'network_response_metadata',
         streamStage: evidence?.diagnostics?.stage ?? null,
+        sseTerminalObserved: debug.sseTerminalObserved === true
+          || detectAstraDebugSseTerminal(evidence?.rawResponseBody),
         httpStatus: evidence?.status ?? evidence?.diagnostics?.httpStatus ?? debug.httpStatus,
         error: evidence?.bodyError ? 'response_body_unavailable' : debug.error,
       });
@@ -1892,6 +1895,15 @@ const networkMonitor = new ChatGptNetworkMonitor({
     void applyNetworkEvidence(tabId, evidence);
   },
   onStreamData(tabId, streamData) {
+    const debug = debugAstraProbes.get(tabId);
+    const initialRequestId = streamData?.streamContext?.initialRequestId
+      || streamData?.requestId || null;
+    if (debug?.requestId && initialRequestId === debug.requestId
+      && detectAstraDebugSseTerminal(streamData?.rawStreamData)) {
+      recordDebugAstra(tabId, 'astra_debug_sse_terminal_observed', {
+        sseTerminalObserved: true,
+      });
+    }
     const state = ensureTabState(tabId);
     if (streamData?.streamContext?.isDownstream) {
       const tracking = state.streamTracking || {
