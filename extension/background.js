@@ -5528,13 +5528,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             windowId: tab.windowId,
             tabIndex: Number.isInteger(tab.index) ? tab.index + 1 : null,
             active: tab.active === true,
+            sameWindow: tab.windowId === sender.tab?.windowId,
             title: String(tab.title || 'ChatGPT').slice(0, 140),
             url: tab.url,
             contextKey: tabStates.get(tab.id)?.contextKey ?? contextKey(tab.url),
             pageModel: tabStates.get(tab.id)?.pageObservation?.model ?? null,
             monitorAttached: networkMonitor.isAttached(tab.id),
             guardStatus: tabStates.has(tab.id) ? guardFor(tabStates.get(tab.id)).status : null,
-          })).sort((a, b) => Number(b.active) - Number(a.active)
+          })).sort((a, b) => Number(b.sameWindow) - Number(a.sameWindow)
+            || Number(b.active) - Number(a.active)
             || a.windowId - b.windowId || (a.tabIndex ?? 0) - (b.tabIndex ?? 0)),
         };
       }
