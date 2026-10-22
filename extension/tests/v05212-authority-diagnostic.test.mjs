@@ -16,6 +16,7 @@ function run(rewrite) {
   const events = [];
   const runtime = {
     ensureTabState: () => state,
+    debugAstraProbes: new Map(),
     forwardedRequestLedger: { remember() {} },
     verificationTransactionForTab: () => ({ model: 'gpt-5.6-sol' }),
     runtimePolicyForTabSync: () => ({ lockedModels: ['gpt-5.6-sol'] }),

@@ -126,7 +126,7 @@ test('v0.5.222 keeps known page selection authoritative without automatic page U
   assert.match(backgroundSource, /knownModels: \[\.\.\.sharedKnownModelIds\]/);
   assert.match(contentSource, /if \(!force \|\| !autoVerificationRunning \|\| visibleGeneratingControl\(\)\) return false/);
   assert.doesNotMatch(contentSource, /scheduleAlign\(\)/);
-  assert.match(backgroundSource, /discovery_ui_action_not_authorized/);
+  assert.match(backgroundSource, /discovery_or_explicit_debug_action_not_authorized/);
 });
 
 test('v0.5.116 rejects reasoning-decorated pseudo model rows', () => {

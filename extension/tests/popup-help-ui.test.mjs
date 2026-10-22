@@ -17,7 +17,7 @@ test('popup removes verbose status cards, keeps help in the action row, and move
   assert.match(popup, /<section class="account-card">[\s\S]*?<button id="options"[^>]*>设置<\/button>/);
   assert.match(popup, /<div class="actions"[^>]*>[\s\S]*?<button id="help"[^>]*>使用帮助<\/button>[\s\S]*?<\/div>/);
   assert.match(popup, /src="popup-help\.js"/);
-  assert.match(css, /grid-template-columns:\s*repeat\(3,/);
+  assert.match(css, /grid-template-columns:\s*repeat\(2,/);
   assert.match(css, /\.account-settings-button/);
 });
 

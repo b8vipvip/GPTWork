@@ -21,7 +21,7 @@ test('legacy automatic page model alignment cannot be re-enabled by account or s
   assert.match(background, /autoAlignSelection:\s*false,\s*\/\/ Never revive legacy page alignment/);
 });
 
-test('background CDP pointer and keyboard paths demand active discovery for the exact tab', () => {
+test('background CDP pointer and keyboard paths require discovery or explicit scoped debug', () => {
   const commands = [
     ['GPTLOCK_TRUSTED_POINTER_PREPARE', 'GPTLOCK_TRUSTED_KEY'],
     ['GPTLOCK_TRUSTED_KEY', 'GPTLOCK_TRUSTED_POINTER'],
@@ -36,21 +36,23 @@ test('background CDP pointer and keyboard paths demand active discovery for the 
         ? 'networkMonitor.trustedKey(sender.tab.id, key)'
         : 'networkMonitor.trustedPointer(sender.tab.id, { action, x, y })');
     assert.ok(check >= 0 && action > check, command + ' must check before CDP');
-    assert.match(code, /discovery_ui_action_not_authorized/);
+    assert.match(code, /discovery_or_explicit_debug_action_not_authorized/);
+    assert.match(code, /debugAstraProbes\.get\(sender\.tab\.id\)\?\.phase !== 'dispatching'/);
   }
 });
 
-test('content runtime blocks trusted and synthetic page pointer input outside discovery', () => {
+test('content runtime blocks model selection outside discovery and scopes debug to send', () => {
   for (const sig of [
     "function dispatchSyntheticPointer(element, action = 'click') {",
     "async function modelPickerPointer(element, action = 'click', source = 'model-picker') {",
-    "async function trustedPointer(element, action = 'click', source = 'unspecified') {",
   ]) {
     const at = content.indexOf(sig);
     assert.ok(at >= 0, sig);
     assert.match(content.slice(at, at + 400), /if \(!autoVerificationRunning\) return false;/);
   }
-  assert.match(content, /if \(!autoVerificationRunning\) return false;\s*\/\/ Synthetic fallback/);
+  const trusted = content.slice(content.indexOf("async function trustedPointer(element, action = 'click', source = 'unspecified') {"));
+  assert.match(trusted, /debugAstraProbeRunning && source === 'auto-probe-send'/);
+  assert.match(content, /if \(!autoVerificationRunning && !debugAstraProbeRunning\) return false;\s*\/\/ Synthetic fallback/);
 });
 
 test('passive selection snapshots remain enabled in normal Chat without opening a picker', () => {

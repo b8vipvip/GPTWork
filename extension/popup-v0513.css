@@ -6,7 +6,7 @@
 /* Primary popup actions stay separate from the status table and fill the full width. */
 .actions {
   display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   align-items: stretch !important;
   gap: 8px !important;
   margin-top: 14px !important;
