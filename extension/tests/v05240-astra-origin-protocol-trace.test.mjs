@@ -27,7 +27,7 @@ test('network lifecycle is observed with request correlation, no headers or bodi
       onDetach: { addListener() {} },
       sendCommand(_target, method, _args, callback) {
         if (method === 'Network.getResponseBody') {
-          callback({ body: 'data: ' + JSON.stringify({ message: { metadata: { resolved_model_slug: 'gpt-6' } } }) + '\\n\\n', base64Encoded: false });
+          callback({ body: 'data: ' + JSON.stringify({ message: { metadata: { resolved_model_slug: 'gpt-6' } } }) + '\n\n', base64Encoded: false });
         } else callback({ bufferedData: '' });
       },
     },
