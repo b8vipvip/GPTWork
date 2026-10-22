@@ -5360,6 +5360,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return { ignored: true };
         }
         const state = ensureTabState(sender.tab.id, sender.url || sender.tab.url);
+        if (stage === 'document_start' && masterRuntimeEnabled()) {
+          // A document_start signal can arrive before tabs.onUpdated. Arm the
+          // watched conversation as early as possible without blocking the page.
+          void configureTab({
+            ...sender.tab,
+            url: sender.url || sender.tab.url,
+            status: 'loading',
+          }).catch(() => {});
+        }
         logRuntime('info', 'astra-origin-trace', 'astra_origin_document_lifecycle', {
           tabId: sender.tab.id,
           contextKey: state.contextKey,
