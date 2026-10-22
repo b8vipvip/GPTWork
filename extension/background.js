@@ -11,8 +11,8 @@ import {
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { conversationKeyFromUrl, modelOriginScene, originSnapshotFields } from './astra-origin-trace.js';
-import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_TIMEOUT_MS, ASTRA_DEBUG_HISTORY_KEY,
-  publicAstraDebugProbe } from './astra-debug-probe.js';
+import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, ASTRA_DEBUG_TIMEOUT_MS, ASTRA_DEBUG_HISTORY_KEY,
+  isAstraDebugRequest, publicAstraDebugProbe } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
@@ -370,7 +370,7 @@ async function startDebugAstra(tabId) {
     await chrome.windows.update(tab.windowId, { focused: true });
     const sent = await sendTabMessage(tabId, {
       type: 'GPTWORK_DEBUG_ASTRA_SEND_PROBE',
-      probeText: '计算 12×13，只输出整数。',
+      probeText: ASTRA_DEBUG_PROMPT,
     });
     recordDebugAstra(tabId, 'astra_debug_probe_send_attempt', {
       sendMethod: sent?.method || null,
@@ -1498,7 +1498,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
     return probe?.phase === 'dispatching' && probe.claimed !== true
       && Date.now() - probe.startedAt < ASTRA_DEBUG_TIMEOUT_MS ? probe : null;
   },
-  claimDebugProbe(tabId, fetchRequestId) {
+  claimDebugProbe(tabId, fetchRequestId, postData) {
+    if (!isAstraDebugRequest(postData)) return null;
     const probe = debugAstraProbes.get(tabId);
     if (!probe || probe.phase !== 'dispatching' || probe.claimed === true
       || Date.now() - probe.startedAt >= ASTRA_DEBUG_TIMEOUT_MS) return null;
