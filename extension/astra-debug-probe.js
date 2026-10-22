@@ -56,7 +56,7 @@ export function publicAstraDebugProbe(probe) {
     'forwardedTransportModel', 'httpStatus', 'mimeType', 'terminalEvent',
     'responseModel', 'responseModelField', 'responseDefaultModel',
     'responseEvidenceSource', 'streamStage', 'networkError',
-    'sendMethod', 'assistantSettled', 'error',
+    'sendMethod', 'assistantSettled', 'responseTextSnippet', 'error',
   ];
   const safe = Object.fromEntries(fields.map((key) => [key, probe[key] ?? null]));
   return { ...safe, targetTransportModel: ASTRA_DEBUG_TRANSPORT, ...astraDebugVerdict(probe) };
