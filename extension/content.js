@@ -793,6 +793,40 @@ document.addEventListener('pointerdown', (event) => {
     if (matchesAny(event.target, SEND_SELECTORS)) prearmNormalChatCapture();
   }, true);
 
+  // Read-only provenance for native Picker A. Record model IDs only, never
+  // DOM text outside a recognized model option, prompts or page contents.
+  // A trusted CDP click can also originate from GPTWork automation; retain that
+  // distinction instead of assuming isTrusted implies a human interaction.
+  let nativePickerOpenedAt = 0;
+  document.addEventListener('click', (event) => {
+    if (event.isTrusted !== true) return;
+    const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
+    const root = evidence?.composerRoot?.();
+    const trigger = evidence?.composerModelTrigger?.(root);
+    const target = event.target;
+    if (trigger && (target === trigger || trigger.contains?.(target))) {
+      nativePickerOpenedAt = Date.now();
+      void sendMessage({
+        type: 'GPTLOCK_MODEL_PICKER_ACTION',
+        action: 'trigger_clicked',
+        automated: autoVerificationRunning || cachedState?.autoVerification?.running === true,
+      }).catch(() => {});
+      return;
+    }
+    if (!nativePickerOpenedAt || Date.now() - nativePickerOpenedAt > 30_000) return;
+    const row = target?.closest?.('[role="menuitemradio"],[role="radio"],[role="option"]');
+    if (!row) return;
+    const model = evidence?.modelFromText?.(row.textContent || '');
+    if (!['gpt-6', 'gpt-5.6-sol', 'gpt-5.5'].includes(model)) return;
+    nativePickerOpenedAt = 0;
+    void sendMessage({
+      type: 'GPTLOCK_MODEL_PICKER_ACTION',
+      action: 'menu_model_clicked',
+      model,
+      automated: autoVerificationRunning || cachedState?.autoVerification?.running === true,
+    }).catch(() => {});
+  }, true);
+
   document.addEventListener('click', (event) => {
     if (matchesAny(event.target, SEND_SELECTORS)) handlePotentialSend(event);
   }, true);
