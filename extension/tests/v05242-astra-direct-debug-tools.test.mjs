@@ -49,9 +49,9 @@ test('debug request ownership matches only the exact fixed prompt', () => {
 });
 
 test('SSE done detection distinguishes a true terminal marker from plain HTTP completion', () => {
-  assert.equal(detectAstraDebugSseTerminal('event: message\\ndata: {"text":"hello"}\\n'), false);
-  assert.equal(detectAstraDebugSseTerminal('data: [DONE]\\n\\n'), true);
-  assert.equal(detectAstraDebugSseTerminal('event: message_stream_complete\\ndata: {}\\n'), true);
+  assert.equal(detectAstraDebugSseTerminal('event: message\ndata: {"text":"hello"}\n'), false);
+  assert.equal(detectAstraDebugSseTerminal('data: [DONE]\n\n'), true);
+  assert.equal(detectAstraDebugSseTerminal('event: message_stream_complete\ndata: {}\n'), true);
   assert.equal(detectAstraDebugSseTerminal(null), false);
 });
 
