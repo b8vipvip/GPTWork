@@ -4,7 +4,7 @@ import { readFile, access } from 'node:fs/promises';
 import { ChatGptNetworkMonitor } from '../network-monitor.js';
 import { rewriteConversationPostData } from '../network-evidence.js';
 import {
-  ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, isAstraDebugRequest, astraDebugConfiguration,
+  ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, isAstraDebugRequest, detectAstraDebugSseTerminal, astraDebugConfiguration,
   astraDebugVerdict, publicAstraDebugProbe,
 } from '../astra-debug-probe.js';
 
@@ -46,6 +46,13 @@ test('debug request ownership matches only the exact fixed prompt', () => {
   assert.equal(isAstraDebugRequest(JSON.stringify({
     messages: [{ author: { role: 'assistant' }, content: { parts: [ASTRA_DEBUG_PROMPT] } }],
   })), false);
+});
+
+test('SSE done detection distinguishes a true terminal marker from plain HTTP completion', () => {
+  assert.equal(detectAstraDebugSseTerminal('event: message\\ndata: {"text":"hello"}\\n'), false);
+  assert.equal(detectAstraDebugSseTerminal('data: [DONE]\\n\\n'), true);
+  assert.equal(detectAstraDebugSseTerminal('event: message_stream_complete\\ndata: {}\\n'), true);
+  assert.equal(detectAstraDebugSseTerminal(null), false);
 });
 
 test('transport success, authoritative Astra proof, mismatch and missing proof stay independent', () => {
