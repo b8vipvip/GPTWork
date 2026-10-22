@@ -54,7 +54,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.239';
+const RUNTIME_CODE_VERSION = '0.5.240';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1401,7 +1401,39 @@ const networkMonitor = new ChatGptNetworkMonitor({
     });
     void broadcastTabState(tabId);
   },
+  onProtocolEvent(tabId, protocol) {
+    // Only the allowlisted request/response lifecycle, never headers, tokens,
+    // prompts, response bodies, or arbitrary ChatGPT application metadata.
+    if (!['conversation_response_headers', 'conversation_response_finished',
+      'conversation_response_failed'].includes(protocol?.event)) return;
+    logRuntime('info', 'network', protocol.event, {
+      tabId,
+      requestId: protocol.requestId ?? null,
+      endpoint: protocol.endpoint ?? null,
+      httpStatus: protocol.httpStatus ?? null,
+      mimeType: protocol.mimeType ?? null,
+      elapsedMs: protocol.elapsedMs ?? null,
+      encodedDataLength: protocol.encodedDataLength ?? null,
+      canceled: protocol.canceled ?? null,
+      networkError: protocol.networkError ?? null,
+      downstream: protocol.downstream === true,
+    });
+  },
   onEvidence(tabId, evidence) {
+    logRuntime('info', 'network', 'conversation_response_metadata_observed', {
+      tabId,
+      requestId: evidence?.streamContext?.initialRequestId || evidence?.requestId || null,
+      transportRequestId: evidence?.requestId ?? null,
+      observedModel: evidence?.model ?? null,
+      rawResponseModel: evidence?.rawModel ?? null,
+      responseModelField: evidence?.fields?.model ?? null,
+      httpStatus: evidence?.status ?? evidence?.diagnostics?.httpStatus ?? null,
+      transport: evidence?.diagnostics?.transport ?? null,
+      stage: evidence?.diagnostics?.stage ?? null,
+      bodyFormat: evidence?.diagnostics?.bodyFormat ?? null,
+      modelCandidateCount: evidence?.diagnostics?.modelCandidateCount ?? null,
+      networkError: evidence?.diagnostics?.networkError ?? null,
+    });
     void applyNetworkEvidence(tabId, evidence);
   },
   onStreamData(tabId, streamData) {
@@ -5007,6 +5039,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await networkMonitor.trustedPointer(sender.tab.id, { action, x, y });
         return { action, x, y };
       }
+      case 'GPTLOCK_MODEL_PICKER_ACTION': {
+        if (!sender.tab?.id) throw new Error('Model picker action requires a tab');
+        const action = String(message.action || '');
+        const model = normalizeConcreteModelId(message.model);
+        if (!['trigger_clicked', 'menu_model_clicked'].includes(action)) return { ignored: true };
+        if (action === 'menu_model_clicked' && !['gpt-6', 'gpt-5.6-sol', 'gpt-5.5'].includes(model)) {
+          return { ignored: true };
+        }
+        const state = ensureTabState(sender.tab.id, sender.tab.url);
+        logRuntime('info', 'page', 'official_picker_a_user_action', {
+          tabId: sender.tab.id,
+          contextKey: state.contextKey,
+          action,
+          selectedModel: action === 'menu_model_clicked' ? model : null,
+          pageModelBefore: state.pageObservation?.model ?? null,
+          currentRequestId: state.lastRequest?.requestId ?? null,
+        });
+        return { recorded: true };
+      }
       case 'GPTLOCK_PAGE_OBSERVATION': {
         if (!sender.tab?.id) throw new Error('Page observation requires a tab');
         const state = ensureTabState(sender.tab.id, sender.tab.url);
@@ -5037,6 +5088,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         const previousConcreteModel = normalizeConcreteModelId(state.lastKnownPageModel || previous?.model);
         const observedConcreteModel = normalizeConcreteModelId(state.pageObservation.model);
+        if (observedConcreteModel && !previousConcreteModel) {
+          logRuntime('info', 'page', 'first_concrete_page_model_observed', {
+            tabId: sender.tab.id,
+            contextKey: state.contextKey,
+            model: observedConcreteModel,
+            source: state.pageObservation.modelEvidenceSource,
+            modelLabel: state.pageObservation.modelLabel.slice(0, 96),
+            pickerMenuObserved: pickerA.observed,
+            pickerMenuSelectedModel: pickerA.selectedModel,
+            currentRequestId: state.lastRequest?.requestId ?? null,
+          });
+        }
         if (observedConcreteModel) state.lastKnownPageModel = observedConcreteModel;
         if (
           previousConcreteModel && observedConcreteModel
@@ -5047,6 +5110,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // intervening reasoning-only / unknown DOM frame does not reset the
           // last actually observed concrete Picker A model.
           state.selectionRevision = (state.selectionRevision || 0) + 1;
+          logRuntime('info', 'page', 'page_model_display_transition', {
+            tabId: sender.tab.id,
+            contextKey: state.contextKey,
+            previousModel: previousConcreteModel,
+            currentModel: observedConcreteModel,
+            source: state.pageObservation.modelEvidenceSource,
+            modelLabel: state.pageObservation.modelLabel.slice(0, 96),
+            pickerMenuObserved: pickerA.observed,
+            pickerMenuSelectedModel: pickerA.selectedModel,
+            selectionRevision: state.selectionRevision,
+            currentRequestId: state.lastRequest?.requestId ?? null,
+          });
           state.phase = 'initial';
           state.lastVerification = null;
           state.lastEvidenceDiagnostics = null;
