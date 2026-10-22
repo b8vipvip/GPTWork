@@ -1,6 +1,24 @@
 // A diagnostic request is an explicit, one-shot transport experiment.
 // Request success and actual served-model proof are deliberately independent.
 export const ASTRA_DEBUG_TRANSPORT = 'gpt-6-astra-wm';
+export const ASTRA_DEBUG_PROMPT = '计算 12×13，只输出整数。';
+
+export function isAstraDebugRequest(postData) {
+  if (typeof postData !== 'string' || postData.length > 2 * 1024 * 1024) return false;
+  try {
+    const payload = JSON.parse(postData);
+    return Array.isArray(payload?.messages) && payload.messages.some((message) => {
+      if (message?.author?.role && message.author.role !== 'user') return false;
+      const parts = message?.content?.parts;
+      return Array.isArray(parts) && parts.some((part) =>
+        part === ASTRA_DEBUG_PROMPT
+        || part?.text === ASTRA_DEBUG_PROMPT
+        || part?.content === ASTRA_DEBUG_PROMPT);
+    });
+  } catch {
+    return false;
+  }
+}
 export const ASTRA_DEBUG_CANONICAL = 'gpt-6-astra';
 export const ASTRA_DEBUG_TIMEOUT_MS = 180000;
 export const ASTRA_DEBUG_HISTORY_KEY = 'gptworkAstraDebugProbeHistoryV1';
