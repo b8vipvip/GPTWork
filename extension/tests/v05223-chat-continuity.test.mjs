@@ -83,6 +83,8 @@ function configurationHarness({ attached, enabled = true } = {}) {
     ensureTabState(tabId, url) { return { tabId, url, windowId: null }; },
     masterRuntimeEnabled() { return true; },
     effectiveSettingsForState() { return { enabled }; },
+    originArmedTabIds: new Set(),
+    async configureOriginTrace() {},
     networkMonitor: {
       isAttached() { return attached; },
       async attach(tabId) { calls.push('attach:' + tabId); },
