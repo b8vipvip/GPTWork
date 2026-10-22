@@ -4,7 +4,7 @@ import { readFile, access } from 'node:fs/promises';
 import { ChatGptNetworkMonitor } from '../network-monitor.js';
 import { rewriteConversationPostData } from '../network-evidence.js';
 import {
-  ASTRA_DEBUG_TRANSPORT, astraDebugConfiguration,
+  ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, isAstraDebugRequest, astraDebugConfiguration,
   astraDebugVerdict, publicAstraDebugProbe,
 } from '../astra-debug-probe.js';
 
@@ -34,6 +34,18 @@ test('debug-only override uses exact Astra transport, keeps reasoning and other 
   assert.equal(astraDebugConfiguration(base, { ...active, claimed: true,
     claimedFetchRequestId: 'fetch-1' }, 'fetch-2'), null);
   assert.equal(astraDebugConfiguration(base, { ...active, phase: 'finished' }), null);
+});
+
+test('debug request ownership matches only the exact fixed prompt', () => {
+  assert.equal(isAstraDebugRequest(JSON.stringify({
+    messages: [{ author: { role: 'user' }, content: { parts: [ASTRA_DEBUG_PROMPT] } }],
+  })), true);
+  assert.equal(isAstraDebugRequest(JSON.stringify({
+    messages: [{ author: { role: 'user' }, content: { parts: ['UNRELATED'] } }],
+  })), false);
+  assert.equal(isAstraDebugRequest(JSON.stringify({
+    messages: [{ author: { role: 'assistant' }, content: { parts: [ASTRA_DEBUG_PROMPT] } }],
+  })), false);
 });
 
 test('transport success, authoritative Astra proof, mismatch and missing proof stay independent', () => {
@@ -68,8 +80,8 @@ test('Fetch requestPaused performs one exact one-shot Astra POST and reverts to 
     const monitor = new ChatGptNetworkMonitor({
       getLockConfiguration: () => base,
       getDebugProbe: () => probe,
-      claimDebugProbe(_tabId, fetchRequestId) {
-        if (probe.claimed) return null;
+      claimDebugProbe(_tabId, fetchRequestId, postData) {
+        if (!isAstraDebugRequest(postData) || probe.claimed) return null;
         probe.claimed = true;
         probe.claimedFetchRequestId = fetchRequestId;
         return probe;
@@ -79,7 +91,8 @@ test('Fetch requestPaused performs one exact one-shot Astra POST and reverts to 
     });
     await monitor.attach(77);
     const url = 'https://chatgpt.com/backend-api/conversation';
-    const payload = JSON.stringify({ model: 'gpt-6', reasoning_effort: 'high', messages: [] });
+    const payload = JSON.stringify({ model: 'gpt-6', reasoning_effort: 'high',
+      messages: [{ author: { role: 'user' }, content: { parts: [ASTRA_DEBUG_PROMPT] } }] });
     await monitor.handlePausedRequest(77, {
       requestId: 'fetch-1', networkId: 'net-1',
       request: { url, method: 'POST', postData: payload },
