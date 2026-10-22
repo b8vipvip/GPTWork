@@ -4985,17 +4985,54 @@ chrome.windows.onRemoved.addListener(() => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url && !isChatGptUrl(changeInfo.url)) {
     tabStates.delete(tabId);
+    originSceneByTab.delete(tabId);
+    originArmedTabIds.delete(tabId);
     forwardedRequestLedger.clearTab(tabId);
     if (networkMonitor.isAttached(tabId)) void networkMonitor.detach(tabId);
     return;
   }
-  if (isChatGptUrl(tab.url ?? '') && (changeInfo.url || changeInfo.status === 'complete')) {
+  if (!isChatGptUrl(tab.url ?? '')) return;
+  if (changeInfo.status === 'loading') {
+    const previous = originSceneByTab.get(tabId);
+    originSceneByTab.delete(tabId);
+    const state = ensureTabState(tabId, tab.url);
+    logRuntime('info', 'astra-origin-trace', 'astra_origin_navigation_started', {
+      tabId,
+      contextKey: state.contextKey,
+      previousScene: previous?.scene ?? null,
+      previousModel: previous?.model ?? null,
+      wasCaptureArmed: networkMonitor.hasOriginTrace(tabId),
+    });
+  }
+  if (changeInfo.url || changeInfo.status === 'loading' || changeInfo.status === 'complete') {
     void configureTab(tab);
   }
 });
 
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  if (!masterRuntimeEnabled()) return;
+  // Disarm no-longer-foreground baselines, retaining persistent Astra watches.
+  void (async () => {
+    await loadOriginWatch();
+    for (const tabId of [...originArmedTabIds]) {
+      if (tabId === activeInfo.tabId) continue;
+      const state = tabStates.get(tabId);
+      if (state?.windowId !== activeInfo.windowId) continue;
+      if (originWatchedConversations.has(state.contextKey) || originScene(tabId) === 'astra') continue;
+      if (networkMonitor.hasOriginTrace(tabId)) await networkMonitor.disableOriginTrace(tabId);
+      originArmedTabIds.delete(tabId);
+    }
+    try {
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      if (isChatGptUrl(tab.url ?? '')) await configureTab(tab);
+    } catch {}
+  })();
+});
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabStates.delete(tabId);
+  originSceneByTab.delete(tabId);
+  originArmedTabIds.delete(tabId);
   forwardedRequestLedger.clearTab(tabId);
   if (networkMonitor.isAttached(tabId)) void networkMonitor.detach(tabId);
 });
