@@ -40,6 +40,7 @@ for (const strictMode of [true, false]) {
       let cancelled = 0;
       const ctx = vm.createContext({
         cachedState: { guard },
+        debugAstraProbeRunning: false,
         cachedSettings: { enabled: true, networkVerificationEnabled: true },
         sendConsumedAt: 0,
         lastRuntimeContactAt: Date.now(),
