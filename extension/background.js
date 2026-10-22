@@ -57,7 +57,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.242';
+const RUNTIME_CODE_VERSION = '0.5.243';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -837,12 +837,25 @@ function runtimePolicyForTabSync(tabId) {
 }
 
 function guardFor(state) {
-  return evaluateGuard({
+  const settings = effectiveSettingsForState(state);
+  const guard = evaluateGuard({
     state,
     policy: runtimePolicyForTabSync(state?.tabId),
-    settings: effectiveSettingsForState(state),
+    settings,
     inScope: isChatGptUrl(state.url),
   });
+  // A Master=ON popup must never be contradicted by an undifferentiated
+  // 'GPTWork disabled' page indicator. Show the actual tab/account gate.
+  if (guard.status === 'disabled' && masterRuntimeEnabled()) {
+    if (!accountAllowsState(state)) {
+      return { ...guard, status: 'account_restricted', reason: 'account_window_not_allowed' };
+    }
+    if (!tabFeatureEnabledSync(state?.tabId)) {
+      return { ...guard, status: 'tab_disabled', reason: 'tab_work_and_model_lock_disabled' };
+    }
+    return { ...guard, status: 'tab_unavailable', reason: 'tab_runtime_not_ready' };
+  }
+  return guard;
 }
 
 function publicTabState(state) {
@@ -867,6 +880,9 @@ function publicTabState(state) {
     lastError: state.lastError,
     autoVerification: state.autoVerification,
     knownModels: [...sharedKnownModelIds],
+    tabFeatureState: tabFeatureStateSync(state.tabId),
+    masterEnabled: masterRuntimeEnabled(),
+    accountWindowAllowed: accountAllowsState(state),
     updatedAt: state.updatedAt,
     guard: guardFor(state),
   };
@@ -889,9 +905,9 @@ async function updateTabBadge(state) {
   } else if (['monitor_offline', 'core_offline', 'error', 'unverified'].includes(guard.status)) {
     text = '?';
     color = '#b45309';
-  } else if (guard.status === 'disabled') {
-    text = 'OFF';
-    color = '#64748b';
+  } else if (['disabled', 'tab_disabled', 'account_restricted', 'tab_unavailable'].includes(guard.status)) {
+    text = guard.status === 'disabled' ? 'OFF' : '?';
+    color = guard.status === 'disabled' ? '#64748b' : '#b45309';
   }
   try {
     await chrome.action.setBadgeText({ tabId: state.tabId, text });
@@ -1959,7 +1975,25 @@ async function configureTab(tab) {
     try { await chrome.action.setBadgeText({ tabId: tab.id, text: '' }); } catch {}
     return state;
   }
+  const feature = tabFeatureStateSync(tab.id);
+  const accountAllowed = accountAllowsState(state);
   const enabled = effectiveSettingsForState(state).enabled;
+  const decision = {
+    tabId: tab.id,
+    enabled,
+    masterEnabled: masterRuntimeEnabled(),
+    accountAuthenticated: accountState?.authenticated === true,
+    entitlementActive: accountState?.entitlement?.active === true,
+    accountWindowAllowed: accountAllowed,
+    workModeEnabled: feature.workModeEnabled,
+    modelLockEnabled: feature.modelLockEnabled,
+    tabStatus: tab.status ?? null,
+  };
+  const decisionKey = JSON.stringify(decision);
+  if (state.lastMonitorDecisionKey !== decisionKey) {
+    state.lastMonitorDecisionKey = decisionKey;
+    logRuntime(enabled ? 'info' : 'warn', 'network', 'tab_monitor_gate_evaluated', decision);
+  }
   // Do not detach an enabled tab while it navigates from / to /c/:id.
   // detach() discards CDP request/stream buffers; a loading transition is
   // not cancellation of the user's active Chat request. On a genuine browser
@@ -1985,6 +2019,35 @@ async function configureOpenTabs() {
   // share per-tab single-flight tasks in ChatGptNetworkMonitor, while each sweep itself
   // advances one tab at a time instead of attaching every window in a Promise.all burst.
   for (const tab of tabs) await configureTab(tab);
+}
+
+// Called only by the existing update recovery owner. Refresh authoritative
+// account/window entitlement and then reconfigure the normal tab monitors;
+// never bypass account quota or per-tab feature switches.
+export async function reconcileMonitorsAfterUpdate() {
+  if (!masterRuntimeEnabled()) return { masterEnabled: false, expected: [], pending: [] };
+  await refreshAccountHeartbeat({ reconfigure: true });
+  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  const details = tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => {
+    const state = ensureTabState(tab.id, tab.url);
+    state.windowId = tab.windowId;
+    return {
+      tabId: tab.id,
+      expected: effectiveSettingsForState(state).enabled && tab.status !== 'loading',
+      attached: networkMonitor.isAttached(tab.id),
+      accountAllowed: accountAllowsState(state),
+      feature: tabFeatureStateSync(tab.id),
+    };
+  });
+  const expected = details.filter((item) => item.expected).map((item) => item.tabId);
+  const pending = details.filter((item) => item.expected && !item.attached).map((item) => item.tabId);
+  logRuntime(pending.length ? 'warn' : 'info', 'update', 'monitor_recovery_reconciled', {
+    expected, pending,
+    disabled: details.filter((item) => !item.expected).map((item) => ({
+      tabId: item.tabId, accountAllowed: item.accountAllowed, feature: item.feature,
+    })),
+  });
+  return { masterEnabled: true, expected, pending };
 }
 
 async function refreshAccountHeartbeat({ reconfigure = true } = {}) {
