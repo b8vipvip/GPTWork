@@ -52,7 +52,7 @@ function selectedTarget() {
 }
 
 function targetLabel(tab) {
-  const title = String(tab.title || 'ChatGPT').replace(/\\s+/g, ' ').trim();
+  const title = String(tab.title || 'ChatGPT').replace(/\s+/g, ' ').trim();
   const windowLabel = tab.sameWindow ? '本窗口' : '其他窗口';
   const position = tab.tabIndex ? '第 ' + tab.tabIndex + ' 个标签' : '位置未知';
   const context = tab.contextKey?.startsWith('conversation:') ? '已有会话' : '新聊天';
@@ -80,7 +80,7 @@ function updateTargetPreview() {
     '标签页 ID：' + tab.tabId,
     '请求锁定器：' + (tab.monitorAttached ? '已连接' : '未连接')
       + (tab.guardStatus ? ' · ' + tab.guardStatus : ''),
-  ].join('\\n');
+  ].join('\n');
   $('locateTab').disabled = false;
 }
 
@@ -176,12 +176,12 @@ $('runAstra').addEventListener('click', async () => {
   const tab = selectedTarget();
   if (!tab) { setFeedback('请先选择目标标签页。'); return; }
   const confirmed = window.confirm(
-    '确认向以下 ChatGPT 标签页发送一条真实测试消息？\\n\\n'
-    + '标题：' + (tab.title || 'ChatGPT') + '\\n'
-    + '窗口：' + tab.windowId + ' · 第 ' + (tab.tabIndex || '?') + ' 个标签\\n'
-    + '标签页 ID：' + tab.tabId + '\\n'
-    + '地址：' + tab.url + '\\n\\n'
-    + '测试消息：计算 12×13，只输出整数。\\n'
+    '确认向以下 ChatGPT 标签页发送一条真实测试消息？\n\n'
+    + '标题：' + (tab.title || 'ChatGPT') + '\n'
+    + '窗口：' + tab.windowId + ' · 第 ' + (tab.tabIndex || '?') + ' 个标签\n'
+    + '标签页 ID：' + tab.tabId + '\n'
+    + '地址：' + tab.url + '\n\n'
+    + '测试消息：计算 12×13，只输出整数。\n'
     + '本次将尝试请求 gpt-6-astra-wm，可能消耗额度。'
   );
   if (!confirmed) return;
