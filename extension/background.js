@@ -1509,6 +1509,12 @@ const networkMonitor = new ChatGptNetworkMonitor({
     };
   },
   onStatus(tabId, monitor) {
+    if (!monitor.attached && debugAstraProbes.has(tabId)) {
+      recordDebugAstra(tabId, 'astra_debug_probe_debugger_detached', {
+        phase: 'failed', error: 'cdp_detached_during_probe',
+      });
+      void endDebugAstra(tabId);
+    }
     const state = ensureTabState(tabId);
     state.monitor = monitor;
     const detachedWhileWaiting = !monitor.attached && state.phase === 'waiting';
@@ -1529,6 +1535,23 @@ const networkMonitor = new ChatGptNetworkMonitor({
     void broadcastTabState(tabId);
   },
   onRewrite(tabId, rewrite) {
+    const debug = debugAstraProbes.get(tabId);
+    if (debug && rewrite.authorityKind === 'debug-astra-transport') {
+      // Fetch.continueRequest has already succeeded when this callback runs.
+      // A failed or mismatched rewrite is never reported as a sent Astra request.
+      const forwarded = !rewrite.error && rewrite.transportModelAfter === ASTRA_DEBUG_TRANSPORT;
+      recordDebugAstra(tabId, forwarded ? 'astra_debug_request_forwarded'
+        : 'astra_debug_request_rejected', {
+        claimed: true,
+        phase: forwarded ? 'forwarded' : 'failed',
+        requestId: rewrite.requestId ?? null,
+        fetchRequestId: rewrite.fetchRequestId ?? null,
+        originalTransportModel: rewrite.transportModelBefore ?? null,
+        forwardedTransportModel: forwarded ? rewrite.transportModelAfter : null,
+        error: forwarded ? null : (rewrite.reason || rewrite.error || 'rewrite_not_confirmed'),
+      });
+      if (!forwarded) void endDebugAstra(tabId);
+    }
     const state = ensureTabState(tabId);
     const capturedAt = new Date().toISOString();
     const isFormalFetch = Boolean(rewrite.fetchRequestId)
@@ -1699,6 +1722,23 @@ const networkMonitor = new ChatGptNetworkMonitor({
     void broadcastTabState(tabId);
   },
   onProtocolEvent(tabId, protocol) {
+    const debug = debugAstraProbes.get(tabId);
+    if (debug && debug.requestId && protocol?.requestId === debug.requestId
+      && ['conversation_response_headers', 'conversation_response_finished',
+        'conversation_response_failed'].includes(protocol.event)) {
+      const failed = protocol.event === 'conversation_response_failed'
+        || Number(protocol.httpStatus) >= 400;
+      recordDebugAstra(tabId, 'astra_debug_response_protocol', {
+        phase: failed ? 'failed'
+          : protocol.event === 'conversation_response_finished' ? 'response_finished' : 'responding',
+        httpStatus: protocol.httpStatus ?? debug.httpStatus,
+        mimeType: protocol.mimeType ?? debug.mimeType,
+        terminalEvent: protocol.event === 'conversation_response_headers'
+          ? debug.terminalEvent : protocol.event,
+        networkError: protocol.networkError ? String(protocol.networkError).slice(0, 120) : null,
+      });
+      if (failed) void endDebugAstra(tabId);
+    }
     if (networkMonitor.hasOriginTrace(tabId)) {
       const state = tabStates.get(tabId);
       logRuntime('info', 'astra-origin-trace', 'astra_origin_conversation_protocol', {
@@ -1760,6 +1800,23 @@ const networkMonitor = new ChatGptNetworkMonitor({
     });
   },
   onEvidence(tabId, evidence) {
+    const debug = debugAstraProbes.get(tabId);
+    const initialRequestId = evidence?.streamContext?.initialRequestId || evidence?.requestId || null;
+    if (debug && debug.requestId && initialRequestId === debug.requestId) {
+      recordDebugAstra(tabId, 'astra_debug_response_model_evidence', {
+        responseModel: evidence?.model || debug.responseModel,
+        responseModelField: evidence?.fields?.model || debug.responseModelField,
+        responseDefaultModel: evidence?.defaultModel || debug.responseDefaultModel,
+        responseEvidenceSource: evidence?.evidenceSource || 'network_response_metadata',
+        streamStage: evidence?.diagnostics?.stage ?? null,
+        httpStatus: evidence?.status ?? evidence?.diagnostics?.httpStatus ?? debug.httpStatus,
+        error: evidence?.bodyError ? 'response_body_unavailable' : debug.error,
+      });
+      if (debug.terminalEvent === 'conversation_response_finished'
+        && (evidence?.model || evidence?.diagnostics?.verificationSuppressedReason)) {
+        void endDebugAstra(tabId);
+      }
+    }
     if (networkMonitor.hasOriginTrace(tabId)) {
       const state = tabStates.get(tabId);
       logRuntime('info', 'astra-origin-trace', 'astra_origin_served_model_evidence', {
@@ -5109,6 +5166,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === RUNTIME_LOG_UPLOAD_ALARM) {
     void syncRuntimeLogsToNative().catch(() => {});
   }
+  if (alarm.name.startsWith(ASTRA_DEBUG_ALARM_PREFIX)) {
+    const tabId = Number(alarm.name.slice(ASTRA_DEBUG_ALARM_PREFIX.length));
+    if (debugAstraProbes.has(tabId)) {
+      recordDebugAstra(tabId, 'astra_debug_probe_timeout', {
+        phase: 'timed_out', error: 'response_or_model_evidence_timeout',
+      });
+      void endDebugAstra(tabId);
+    }
+  }
 });
 
 // Keep native window lifecycle listeners registered at all times, but do not turn a
@@ -5172,6 +5238,10 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  if (debugAstraProbes.has(tabId)) {
+    recordDebugAstra(tabId, 'astra_debug_tab_closed', { phase: 'failed', error: 'target_tab_closed' });
+    void endDebugAstra(tabId);
+  }
   tabStates.delete(tabId);
   originSceneByTab.delete(tabId);
   originArmedTabIds.delete(tabId);
