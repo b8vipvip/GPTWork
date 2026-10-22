@@ -325,6 +325,10 @@ async function startDebugAstra(tabId) {
   if (state.autoVerification?.running || verificationTransactionForTab(tabId)) {
     throw new Error('model_discovery_in_progress');
   }
+  if (debugAstraProbes.has(tabId)
+    && ['finished', 'failed', 'timed_out', 'canceled'].includes(debugAstraProbes.get(tabId).phase)) {
+    await endDebugAstra(tabId);
+  }
   if (debugAstraProbes.has(tabId)) throw new Error('astra_debug_probe_already_running');
   const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
   if (!attached) throw new Error('cdp_attach_failed');
@@ -353,6 +357,7 @@ async function startDebugAstra(tabId) {
     networkError: null,
     sendMethod: null,
     assistantSettled: null,
+    responseTextSnippet: null,
     error: null,
   };
   debugAstraProbes.set(tabId, probe);
@@ -372,6 +377,30 @@ async function startDebugAstra(tabId) {
       ...(sent?.sent === true ? {} : { error: 'visible_send_not_confirmed' }),
     });
     if (sent?.sent !== true) throw new Error('visible_send_not_confirmed');
+    // Passive reply observation is separate from HTTP and served-model proof.
+    // The fixed test prompt is never stored; only its new assistant reply (max
+    // 300 characters) may enter the local debug result and runtime JSONL.
+    void sendTabMessage(tabId, {
+      type: 'GPTWORK_DEBUG_ASTRA_WAIT_SETTLED',
+      assistantCountBefore: sent.assistantCountBefore,
+      timeoutMs: 110000,
+    }).then((reply) => {
+      if (debugAstraProbes.get(tabId)?.id !== probe.id) return;
+      const settled = reply?.settled === true;
+      recordDebugAstra(tabId, 'astra_debug_assistant_reply_observed', {
+        assistantSettled: settled,
+        responseTextSnippet: settled ? String(reply.responseTextSnippet || '').slice(0, 300) : null,
+        phase: settled && probe.terminalEvent === 'conversation_response_finished'
+          ? 'finished' : probe.phase,
+      });
+      if (settled && probe.terminalEvent === 'conversation_response_finished') {
+        void endDebugAstra(tabId);
+      }
+    }).catch(() => {
+      if (debugAstraProbes.get(tabId)?.id === probe.id) {
+        recordDebugAstra(tabId, 'astra_debug_assistant_reply_unavailable', { assistantSettled: false });
+      }
+    });
     // A successful DOM click is NOT a successful HTTP request.
     return publicAstraDebugProbe(probe);
   } catch (error) {
@@ -1813,7 +1842,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
         error: evidence?.bodyError ? 'response_body_unavailable' : debug.error,
       });
       if (debug.terminalEvent === 'conversation_response_finished'
-        && (evidence?.model || evidence?.diagnostics?.verificationSuppressedReason)) {
+        && debug.assistantSettled === true) {
+        recordDebugAstra(tabId, 'astra_debug_probe_completed', { phase: 'finished' });
         void endDebugAstra(tabId);
       }
     }
@@ -5169,9 +5199,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name.startsWith(ASTRA_DEBUG_ALARM_PREFIX)) {
     const tabId = Number(alarm.name.slice(ASTRA_DEBUG_ALARM_PREFIX.length));
     if (debugAstraProbes.has(tabId)) {
-      recordDebugAstra(tabId, 'astra_debug_probe_timeout', {
-        phase: 'timed_out', error: 'response_or_model_evidence_timeout',
-      });
+      const probe = debugAstraProbes.get(tabId);
+      if (probe.terminalEvent === 'conversation_response_finished') {
+        recordDebugAstra(tabId, 'astra_debug_probe_capture_ended', {
+          phase: 'finished',
+          error: probe.assistantSettled === true ? null : 'assistant_reply_unconfirmed',
+        });
+      } else {
+        recordDebugAstra(tabId, 'astra_debug_probe_timeout', {
+          phase: 'timed_out', error: 'response_or_model_evidence_timeout',
+        });
+      }
       void endDebugAstra(tabId);
     }
   }
