@@ -6,7 +6,7 @@
 
 **直接使用 `gpt-6-astra-wm` 请求**：选择目标 ChatGPT 标签页，点击“发送单次 Astra 测试请求”。此操作会真实发送固定测试消息“计算 12×13，只输出整数。”到该标签页当前会话，可能消耗账户额度。页面需要已登录 ChatGPT，且 GPTWork 主开关、账户授权和该标签页的功能处于启用状态。
 
-1. 只在这一次请求的正式 `POST /backend-api/conversation` 或 `POST /backend-api/f/conversation` 中尝试将顶层 `model` 改为 `gpt-6-astra-wm`。保留原请求的会话上下文、消息内容、推理强度及其他字段。
+1. 只对包含该固定测试消息的这一次请求的正式 `POST /backend-api/conversation` 或 `POST /backend-api/f/conversation` 中尝试将顶层 `model` 改为 `gpt-6-astra-wm`。保留原请求的会话上下文、消息内容、推理强度及其他字段。
 2. 使用已有的 CDP Fetch 拦截；**绝不**通过伪造账户授权、Cookie、认证头或绕过 ChatGPT 账户限制来发送。
 3. 只有 `Fetch.continueRequest` 成功且转发模型与 `gpt-6-astra-wm` 完全一致时，才记为“已确认转发”。如果请求模型字段缺失、改写失败或目标不一致，调试请求失败关闭，不把普通模型请求冒充 Astra 请求。
 4. 自动采集真实 HTTP 状态、流完成/失败事件和允许列出的响应模型元数据。HTTP 200 仅表示传输成功，**不是** Astra 模型证明。
