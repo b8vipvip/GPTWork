@@ -383,7 +383,7 @@ test('v0.5.176 keeps GPT-5.6 Thinking distinct and records performance evidence'
 test('v0.5.176 rechecks discovery authority before mutation and scopes full network capture', async () => {
   const monitor = await readFile(new URL('../network-monitor.js', import.meta.url), 'utf8');
   assert.match(monitor, /model_discovery_native_passthrough/);
-  assert.match(monitor, /effectiveConfiguration\(tabId\)/);
+  assert.match(monitor, /effectiveConfiguration\(tabId,\s*requestId,\s*postData\)/);
   assert.match(monitor, /enableResponseCapture/);
   assert.match(monitor, /disableResponseCapture/);
 });
@@ -431,7 +431,7 @@ test('v0.5.111 performance diagnostics stay compact and sample every 30 seconds'
 
 test('v0.5.176 resolves Chat compatibility authority at the raw Fetch transport sink', () => {
   assert.match(networkMonitor, /Resolve authority only after postData acquisition/);
-  assert.match(networkMonitor, /configuration = this\.effectiveConfiguration\(tabId\)/);
+  assert.match(networkMonitor, /configuration = this\.effectiveConfiguration\(tabId,\s*requestId,\s*postData\)/);
   assert.match(networkMonitor, /actualAuthorityModel/);
   assert.match(networkMonitor, /rewrite\.transportModelAfter/);
   assert.match(networkMonitor, /verification_authority_mismatch_blocked/);
