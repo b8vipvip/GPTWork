@@ -328,8 +328,7 @@ async function rememberAstraConversation(context) {
 }
 
 function originScene(tabId) {
-  return originSceneByTab.get(tabId)?.scene
-    || modelOriginScene(tabStates.get(tabId)?.pageObservation?.model);
+  return originSceneByTab.get(tabId)?.scene || 'unknown';
 }
 
 function recordOriginObservation(tabId, state, observation) {
@@ -1529,6 +1528,19 @@ const networkMonitor = new ChatGptNetworkMonitor({
     state.lastResponseEvidence = null;
     state.responseModelIdentity = null;
     state.lastEvidenceDiagnostics = null;
+    if (networkMonitor.hasOriginTrace(tabId)) {
+      logRuntime('info', 'astra-origin-trace', 'astra_origin_conversation_request', {
+        tabId,
+        contextKey: state.contextKey,
+        scene: originScene(tabId),
+        pageModel: state.pageObservation?.model ?? null,
+        requestId: request.requestId,
+        observedRequestModel: request.model ?? null,
+        forwardedModel: state.lastRequest.model ?? null,
+        rewriteReason: state.lastRewrite?.reason ?? null,
+        requestEvidenceSource: state.lastRequest.requestEvidenceSource ?? null,
+      });
+    }
     logRuntime('info', 'network', 'formal_conversation_request_detected', {
       tabId,
       requestId: request.requestId,
@@ -1548,6 +1560,26 @@ const networkMonitor = new ChatGptNetworkMonitor({
     void broadcastTabState(tabId);
   },
   onProtocolEvent(tabId, protocol) {
+    if (networkMonitor.hasOriginTrace(tabId)) {
+      const state = tabStates.get(tabId);
+      logRuntime('info', 'astra-origin-trace', 'astra_origin_conversation_protocol', {
+        tabId,
+        contextKey: state?.contextKey ?? null,
+        scene: originScene(tabId),
+        pageModel: state?.pageObservation?.model ?? null,
+        event: protocol?.event ?? null,
+        requestId: protocol?.requestId ?? null,
+        transportRequestId: protocol?.transportRequestId ?? null,
+        endpoint: protocol?.endpoint ?? null,
+        httpStatus: protocol?.httpStatus ?? null,
+        mimeType: protocol?.mimeType ?? null,
+        elapsedMs: protocol?.elapsedMs ?? null,
+        encodedDataLength: protocol?.encodedDataLength ?? null,
+        canceled: protocol?.canceled ?? null,
+        networkError: protocol?.networkError ?? null,
+        downstream: protocol?.downstream === true,
+      });
+    }
     // Only the allowlisted request/response lifecycle, never headers, tokens,
     // prompts, response bodies, or arbitrary ChatGPT application metadata.
     if (!['conversation_response_headers', 'conversation_response_finished',
@@ -1566,7 +1598,47 @@ const networkMonitor = new ChatGptNetworkMonitor({
       downstream: protocol.downstream === true,
     });
   },
+  onOriginTrace(tabId, trace) {
+    const state = tabStates.get(tabId);
+    if (!state || state.contextKey !== trace?.conversationKey) return;
+    logRuntime('info', 'astra-origin-trace', 'astra_origin_conversation_hydration', {
+      tabId,
+      contextKey: state.contextKey,
+      scene: originScene(tabId),
+      pageModel: state.pageObservation?.model ?? null,
+      event: trace.event ?? null,
+      requestId: trace.requestId ?? null,
+      endpointKind: trace.endpointKind ?? null,
+      httpStatus: trace.httpStatus ?? null,
+      mimeType: trace.mimeType ?? null,
+      elapsedMs: trace.elapsedMs ?? null,
+      metadataStatus: trace.metadata?.status ?? null,
+      metadataFields: trace.metadata?.fields ?? [],
+      hasCurrentNode: trace.metadata?.hasCurrentNode ?? null,
+      hasMapping: trace.metadata?.hasMapping ?? null,
+      canceled: trace.canceled ?? null,
+      networkError: trace.networkError ?? null,
+    });
+  },
   onEvidence(tabId, evidence) {
+    if (networkMonitor.hasOriginTrace(tabId)) {
+      const state = tabStates.get(tabId);
+      logRuntime('info', 'astra-origin-trace', 'astra_origin_served_model_evidence', {
+        tabId,
+        contextKey: state?.contextKey ?? null,
+        scene: originScene(tabId),
+        pageModel: state?.pageObservation?.model ?? null,
+        requestId: evidence?.streamContext?.initialRequestId || evidence?.requestId || null,
+        transportRequestId: evidence?.requestId ?? null,
+        responseModel: evidence?.model ?? null,
+        responseModelField: evidence?.fields?.model ?? null,
+        httpStatus: evidence?.status ?? evidence?.diagnostics?.httpStatus ?? null,
+        stage: evidence?.diagnostics?.stage ?? null,
+        transport: evidence?.diagnostics?.transport ?? null,
+        verificationSuppressedReason: evidence?.diagnostics?.verificationSuppressedReason ?? null,
+        bodyErrorPresent: Boolean(evidence?.bodyError),
+      });
+    }
     logRuntime('info', 'network', 'conversation_response_metadata_observed', {
       tabId,
       requestId: evidence?.streamContext?.initialRequestId || evidence?.requestId || null,
@@ -1634,6 +1706,7 @@ async function configureTab(tab) {
   const state = ensureTabState(tab.id, tab.url);
   state.windowId = Number.isInteger(tab.windowId) ? tab.windowId : null;
   if (!masterRuntimeEnabled()) {
+    originArmedTabIds.delete(tab.id);
     await networkMonitor.detach(tab.id);
     try { await chrome.action.setBadgeText({ tabId: tab.id, text: '' }); } catch {}
     return state;
@@ -1644,9 +1717,16 @@ async function configureTab(tab) {
   // not cancellation of the user's active Chat request. On a genuine browser
   // navigation Chrome will detach the session itself, which is reported by
   // the monitor and can be restored once the tab reaches complete.
-  if (!enabled) await networkMonitor.detach(tab.id);
-  else if (tab.status !== 'loading' || networkMonitor.isAttached(tab.id)) {
-    await networkMonitor.attach(tab.id);
+  if (!enabled) {
+    originArmedTabIds.delete(tab.id);
+    await networkMonitor.detach(tab.id);
+  } else {
+    // A foreground or previously Astra conversation must be captured before
+    // its next hydration request. Ordinary background tabs remain lightweight.
+    await configureOriginTrace(tab, state);
+    if (tab.status !== 'loading' || networkMonitor.isAttached(tab.id)) {
+      await networkMonitor.attach(tab.id);
+    }
   }
   await broadcastTabState(tab.id);
   return state;
@@ -5206,6 +5286,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return { recorded: true };
       }
+      case 'GPTLOCK_ASTRA_ORIGIN_DOCUMENT_EVENT': {
+        if (!sender.tab?.id || !isChatGptUrl(sender.tab.url || sender.url || '')) {
+          return { ignored: true };
+        }
+        const stage = String(message.stage || '');
+        if (!['document_start', 'dom_content_loaded', 'pageshow', 'window_load'].includes(stage)) {
+          return { ignored: true };
+        }
+        const state = ensureTabState(sender.tab.id, sender.tab.url);
+        logRuntime('info', 'astra-origin-trace', 'astra_origin_document_lifecycle', {
+          tabId: sender.tab.id,
+          contextKey: state.contextKey,
+          stage,
+          documentId: typeof sender.documentId === 'string' ? sender.documentId.slice(0, 80) : null,
+          documentTimeOrigin: Number.isFinite(message.documentTimeOrigin)
+            ? Math.round(message.documentTimeOrigin) : null,
+          sinceNavigationMs: Number.isFinite(message.sinceNavigationMs)
+            ? Math.max(0, Math.round(message.sinceNavigationMs)) : null,
+          navigationType: ['navigate', 'reload', 'back_forward', 'prerender'].includes(message.navigationType)
+            ? message.navigationType : 'unknown',
+          readyState: ['loading', 'interactive', 'complete'].includes(message.readyState)
+            ? message.readyState : 'unknown',
+          persisted: message.persisted === true,
+          scene: originScene(sender.tab.id),
+        });
+        return { recorded: true };
+      }
       case 'GPTLOCK_PAGE_OBSERVATION': {
         if (!sender.tab?.id) throw new Error('Page observation requires a tab');
         const state = ensureTabState(sender.tab.id, sender.tab.url);
@@ -5224,6 +5331,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           pickerA: normalizePickerAObservation(message.observation?.pickerA),
         };
         const pickerA = state.pageObservation.pickerA;
+        recordOriginObservation(sender.tab.id, state, {
+          ...state.pageObservation,
+          originTrace: message.observation?.originTrace,
+        });
         if (pickerA.observed && JSON.stringify(previous?.pickerA) !== JSON.stringify(pickerA)) {
           logRuntime('info', 'page', 'official_picker_a_catalog_observed', {
             tabId: sender.tab.id,
@@ -5340,6 +5451,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GPTLOCK_CONTEXT_CHANGED': {
         if (!sender.tab?.id) throw new Error('Context update requires a tab');
         const state = ensureTabState(sender.tab.id, message.url || sender.tab.url);
+        void configureOriginTrace({ ...sender.tab, url: message.url || sender.tab.url }, state);
         await broadcastTabState(sender.tab.id);
         return publicTabState(state);
       }
