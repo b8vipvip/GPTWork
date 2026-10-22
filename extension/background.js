@@ -1409,6 +1409,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     logRuntime('info', 'network', protocol.event, {
       tabId,
       requestId: protocol.requestId ?? null,
+      transportRequestId: protocol.transportRequestId ?? null,
       endpoint: protocol.endpoint ?? null,
       httpStatus: protocol.httpStatus ?? null,
       mimeType: protocol.mimeType ?? null,
