@@ -1717,10 +1717,8 @@ async function configureTab(tab) {
   // not cancellation of the user's active Chat request. On a genuine browser
   // navigation Chrome will detach the session itself, which is reported by
   // the monitor and can be restored once the tab reaches complete.
-  if (!enabled) {
-    originArmedTabIds.delete(tab.id);
-    await networkMonitor.detach(tab.id);
-  } else {
+  if (!enabled) await networkMonitor.detach(tab.id);
+  else {
     // A foreground or previously Astra conversation must be captured before
     // its next hydration request. Ordinary background tabs remain lightweight.
     await configureOriginTrace(tab, state);
@@ -1728,6 +1726,7 @@ async function configureTab(tab) {
       await networkMonitor.attach(tab.id);
     }
   }
+  if (!enabled) originArmedTabIds.delete(tab.id);
   await broadcastTabState(tab.id);
   return state;
 }
