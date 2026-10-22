@@ -31,11 +31,6 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*"],
-      "js": ["astra-origin-early.js"],
-      "run_at": "document_start"
-    },
-    {
       "matches": [
         "https://chatgpt.com/*"
       ],
@@ -59,6 +54,15 @@
         "chat-length-remaining-indicator.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "astra-origin-early.js"
+      ],
+      "run_at": "document_start"
     }
   ],
   "options_ui": {
