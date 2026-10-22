@@ -19,6 +19,12 @@ export function isAstraDebugRequest(postData) {
     return false;
   }
 }
+export function detectAstraDebugSseTerminal(body) {
+  if (typeof body !== 'string' || body.length > 4 * 1024 * 1024) return false;
+  return /(?:^|\n)\s*data:\s*\[DONE\]\s*(?:\r?\n|$)/i.test(body)
+    || /(?:^|\n)\s*event:\s*(?:done|message_stream_complete)\s*(?:\r?\n|$)/i.test(body);
+}
+
 export const ASTRA_DEBUG_CANONICAL = 'gpt-6-astra';
 export const ASTRA_DEBUG_TIMEOUT_MS = 180000;
 export const ASTRA_DEBUG_HISTORY_KEY = 'gptworkAstraDebugProbeHistoryV1';
@@ -74,7 +80,7 @@ export function publicAstraDebugProbe(probe) {
     'requestId', 'fetchRequestId', 'pageModel', 'originalTransportModel',
     'forwardedTransportModel', 'httpStatus', 'mimeType', 'terminalEvent',
     'responseModel', 'responseModelField', 'responseDefaultModel',
-    'responseEvidenceSource', 'streamStage', 'networkError',
+    'responseEvidenceSource', 'streamStage', 'sseTerminalObserved', 'networkError',
     'sendMethod', 'assistantSettled', 'responseTextSnippet', 'error',
   ];
   const safe = Object.fromEntries(fields.map((key) => [key, probe[key] ?? null]));
