@@ -454,6 +454,22 @@ document.addEventListener('pointerdown', (event) => {
     return null;
   }
 
+  function originTraceSnapshot() {
+    const evidence = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__;
+    const root = evidence?.composerRoot?.();
+    const trigger = evidence?.composerModelTrigger?.(root);
+    const navigation = performance.getEntriesByType?.('navigation')?.[0];
+    return {
+      composerPresent: Boolean(root),
+      modelTriggerPresent: Boolean(trigger),
+      modelTriggerExpanded: trigger?.getAttribute?.('aria-expanded') === 'true',
+      navigationType: navigation?.type || 'unknown',
+      readyState: document.readyState,
+      documentTimeOrigin: Number.isFinite(performance.timeOrigin) ? performance.timeOrigin : null,
+      sinceNavigationMs: Math.round(performance.now()),
+    };
+  }
+
   function collectObservation() {
     const validated = globalThis.__GPTLOCK_PAGE_MODEL_EVIDENCE__?.collect?.();
     if (validated) {
@@ -468,6 +484,7 @@ document.addEventListener('pointerdown', (event) => {
         ambiguousModel: Boolean(validated.ambiguous),
         candidates: Array.isArray(validated.candidates) ? validated.candidates.slice(0, 8) : [],
         pickerA: validated.pickerA || null,
+        originTrace: originTraceSnapshot(),
         capturedAt: new Date().toISOString(),
       };
     }
@@ -488,6 +505,7 @@ document.addEventListener('pointerdown', (event) => {
       reasoningEvidenceSource: 'legacy-fallback',
       ambiguousModel: false,
       candidates: model ? [model] : [],
+      originTrace: originTraceSnapshot(),
       capturedAt: new Date().toISOString(),
     };
   }

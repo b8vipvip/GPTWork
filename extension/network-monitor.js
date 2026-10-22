@@ -8,6 +8,7 @@ import {
   rewriteConversationPostData,
   streamPayloadMatches,
 } from './network-evidence.js';
+import { originMetadataEndpoint, extractOriginConversationMetadata, ORIGIN_METADATA_MAX_BYTES } from './astra-origin-trace.js';
 
 const CDP_VERSION = '1.3';
 const REQUEST_TTL_MS = 15 * 60 * 1000;
@@ -128,7 +129,7 @@ export function webSocketFrameMatchesHandoff(payload, handoff) {
 }
 
 export class ChatGptNetworkMonitor {
-  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, getLockConfiguration, getVerificationTransaction }) {
+  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, onOriginTrace, getLockConfiguration, getVerificationTransaction }) {
     this.onStatus = onStatus;
     this.onRequest = onRequest;
     this.onEvidence = onEvidence;
@@ -136,10 +137,14 @@ export class ChatGptNetworkMonitor {
     this.onRewrite = onRewrite;
     this.onStreamData = onStreamData;
     this.onProtocolEvent = onProtocolEvent;
+    this.onOriginTrace = onOriginTrace;
     this.getLockConfiguration = getLockConfiguration;
     this.getVerificationTransaction = getVerificationTransaction;
     this.attachedTabs = new Set();
     this.responseCaptureTabs = new Set();
+    this.originTraceTabs = new Set();
+    this.originTraceTasks = new Map();
+    this.originRequests = new Map();
     this.attachTasks = new Map();
     this.detachTasks = new Map();
     this.requests = new Map();
@@ -162,6 +167,8 @@ export class ChatGptNetworkMonitor {
     chrome.debugger.onDetach.addListener((source, reason) => {
       if (!source.tabId) return;
       this.attachedTabs.delete(source.tabId);
+      this.responseCaptureTabs.delete(source.tabId);
+      this.originTraceTabs.delete(source.tabId);
       this.dropTabRequests(source.tabId);
       this.onStatus(source.tabId, { attached: false, error: `detached:${reason}` });
     });
@@ -323,19 +330,65 @@ export class ChatGptNetworkMonitor {
     const attached = this.isAttached(tabId) || await this.attach(tabId);
     if (!attached) return false;
     if (this.responseCaptureTabs.has(tabId)) return true;
-    await debuggerCall('sendCommand', this.target(tabId), 'Network.enable', {
-      maxTotalBufferSize: 32 * 1024 * 1024,
-      maxResourceBufferSize: 16 * 1024 * 1024,
-      maxPostDataSize: 2 * 1024 * 1024,
-    });
+    if (!this.originTraceTabs.has(tabId)) {
+      await debuggerCall('sendCommand', this.target(tabId), 'Network.enable', {
+        maxTotalBufferSize: 32 * 1024 * 1024,
+        maxResourceBufferSize: 16 * 1024 * 1024,
+        maxPostDataSize: 2 * 1024 * 1024,
+      });
+    }
     this.responseCaptureTabs.add(tabId);
     return true;
   }
 
   async disableResponseCapture(tabId) {
     this.responseCaptureTabs.delete(tabId);
-    try { await debuggerCall('sendCommand', this.target(tabId), 'Network.disable', {}); } catch {}
-    this.dropTabRequests(tabId);
+    if (!this.originTraceTabs.has(tabId)) {
+      try { await debuggerCall('sendCommand', this.target(tabId), 'Network.disable', {}); } catch {}
+      this.dropTabRequests(tabId);
+    }
+  }
+
+  // Independent ownership from explicit model verification. Only foreground
+  // conversations and previously observed Astra conversations are auto-armed.
+  async enableOriginTrace(tabId) {
+    if (this.originTraceTabs.has(tabId)) return true;
+    const pending = this.originTraceTasks.get(tabId);
+    if (pending) return pending;
+    const task = (async () => {
+      const attached = this.isAttached(tabId) || await this.attach(tabId);
+      if (!attached) return false;
+      if (!this.responseCaptureTabs.has(tabId)) {
+        await debuggerCall('sendCommand', this.target(tabId), 'Network.enable', {
+          maxTotalBufferSize: 8 * 1024 * 1024,
+          maxResourceBufferSize: 4 * 1024 * 1024,
+          maxPostDataSize: 512 * 1024,
+        });
+      }
+      if (!this.isAttached(tabId)) return false;
+      this.originTraceTabs.add(tabId);
+      return true;
+    })().finally(() => {
+      if (this.originTraceTasks.get(tabId) === task) this.originTraceTasks.delete(tabId);
+    });
+    this.originTraceTasks.set(tabId, task);
+    return task;
+  }
+
+  async disableOriginTrace(tabId) {
+    const pending = this.originTraceTasks.get(tabId);
+    if (pending) { try { await pending; } catch {} }
+    if (!this.originTraceTabs.delete(tabId)) return;
+    const prefix = `${tabId}:`;
+    for (const key of this.originRequests.keys()) if (key.startsWith(prefix)) this.originRequests.delete(key);
+    if (!this.responseCaptureTabs.has(tabId)) {
+      try { await debuggerCall('sendCommand', this.target(tabId), 'Network.disable', {}); } catch {}
+      this.dropTabRequests(tabId);
+    }
+  }
+
+  hasOriginTrace(tabId) {
+    return this.originTraceTabs.has(tabId);
   }
 
   attachedCount() {
@@ -357,6 +410,7 @@ export class ChatGptNetworkMonitor {
       elapsedMs,
       attachedTabs: this.attachedTabs.size,
       responseCaptureTabs: this.responseCaptureTabs.size,
+      originTraceTabs: this.originTraceTabs.size,
       cdpEvents: this.diagnosticCounters.cdpEvents,
       fetchPaused: this.diagnosticCounters.fetchPaused,
       networkEvents: this.diagnosticCounters.networkEvents,
@@ -378,6 +432,7 @@ export class ChatGptNetworkMonitor {
   async performDetach(tabId) {
     this.attachedTabs.delete(tabId);
     this.responseCaptureTabs.delete(tabId);
+    this.originTraceTabs.delete(tabId);
     this.dropTabRequests(tabId);
     try { await debuggerCall('sendCommand', this.target(tabId), 'Fetch.disable', {}); } catch {}
     try { await debuggerCall('detach', this.target(tabId)); } catch {}
@@ -483,6 +538,7 @@ export class ChatGptNetworkMonitor {
     for (const key of this.requests.keys()) if (key.startsWith(prefix)) this.requests.delete(key);
     for (const key of this.handoffs.keys()) if (key.startsWith(prefix)) this.handoffs.delete(key);
     for (const key of this.webSockets.keys()) if (key.startsWith(prefix)) this.webSockets.delete(key);
+    for (const key of this.originRequests.keys()) if (key.startsWith(prefix)) this.originRequests.delete(key);
     this.lastFormalRequestByTab.delete(tabId);
   }
 
@@ -490,6 +546,9 @@ export class ChatGptNetworkMonitor {
     const requestCutoff = Date.now() - REQUEST_TTL_MS;
     for (const [key, request] of this.requests) {
       if (request.startedAt < requestCutoff) this.requests.delete(key);
+    }
+    for (const [key, record] of this.originRequests) {
+      if (record.startedAt < requestCutoff) this.originRequests.delete(key);
     }
     const streamCutoff = Date.now() - STREAM_TTL_MS;
     for (const [key, handoff] of this.handoffs) {
@@ -584,7 +643,9 @@ export class ChatGptNetworkMonitor {
     if (method === 'Network.webSocketFrameSent' || method === 'Network.webSocketFrameReceived') {
       this.diagnosticCounters.webSocketFrames += 1;
     }
-    if (method.startsWith('Network.') && !this.responseCaptureTabs.has(tabId)) return;
+    if (method.startsWith('Network.')
+      && !this.responseCaptureTabs.has(tabId)
+      && !this.originTraceTabs.has(tabId)) return;
     const now = Date.now();
     if (now - this.lastPurgeAt >= 5000) {
       this.lastPurgeAt = now;
@@ -594,14 +655,18 @@ export class ChatGptNetworkMonitor {
     if (method === 'Fetch.requestPaused') {
       await this.handlePausedRequest(tabId, params);
     } else if (method === 'Network.requestWillBeSent') {
+      this.trackOriginRequest(tabId, params);
       await this.handleRequest(tabId, params);
     } else if (method === 'Network.responseReceived') {
+      this.trackOriginResponse(tabId, params);
       await this.handleResponse(tabId, params);
     } else if (method === 'Network.dataReceived') {
       this.handleDataReceived(tabId, params);
     } else if (method === 'Network.loadingFinished') {
+      await this.finishOriginRequest(tabId, params);
       await this.handleFinished(tabId, params);
     } else if (method === 'Network.loadingFailed') {
+      this.failOriginRequest(tabId, params);
       await this.handleFailed(tabId, params);
     } else if (method === 'Network.webSocketCreated') {
       this.handleWebSocketCreated(tabId, params);
@@ -612,6 +677,83 @@ export class ChatGptNetworkMonitor {
     } else if (method === 'Network.webSocketClosed') {
       this.webSockets.delete(this.key(tabId, String(params.requestId)));
     }
+  }
+
+  trackOriginRequest(tabId, params) {
+    if (!this.originTraceTabs.has(tabId)) return;
+    const endpoint = originMetadataEndpoint(params.request?.url, params.request?.method);
+    if (!endpoint) return;
+    const requestId = String(params.requestId);
+    const record = {
+      ...endpoint, requestId, startedAt: Date.now(),
+      status: null, mimeType: null, contentLength: null,
+    };
+    this.originRequests.set(this.key(tabId, requestId), record);
+    this.onOriginTrace?.(tabId, {
+      event: 'metadata_request', requestId, endpointKind: record.kind,
+      conversationKey: record.conversationKey,
+    });
+  }
+
+  trackOriginResponse(tabId, params) {
+    const record = this.originRequests.get(this.key(tabId, String(params.requestId)));
+    if (!record) return;
+    record.status = Number(params.response?.status) || null;
+    record.mimeType = String(params.response?.mimeType || '').slice(0, 80);
+    const headers = params.response?.headers || {};
+    const contentLength = Object.entries(headers).find(([key]) => key.toLowerCase() === 'content-length')?.[1];
+    record.contentLength = Number(contentLength) || null;
+    this.onOriginTrace?.(tabId, {
+      event: 'metadata_response', requestId: record.requestId,
+      endpointKind: record.kind, conversationKey: record.conversationKey,
+      httpStatus: record.status, mimeType: record.mimeType,
+      elapsedMs: Date.now() - record.startedAt,
+    });
+  }
+
+  async finishOriginRequest(tabId, params) {
+    const key = this.key(tabId, String(params.requestId));
+    const record = this.originRequests.get(key);
+    if (!record) return;
+    this.originRequests.delete(key);
+    let evidence = { status: 'not_captured', fields: [] };
+    // Parse only the recognized model metadata, then discard the response.
+    // Conversation history and message bodies never leave this function.
+    if (record.status === 200 && /json/i.test(record.mimeType || '')
+      && (!record.contentLength || record.contentLength <= ORIGIN_METADATA_MAX_BYTES)) {
+      try {
+        const result = await debuggerCall('sendCommand', this.target(tabId),
+          'Network.getResponseBody', { requestId: record.requestId });
+        const body = decodeCdpBody(result?.body ?? '', Boolean(result?.base64Encoded));
+        evidence = extractOriginConversationMetadata(body);
+      } catch {
+        evidence = { status: 'body_unavailable', fields: [] };
+      }
+    } else if (record.contentLength > ORIGIN_METADATA_MAX_BYTES) {
+      evidence = { status: 'size_limit', fields: [] };
+    }
+    this.onOriginTrace?.(tabId, {
+      event: 'metadata_finished', requestId: record.requestId,
+      endpointKind: record.kind, conversationKey: record.conversationKey,
+      httpStatus: record.status, mimeType: record.mimeType,
+      elapsedMs: Date.now() - record.startedAt,
+      metadata: evidence,
+    });
+  }
+
+  failOriginRequest(tabId, params) {
+    const key = this.key(tabId, String(params.requestId));
+    const record = this.originRequests.get(key);
+    if (!record) return;
+    this.originRequests.delete(key);
+    this.onOriginTrace?.(tabId, {
+      event: 'metadata_failed', requestId: record.requestId,
+      endpointKind: record.kind, conversationKey: record.conversationKey,
+      httpStatus: record.status,
+      elapsedMs: Date.now() - record.startedAt,
+      canceled: Boolean(params.canceled),
+      networkError: String(params.errorText || 'network_loading_failed').slice(0, 100),
+    });
   }
 
   async continuePaused(tabId, requestId, postData = null) {
