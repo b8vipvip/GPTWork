@@ -5352,14 +5352,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { recorded: true };
       }
       case 'GPTLOCK_ASTRA_ORIGIN_DOCUMENT_EVENT': {
-        if (!sender.tab?.id || !isChatGptUrl(sender.tab.url || sender.url || '')) {
+        if (!sender.tab?.id || !isChatGptUrl(sender.url || sender.tab.url || '')) {
           return { ignored: true };
         }
         const stage = String(message.stage || '');
         if (!['document_start', 'dom_content_loaded', 'pageshow', 'window_load'].includes(stage)) {
           return { ignored: true };
         }
-        const state = ensureTabState(sender.tab.id, sender.tab.url);
+        const state = ensureTabState(sender.tab.id, sender.url || sender.tab.url);
         logRuntime('info', 'astra-origin-trace', 'astra_origin_document_lifecycle', {
           tabId: sender.tab.id,
           contextKey: state.contextKey,
