@@ -5383,6 +5383,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           accountWindowAllowed: state ? accountAllowsState(state) : false,
         };
       }
+      case 'GPTWORK_DEBUG_TOOLS_TARGETS': {
+        const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+        return {
+          tabs: tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => ({
+            tabId: tab.id,
+            windowId: tab.windowId,
+            active: tab.active === true,
+            contextKey: tabStates.get(tab.id)?.contextKey ?? contextKey(tab.url),
+            pageModel: tabStates.get(tab.id)?.pageObservation?.model ?? null,
+          })).sort((a, b) => Number(b.active) - Number(a.active)),
+        };
+      }
+      case 'GPTWORK_DEBUG_ASTRA_STATUS': {
+        const active = [...debugAstraProbes.values()].map(publicAstraDebugProbe);
+        const stored = await chrome.storage.local.get(ASTRA_DEBUG_HISTORY_KEY);
+        return {
+          active,
+          history: Array.isArray(stored[ASTRA_DEBUG_HISTORY_KEY])
+            ? stored[ASTRA_DEBUG_HISTORY_KEY].slice(0, 20) : [],
+        };
+      }
+      case 'GPTWORK_DEBUG_ASTRA_START':
+        return startDebugAstra(message.tabId);
+      case 'GPTWORK_DEBUG_ASTRA_CANCEL': {
+        const tabId = Number(message.tabId);
+        if (!debugAstraProbes.has(tabId)) return { canceled: false };
+        recordDebugAstra(tabId, 'astra_debug_probe_canceled', {
+          phase: 'canceled', error: 'canceled_by_user',
+        });
+        await endDebugAstra(tabId);
+        return { canceled: true };
+      }
       case 'GPTLOCK_ACCOUNT_CONFIG':
         return accountClient.config();
       case 'GPTLOCK_ACCOUNT_REGISTER':
@@ -5466,8 +5498,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!sender.tab?.id) throw new Error('Trusted pointer preparation requires a tab');
         // Ordinary Chat is observation-only. A discovery task is the sole
         // authority permitted to mutate the live ChatGPT page via CDP.
-        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true) {
-          throw new Error('discovery_ui_action_not_authorized');
+        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true
+          && debugAstraProbes.get(sender.tab.id)?.phase !== 'dispatching') {
+          throw new Error('discovery_or_explicit_debug_action_not_authorized');
         }
         const attached = networkMonitor.isAttached(sender.tab.id) || await networkMonitor.attach(sender.tab.id);
         if (!attached) throw new Error('Debugger is not attached for trusted pointer input');
@@ -5477,8 +5510,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!sender.tab?.id) throw new Error('Trusted keyboard input requires a tab');
         // Ordinary Chat is observation-only. A discovery task is the sole
         // authority permitted to mutate the live ChatGPT page via CDP.
-        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true) {
-          throw new Error('discovery_ui_action_not_authorized');
+        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true
+          && debugAstraProbes.get(sender.tab.id)?.phase !== 'dispatching') {
+          throw new Error('discovery_or_explicit_debug_action_not_authorized');
+        }
+        const debugAction = debugAstraProbes.get(sender.tab.id)?.phase === 'dispatching';
+        if (debugAction && tabStates.get(sender.tab.id)?.autoVerification?.running !== true
+          && message.source !== 'auto-probe-enter') {
+          throw new Error('debug_keyboard_action_not_authorized');
         }
         const key = String(message.key || '');
         if (key !== 'Enter') throw new Error('Unsupported trusted key');
@@ -5495,8 +5534,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!sender.tab?.id) throw new Error('Trusted pointer input requires a tab');
         // Ordinary Chat is observation-only. A discovery task is the sole
         // authority permitted to mutate the live ChatGPT page via CDP.
-        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true) {
-          throw new Error('discovery_ui_action_not_authorized');
+        if (tabStates.get(sender.tab.id)?.autoVerification?.running !== true
+          && debugAstraProbes.get(sender.tab.id)?.phase !== 'dispatching') {
+          throw new Error('discovery_or_explicit_debug_action_not_authorized');
+        }
+        const debugAction = debugAstraProbes.get(sender.tab.id)?.phase === 'dispatching';
+        if (debugAction && tabStates.get(sender.tab.id)?.autoVerification?.running !== true
+          && (message.source !== 'auto-probe-send' || message.action === 'move')) {
+          throw new Error('debug_pointer_action_not_authorized');
         }
         const x = Number(message.x);
         const y = Number(message.y);
