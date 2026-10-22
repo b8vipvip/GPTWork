@@ -53,6 +53,7 @@ function presentProbe(probe) {
   text('probeForwarded', probe?.forwardedTransportModel);
   text('probeHttp', probe?.httpStatus);
   text('probeTerminal', probe?.terminalEvent || probe?.networkError);
+  text('probeSseDone', probe?.sseTerminalObserved === true ? '已观察到' : '未观察到 / 不适用');
   text('probeServed', probe?.responseModel
     ? probe.responseModel + (probe.responseModelField ? ' · ' + probe.responseModelField : '')
     : '未获取权威证据');
