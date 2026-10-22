@@ -130,7 +130,7 @@ export function webSocketFrameMatchesHandoff(payload, handoff) {
 }
 
 export class ChatGptNetworkMonitor {
-  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, onOriginTrace, getLockConfiguration, getVerificationTransaction, getDebugProbe }) {
+  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, onOriginTrace, getLockConfiguration, getVerificationTransaction, getDebugProbe, claimDebugProbe }) {
     this.onStatus = onStatus;
     this.onRequest = onRequest;
     this.onEvidence = onEvidence;
@@ -142,6 +142,7 @@ export class ChatGptNetworkMonitor {
     this.getLockConfiguration = getLockConfiguration;
     this.getVerificationTransaction = getVerificationTransaction;
     this.getDebugProbe = getDebugProbe;
+    this.claimDebugProbe = claimDebugProbe;
     this.attachedTabs = new Set();
     this.responseCaptureTabs = new Set();
     this.originTraceTabs = new Set();
@@ -216,9 +217,11 @@ export class ChatGptNetworkMonitor {
     }
   }
 
-  effectiveConfiguration(tabId) {
+  effectiveConfiguration(tabId, fetchRequestId = null) {
     const base = this.configuration(tabId);
-    const debugConfiguration = astraDebugConfiguration(base, this.getDebugProbe?.(tabId));
+    const debugProbe = fetchRequestId && this.claimDebugProbe
+      ? this.claimDebugProbe(tabId, fetchRequestId) : this.getDebugProbe?.(tabId);
+    const debugConfiguration = astraDebugConfiguration(base, debugProbe, fetchRequestId);
     if (debugConfiguration) return debugConfiguration;
     const transaction = this.verificationTransaction(tabId);
     const model = String(transaction?.model || '').trim();
@@ -826,7 +829,7 @@ export class ChatGptNetworkMonitor {
       const postData = await this.pausedPostData(tabId, params);
       // Resolve authority only after postData acquisition. This closes the race where
       // a normal-policy snapshot was taken before verification became active.
-      configuration = this.effectiveConfiguration(tabId);
+      configuration = this.effectiveConfiguration(tabId, requestId);
       if (configuration.bypassRewrite === true) {
         const observed = extractRequestEvidence(postData);
         await this.continuePaused(tabId, requestId);
