@@ -12,25 +12,25 @@ const moduleNav = new URL('../module-nav.js', import.meta.url);
 const backgroundUpdate = new URL('../background-update.js', import.meta.url);
 const installer = new URL('../../packaging/windows/GPTWork.iss', import.meta.url);
 
-test('popup keeps settings inside the account card and gives three primary actions more room', async () => {
+test('popup keeps settings inside the account card and organizes four primary actions into two columns', async () => {
   const manifest = JSON.parse(await readFile(manifestUrl, 'utf8'));
   const popupHtml = new URL(`../${manifest.action.default_popup}`, import.meta.url);
   const [html, css] = await Promise.all([readFile(popupHtml, 'utf8'), readFile(popupCss, 'utf8')]);
 
-  for (const id of ['autoVerify', 'checkUpdate', 'help', 'options']) {
+  for (const id of ['autoVerify', 'debugTools', 'checkUpdate', 'help', 'options']) {
     assert.match(html, new RegExp(`<button id="${id}"`));
   }
   const accountCard = html.match(/<section class="account-card">([\s\S]*?)<\/section>/)?.[1] || '';
   const actions = html.match(/<div class="actions"[^>]*>([\s\S]*?)<\/div>/)?.[1] || '';
   assert.match(accountCard, /id="options"[^>]*>设置<\/button>/);
-  for (const id of ['autoVerify', 'checkUpdate', 'help']) assert.match(actions, new RegExp(`id="${id}"`));
+  for (const id of ['autoVerify', 'debugTools', 'checkUpdate', 'help']) assert.match(actions, new RegExp(`id="${id}"`));
   assert.doesNotMatch(actions, /id="options"/);
   assert.doesNotMatch(html, /<button id="reconnect"/);
   assert.doesNotMatch(html, /<button id="logs"/);
   assert.match(html, /id="reconnect" hidden/);
   assert.match(html, /id="logs" hidden/);
   assert.match(html, /src="popup-navigation\.js"/);
-  assert.match(css, /grid-template-columns:\s*repeat\(3,/);
+  assert.match(css, /grid-template-columns:\s*repeat\(2,/);
   assert.match(css, /margin-top:\s*14px/);
   assert.match(css, /min-height:\s*38px/);
   assert.match(css, /\.account-settings-button/);
