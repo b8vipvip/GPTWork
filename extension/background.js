@@ -2021,24 +2021,34 @@ async function configureOpenTabs() {
   for (const tab of tabs) await configureTab(tab);
 }
 
+// Read-only eligibility snapshot from the same background authority that owns
+// monitor attach/detach. Update readiness must not assume every tab feature
+// implies account/window authorization.
+export async function monitorRecoveryEligibility() {
+  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
+  return tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => {
+    const state = ensureTabState(tab.id, tab.url);
+    state.windowId = tab.windowId;
+    return {
+      tabId: tab.id,
+      expected: masterRuntimeEnabled()
+        && effectiveSettingsForState(state).enabled
+        && tab.status !== 'loading',
+      accountAllowed: accountAllowsState(state),
+      feature: tabFeatureStateSync(tab.id),
+    };
+  });
+}
+
 // Called only by the existing update recovery owner. Refresh authoritative
 // account/window entitlement and then reconfigure the normal tab monitors;
 // never bypass account quota or per-tab feature switches.
 export async function reconcileMonitorsAfterUpdate() {
   if (!masterRuntimeEnabled()) return { masterEnabled: false, expected: [], pending: [] };
   await refreshAccountHeartbeat({ reconfigure: true });
-  const tabs = await chrome.tabs.query({ url: 'https://chatgpt.com/*' });
-  const details = tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => {
-    const state = ensureTabState(tab.id, tab.url);
-    state.windowId = tab.windowId;
-    return {
-      tabId: tab.id,
-      expected: effectiveSettingsForState(state).enabled && tab.status !== 'loading',
-      attached: networkMonitor.isAttached(tab.id),
-      accountAllowed: accountAllowsState(state),
-      feature: tabFeatureStateSync(tab.id),
-    };
-  });
+  const details = (await monitorRecoveryEligibility()).map((item) => ({
+    ...item, attached: networkMonitor.isAttached(item.tabId),
+  }));
   const expected = details.filter((item) => item.expected).map((item) => item.tabId);
   const pending = details.filter((item) => item.expected && !item.attached).map((item) => item.tabId);
   logRuntime(pending.length ? 'warn' : 'info', 'update', 'monitor_recovery_reconciled', {
