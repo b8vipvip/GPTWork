@@ -1498,6 +1498,15 @@ const networkMonitor = new ChatGptNetworkMonitor({
     return probe?.phase === 'dispatching' && probe.claimed !== true
       && Date.now() - probe.startedAt < ASTRA_DEBUG_TIMEOUT_MS ? probe : null;
   },
+  claimDebugProbe(tabId, fetchRequestId) {
+    const probe = debugAstraProbes.get(tabId);
+    if (!probe || probe.phase !== 'dispatching' || probe.claimed === true
+      || Date.now() - probe.startedAt >= ASTRA_DEBUG_TIMEOUT_MS) return null;
+    probe.claimed = true;
+    probe.claimedFetchRequestId = fetchRequestId;
+    recordDebugAstra(tabId, 'astra_debug_fetch_claimed', { fetchRequestId });
+    return probe;
+  },
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
     const feature = tabFeatureStateSync(tabId);
