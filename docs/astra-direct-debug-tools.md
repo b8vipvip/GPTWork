@@ -23,7 +23,7 @@
 - `astra_debug_response_model_evidence`
 - `astra_debug_probe_timeout` / `astra_debug_probe_canceled` / `astra_debug_probe_debugger_detached`
 
-按 `tabId`、`requestId`、`fetchRequestId`、`contextKey` 关联；不记录测试提示词正文、ChatGPT 对话正文、Cookie、Authorization、完整响应体。调试工具页可导出最近 20 条本地摘要 JSON；完整时间线请使用原有运行时 JSONL。
+按 `tabId`、`requestId`、`fetchRequestId`、`contextKey` 关联；不记录测试提示词正文、历史 ChatGPT 对话正文、Cookie、Authorization、完整响应体；只保存本次固定测试消息产生的新助手回复的最多 300 字片段。调试工具页可导出最近 20 条本地摘要 JSON；完整时间线请使用原有运行时 JSONL。
 
 结果的三个独立维度：`requestAccepted`（是否实际转发该模型）、`requestOutcome`（HTTP/网络流终态）、`modelVerdict`（权威响应字段确认 Astra / 其他模型 / 未验证）。
 
