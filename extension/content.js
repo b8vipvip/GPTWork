@@ -2416,6 +2416,31 @@ document.addEventListener('pointerdown', (event) => {
     return { settled: false, stillGenerating: Boolean(visibleGeneratingControl()), assistantCount: assistantMessages().length };
   }
 
+  async function waitForDebugAstraReply(options = {}) {
+    const before = Math.max(0, Number(options.assistantCountBefore || 0));
+    const deadline = Date.now() + Math.min(120000, Math.max(5000, Number(options.timeoutMs || 90000)));
+    const initialUrl = location.href;
+    let lastFingerprint = '';
+    let stableSince = 0;
+    while (Date.now() < deadline) {
+      if (location.href !== initialUrl) return { settled: false, reason: 'conversation_navigated' };
+      const messages = assistantMessages();
+      const newMessage = messages.length > before ? messages.at(-1) : null;
+      const response = String(newMessage?.innerText || newMessage?.textContent || '').trim();
+      const fingerprint = messages.length + ':' + response;
+      if (response && fingerprint !== lastFingerprint) {
+        lastFingerprint = fingerprint;
+        stableSince = Date.now();
+      } else if (response && stableSince && Date.now() - stableSince >= 1700
+        && !visibleGeneratingControl()) {
+        return { settled: true, responseTextSnippet: response.slice(0, 300),
+          responseTextLength: response.length };
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+    return { settled: false, reason: 'assistant_reply_timeout' };
+  }
+
   async function autoSendProbe(options = {}) {
     if (autoProbeRunning) throw new Error('Automatic verification is already running / 自动验证正在进行');
     autoProbeRunning = true;
@@ -2739,6 +2764,13 @@ document.addEventListener('pointerdown', (event) => {
       updateCache(message);
       sendResponse({ ok: true });
       return false;
+    }
+    if (message?.type === 'GPTWORK_DEBUG_ASTRA_WAIT_SETTLED') {
+      void waitForDebugAstraReply(message).then(
+        (result) => sendResponse({ ok: true, ...result }),
+        () => sendResponse({ ok: false, error: 'debug_reply_observation_failed' }),
+      );
+      return true;
     }
     if (message?.type === 'GPTWORK_DEBUG_ASTRA_SEND_PROBE') {
       if (debugAstraProbeRunning || autoProbeRunning || autoVerificationRunning) {
