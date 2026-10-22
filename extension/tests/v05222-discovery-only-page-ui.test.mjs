@@ -50,7 +50,9 @@ test('content runtime blocks model selection outside discovery and scopes debug 
     assert.ok(at >= 0, sig);
     assert.match(content.slice(at, at + 400), /if \(!autoVerificationRunning\) return false;/);
   }
-  assert.match(content, /if \(!autoVerificationRunning\) return false;\s*\/\/ Synthetic fallback/);
+  const trusted = content.slice(content.indexOf("async function trustedPointer(element, action = 'click', source = 'unspecified') {"));
+  assert.match(trusted, /debugAstraProbeRunning && source === 'auto-probe-send'/);
+  assert.match(content, /if \\(!autoVerificationRunning && !debugAstraProbeRunning\\) return false;\\s*\\/\\/ Synthetic fallback/);
 });
 
 test('passive selection snapshots remain enabled in normal Chat without opening a picker', () => {
