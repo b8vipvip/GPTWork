@@ -366,7 +366,7 @@ function recordOriginObservation(tabId, state, observation) {
 }
 
 async function armOriginTrace(tabId, reason) {
-  if (!masterRuntimeEnabled()) return false;
+  if (!masterRuntimeEnabled() || networkMonitor.isDiagnosticSuspended()) return false;
   const state = tabStates.get(tabId);
   if (!state || !isChatGptUrl(state.url) || !effectiveSettingsForState(state).enabled) return false;
   if (networkMonitor.hasOriginTrace(tabId)) return true;
@@ -394,6 +394,7 @@ async function configureOriginTrace(tab, state) {
   const astra = originScene(tab.id) === 'astra';
   const foreground = Boolean(tab.active && key);
   const shouldArm = masterRuntimeEnabled()
+    && !networkMonitor.isDiagnosticSuspended()
     && effectiveSettingsForState(state).enabled
     && Boolean(key)
     && (watched || astra || foreground);
@@ -4991,6 +4992,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
   if (!isChatGptUrl(tab.url ?? '')) return;
+  if (changeInfo.url
+    && tabStates.get(tabId)?.contextKey !== contextKey(changeInfo.url)) {
+    originSceneByTab.delete(tabId);
+  }
   if (changeInfo.status === 'loading') {
     const previous = originSceneByTab.get(tabId);
     originSceneByTab.delete(tabId);
@@ -5486,8 +5491,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'GPTLOCK_CONTEXT_CHANGED': {
         if (!sender.tab?.id) throw new Error('Context update requires a tab');
-        const state = ensureTabState(sender.tab.id, message.url || sender.tab.url);
-        void configureOriginTrace({ ...sender.tab, url: message.url || sender.tab.url }, state);
+        const nextUrl = message.url || sender.tab.url;
+        if (tabStates.get(sender.tab.id)?.contextKey !== contextKey(nextUrl)) {
+          originSceneByTab.delete(sender.tab.id);
+        }
+        const state = ensureTabState(sender.tab.id, nextUrl);
+        void configureOriginTrace({ ...sender.tab, url: nextUrl }, state);
         await broadcastTabState(sender.tab.id);
         return publicTabState(state);
       }
