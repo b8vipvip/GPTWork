@@ -143,6 +143,7 @@ export class ChatGptNetworkMonitor {
     this.attachedTabs = new Set();
     this.responseCaptureTabs = new Set();
     this.originTraceTabs = new Set();
+    this.originTraceTasks = new Map();
     this.originRequests = new Map();
     this.attachTasks = new Map();
     this.detachTasks = new Map();
@@ -351,21 +352,32 @@ export class ChatGptNetworkMonitor {
   // Independent ownership from explicit model verification. Only foreground
   // conversations and previously observed Astra conversations are auto-armed.
   async enableOriginTrace(tabId) {
-    const attached = this.isAttached(tabId) || await this.attach(tabId);
-    if (!attached) return false;
     if (this.originTraceTabs.has(tabId)) return true;
-    if (!this.responseCaptureTabs.has(tabId)) {
-      await debuggerCall('sendCommand', this.target(tabId), 'Network.enable', {
-        maxTotalBufferSize: 8 * 1024 * 1024,
-        maxResourceBufferSize: 4 * 1024 * 1024,
-        maxPostDataSize: 512 * 1024,
-      });
-    }
-    this.originTraceTabs.add(tabId);
-    return true;
+    const pending = this.originTraceTasks.get(tabId);
+    if (pending) return pending;
+    const task = (async () => {
+      const attached = this.isAttached(tabId) || await this.attach(tabId);
+      if (!attached) return false;
+      if (!this.responseCaptureTabs.has(tabId)) {
+        await debuggerCall('sendCommand', this.target(tabId), 'Network.enable', {
+          maxTotalBufferSize: 8 * 1024 * 1024,
+          maxResourceBufferSize: 4 * 1024 * 1024,
+          maxPostDataSize: 512 * 1024,
+        });
+      }
+      if (!this.isAttached(tabId)) return false;
+      this.originTraceTabs.add(tabId);
+      return true;
+    })().finally(() => {
+      if (this.originTraceTasks.get(tabId) === task) this.originTraceTasks.delete(tabId);
+    });
+    this.originTraceTasks.set(tabId, task);
+    return task;
   }
 
   async disableOriginTrace(tabId) {
+    const pending = this.originTraceTasks.get(tabId);
+    if (pending) { try { await pending; } catch {} }
     if (!this.originTraceTabs.delete(tabId)) return;
     const prefix = `${tabId}:`;
     for (const key of this.originRequests.keys()) if (key.startsWith(prefix)) this.originRequests.delete(key);
