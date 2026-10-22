@@ -13,9 +13,11 @@ import {
   resumeContentRecovery,
   suspendContentRecovery,
 } from './content-runtime-recovery.js';
-import { tabFeatureEnabledSync } from './tab-feature-runtime.js';
+// Monitor eligibility is computed by the existing background lifecycle authority.
 import {
   initializeAfterCurrentTask,
+  monitorRecoveryEligibility,
+  reconcileMonitorsAfterUpdate,
   probeNativeCoreForUpdateRecovery,
 } from './background.js';
 
@@ -41,7 +43,7 @@ const INSTALL_TIMEOUT_MS = 2 * 60 * 1000;
 const INSTALL_INITIAL_WAIT_MS = 1_000;
 const INSTALL_POLL_MS = 1_000;
 const RECOVERY_TIMEOUT_MS = 90_000;
-const RECOVERY_MONITOR_GRACE_MS = 12_000;
+const RECOVERY_MONITOR_RETRY_MS = 8_000;
 const NATIVE_TIMEOUT_MS = 12_000;
 const LONG_POLL_ROUNDS = 3;
 const TRANSIENT_PHASES = new Set([
@@ -366,9 +368,8 @@ async function runtimeReadiness(targetVersion, chromeApi = globalThis.chrome) {
   }
 
   const attached = await debuggerAttachedTabIds(chromeApi);
-  const expectedMonitorTabs = tabs
-    .filter((tab) => Number.isInteger(tab?.id) && tab.status !== 'loading' && tabFeatureEnabledSync(tab.id))
-    .map((tab) => tab.id);
+  const monitorEligibility = await monitorRecoveryEligibility();
+  const expectedMonitorTabs = monitorEligibility.filter((item) => item.expected).map((item) => item.tabId);
   const pendingMonitorTabs = expectedMonitorTabs.filter((tabId) => !attached.has(tabId));
 
   // Recovery truth must come from a fresh Native Messaging round trip owned by the
@@ -488,25 +489,33 @@ async function recoverAfterReload(status, chromeApi = globalThis.chrome) {
 
   const recoveryStartedAt = Date.now();
   const deadline = recoveryStartedAt + RECOVERY_TIMEOUT_MS;
+  let lastMonitorRetryAt = 0;
   let last = null;
   while (Date.now() < deadline) {
     last = await runtimeReadiness(targetVersion, chromeApi);
-    const contentAndCoreReady = last.coreReady && last.pendingContentTabs.length === 0;
-    const monitorGraceElapsed = Date.now() - recoveryStartedAt >= RECOVERY_MONITOR_GRACE_MS;
-    if (last.ready || (contentAndCoreReady && monitorGraceElapsed)) {
+    // Never report 100% when an authorized tab's request interceptor is
+    // detached. A missing interceptor silently bypasses model locking.
+    if (last.ready) {
       await recordAttempt(targetVersion, 'complete', { nativeVersion: last.nativeVersion }, chromeApi);
       await setUpdateStatus({
         phase: 'complete', percent: 100, targetVersion,
         nativeVersion: last.nativeVersion,
-        monitorRecoveryPending: last.pendingMonitorTabs.length > 0,
-        message: last.pendingMonitorTabs.length
-          ? `更新完成：${targetVersion}。本地核心和页面运行时已恢复，请求锁定器将在页面发送请求时继续自动连接。`
-          : `更新完成：${targetVersion}。本地核心、页面运行时和请求锁定器均已恢复。`,
+        monitorRecoveryPending: false,
+        message: `更新完成：${targetVersion}。本地核心、页面运行时和请求锁定器均已恢复。`,
         completedAt: new Date().toISOString(),
       }, chromeApi);
       await setActionUpdateState({ available: false }, chromeApi);
       logUpdate('info', 'background_auto_update_completed', { targetVersion, ...last });
       return { complete: true, ...last };
+    }
+    if (last.coreReady && last.pendingContentTabs.length === 0
+      && last.pendingMonitorTabs.length > 0
+      && Date.now() - lastMonitorRetryAt >= RECOVERY_MONITOR_RETRY_MS) {
+      lastMonitorRetryAt = Date.now();
+      try { await reconcileMonitorsAfterUpdate(); }
+      catch (error) {
+        logUpdate('warn', 'monitor_recovery_retry_failed', { error: errorText(error) });
+      }
     }
     const pending = last.pendingContentTabs.length + last.pendingMonitorTabs.length;
     const percent = last.coreReady ? (pending > 0 ? 97 : 99) : 95;
