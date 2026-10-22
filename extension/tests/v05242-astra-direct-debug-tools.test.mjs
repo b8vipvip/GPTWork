@@ -29,6 +29,10 @@ test('debug-only override uses exact Astra transport, keeps reasoning and other 
   assert.equal(payload.reasoning_effort, 'high');
   assert.deepEqual(payload.messages, input.messages);
   assert.equal(astraDebugConfiguration(base, { ...active, claimed: true }), null);
+  assert.equal(astraDebugConfiguration(base, { ...active, claimed: true,
+    claimedFetchRequestId: 'fetch-1' }, 'fetch-1').forceTransportModel, ASTRA_DEBUG_TRANSPORT);
+  assert.equal(astraDebugConfiguration(base, { ...active, claimed: true,
+    claimedFetchRequestId: 'fetch-1' }, 'fetch-2'), null);
   assert.equal(astraDebugConfiguration(base, { ...active, phase: 'finished' }), null);
 });
 
@@ -64,6 +68,12 @@ test('Fetch requestPaused performs one exact one-shot Astra POST and reverts to 
     const monitor = new ChatGptNetworkMonitor({
       getLockConfiguration: () => base,
       getDebugProbe: () => probe,
+      claimDebugProbe(_tabId, fetchRequestId) {
+        if (probe.claimed) return null;
+        probe.claimed = true;
+        probe.claimedFetchRequestId = fetchRequestId;
+        return probe;
+      },
       onStatus() {},
       onRewrite(_tabId, rewrite) { rewrites.push(rewrite); if (rewrite.authorityKind === 'debug-astra-transport') probe.claimed = true; },
     });
