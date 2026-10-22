@@ -71,6 +71,8 @@ function presentProbe(probe) {
   };
   text('probeVerdict', probe ? verdicts[probe.modelVerdict] || probe.modelVerdict : '未验证');
   text('probeRequestId', probe?.requestId || probe?.fetchRequestId);
+  text('probeReply', probe?.responseTextSnippet);
+  text('probeAssistantSettled', probe?.assistantSettled === true ? '是' : probe?.assistantSettled === false ? '未确认' : '等待中');
   const active = ['dispatching', 'forwarded', 'responding', 'response_finished'].includes(probe?.phase);
   $('runAstra').disabled = active || !$('targetTab').value;
   $('cancelAstra').disabled = !active;
