@@ -9,6 +9,7 @@ import {
   streamPayloadMatches,
 } from './network-evidence.js';
 import { originMetadataEndpoint, extractOriginConversationMetadata, ORIGIN_METADATA_MAX_BYTES } from './astra-origin-trace.js';
+import { astraDebugConfiguration, ASTRA_DEBUG_TRANSPORT } from './astra-debug-probe.js';
 
 const CDP_VERSION = '1.3';
 const REQUEST_TTL_MS = 15 * 60 * 1000;
@@ -129,7 +130,7 @@ export function webSocketFrameMatchesHandoff(payload, handoff) {
 }
 
 export class ChatGptNetworkMonitor {
-  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, onOriginTrace, getLockConfiguration, getVerificationTransaction }) {
+  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, onOriginTrace, getLockConfiguration, getVerificationTransaction, getDebugProbe }) {
     this.onStatus = onStatus;
     this.onRequest = onRequest;
     this.onEvidence = onEvidence;
@@ -140,6 +141,7 @@ export class ChatGptNetworkMonitor {
     this.onOriginTrace = onOriginTrace;
     this.getLockConfiguration = getLockConfiguration;
     this.getVerificationTransaction = getVerificationTransaction;
+    this.getDebugProbe = getDebugProbe;
     this.attachedTabs = new Set();
     this.responseCaptureTabs = new Set();
     this.originTraceTabs = new Set();
@@ -216,6 +218,8 @@ export class ChatGptNetworkMonitor {
 
   effectiveConfiguration(tabId) {
     const base = this.configuration(tabId);
+    const debugConfiguration = astraDebugConfiguration(base, this.getDebugProbe?.(tabId));
+    if (debugConfiguration) return debugConfiguration;
     const transaction = this.verificationTransaction(tabId);
     const model = String(transaction?.model || '').trim();
     if (!model) {
@@ -857,8 +861,10 @@ export class ChatGptNetworkMonitor {
         ? configuration.authorityTransportModel
         : configuration.authorityRequestModel;
       if (
-        ['verification-transaction', 'model-discovery-chat-compat'].includes(configuration.authorityKind)
-        && actualAuthorityModel !== expectedAuthorityModel
+        (['verification-transaction', 'model-discovery-chat-compat'].includes(configuration.authorityKind)
+          && actualAuthorityModel !== expectedAuthorityModel)
+        || (configuration.authorityKind === 'debug-astra-transport'
+          && rewrite.transportModelAfter !== ASTRA_DEBUG_TRANSPORT)
       ) {
         const detail = `verification_request_authority_mismatch:${actualAuthorityModel || 'none'}!=${expectedAuthorityModel || 'none'}`;
         this.onRewrite?.(tabId, {
@@ -866,7 +872,9 @@ export class ChatGptNetworkMonitor {
           requestId: params.networkId ? String(params.networkId) : null,
           fetchRequestId: requestId,
           changed: rewrite.changed,
-          reason: 'verification_authority_mismatch_blocked',
+          reason: configuration.authorityKind === 'debug-astra-transport'
+            ? 'debug_astra_transport_mismatch_blocked'
+            : 'verification_authority_mismatch_blocked',
           modelBefore: rewrite.modelBefore,
           modelAfter: rewrite.modelAfter,
           transportModelBefore: rewrite.transportModelBefore,
@@ -906,13 +914,15 @@ export class ChatGptNetworkMonitor {
       });
     } catch (error) {
       const detail = safeError(error);
-      if (configuration?.authorityKind === 'verification-transaction') {
+      if (['verification-transaction', 'debug-astra-transport'].includes(configuration?.authorityKind)) {
         this.onRewrite?.(tabId, {
           endpoint,
           requestId: params.networkId ? String(params.networkId) : null,
           fetchRequestId: requestId,
           changed: false,
-          reason: 'verification_rewrite_failed_closed',
+          reason: configuration.authorityKind === 'debug-astra-transport'
+            ? 'debug_astra_rewrite_failed_closed'
+            : 'verification_rewrite_failed_closed',
           modelBefore: rewrite?.modelBefore ?? null,
           modelAfter: rewrite?.modelAfter ?? null,
           authorityKind: configuration.authorityKind,
