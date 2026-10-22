@@ -37,7 +37,7 @@ test('background CDP pointer and keyboard paths require discovery or explicit sc
         : 'networkMonitor.trustedPointer(sender.tab.id, { action, x, y })');
     assert.ok(check >= 0 && action > check, command + ' must check before CDP');
     assert.match(code, /discovery_or_explicit_debug_action_not_authorized/);
-    assert.match(code, /debugAstraProbes\\.get\\(sender\\.tab\\.id\\)\\?\\.phase !== 'dispatching'/);
+    assert.match(code, /debugAstraProbes\.get\(sender\.tab\.id\)\?\.phase !== 'dispatching'/);
   }
 });
 
