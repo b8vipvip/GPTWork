@@ -217,10 +217,10 @@ export class ChatGptNetworkMonitor {
     }
   }
 
-  effectiveConfiguration(tabId, fetchRequestId = null) {
+  effectiveConfiguration(tabId, fetchRequestId = null, postData = null) {
     const base = this.configuration(tabId);
     const debugProbe = fetchRequestId && this.claimDebugProbe
-      ? this.claimDebugProbe(tabId, fetchRequestId) : this.getDebugProbe?.(tabId);
+      ? this.claimDebugProbe(tabId, fetchRequestId, postData) : this.getDebugProbe?.(tabId);
     const debugConfiguration = astraDebugConfiguration(base, debugProbe, fetchRequestId);
     if (debugConfiguration) return debugConfiguration;
     const transaction = this.verificationTransaction(tabId);
@@ -829,7 +829,7 @@ export class ChatGptNetworkMonitor {
       const postData = await this.pausedPostData(tabId, params);
       // Resolve authority only after postData acquisition. This closes the race where
       // a normal-policy snapshot was taken before verification became active.
-      configuration = this.effectiveConfiguration(tabId, requestId);
+      configuration = this.effectiveConfiguration(tabId, requestId, postData);
       if (configuration.bypassRewrite === true) {
         const observed = extractRequestEvidence(postData);
         await this.continuePaused(tabId, requestId);
