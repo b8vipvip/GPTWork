@@ -93,6 +93,7 @@ test('automatic CDP trace captures conversation detail GET and response without 
     const trace = [];
     const monitor = new ChatGptNetworkMonitor({
       onOriginTrace(_tabId, event) { trace.push(event); },
+      onStatus() {},
     });
     assert.equal(await monitor.enableOriginTrace(91), true);
     assert.equal(monitor.hasOriginTrace(91), true);
@@ -138,6 +139,6 @@ test('background and manifest register automatic document and model state diagno
   assert.match(background, /rememberAstraConversation/);
   assert.match(content, /originTraceSnapshot/);
   const manifestJson = JSON.parse(manifest);
-  assert.equal(manifestJson.content_scripts[0].run_at, 'document_start');
-  assert.deepEqual(manifestJson.content_scripts[0].js, ['astra-origin-early.js']);
+  assert.equal(manifestJson.content_scripts[1].run_at, 'document_start');
+  assert.deepEqual(manifestJson.content_scripts[1].js, ['astra-origin-early.js']);
 });
