@@ -5,8 +5,9 @@ export const ASTRA_DEBUG_CANONICAL = 'gpt-6-astra';
 export const ASTRA_DEBUG_TIMEOUT_MS = 180000;
 export const ASTRA_DEBUG_HISTORY_KEY = 'gptworkAstraDebugProbeHistoryV1';
 
-export function astraDebugConfiguration(base, probe) {
-  if (!probe || probe.phase !== 'dispatching' || probe.claimed === true) return null;
+export function astraDebugConfiguration(base, probe, requestId = null) {
+  if (!probe || probe.phase !== 'dispatching'
+    || (probe.claimed === true && (!requestId || probe.claimedFetchRequestId !== requestId))) return null;
   return {
     ...base,
     lockedModels: [ASTRA_DEBUG_CANONICAL],
