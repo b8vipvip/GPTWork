@@ -128,13 +128,14 @@ export function webSocketFrameMatchesHandoff(payload, handoff) {
 }
 
 export class ChatGptNetworkMonitor {
-  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, getLockConfiguration, getVerificationTransaction }) {
+  constructor({ onStatus, onRequest, onEvidence, onFailure, onRewrite, onStreamData, onProtocolEvent, getLockConfiguration, getVerificationTransaction }) {
     this.onStatus = onStatus;
     this.onRequest = onRequest;
     this.onEvidence = onEvidence;
     this.onFailure = onFailure;
     this.onRewrite = onRewrite;
     this.onStreamData = onStreamData;
+    this.onProtocolEvent = onProtocolEvent;
     this.getLockConfiguration = getLockConfiguration;
     this.getVerificationTransaction = getVerificationTransaction;
     this.attachedTabs = new Set();
@@ -936,6 +937,15 @@ export class ChatGptNetworkMonitor {
     record.mimeType = mimeType;
     record.responseHeaders = params.response?.headers ?? {};
     record.status = params.response?.status ?? null;
+    this.onProtocolEvent?.(tabId, {
+      event: 'conversation_response_headers',
+      requestId: record.downstream ? this.newestHandoff(tabId)?.initialRequestId ?? record.requestId : record.requestId,
+      endpoint: record.endpoint,
+      httpStatus: record.status,
+      mimeType: record.mimeType,
+      elapsedMs: Date.now() - record.startedAt,
+      downstream: Boolean(record.downstream),
+    });
     if (record.responseVerificationEnabled && !record.streamCaptureStarted) {
       record.streamCaptureStarted = true;
       record.streamChunks = [];
@@ -961,6 +971,16 @@ export class ChatGptNetworkMonitor {
     const record = this.requests.get(key);
     if (!record) return;
     this.requests.delete(key);
+    this.onProtocolEvent?.(tabId, {
+      event: 'conversation_response_finished',
+      requestId: record.downstream ? this.newestHandoff(tabId)?.initialRequestId ?? record.requestId : record.requestId,
+      endpoint: record.endpoint,
+      httpStatus: record.status ?? null,
+      mimeType: record.mimeType,
+      elapsedMs: Date.now() - record.startedAt,
+      encodedDataLength: Number.isFinite(params.encodedDataLength) ? params.encodedDataLength : null,
+      downstream: Boolean(record.downstream),
+    });
     if (!record.responseVerificationEnabled) return;
 
     let body = '';
@@ -1072,6 +1092,17 @@ export class ChatGptNetworkMonitor {
     const record = this.requests.get(key);
     if (!record) return;
     this.requests.delete(key);
+    this.onProtocolEvent?.(tabId, {
+      event: 'conversation_response_failed',
+      requestId: record.downstream ? this.newestHandoff(tabId)?.initialRequestId ?? record.requestId : record.requestId,
+      endpoint: record.endpoint,
+      httpStatus: record.status ?? null,
+      mimeType: record.mimeType,
+      elapsedMs: Date.now() - record.startedAt,
+      canceled: Boolean(params.canceled),
+      networkError: params.errorText || 'network_loading_failed',
+      downstream: Boolean(record.downstream),
+    });
     if (!record.responseVerificationEnabled) return;
 
     const recoveredBody = this.responseStreamBody(record);
