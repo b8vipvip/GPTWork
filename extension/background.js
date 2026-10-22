@@ -78,6 +78,7 @@ const NETWORK_CANDIDATE_SELECTOR = '__network_candidate__';
 const JANK_ISOLATION_KEY = 'gptworkJankIsolationV1';
 const ASTRA_ORIGIN_WATCH_KEY = 'gptworkAstraOriginWatchedConversationsV1';
 const ASTRA_ORIGIN_WATCH_LIMIT = 24;
+const ASTRA_ORIGIN_BASELINE_MAX_TABS = 3;
 const ASTRA_ORIGIN_WATCH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 let nativePort = null;
@@ -399,6 +400,22 @@ async function configureOriginTrace(tab, state) {
     && Boolean(key)
     && (watched || astra || foreground);
   if (shouldArm) {
+    if (foreground && !watched && !astra && !networkMonitor.hasOriginTrace(tab.id)) {
+      const baselines = [...originArmedTabIds].filter((id) => {
+        const other = tabStates.get(id);
+        return other && !originWatchedConversations.has(other.contextKey)
+          && originScene(id) !== 'astra' && networkMonitor.hasOriginTrace(id);
+      });
+      if (baselines.length >= ASTRA_ORIGIN_BASELINE_MAX_TABS) {
+        const evicted = baselines[0];
+        await networkMonitor.disableOriginTrace(evicted);
+        originArmedTabIds.delete(evicted);
+        logRuntime('info', 'astra-origin-trace', 'astra_origin_capture_disarmed', {
+          tabId: evicted, contextKey: tabStates.get(evicted)?.contextKey ?? null,
+          reason: 'baseline_budget_evicted',
+        });
+      }
+    }
     await armOriginTrace(tab.id, watched ? 'persisted_astra_conversation'
       : astra ? 'astra_detected' : 'foreground_baseline');
   } else if (networkMonitor.hasOriginTrace(tab.id)) {
