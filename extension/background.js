@@ -393,7 +393,14 @@ async function configureOriginTrace(tab, state) {
   const key = conversationKeyFromUrl(tab.url);
   const watched = Boolean(key && originWatchedConversations.has(key));
   const astra = originScene(tab.id) === 'astra';
-  const foreground = Boolean(tab.active && key);
+  let focusedWindowId = null;
+  if (tab.active && key && Number.isInteger(tab.windowId)) {
+    try {
+      focusedWindowId = (await chrome.windows.getLastFocused())?.id ?? null;
+    } catch {}
+  }
+  const foreground = Boolean(tab.active && key
+    && (focusedWindowId === null || focusedWindowId === tab.windowId));
   const shouldArm = masterRuntimeEnabled()
     && !networkMonitor.isDiagnosticSuspended()
     && effectiveSettingsForState(state).enabled
