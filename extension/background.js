@@ -11,6 +11,8 @@ import {
 } from './policy.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { conversationKeyFromUrl, modelOriginScene, originSnapshotFields } from './astra-origin-trace.js';
+import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_TIMEOUT_MS, ASTRA_DEBUG_HISTORY_KEY,
+  publicAstraDebugProbe } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
@@ -55,7 +57,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.241';
+const RUNTIME_CODE_VERSION = '0.5.242';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -91,6 +93,9 @@ let coreConnection = { connected: false, error: null };
 let initializeTask = null;
 const pendingRequests = new Map();
 const tabStates = new Map();
+const debugAstraProbes = new Map();
+const ASTRA_DEBUG_ALARM_PREFIX = 'gptwork-astra-debug-timeout:';
+let debugAstraHistoryWrite = Promise.resolve();
 const originSceneByTab = new Map();
 const originArmedTabIds = new Set();
 const originWatchedConversations = new Map();
@@ -272,6 +277,110 @@ function logRuntime(level, component, event, details = {}) {
   void appendRuntimeLog(level, component, event, details)
     .then(() => scheduleRuntimeLogDelivery())
     .catch(() => {});
+}
+
+// The debug tool is opt-in, scoped to one tab, one visible ChatGPT send,
+// and one POST. Never persist prompts or raw response bodies.
+function recordDebugAstra(tabId, event, patch = {}) {
+  const probe = debugAstraProbes.get(tabId);
+  if (!probe) return null;
+  Object.assign(probe, patch, { updatedAt: Date.now() });
+  const snapshot = publicAstraDebugProbe(probe);
+  logRuntime(probe.phase === 'failed' ? 'warn' : 'info', 'astra-direct-debug', event, snapshot);
+  debugAstraHistoryWrite = debugAstraHistoryWrite.catch(() => {}).then(async () => {
+    const stored = await chrome.storage.local.get(ASTRA_DEBUG_HISTORY_KEY);
+    const history = Array.isArray(stored[ASTRA_DEBUG_HISTORY_KEY]) ? stored[ASTRA_DEBUG_HISTORY_KEY] : [];
+    await chrome.storage.local.set({
+      [ASTRA_DEBUG_HISTORY_KEY]: [snapshot, ...history.filter((entry) => entry?.id !== snapshot.id)].slice(0, 20),
+    });
+  }).catch(() => {});
+  return snapshot;
+}
+
+async function endDebugAstra(tabId, reason = null) {
+  const probe = debugAstraProbes.get(tabId);
+  if (!probe) return;
+  debugAstraProbes.delete(tabId);
+  try { await chrome.alarms.clear(ASTRA_DEBUG_ALARM_PREFIX + tabId); } catch {}
+  if (reason && !['finished', 'failed', 'timed_out', 'canceled'].includes(probe.phase)) {
+    probe.phase = reason;
+    debugAstraProbes.set(tabId, probe);
+    recordDebugAstra(tabId, 'astra_debug_probe_ended', { error: reason });
+    debugAstraProbes.delete(tabId);
+  }
+  try { await networkMonitor.disableResponseCapture(tabId); } catch {}
+}
+
+async function startDebugAstra(tabId) {
+  if (!Number.isInteger(tabId)) throw new Error('invalid_tab_id');
+  if (!masterRuntimeEnabled()) throw new Error('gptwork_master_disabled');
+  if (networkMonitor.isDiagnosticSuspended()) throw new Error('cdp_diagnostics_suspended');
+  const tab = await chrome.tabs.get(tabId);
+  if (!isChatGptUrl(tab.url ?? '')) throw new Error('target_is_not_chatgpt');
+  const state = ensureTabState(tabId, tab.url);
+  state.windowId = tab.windowId;
+  if (!effectiveSettingsForState(state).enabled || !accountAllowsState(state)) {
+    throw new Error('gptwork_tab_not_authorized');
+  }
+  if (state.autoVerification?.running || verificationTransactionForTab(tabId)) {
+    throw new Error('model_discovery_in_progress');
+  }
+  if (debugAstraProbes.has(tabId)) throw new Error('astra_debug_probe_already_running');
+  const attached = networkMonitor.isAttached(tabId) || await networkMonitor.attach(tabId);
+  if (!attached) throw new Error('cdp_attach_failed');
+  await networkMonitor.enableResponseCapture(tabId);
+  const probe = {
+    id: 'astra-' + crypto.randomUUID(),
+    tabId,
+    contextKey: state.contextKey,
+    pageModel: state.pageObservation?.model ?? null,
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+    phase: 'dispatching',
+    claimed: false,
+    requestId: null,
+    fetchRequestId: null,
+    originalTransportModel: null,
+    forwardedTransportModel: null,
+    httpStatus: null,
+    mimeType: null,
+    terminalEvent: null,
+    responseModel: null,
+    responseModelField: null,
+    responseDefaultModel: null,
+    responseEvidenceSource: null,
+    streamStage: null,
+    networkError: null,
+    sendMethod: null,
+    assistantSettled: null,
+    error: null,
+  };
+  debugAstraProbes.set(tabId, probe);
+  recordDebugAstra(tabId, 'astra_debug_probe_started');
+  await chrome.alarms.create(ASTRA_DEBUG_ALARM_PREFIX + tabId, {
+    when: Date.now() + ASTRA_DEBUG_TIMEOUT_MS,
+  });
+  try {
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    const sent = await sendTabMessage(tabId, {
+      type: 'GPTWORK_DEBUG_ASTRA_SEND_PROBE',
+      probeText: '计算 12×13，只输出整数。',
+    });
+    recordDebugAstra(tabId, 'astra_debug_probe_send_attempt', {
+      sendMethod: sent?.method || null,
+      ...(sent?.sent === true ? {} : { error: 'visible_send_not_confirmed' }),
+    });
+    if (sent?.sent !== true) throw new Error('visible_send_not_confirmed');
+    // A successful DOM click is NOT a successful HTTP request.
+    return publicAstraDebugProbe(probe);
+  } catch (error) {
+    recordDebugAstra(tabId, 'astra_debug_probe_dispatch_failed', {
+      phase: 'failed', error: String(error?.message || error).slice(0, 180),
+    });
+    await endDebugAstra(tabId);
+    return publicAstraDebugProbe(probe);
+  }
 }
 
 // Automatic read-only Astra origin diagnostics. A watched conversation is
@@ -1355,6 +1464,11 @@ async function applyNetworkEvidence(tabId, evidence) {
 }
 
 const networkMonitor = new ChatGptNetworkMonitor({
+  getDebugProbe(tabId) {
+    const probe = debugAstraProbes.get(tabId);
+    return probe?.phase === 'dispatching' && probe.claimed !== true
+      && Date.now() - probe.startedAt < 30000 ? probe : null;
+  },
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
     const feature = tabFeatureStateSync(tabId);
