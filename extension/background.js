@@ -311,12 +311,16 @@ async function endDebugAstra(tabId, reason = null) {
   try { await networkMonitor.disableResponseCapture(tabId); } catch {}
 }
 
-async function startDebugAstra(tabId) {
+async function startDebugAstra(tabId, expectedUrl) {
   if (!Number.isInteger(tabId)) throw new Error('invalid_tab_id');
+  if (typeof expectedUrl !== 'string' || !isChatGptUrl(expectedUrl)) {
+    throw new Error('debug_target_must_be_confirmed');
+  }
   if (!masterRuntimeEnabled()) throw new Error('gptwork_master_disabled');
   if (networkMonitor.isDiagnosticSuspended()) throw new Error('cdp_diagnostics_suspended');
   const tab = await chrome.tabs.get(tabId);
   if (!isChatGptUrl(tab.url ?? '')) throw new Error('target_is_not_chatgpt');
+  if (tab.url !== expectedUrl) throw new Error('debug_target_navigated_refresh_and_confirm');
   const state = ensureTabState(tabId, tab.url);
   state.windowId = tab.windowId;
   if (!effectiveSettingsForState(state).enabled || !accountAllowsState(state)) {
@@ -5522,11 +5526,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabs: tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => ({
             tabId: tab.id,
             windowId: tab.windowId,
+            tabIndex: Number.isInteger(tab.index) ? tab.index + 1 : null,
             active: tab.active === true,
+            title: String(tab.title || 'ChatGPT').slice(0, 140),
+            url: tab.url,
             contextKey: tabStates.get(tab.id)?.contextKey ?? contextKey(tab.url),
             pageModel: tabStates.get(tab.id)?.pageObservation?.model ?? null,
-          })).sort((a, b) => Number(b.active) - Number(a.active)),
+            monitorAttached: networkMonitor.isAttached(tab.id),
+            guardStatus: tabStates.has(tab.id) ? guardFor(tabStates.get(tab.id)).status : null,
+          })).sort((a, b) => Number(b.active) - Number(a.active)
+            || a.windowId - b.windowId || (a.tabIndex ?? 0) - (b.tabIndex ?? 0)),
         };
+      }
+      case 'GPTWORK_DEBUG_TOOLS_FOCUS_TAB': {
+        const tabId = Number(message.tabId);
+        if (!Number.isInteger(tabId)) throw new Error('invalid_tab_id');
+        const tab = await chrome.tabs.get(tabId);
+        if (!isChatGptUrl(tab.url || '') || tab.url !== message.expectedUrl) {
+          throw new Error('debug_target_navigated_refresh_and_confirm');
+        }
+        await chrome.tabs.update(tabId, { active: true });
+        await chrome.windows.update(tab.windowId, { focused: true });
+        return { tabId, url: tab.url, title: tab.title, windowId: tab.windowId };
       }
       case 'GPTWORK_DEBUG_ASTRA_STATUS': {
         const active = [...debugAstraProbes.values()].map(publicAstraDebugProbe);
@@ -5538,7 +5559,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
       }
       case 'GPTWORK_DEBUG_ASTRA_START':
-        return startDebugAstra(message.tabId);
+        return startDebugAstra(message.tabId, message.expectedUrl);
       case 'GPTWORK_DEBUG_ASTRA_CANCEL': {
         const tabId = Number(message.tabId);
         if (!debugAstraProbes.has(tabId)) return { canceled: false };
