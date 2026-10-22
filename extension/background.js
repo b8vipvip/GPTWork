@@ -1496,7 +1496,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
   getDebugProbe(tabId) {
     const probe = debugAstraProbes.get(tabId);
     return probe?.phase === 'dispatching' && probe.claimed !== true
-      && Date.now() - probe.startedAt < 30000 ? probe : null;
+      && Date.now() - probe.startedAt < ASTRA_DEBUG_TIMEOUT_MS ? probe : null;
   },
   getLockConfiguration(tabId) {
     const policy = runtimePolicyForTabSync(tabId);
