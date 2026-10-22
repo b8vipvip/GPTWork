@@ -241,6 +241,11 @@ export async function initializeTabFeatureRuntime() {
       }
       if (workStateChanged) await persistStates();
     }
+    // Update recovery may restore MASTER_KEY while migration is awaiting storage.
+    // Re-read the canonical value at the end so the initial snapshot cannot
+    // overwrite a newer storage.onChanged event with the old OFF value.
+    const currentMaster = await chrome.storage.local.get(MASTER_KEY);
+    masterEnabled = currentMaster[MASTER_KEY] === true;
     initialized = true;
   })().finally(() => {
     initializePromise = null;
@@ -300,13 +305,16 @@ export async function isolateTabForVerification(tabId) {
 }
 
 export function tabFeatureEnabledSync(tabId) {
-  if (!masterEnabled) return false;
+  // Only the tab's Work/Model switches belong here. The background lifecycle
+  // owns the single global MASTER_KEY gate. Duplicating that gate here allowed
+  // a stale OFF cache during silent-update recovery to detach every monitor
+  // while the popup correctly displayed Master=ON.
   const state = tabFeatureStateSync(tabId);
   return state.workModeEnabled || state.modelLockEnabled;
 }
 
 export function requestPolicyForTabSync(tabId, pageModel) {
-  const feature = masterEnabled ? tabFeatureStateSync(tabId) : normalizeState(null);
+  const feature = tabFeatureStateSync(tabId);
   const selected = normalizeConcreteModelId(pageModel);
   let lockedModels = [];
 
@@ -336,7 +344,7 @@ export function requestPolicyForTabSync(tabId, pageModel) {
 }
 
 export function effectivePolicyForTabSync(tabId) {
-  const feature = masterEnabled ? tabFeatureStateSync(tabId) : normalizeState(null);
+  const feature = tabFeatureStateSync(tabId);
   const active = [];
   if (workFeatureEnabled && feature.workModeEnabled) active.push(...workModels());
   if (feature.modelLockEnabled) {
