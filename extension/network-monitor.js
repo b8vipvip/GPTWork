@@ -939,7 +939,10 @@ export class ChatGptNetworkMonitor {
     record.status = params.response?.status ?? null;
     this.onProtocolEvent?.(tabId, {
       event: 'conversation_response_headers',
-      requestId: record.downstream ? this.newestHandoff(tabId)?.initialRequestId ?? record.requestId : record.requestId,
+      requestId: record.downstream
+        ? (record.handoffId ? this.handoffs.get(record.handoffId)?.initialRequestId ?? null : null)
+        : record.requestId,
+      transportRequestId: record.requestId,
       endpoint: record.endpoint,
       httpStatus: record.status,
       mimeType: record.mimeType,
@@ -973,7 +976,10 @@ export class ChatGptNetworkMonitor {
     this.requests.delete(key);
     this.onProtocolEvent?.(tabId, {
       event: 'conversation_response_finished',
-      requestId: record.downstream ? this.newestHandoff(tabId)?.initialRequestId ?? record.requestId : record.requestId,
+      requestId: record.downstream
+        ? (record.handoffId ? this.handoffs.get(record.handoffId)?.initialRequestId ?? null : null)
+        : record.requestId,
+      transportRequestId: record.requestId,
       endpoint: record.endpoint,
       httpStatus: record.status ?? null,
       mimeType: record.mimeType,
@@ -1094,7 +1100,10 @@ export class ChatGptNetworkMonitor {
     this.requests.delete(key);
     this.onProtocolEvent?.(tabId, {
       event: 'conversation_response_failed',
-      requestId: record.downstream ? this.newestHandoff(tabId)?.initialRequestId ?? record.requestId : record.requestId,
+      requestId: record.downstream
+        ? (record.handoffId ? this.handoffs.get(record.handoffId)?.initialRequestId ?? null : null)
+        : record.requestId,
+      transportRequestId: record.requestId,
       endpoint: record.endpoint,
       httpStatus: record.status ?? null,
       mimeType: record.mimeType,
