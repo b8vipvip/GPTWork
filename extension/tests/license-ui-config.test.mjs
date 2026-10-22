@@ -51,6 +51,6 @@ test('default popup and settings expose account UI without legacy product-licens
   assert.match(settingsRuntime, /SETTINGS_REVISION = 'v0521-single-authority-1'/);
   assert.match(settingsRuntime, /gptlockUiUpdateStatus/);
   assert.match(settingsRuntime, /SAFE_CORE_RECONCILE_PHASES/);
-  assert.match(css, /grid-template-columns:\s*repeat\(3,/);
+  assert.match(css, /grid-template-columns:\s*repeat\(2,/);
   assert.match(html, /<section class="account-card">[\s\S]*?<button id="options" class="account-settings-button"/);
 });
