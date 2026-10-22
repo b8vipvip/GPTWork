@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPTWork · 调试工具</title>
+  <link rel="stylesheet" href="debug-tools.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div><span class="eyebrow">GPTWORK · DIAGNOSTICS</span><h1>调试工具</h1>
+        <p>单次真实请求验证、原生 Astra 来源追踪、Windows 性能诊断。</p></div>
+      <button id="refresh" type="button" class="secondary">刷新状态</button>
+    </header>
+    <section class="panel">
+      <div class="heading"><span class="pill">插件内运行</span><h2>直接使用 gpt-6-astra-wm 请求</h2></div>
+      <p>点击后，GPTWork 会在所选 ChatGPT 标签页发送一条固定测试消息，仅对该次正式 POST 尝试将顶层模型改为 <code>gpt-6-astra-wm</code>。不会永久修改模型锁定或原生模型选择。</p>
+      <p class="warning">此操作会真实发送一条消息到当前会话，可能消耗账户额度。HTTP 成功不等于 Astra 模型确认。</p>
+      <label for="targetTab">目标 ChatGPT 标签页</label>
+      <select id="targetTab"><option value="">正在读取…</option></select>
+      <div class="controls">
+        <button id="runAstra" class="primary" type="button">发送单次 Astra 测试请求</button>
+        <button id="cancelAstra" class="secondary" type="button">停止等待 / 取消</button>
+      </div>
+      <p id="feedback" role="status" aria-live="polite"></p>
+      <div class="heading"><h3>请求与响应证据</h3><span class="caption">自动记录至运行时 JSONL</span></div>
+      <dl id="probeSummary">
+        <div><dt>执行状态</dt><dd id="probePhase">未执行</dd></div>
+        <div><dt>原生页面模型</dt><dd id="probePageModel">—</dd></div>
+        <div><dt>原始请求模型</dt><dd id="probeBefore">—</dd></div>
+        <div><dt>实际转发模型</dt><dd id="probeForwarded">—</dd></div>
+        <div><dt>HTTP 状态</dt><dd id="probeHttp">—</dd></div>
+        <div><dt>网络 / 流终态</dt><dd id="probeTerminal">—</dd></div>
+        <div><dt>真实响应模型</dt><dd id="probeServed">未获取权威证据</dd></div>
+        <div><dt>请求结果</dt><dd id="probeOutcome">—</dd></div>
+        <div><dt>Astra 模型确认</dt><dd id="probeVerdict">未验证</dd></div>
+        <div><dt>请求 ID</dt><dd id="probeRequestId">—</dd></div>
+      </dl>
+      <div class="controls"><button id="exportResults" class="secondary" type="button">导出 Astra 调试结果 JSON</button></div>
+    </section>
+    <section class="panel">
+      <div class="heading"><span class="pill">自动采集</span><h2>Astra 原生来源追踪</h2></div>
+      <p>已集成的 <code>astra-origin-trace</code> 会在原生页面出现 Astra 和普通模型时记录加载、会话恢复、模型快照及网络元数据。它是自动工具，无需额外执行。</p>
+      <a href="https://github.com/b8vipvip/GPTWork/blob/main/docs/astra-origin-auto-trace.md" target="_blank" rel="noopener noreferrer">查看追踪说明 ↗</a>
+    </section>
+    <section class="panel">
+      <div class="heading"><span class="pill">Windows 本地执行</span><h2>仓库 tools/windows 工具列表</h2></div>
+      <p>以下为仓库中的原始 PowerShell / 批处理诊断工具。浏览器扩展不会直接执行系统脚本；点击“查看脚本”可检查内容并下载后在 Windows 本地运行。</p>
+      <div id="windowsTools" class="tool-list"></div>
+    </section>
+    <footer>调试记录不包含测试消息正文、Cookie、认证头或原始响应内容。请在完成测试后导出 JSONL 运行日志进行进一步核对。</footer>
+  </main>
+  <script type="module" src="debug-tools.js"></script>
+</body>
+</html>
