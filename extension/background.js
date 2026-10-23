@@ -385,7 +385,9 @@ async function startDebugAstra(tabId) {
     sseApplicationErrorSeen: false,
     sseAssistantMessageSeen: false,
     sseAssistantFinalSeen: false,
+    sseAssistantEndTurnSeen: false,
     sseAssistantStatus: null,
+    sseAssistantStatusSequence: [],
     sseCaptureTruncated: false,
     streamCaptureBytes: null,
     conversationDetail404Count: 0,
@@ -1916,7 +1918,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
         sseApplicationErrorSeen: debug.sseApplicationErrorSeen || sse.sseApplicationErrorSeen,
         sseAssistantMessageSeen: debug.sseAssistantMessageSeen || sse.sseAssistantMessageSeen,
         sseAssistantFinalSeen: debug.sseAssistantFinalSeen || sse.sseAssistantFinalSeen,
+        sseAssistantEndTurnSeen: debug.sseAssistantEndTurnSeen || sse.sseAssistantEndTurnSeen,
         sseAssistantStatus: sse.sseAssistantStatus || debug.sseAssistantStatus,
+        sseAssistantStatusSequence: sse.sseAssistantStatusSequence?.length
+          ? sse.sseAssistantStatusSequence : debug.sseAssistantStatusSequence,
         sseCaptureTruncated: debug.sseCaptureTruncated || sse.sseCaptureTruncated,
         streamCaptureBytes: Number.isFinite(evidence?.diagnostics?.streamCaptureBytes)
           ? evidence.diagnostics.streamCaptureBytes : debug.streamCaptureBytes,
@@ -1983,7 +1988,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
         sseApplicationErrorSeen: debug.sseApplicationErrorSeen || sse.sseApplicationErrorSeen,
         sseAssistantMessageSeen: debug.sseAssistantMessageSeen || sse.sseAssistantMessageSeen,
         sseAssistantFinalSeen: debug.sseAssistantFinalSeen || sse.sseAssistantFinalSeen,
+        sseAssistantEndTurnSeen: debug.sseAssistantEndTurnSeen || sse.sseAssistantEndTurnSeen,
         sseAssistantStatus: sse.sseAssistantStatus || debug.sseAssistantStatus,
+        sseAssistantStatusSequence: sse.sseAssistantStatusSequence?.length
+          ? sse.sseAssistantStatusSequence : debug.sseAssistantStatusSequence,
         sseCaptureTruncated: debug.sseCaptureTruncated || sse.sseCaptureTruncated,
       });
     }
