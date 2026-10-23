@@ -72,7 +72,8 @@ test('transport success, authoritative Astra proof, mismatch and missing proof s
     requestOutcome: 'transport_completed', modelVerdict: 'unverified',
   });
   assert.equal(astraDebugVerdict({ ...baseProbe, responseModel: 'gpt-6-astra' }).modelVerdict, 'astra_confirmed');
-  assert.equal(astraDebugVerdict({ ...baseProbe, responseModel: 'gpt-6' }).modelVerdict, 'different_model');
+  assert.equal(astraDebugVerdict({ ...baseProbe, responseModel: 'gpt-6' }).modelVerdict, 'unverified');
+  assert.equal(astraDebugVerdict({ ...baseProbe, responseModel: 'gpt-6-sol' }).modelVerdict, 'different_model');
   assert.equal(astraDebugVerdict({ ...baseProbe, httpStatus: 403 }).requestOutcome, 'failed');
   assert.equal(astraDebugVerdict({ ...baseProbe, terminalEvent: 'conversation_response_failed' }).requestOutcome, 'failed');
   const publicProbe = publicAstraDebugProbe({ ...baseProbe, id: 'test', prompt: 'SECRET', responseText: 'SECRET' });
@@ -178,5 +179,5 @@ test('popup debug entry, tools catalog, message authorization and release metada
     await access(new URL('../../tools/windows/' + file, import.meta.url));
   }
   const manifest = JSON.parse(manifestText);
-  assert.equal(manifest.version, '0.5.243');
+  assert.equal(manifest.version, '0.5.244');
 });

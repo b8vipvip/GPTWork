@@ -1,4 +1,4 @@
-# GPTWork v0.5.243 · 调试工具与 Astra 单次请求实验
+# GPTWork v0.5.244 · 调试工具与 Astra 单次请求实验
 
 打开 GPTWork 插件弹窗，点击 **调试工具**，进入独立工具页。
 
@@ -26,6 +26,14 @@
 按 `tabId`、`requestId`、`fetchRequestId`、`contextKey` 关联；不记录测试提示词正文、历史 ChatGPT 对话正文、Cookie、Authorization、完整响应体；只保存本次固定测试消息产生的新助手回复的最多 300 字片段。调试工具页可导出最近 20 条本地摘要 JSON；完整时间线请使用原有运行时 JSONL。
 
 结果的三个独立维度：`requestAccepted`（是否实际转发该模型）、`requestOutcome`（HTTP/网络流终态）、`modelVerdict`（权威响应字段确认 Astra / 其他模型 / 未验证）。
+
+## v0.5.244 · 中断流证据与新聊天关联
+
+- 当首轮新聊天按 `/` → `/c/local-chatgpt` → `/c/:id` 导航时，同一条正式请求的 `requestId`、转发模型及锁定策略继续关联；切换到另一条已存在会话仍重置状态，防止跨会话串证据。
+- `Network.loadingFailed` 可在异步 SSE 解码完成前到达。调试探针先保留失败状态，等待 `onEvidence` 写入已解析的 `resolved_model_slug`、`default_model_slug`、流阶段，再结束采集。若没有后续证据，180 秒清理保留原失败终态，不改成超时。
+- `gpt-6` 家族级响应标识不能确认或排除 `gpt-6-astra`；`default_model_slug` 仅作默认/路由元数据；中断流即使出现精确模型字段，也不能标记为 Astra 成功。
+- 新聊天的正常 SPA 导航不再提前终止页面回复观察；其他会话跳转仍视为无效。调试页额外展示网络错误、流阶段、默认模型元数据和回复观察原因。
+- 本次修复只解决证据丢失和请求/响应关联，不声称修复 ChatGPT 原生请求被浏览器取消的原因，也不保证服务端会接受实验性模型 ID。
 
 ## 自动追踪工具
 

@@ -14,6 +14,7 @@ import { conversationKeyFromUrl, modelOriginScene, originSnapshotFields } from '
 import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, ASTRA_DEBUG_TIMEOUT_MS, ASTRA_DEBUG_HISTORY_KEY,
   isAstraDebugRequest, detectAstraDebugSseTerminal, publicAstraDebugProbe } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
+import { isActiveNewChatRequestHandoff } from './chat-context-handoff.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
@@ -57,7 +58,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.243';
+const RUNTIME_CODE_VERSION = '0.5.244';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -358,6 +359,7 @@ async function startDebugAstra(tabId) {
     networkError: null,
     sendMethod: null,
     assistantSettled: null,
+    assistantObservationReason: null,
     responseTextSnippet: null,
     error: null,
   };
@@ -390,6 +392,7 @@ async function startDebugAstra(tabId) {
       const settled = reply?.settled === true;
       recordDebugAstra(tabId, 'astra_debug_assistant_reply_observed', {
         assistantSettled: settled,
+        assistantObservationReason: settled ? null : String(reply?.reason || 'assistant_reply_unconfirmed').slice(0, 120),
         responseTextSnippet: settled ? String(reply.responseTextSnippet || '').slice(0, 300) : null,
         phase: settled && probe.terminalEvent === 'conversation_response_finished'
           ? 'finished' : probe.phase,
@@ -399,7 +402,9 @@ async function startDebugAstra(tabId) {
       }
     }).catch(() => {
       if (debugAstraProbes.get(tabId)?.id === probe.id) {
-        recordDebugAstra(tabId, 'astra_debug_assistant_reply_unavailable', { assistantSettled: false });
+        recordDebugAstra(tabId, 'astra_debug_assistant_reply_unavailable', {
+          assistantSettled: false, assistantObservationReason: 'content_message_failed',
+        });
       }
     });
     // A successful DOM click is NOT a successful HTTP request.
@@ -707,13 +712,9 @@ function ensureTabState(tabId, url = '') {
     // Preserve that exact request/response epoch during the one-way new-chat
     // handoff, just as an explicit discovery does. A different /c/:id still
     // starts a fresh state, preventing evidence from crossing conversations.
-    const requestTime = Date.parse(state.lastRequest?.capturedAt || '');
-    const activeNewChatRequest = !state.contextKey.startsWith('conversation:')
-      && nextContextKey.startsWith('conversation:')
-      && Boolean(state.lastRequest?.requestId)
-      && Number.isFinite(requestTime)
-      && Date.now() - requestTime >= 0
-      && Date.now() - requestTime < 15 * 60 * 1000;
+    const activeNewChatRequest = isActiveNewChatRequestHandoff(
+      state.contextKey, nextContextKey, state.lastRequest,
+    );
     const preserveVerificationState = Boolean(
       state.autoVerification?.running
         || verificationTransactionForTab(tabId)
@@ -1777,7 +1778,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
           ? debug.terminalEvent : protocol.event,
         networkError: protocol.networkError ? String(protocol.networkError).slice(0, 120) : null,
       });
-      if (failed) void endDebugAstra(tabId);
+      // Network.loadingFailed/Finished is delivered before the response body
+      // has been decoded into model evidence. Do not remove the probe here:
+      // onEvidence must first retain even a partial aborted SSE model record.
+      // If no evidence callback arrives, the probe alarm closes this failure.
     }
     if (networkMonitor.hasOriginTrace(tabId)) {
       const state = tabStates.get(tabId);
@@ -1854,7 +1858,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
         httpStatus: evidence?.status ?? evidence?.diagnostics?.httpStatus ?? debug.httpStatus,
         error: evidence?.bodyError ? 'response_body_unavailable' : debug.error,
       });
-      if (debug.terminalEvent === 'conversation_response_finished'
+      if (debug.terminalEvent === 'conversation_response_failed'
+        || (Number(debug.httpStatus) >= 400 && debug.terminalEvent)) {
+        // Retain the parsed model/default-model metadata before finalizing.
+        void endDebugAstra(tabId);
+      } else if (debug.terminalEvent === 'conversation_response_finished'
         && debug.assistantSettled === true) {
         recordDebugAstra(tabId, 'astra_debug_probe_completed', { phase: 'finished' });
         void endDebugAstra(tabId);
@@ -5222,7 +5230,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     const tabId = Number(alarm.name.slice(ASTRA_DEBUG_ALARM_PREFIX.length));
     if (debugAstraProbes.has(tabId)) {
       const probe = debugAstraProbes.get(tabId);
-      if (probe.terminalEvent === 'conversation_response_finished') {
+      if (probe.phase === 'failed') {
+        // Preserve the real failed transport outcome when response-body
+        // evidence was unavailable; never rewrite it to a generic timeout.
+        recordDebugAstra(tabId, 'astra_debug_failed_capture_ended');
+      } else if (probe.terminalEvent === 'conversation_response_finished') {
         recordDebugAstra(tabId, 'astra_debug_probe_capture_ended', {
           phase: 'finished',
           error: probe.assistantSettled === true ? null : 'assistant_reply_unconfirmed',
