@@ -1,4 +1,4 @@
-# GPTWork v0.5.249 · 调试工具与 Astra 单次请求实验
+# GPTWork v0.5.250 · 调试工具与 Astra 单次请求实验
 
 打开 GPTWork 插件弹窗，点击 **调试工具**，进入独立工具页。
 
@@ -67,6 +67,13 @@
 
 - 当普通正式请求的网络响应有 HTTP / 模型字段但缺少原始 SSE 缓冲区时，仍记录 `normal_conversation_sse_baseline_observed`，并携带 `sseEvidenceAvailable=false`、`sseUnavailableReason` 及 `networkTerminal`；原始流内应用错误与助手状态记为 **未知（null）**，不伪造“无错误”或“未完成”结论。
 - v0.5.248 实机普通 GPT-6 和 Astra 在同一标签页均出现 `HTTP 200` 后的 `net::ERR_ABORTED`；Astra 仅收到助手 `in_progress` 数据，尚无真实执行的终态证明。新诊断用于定位 ordinary 对照样本为何缺少 SSE 分类，而非绕过浏览器网络取消。
+
+## v0.5.250 · 助手消息成功不等于整轮完成
+
+- 在 v0.5.249 实机普通请求中，`sseAssistantFinalSeen=true` 且 `sseAssistantStatus=in_progress`：说明**至少一条**助手消息曾完成，但最后观察到的可能是**另一条**进行中的消息。不能用前者直接证明整个用户回复已经完成。
+- 增加 `sseAssistantEndTurnSeen`，要求同一条助手消息同时出现 `finished_successfully` 和 `end_turn=true`；`sseAssistantStatusSequence` 最多记录 16 个允许状态枚举，便于区分跨消息状态变化。不能把跨消息序列视为同一消息的生命周期。
+- 若没有原始 SSE，以上字段标记 `null` 或未知；即使观察到 `end_turn`，也不能覆盖 Chrome 的 `Network.loadingFailed/net::ERR_ABORTED`。
+- 普通 GPT-6 与 Astra 的对照表明 Chrome 取消不是 Astra 专有信号，但 Astra 尚未取得助手完成、页面回复或精确后端模型证明。
 
 ## 自动追踪工具
 
