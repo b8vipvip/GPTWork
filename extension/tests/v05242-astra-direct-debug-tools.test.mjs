@@ -179,5 +179,5 @@ test('popup debug entry, tools catalog, message authorization and release metada
     await access(new URL('../../tools/windows/' + file, import.meta.url));
   }
   const manifest = JSON.parse(manifestText);
-  assert.equal(manifest.version, '0.5.246');
+  assert.equal(manifest.version, '0.5.247');
 });
