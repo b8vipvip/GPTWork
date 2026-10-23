@@ -60,7 +60,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.247';
+const RUNTIME_CODE_VERSION = '0.5.248';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
