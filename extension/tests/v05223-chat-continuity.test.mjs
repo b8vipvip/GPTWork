@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import vm from 'node:vm';
+import { isActiveNewChatRequestHandoff } from '../chat-context-handoff.js';
 
 const [background, content] = await Promise.all([
   readFile(new URL('../background.js', import.meta.url), 'utf8'),
@@ -25,6 +26,7 @@ function stateHarness() {
     URL, Date,
     tabStates: new Map(),
     coreConnection: { connected: true },
+    isActiveNewChatRequestHandoff,
     verificationTransactionForTab() { return null; },
     logRuntime(_level, _component, event, details) { logs.push({ event, details }); },
   });
@@ -57,6 +59,26 @@ test('ordinary GPT-6 request and response epoch survives exactly one home-to-con
   assert.notEqual(newConversation, original, 'unrelated conversation must not inherit an old request');
   assert.equal(newConversation.lastRequest, null);
   assert.equal(newConversation.pageObservation, null);
+});
+
+test('new-chat local placeholder preserves request epoch through the final conversation route', () => {
+  const { get, logs } = stateHarness();
+  const initial = get(88, 'https://chatgpt.com/');
+  initial.lastRequest = {
+    requestId: '15564.488',
+    capturedAt: new Date().toISOString(),
+    model: 'gpt-6-astra',
+    requestEvidenceSource: 'fetch_continued',
+  };
+  const local = get(88, 'https://chatgpt.com/c/local-chatgpt');
+  assert.equal(local, initial);
+  const final = get(88, 'https://chatgpt.com/c/real-conversation');
+  assert.equal(final, initial, 'placeholder handoff must not erase forwarded-model correlation');
+  assert.equal(final.lastRequest.model, 'gpt-6-astra');
+  assert.equal(logs.filter(entry => entry.event === 'normal_chat_request_context_migrated').length, 2);
+  const unrelated = get(88, 'https://chatgpt.com/c/unrelated');
+  assert.notEqual(unrelated, initial);
+  assert.equal(unrelated.lastRequest, null);
 });
 
 test('home navigation with no recent formal request resets state, never fabricates evidence', () => {
