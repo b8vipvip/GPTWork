@@ -1,0 +1,94 @@
+// Content-free classification of an individual Astra debug SSE capture.
+// It never returns response text, request content, or arbitrary server error messages.
+// A [DONE] transport marker is separate from an assistant final turn and from CDP's
+// Network.loadingFinished: it cannot override Network.loadingFailed.
+const MAX_SSE_BYTES = 4 * 1024 * 1024;
+const MAX_SSE_EVENTS = 4000;
+const ALLOWED_STATUSES = new Set([
+  'finished_successfully', 'finished_with_errors', 'in_progress',
+  'pending', 'interrupted', 'cancelled',
+]);
+const TERMINAL_EVENTS = new Set(['done', 'message_stream_complete']);
+
+export function analyzeAstraDebugSse(body) {
+  const result = {
+    sseDataEvents: 0,
+    sseJsonEvents: 0,
+    sseTerminalKind: null,
+    sseApplicationErrorSeen: false,
+    sseAssistantMessageSeen: false,
+    sseAssistantFinalSeen: false,
+    sseAssistantStatus: null,
+    sseCaptureTruncated: false,
+  };
+  if (typeof body !== 'string' || !body) return result;
+  if (body.length > MAX_SSE_BYTES) {
+    result.sseCaptureTruncated = true;
+    return result;
+  }
+
+  let eventName = null;
+  let dataLines = [];
+  let dispatched = 0;
+  const flush = () => {
+    if (!eventName && !dataLines.length) return;
+    if (dispatched >= MAX_SSE_EVENTS) {
+      result.sseCaptureTruncated = true;
+      eventName = null;
+      dataLines = [];
+      return;
+    }
+    dispatched += 1;
+    const data = dataLines.join('\n').trim();
+    const name = eventName;
+    eventName = null;
+    dataLines = [];
+    if (TERMINAL_EVENTS.has(name) && !result.sseTerminalKind) result.sseTerminalKind = 'event_done';
+    if (name === 'error') result.sseApplicationErrorSeen = true;
+    if (!data) return;
+    result.sseDataEvents += 1;
+    if (data === '[DONE]') {
+      result.sseTerminalKind = 'data_done';
+      return;
+    }
+    if (data.length > 1024 * 1024) {
+      result.sseCaptureTruncated = true;
+      return;
+    }
+    let entry;
+    try { entry = JSON.parse(data); } catch { return; }
+    if (!entry || typeof entry !== 'object') return;
+    result.sseJsonEvents += 1;
+    const kind = String(entry.type || entry.event || entry.v?.type || '').toLowerCase();
+    if (kind === 'error' || kind === 'conversation_error'
+      || entry.error && typeof entry.error === 'object') {
+      result.sseApplicationErrorSeen = true;
+    }
+    if (TERMINAL_EVENTS.has(kind) && !result.sseTerminalKind) result.sseTerminalKind = 'event_done';
+    const message = entry.message && typeof entry.message === 'object' ? entry.message
+      : entry.v?.message && typeof entry.v.message === 'object' ? entry.v.message : null;
+    if (message?.author?.role !== 'assistant') return;
+    result.sseAssistantMessageSeen = true;
+    const status = message.status;
+    if (ALLOWED_STATUSES.has(status)) {
+      result.sseAssistantStatus = status;
+      if (status === 'finished_successfully') result.sseAssistantFinalSeen = true;
+      if (status === 'finished_with_errors') result.sseApplicationErrorSeen = true;
+    }
+  };
+  for (const line of body.split(/\r?\n/)) {
+    if (dispatched >= MAX_SSE_EVENTS) {
+      result.sseCaptureTruncated = true;
+      break;
+    }
+    if (!line.trim()) {
+      flush();
+    } else if (line.startsWith('event:')) {
+      eventName = line.slice(6).trim().toLowerCase().slice(0, 70);
+    } else if (line.startsWith('data:')) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  if (!result.sseCaptureTruncated) flush();
+  return result;
+}
