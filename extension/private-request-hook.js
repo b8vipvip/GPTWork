@@ -1,5 +1,6 @@
 import { privateCoreChannel } from './private-core-channel.js';
 import { ChatGptNetworkMonitor } from './network-monitor.js';
+import { isAstraDebugRequest } from './astra-debug-probe.js';
 import {
   applyPrivateRequestPatches,
   buildPrivateRequestPayload,
@@ -95,6 +96,17 @@ export function installPrivateRequestRoutingHook() {
     const requestId = String(params.requestId ?? '');
     const request = params.request ?? {};
     const endpoint = safeRequestEndpoint(request.url);
+
+    // Only the explicitly armed Astra one-shot request may use the existing
+    // Fetch terminal handler. Unrelated requests remain private-core owned.
+    // This routing precedes the private-core availability check.
+    if (this.getDebugProbe?.(tabId)) {
+      let debugPostData = null;
+      try { debugPostData = await this.pausedPostData(tabId, params); } catch {}
+      if (isAstraDebugRequest(debugPostData)) {
+        return terminalVerificationHandler.call(this, tabId, params);
+      }
+    }
 
     if (!(await privateCoreChannel.isAvailable())) {
       await continueUnmodified(this, tabId, requestId, endpoint, 'private_request_authority_unavailable');
