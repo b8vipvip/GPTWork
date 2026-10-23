@@ -15,6 +15,8 @@
   }
 
   function promptElement() {
+    const owner = globalThis.GPTWorkComposerSurfaceV1;
+    if (owner?.getActiveComposer) return owner.getActiveComposer();
     return PROMPT_SELECTORS
       .map((selector) => document.querySelector(selector))
       .find((element) => visible(element)) || null;

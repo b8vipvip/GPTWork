@@ -9,6 +9,7 @@ const TOOLS = [
 let selectedTabId = null;
 let lastStatus = null;
 let refreshBusy = false;
+let targetTabs = new Map();
 
 function toolList() {
   const root = $('windowsTools');
@@ -89,20 +90,30 @@ async function refreshTargets() {
   const current = select.value || String(selectedTabId || '');
   select.replaceChildren();
   const tabs = response?.tabs || [];
+  targetTabs = new Map(tabs.map((tab) => [Number(tab.tabId), tab]));
   if (!tabs.length) {
     const option = new Option('没有检测到 ChatGPT 标签页', '');
     select.add(option);
   }
   for (const tab of tabs) {
-    const name = '标签页 ' + tab.tabId + ' · '
-      + (tab.pageModel || '模型未识别') + ' · '
-      + (tab.contextKey?.startsWith('conversation:') ? '已有会话' : '新聊天')
-      + (tab.active ? ' · 当前激活' : '');
+    const position = Number.isInteger(tab.tabIndex) ? '第 ' + (tab.tabIndex + 1) + ' 个' : '位置未知';
+    const title = String(tab.title || 'ChatGPT').replace(/\s+/g, ' ').slice(0, 45);
+    const name = '窗口 ' + tab.windowId + ' · ' + position + '标签 · ' + title
+      + ' · ID ' + tab.tabId
+      + (tab.contextKey?.startsWith('conversation:') ? ' · 已有会话' : ' · 新聊天')
+      + (tab.active ? ' · 当前窗口已选中' : '');
     select.add(new Option(name, String(tab.tabId)));
   }
   select.value = tabs.some((tab) => String(tab.tabId) === current)
     ? current : tabs.length ? String(tabs[0].tabId) : '';
   selectedTabId = Number(select.value) || null;
+  const selected = targetTabs.get(selectedTabId);
+  text('targetTabInfo', selected
+    ? 'Chrome 标签页 ID：' + selected.tabId
+      + '；窗口 ID：' + selected.windowId
+      + '；标签位置：' + (Number.isInteger(selected.tabIndex) ? selected.tabIndex + 1 : '未知')
+      + '。可点击“定位标签页”确认目标。'
+    : '没有可用的 ChatGPT 标签页。');
 }
 
 async function refreshStatus() {
@@ -114,7 +125,7 @@ async function refreshStatus() {
     const target = Number($('targetTab').value);
     const probe = status?.active?.find((entry) => entry.tabId === target)
       || status?.history?.find((entry) => entry.tabId === target)
-      || status?.active?.[0] || status?.history?.[0] || null;
+      || (!target ? status?.active?.[0] || status?.history?.[0] : null);
     presentProbe(probe);
   } catch (error) {
     setFeedback('状态读取失败：' + error.message);
@@ -123,7 +134,27 @@ async function refreshStatus() {
 
 $('targetTab').addEventListener('change', () => {
   selectedTabId = Number($('targetTab').value) || null;
+  const selected = targetTabs.get(selectedTabId);
+  text('targetTabInfo', selected
+    ? 'Chrome 标签页 ID：' + selected.tabId
+      + '；窗口 ID：' + selected.windowId
+      + '；标签位置：' + (Number.isInteger(selected.tabIndex) ? selected.tabIndex + 1 : '未知')
+      + '。可点击“定位标签页”确认目标。'
+    : '没有可用的 ChatGPT 标签页。');
   void refreshStatus();
+});
+$('locateTab').addEventListener('click', async () => {
+  const tabId = Number($('targetTab').value);
+  if (!Number.isInteger(tabId) || tabId <= 0) return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    setFeedback('已定位 Chrome 标签页 ID ' + tabId + '。此操作不发送请求。');
+  } catch (error) {
+    setFeedback('定位失败，标签页可能已关闭：' + String(error?.message || error));
+    await refreshTargets();
+  }
 });
 $('refresh').addEventListener('click', async () => {
   try { await refreshTargets(); await refreshStatus(); setFeedback('已刷新工具状态。'); }

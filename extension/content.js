@@ -1932,6 +1932,8 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   function findComposer() {
+    const owner = globalThis.GPTWorkComposerSurfaceV1;
+    if (owner?.getActiveComposer) return owner.getActiveComposer();
     return COMPOSER_SELECTORS
       .map((selector) => document.querySelector(selector))
       .find((element) => element && visible(element)) || null;
@@ -2469,8 +2471,22 @@ document.addEventListener('pointerdown', (event) => {
         await new Promise((resolve) => window.setTimeout(resolve, 450));
       }
 
-      const composer = await waitUntil(findComposer, 5000, 100);
-      if (!composer) throw new Error('ChatGPT composer not found / 未找到 ChatGPT 输入框');
+      const isAstraDebug = options.skipAlignment === true && options.probeMarker === 'Astra 调试';
+      const composer = await waitUntil(findComposer, isAstraDebug ? 12000 : 5000, 100);
+      if (!composer) {
+        const snapshot = globalThis.GPTWorkComposerSurfaceV1?.diagnosticSnapshot?.() || {};
+        // Only export numeric structure, not the draft or raw page text.
+        const detail = isAstraDebug
+          ? ' (DOM: ' + [
+            'ready=' + String(snapshot.documentReady || 'unknown'),
+            'visible=' + String(snapshot.documentVisible ?? 'unknown'),
+            'mainForms=' + String(snapshot.mainForms ?? 'unknown'),
+            'visibleEditable=' + String(snapshot.visibleEditable ?? 'unknown'),
+            'chatHinted=' + String(snapshot.chatHinted ?? 'unknown'),
+          ].join(', ') + ')'
+          : '';
+        throw new Error('ChatGPT composer not found / 未找到 ChatGPT 输入框' + detail);
+      }
       const originalDraft = composerText(composer);
       const draftPreserved = Boolean(originalDraft.trim());
       const probeText = typeof options.probeText === 'string' && options.probeText.trim()

@@ -58,7 +58,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.244';
+const RUNTIME_CODE_VERSION = '0.5.245';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -5461,6 +5461,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabs: tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => ({
             tabId: tab.id,
             windowId: tab.windowId,
+            tabIndex: Number.isInteger(tab.index) ? tab.index : null,
+            title: String(tab.title || 'ChatGPT').slice(0, 100),
             active: tab.active === true,
             contextKey: tabStates.get(tab.id)?.contextKey ?? contextKey(tab.url),
             pageModel: tabStates.get(tab.id)?.pageObservation?.model ?? null,
