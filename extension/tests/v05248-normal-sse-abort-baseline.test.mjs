@@ -78,5 +78,5 @@ test('normal baseline has no path to mutate request model or terminate verifier'
   assert.match(background,/normal_conversation_sse_baseline_observed/);
   assert.match(source,/transportEndedNormally/);
   assert.doesNotMatch(source,/Fetch\.continueRequest|Fetch\.failRequest|chrome\.debugger\.sendCommand/);
-  assert.equal(JSON.parse(manifestText).version,'0.5.248');
+  assert.equal(JSON.parse(manifestText).version,'0.5.249');
 });
