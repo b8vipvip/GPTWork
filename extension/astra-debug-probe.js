@@ -1,3 +1,5 @@
+import { classifyResponseModelIdentity } from './response-model-identity.js';
+
 // A diagnostic request is an explicit, one-shot transport experiment.
 // Request success and actual served-model proof are deliberately independent.
 export const ASTRA_DEBUG_TRANSPORT = 'gpt-6-astra-wm';
@@ -60,7 +62,16 @@ export function astraDebugVerdict(probe) {
   const httpSuccess = status >= 200 && status < 300;
   const completed = terminal === 'conversation_response_finished';
   const failed = terminal === 'conversation_response_failed' || (status >= 400 && status <= 599);
-  const servedModel = probe?.responseModel ?? null;
+  const identity = classifyResponseModelIdentity({
+    requestModel: ASTRA_DEBUG_CANONICAL,
+    responseModel: probe?.responseModel ?? null,
+    responseField: probe?.responseModelField ?? null,
+    terminalEvent: failed ? 'loadingFailed' : null,
+    networkError: probe?.networkError ?? null,
+  });
+  // A partial/aborted stream or a family-only gpt-6 slug is not proof
+  // of either Astra execution or a definite fallback to another variant.
+  const conclusive = completed && httpSuccess && !probe?.networkError;
   return {
     requestAccepted,
     httpSuccess,
@@ -70,8 +81,9 @@ export function astraDebugVerdict(probe) {
       : completed && httpSuccess ? 'transport_completed'
       : status >= 200 ? 'awaiting_stream_terminal'
       : 'awaiting_response',
-    modelVerdict: !servedModel ? 'unverified'
-      : servedModel === ASTRA_DEBUG_CANONICAL ? 'astra_confirmed' : 'different_model',
+    modelVerdict: !conclusive ? 'unverified'
+      : identity.variantConfirmed ? 'astra_confirmed'
+      : identity.definitiveMismatch ? 'different_model' : 'unverified',
   };
 }
 
