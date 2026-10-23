@@ -53,10 +53,13 @@ function presentProbe(probe) {
   text('probeForwarded', probe?.forwardedTransportModel);
   text('probeHttp', probe?.httpStatus);
   text('probeTerminal', probe?.terminalEvent || probe?.networkError);
+  text('probeNetworkError', probe?.networkError);
+  text('probeStreamStage', probe?.streamStage);
   text('probeSseDone', probe?.sseTerminalObserved === true ? '已观察到' : '未观察到 / 不适用');
   text('probeServed', probe?.responseModel
     ? probe.responseModel + (probe.responseModelField ? ' · ' + probe.responseModelField : '')
     : '未获取权威证据');
+  text('probeDefaultModel', probe?.responseDefaultModel);
   const outcomes = {
     not_forwarded: '未确认转发',
     failed: '请求失败',
@@ -74,6 +77,7 @@ function presentProbe(probe) {
   text('probeRequestId', probe?.requestId || probe?.fetchRequestId);
   text('probeReply', probe?.responseTextSnippet);
   text('probeAssistantSettled', probe?.assistantSettled === true ? '是' : probe?.assistantSettled === false ? '未确认' : '等待中');
+  text('probeAssistantReason', probe?.assistantObservationReason);
   const active = ['dispatching', 'forwarded', 'responding', 'response_finished'].includes(probe?.phase);
   $('runAstra').disabled = active || !$('targetTab').value;
   $('cancelAstra').disabled = !active;
