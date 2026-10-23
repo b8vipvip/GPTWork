@@ -1868,6 +1868,13 @@ const networkMonitor = new ChatGptNetworkMonitor({
   onOriginTrace(tabId, trace) {
     const state = tabStates.get(tabId);
     if (!state || state.contextKey !== trace?.conversationKey) return;
+    const debug = debugAstraProbes.get(tabId);
+    if (debug && trace?.event === 'metadata_response'
+      && trace?.endpointKind === 'conversation_detail' && trace?.httpStatus === 404) {
+      recordDebugAstra(tabId, 'astra_debug_conversation_detail_404_observed', {
+        conversationDetail404Count: Math.min(100, (debug.conversationDetail404Count || 0) + 1),
+      });
+    }
     logRuntime('info', 'astra-origin-trace', 'astra_origin_conversation_hydration', {
       tabId,
       contextKey: state.contextKey,
