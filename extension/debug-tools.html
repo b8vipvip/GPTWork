@@ -16,7 +16,7 @@
     <section class="panel">
       <div class="heading"><span class="pill">插件内运行</span><h2>直接使用 gpt-6-astra-wm 请求</h2></div>
       <p>点击后，GPTWork 会在所选 ChatGPT 标签页发送一条固定测试消息，仅对该次正式 POST 尝试将顶层模型改为 <code>gpt-6-astra-wm</code>。不会永久修改模型锁定或原生模型选择。</p>
-      <p class="warning">此操作会真实发送一条消息到当前会话，可能消耗账户额度。HTTP 200、SSE 结束标记或默认模型字段都不等于 Astra 执行成功。建议先在已存在的 ChatGPT 会话中测试，排除新聊天建立时的页面导航干扰。</p>
+      <p class="warning">此操作会真实发送一条消息到当前会话，可能消耗账户额度。HTTP 200、SSE [DONE] 或默认模型字段不代表 Astra 执行成功。SSE 解析只保留结构信号和计数，不导出流内容或应用错误正文。优先在已有会话中测试，与普通模型请求做对照。</p>
       <label for="targetTab">目标 ChatGPT 标签页</label>
       <select id="targetTab"><option value="">正在读取…</option></select>
       <p id="targetTabInfo" class="caption">标签页 ID 由 Chrome 分配，选择后可定位对应标签页。</p>
@@ -41,6 +41,13 @@
         <div><dt>网络请求耗时</dt><dd id="probeTransportElapsed">—</dd></div>
         <div><dt>流证据阶段</dt><dd id="probeStreamStage">—</dd></div>
         <div><dt>SSE 结束标记</dt><dd id="probeSseDone">—</dd></div>
+        <div><dt>SSE 结束标记类型</dt><dd id="probeSseTerminalKind">—</dd></div>
+        <div><dt>SSE 解析事件数量</dt><dd id="probeSseEvents">—</dd></div>
+        <div><dt>SSE 服务端应用错误信号</dt><dd id="probeSseAppError">—</dd></div>
+        <div><dt>SSE 助手结束信号</dt><dd id="probeSseAssistant">—</dd></div>
+        <div><dt>SSE 助手状态</dt><dd id="probeSseStatus">—</dd></div>
+        <div><dt>网络流捕获字节</dt><dd id="probeCaptureBytes">—</dd></div>
+        <div><dt>目标标签页会话详情 HTTP 404</dt><dd id="probeConversation404">—</dd></div>
         <div><dt>响应模型字段（中断流仅供参考）</dt><dd id="probeServed">未获取权威证据</dd></div>
         <div><dt>默认模型元数据（非执行证明）</dt><dd id="probeDefaultModel">—</dd></div>
         <div><dt>请求结果</dt><dd id="probeOutcome">—</dd></div>

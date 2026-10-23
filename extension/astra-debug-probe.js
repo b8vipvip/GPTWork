@@ -107,7 +107,11 @@ export function publicAstraDebugProbe(probe) {
     'responseEvidenceSource', 'streamStage', 'sseTerminalObserved', 'networkError',
     'sendMethod', 'assistantSettled', 'assistantObservationReason', 'assistantNavigation',
     'assistantNavigationCount', 'pageNavigationEvents', 'networkCanceled', 'transportElapsedMs',
-    'responseEvidenceSettled', 'assistantObservationComplete', 'responseTextSnippet', 'error',
+    'responseEvidenceSettled', 'assistantObservationComplete',
+    'sseTerminalKind', 'sseDataEvents', 'sseJsonEvents', 'sseApplicationErrorSeen',
+    'sseAssistantMessageSeen', 'sseAssistantFinalSeen', 'sseAssistantStatus',
+    'sseCaptureTruncated', 'streamCaptureBytes', 'conversationDetail404Count',
+    'responseTextSnippet', 'error',
   ];
   const safe = Object.fromEntries(fields.map((key) => [key, probe[key] ?? null]));
   return { ...safe, targetTransportModel: ASTRA_DEBUG_TRANSPORT, ...astraDebugVerdict(probe) };

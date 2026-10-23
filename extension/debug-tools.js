@@ -60,7 +60,21 @@ function presentProbe(probe) {
   text('probeTransportElapsed', Number.isFinite(probe?.transportElapsedMs)
     ? probe.transportElapsedMs + ' ms' : '—');
   text('probeStreamStage', probe?.streamStage);
-  text('probeSseDone', probe?.sseTerminalObserved === true ? '已观察到' : '未观察到 / 不适用');
+  text('probeSseDone', probe?.sseTerminalObserved === true ? '已观察到（仅流标记）' : '未观察到 / 不适用');
+  text('probeSseTerminalKind', probe?.sseTerminalKind);
+  text('probeSseEvents', Number.isFinite(probe?.sseJsonEvents)
+    ? probe.sseJsonEvents + ' 个 JSON，' + probe.sseDataEvents + ' 个数据段'
+    : '—');
+  text('probeSseAppError', probe?.sseApplicationErrorSeen === true ? '已检测到流内错误事件'
+    : probe?.sseApplicationErrorSeen === false ? '未观察到（不代表不存在）' : '—');
+  text('probeSseAssistant', probe?.sseAssistantFinalSeen === true ? '已观察到助手 final 状态（不代表实际模型确认）'
+    : probe?.sseAssistantMessageSeen === true ? '发现助手消息，未观察到明确成功终态'
+    : probe?.sseAssistantMessageSeen === false ? '未发现助手消息' : '—');
+  text('probeSseStatus', probe?.sseAssistantStatus);
+  text('probeCaptureBytes', Number.isFinite(probe?.streamCaptureBytes)
+    ? probe.streamCaptureBytes + ' bytes' : '—');
+  text('probeConversation404', Number.isFinite(probe?.conversationDetail404Count)
+    ? probe.conversationDetail404Count + ' 次（会话详情；不代表 Astra 失败原因）' : '—');
   text('probeServed', probe?.responseModel
     ? probe.responseModel + (probe.responseModelField ? ' · ' + probe.responseModelField : '')
     : '未获取权威证据');
