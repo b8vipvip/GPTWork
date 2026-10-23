@@ -7,14 +7,16 @@ export function isAstraDebugRequest(postData) {
   if (typeof postData !== 'string' || postData.length > 2 * 1024 * 1024) return false;
   try {
     const payload = JSON.parse(postData);
-    return Array.isArray(payload?.messages) && payload.messages.some((message) => {
-      if (message?.author?.role && message.author.role !== 'user') return false;
-      const parts = message?.content?.parts;
-      return Array.isArray(parts) && parts.some((part) =>
-        part === ASTRA_DEBUG_PROMPT
-        || part?.text === ASTRA_DEBUG_PROMPT
-        || part?.content === ASTRA_DEBUG_PROMPT);
-    });
+    if (!Array.isArray(payload?.messages) || !payload.messages.length) return false;
+    // A historical occurrence of the fixed prompt must never claim a new turn.
+    const message = payload.messages.at(-1);
+    if (message?.author?.role && message.author.role !== 'user') return false;
+    const parts = message?.content?.parts;
+    if (!Array.isArray(parts) || parts.length !== 1) return false;
+    const part = parts[0];
+    return part === ASTRA_DEBUG_PROMPT
+      || part?.text === ASTRA_DEBUG_PROMPT
+      || part?.content === ASTRA_DEBUG_PROMPT;
   } catch {
     return false;
   }
