@@ -90,5 +90,5 @@ test('one shared composer surface is loaded before send compatibility and conten
   assert.match(ui, /chrome\.windows\.update\(tab\.windowId, \{ focused: true \}\)/);
   assert.match(html, /id="locateTab"/);
   assert.match(html, /id="targetTabInfo"/);
-  assert.equal(manifest.version, '0.5.247');
+  assert.equal(manifest.version, '0.5.248');
 });
