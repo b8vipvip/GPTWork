@@ -16,6 +16,7 @@ import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, ASTRA_DEBUG_TIMEOUT_MS, ASTR
   astraDebugObservationComplete } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { isActiveNewChatRequestHandoff } from './chat-context-handoff.js';
+import { analyzeAstraDebugSse } from './astra-debug-sse.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
@@ -378,6 +379,16 @@ async function startDebugAstra(tabId) {
     responseEvidenceSource: null,
     streamStage: null,
     sseTerminalObserved: false,
+    sseTerminalKind: null,
+    sseDataEvents: 0,
+    sseJsonEvents: 0,
+    sseApplicationErrorSeen: false,
+    sseAssistantMessageSeen: false,
+    sseAssistantFinalSeen: false,
+    sseAssistantStatus: null,
+    sseCaptureTruncated: false,
+    streamCaptureBytes: null,
+    conversationDetail404Count: 0,
     networkError: null,
     sendMethod: null,
     assistantSettled: null,
@@ -1880,7 +1891,18 @@ const networkMonitor = new ChatGptNetworkMonitor({
     const debug = debugAstraProbes.get(tabId);
     const initialRequestId = evidence?.streamContext?.initialRequestId || evidence?.requestId || null;
     if (debug && debug.requestId && initialRequestId === debug.requestId) {
+      const sse = analyzeAstraDebugSse(evidence?.rawResponseBody);
       recordDebugAstra(tabId, 'astra_debug_response_model_evidence', {
+        sseTerminalKind: sse.sseTerminalKind || debug.sseTerminalKind,
+        sseDataEvents: Math.max(debug.sseDataEvents || 0, sse.sseDataEvents),
+        sseJsonEvents: Math.max(debug.sseJsonEvents || 0, sse.sseJsonEvents),
+        sseApplicationErrorSeen: debug.sseApplicationErrorSeen || sse.sseApplicationErrorSeen,
+        sseAssistantMessageSeen: debug.sseAssistantMessageSeen || sse.sseAssistantMessageSeen,
+        sseAssistantFinalSeen: debug.sseAssistantFinalSeen || sse.sseAssistantFinalSeen,
+        sseAssistantStatus: sse.sseAssistantStatus || debug.sseAssistantStatus,
+        sseCaptureTruncated: debug.sseCaptureTruncated || sse.sseCaptureTruncated,
+        streamCaptureBytes: Number.isFinite(evidence?.diagnostics?.streamCaptureBytes)
+          ? evidence.diagnostics.streamCaptureBytes : debug.streamCaptureBytes,
         responseModel: evidence?.model || debug.responseModel,
         responseModelField: evidence?.fields?.model || debug.responseModelField,
         responseDefaultModel: evidence?.defaultModel || debug.responseDefaultModel,
@@ -1933,9 +1955,19 @@ const networkMonitor = new ChatGptNetworkMonitor({
     const initialRequestId = streamData?.streamContext?.initialRequestId
       || streamData?.requestId || null;
     if (debug?.requestId && initialRequestId === debug.requestId
-      && detectAstraDebugSseTerminal(streamData?.rawStreamData)) {
-      recordDebugAstra(tabId, 'astra_debug_sse_terminal_observed', {
-        sseTerminalObserved: true,
+      && typeof streamData?.rawStreamData === 'string') {
+      const sse = analyzeAstraDebugSse(streamData.rawStreamData);
+      recordDebugAstra(tabId, 'astra_debug_sse_partial_evidence', {
+        sseTerminalObserved: debug.sseTerminalObserved === true
+          || detectAstraDebugSseTerminal(streamData.rawStreamData),
+        sseTerminalKind: sse.sseTerminalKind || debug.sseTerminalKind,
+        sseDataEvents: Math.max(debug.sseDataEvents || 0, sse.sseDataEvents),
+        sseJsonEvents: Math.max(debug.sseJsonEvents || 0, sse.sseJsonEvents),
+        sseApplicationErrorSeen: debug.sseApplicationErrorSeen || sse.sseApplicationErrorSeen,
+        sseAssistantMessageSeen: debug.sseAssistantMessageSeen || sse.sseAssistantMessageSeen,
+        sseAssistantFinalSeen: debug.sseAssistantFinalSeen || sse.sseAssistantFinalSeen,
+        sseAssistantStatus: sse.sseAssistantStatus || debug.sseAssistantStatus,
+        sseCaptureTruncated: debug.sseCaptureTruncated || sse.sseCaptureTruncated,
       });
     }
     const state = ensureTabState(tabId);
