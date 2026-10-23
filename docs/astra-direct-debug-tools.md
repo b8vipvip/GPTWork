@@ -1,4 +1,4 @@
-# GPTWork v0.5.246 · 调试工具与 Astra 单次请求实验
+# GPTWork v0.5.247 · 调试工具与 Astra 单次请求实验
 
 打开 GPTWork 插件弹窗，点击 **调试工具**，进入独立工具页。
 
@@ -48,6 +48,13 @@
 - 被中断的网络流可以比页面回复观察更早结束。调试会等待两者各自结束后才归档本次探针；独立的浏览器导航证据不覆盖网络终态。
 - 仅导出 `Network.loadingFailed.canceled`、耗时和 `new_chat/placeholder/conversation/other` 的路由种类及跳转次数，不导出完整导航 URL、认证头或聊天记录。
 - 建议优先在已有 ChatGPT 会话中测试，再用新聊天做对照；两次运行各自导出 Astra JSON 和运行日志，避免把新聊天创建的导航行为误认为模型拒绝。
+
+## v0.5.247 · 网络取消与 SSE 内部终态
+
+- `[DONE]` / `message_stream_complete` 是流协议结束标记，不代表该轮助手 `finished_successfully`，也不能覆盖 CDP 的 `loadingFailed/canceled`。
+- 额外计数结构化 SSE 数据段及 JSON 事件，记录助手最终状态和应用层错误存在性，不保存错误消息原文、用户提示词或 SSE 流内容。
+- 正式调试标签页内会话详情请求若返回 HTTP 404，统计其次数但不据此推导与模型失败的因果关系。
+- 优先与用户在相同会话手动发送的官方模型请求做对照；如果普通请求也失败，不能归咎于 Astra ID。
 
 ## 自动追踪工具
 
