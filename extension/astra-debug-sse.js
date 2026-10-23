@@ -17,8 +17,12 @@ export function analyzeAstraDebugSse(body) {
     sseTerminalKind: null,
     sseApplicationErrorSeen: false,
     sseAssistantMessageSeen: false,
+    // finished_successfully can belong to an intermediate assistant message.
+    // Only a matching end_turn=true confirms an assistant turn-final signal.
     sseAssistantFinalSeen: false,
-    sseAssistantStatus: null,
+    sseAssistantEndTurnSeen: false,
+    sseAssistantStatus: null, // status of the most recent assistant packet
+    sseAssistantStatusSequence: [], // allowed enum transitions, no message IDs/text
     sseCaptureTruncated: false,
   };
   if (typeof body !== 'string' || !body) return result;
@@ -72,7 +76,14 @@ export function analyzeAstraDebugSse(body) {
     const status = message.status;
     if (ALLOWED_STATUSES.has(status)) {
       result.sseAssistantStatus = status;
-      if (status === 'finished_successfully') result.sseAssistantFinalSeen = true;
+      const sequence = result.sseAssistantStatusSequence;
+      if (sequence[sequence.length - 1] !== status && sequence.length < 16) {
+        sequence.push(status);
+      }
+      if (status === 'finished_successfully') {
+        result.sseAssistantFinalSeen = true;
+        if (message.end_turn === true) result.sseAssistantEndTurnSeen = true;
+      }
       if (status === 'finished_with_errors') result.sseApplicationErrorSeen = true;
     }
   };
@@ -114,7 +125,9 @@ export function normalChatSseBaseline(evidence, debugRequestId = null) {
     sseApplicationErrorSeen: null,
     sseAssistantMessageSeen: null,
     sseAssistantFinalSeen: null,
+    sseAssistantEndTurnSeen: null,
     sseAssistantStatus: null,
+    sseAssistantStatusSequence: null,
     sseCaptureTruncated: null,
   };
   return {

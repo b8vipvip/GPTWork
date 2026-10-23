@@ -79,5 +79,5 @@ test('probe wiring exports safe SSE evidence, request 404 count and raw response
     /'rawResponseBody'/);
   assert.match(page, /id="probeSseAppError"/);
   assert.match(script, /probeConversation404/);
-  assert.equal(JSON.parse(manifest).version, '0.5.249');
+  assert.equal(JSON.parse(manifest).version, '0.5.250');
 });
