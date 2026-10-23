@@ -12,7 +12,8 @@ import {
 import { ChatGptNetworkMonitor } from './network-monitor.js';
 import { conversationKeyFromUrl, modelOriginScene, originSnapshotFields } from './astra-origin-trace.js';
 import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, ASTRA_DEBUG_TIMEOUT_MS, ASTRA_DEBUG_HISTORY_KEY,
-  isAstraDebugRequest, detectAstraDebugSseTerminal, publicAstraDebugProbe } from './astra-debug-probe.js';
+  isAstraDebugRequest, detectAstraDebugSseTerminal, publicAstraDebugProbe,
+  astraDebugObservationComplete } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { isActiveNewChatRequestHandoff } from './chat-context-handoff.js';
 import { evaluateGuard } from './guard.js';
@@ -58,7 +59,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.245';
+const RUNTIME_CODE_VERSION = '0.5.246';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -298,6 +299,21 @@ function recordDebugAstra(tabId, event, patch = {}) {
   return snapshot;
 }
 
+function finalizeDebugAstraObservation(tabId) {
+  const probe = debugAstraProbes.get(tabId);
+  if (!astraDebugObservationComplete(probe)) return false;
+  if (probe.terminalEvent === 'conversation_response_failed') {
+    recordDebugAstra(tabId, 'astra_debug_failure_evidence_complete', { phase: 'failed' });
+  } else {
+    recordDebugAstra(tabId, 'astra_debug_probe_completed', {
+      phase: 'finished',
+      error: probe.assistantSettled === true ? null : 'assistant_reply_unconfirmed',
+    });
+  }
+  void endDebugAstra(tabId);
+  return true;
+}
+
 async function endDebugAstra(tabId, reason = null) {
   const probe = debugAstraProbes.get(tabId);
   if (!probe) return;
@@ -325,6 +341,12 @@ async function startDebugAstra(tabId) {
   }
   if (state.autoVerification?.running || verificationTransactionForTab(tabId)) {
     throw new Error('model_discovery_in_progress');
+  }
+  const priorDebug = debugAstraProbes.get(tabId);
+  if (priorDebug?.phase === 'failed'
+    && priorDebug.responseEvidenceSettled === true
+    && priorDebug.assistantObservationComplete !== true) {
+    throw new Error('astra_debug_probe_observation_pending');
   }
   if (debugAstraProbes.has(tabId)
     && ['finished', 'failed', 'timed_out', 'canceled'].includes(debugAstraProbes.get(tabId).phase)) {
@@ -360,6 +382,13 @@ async function startDebugAstra(tabId) {
     sendMethod: null,
     assistantSettled: null,
     assistantObservationReason: null,
+    assistantObservationComplete: false,
+    assistantNavigation: null,
+    assistantNavigationCount: 0,
+    pageNavigationEvents: [],
+    networkCanceled: null,
+    transportElapsedMs: null,
+    responseEvidenceSettled: false,
     responseTextSnippet: null,
     error: null,
   };
@@ -393,18 +422,19 @@ async function startDebugAstra(tabId) {
       recordDebugAstra(tabId, 'astra_debug_assistant_reply_observed', {
         assistantSettled: settled,
         assistantObservationReason: settled ? null : String(reply?.reason || 'assistant_reply_unconfirmed').slice(0, 120),
+        assistantObservationComplete: true,
+        assistantNavigation: String(reply?.navigation || '').slice(0, 100) || null,
+        assistantNavigationCount: Number(reply?.navigationCount || 0),
         responseTextSnippet: settled ? String(reply.responseTextSnippet || '').slice(0, 300) : null,
-        phase: settled && probe.terminalEvent === 'conversation_response_finished'
-          ? 'finished' : probe.phase,
       });
-      if (settled && probe.terminalEvent === 'conversation_response_finished') {
-        void endDebugAstra(tabId);
-      }
+      finalizeDebugAstraObservation(tabId);
     }).catch(() => {
       if (debugAstraProbes.get(tabId)?.id === probe.id) {
         recordDebugAstra(tabId, 'astra_debug_assistant_reply_unavailable', {
           assistantSettled: false, assistantObservationReason: 'content_message_failed',
+          assistantObservationComplete: true,
         });
+        finalizeDebugAstraObservation(tabId);
       }
     });
     // A successful DOM click is NOT a successful HTTP request.
@@ -1765,6 +1795,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
   onProtocolEvent(tabId, protocol) {
     const debug = debugAstraProbes.get(tabId);
     if (debug && debug.requestId && protocol?.requestId === debug.requestId
+      && protocol?.downstream !== true
       && ['conversation_response_headers', 'conversation_response_finished',
         'conversation_response_failed'].includes(protocol.event)) {
       const failed = protocol.event === 'conversation_response_failed'
@@ -1777,6 +1808,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
         terminalEvent: protocol.event === 'conversation_response_headers'
           ? debug.terminalEvent : protocol.event,
         networkError: protocol.networkError ? String(protocol.networkError).slice(0, 120) : null,
+        networkCanceled: typeof protocol.canceled === 'boolean' ? protocol.canceled : debug.networkCanceled,
+        transportElapsedMs: Number.isFinite(protocol.elapsedMs) ? protocol.elapsedMs : debug.transportElapsedMs,
       });
       // Network.loadingFailed/Finished is delivered before the response body
       // has been decoded into model evidence. Do not remove the probe here:
@@ -1857,16 +1890,9 @@ const networkMonitor = new ChatGptNetworkMonitor({
           || detectAstraDebugSseTerminal(evidence?.rawResponseBody),
         httpStatus: evidence?.status ?? evidence?.diagnostics?.httpStatus ?? debug.httpStatus,
         error: evidence?.bodyError ? 'response_body_unavailable' : debug.error,
+        responseEvidenceSettled: true,
       });
-      if (debug.terminalEvent === 'conversation_response_failed'
-        || (Number(debug.httpStatus) >= 400 && debug.terminalEvent)) {
-        // Retain the parsed model/default-model metadata before finalizing.
-        void endDebugAstra(tabId);
-      } else if (debug.terminalEvent === 'conversation_response_finished'
-        && debug.assistantSettled === true) {
-        recordDebugAstra(tabId, 'astra_debug_probe_completed', { phase: 'finished' });
-        void endDebugAstra(tabId);
-      }
+      finalizeDebugAstraObservation(tabId);
     }
     if (networkMonitor.hasOriginTrace(tabId)) {
       const state = tabStates.get(tabId);
@@ -1931,6 +1957,14 @@ const networkMonitor = new ChatGptNetworkMonitor({
     });
   },
   onFailure(tabId, failure) {
+    const debug = debugAstraProbes.get(tabId);
+    if (debug?.requestId === failure.requestId && failure.downstream !== true) {
+      recordDebugAstra(tabId, 'astra_debug_response_body_unavailable', {
+        responseEvidenceSettled: true,
+        error: 'response_body_unavailable',
+      });
+      finalizeDebugAstraObservation(tabId);
+    }
     logRuntime('error', 'network', 'response_loading_failed', {
       tabId,
       endpoint: failure.endpoint,
@@ -5268,6 +5302,19 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return;
   }
   if (!isChatGptUrl(tab.url ?? '')) return;
+  const debug = debugAstraProbes.get(tabId);
+  if (debug && (changeInfo.url || changeInfo.status === 'loading')) {
+    let pathname = '/';
+    try { pathname = new URL(changeInfo.url || tab.url).pathname.replace(/\/+$/, '') || '/'; } catch {}
+    const routeKind = pathname === '/' ? 'new_chat'
+      : pathname === '/c/local-chatgpt' ? 'placeholder'
+      : /^\/c\/[a-zA-Z0-9_-]+$/.test(pathname) ? 'conversation' : 'other';
+    const event = (changeInfo.status === 'loading' ? 'document_loading:' : 'route_changed:') + routeKind;
+    const recent = Array.isArray(debug.pageNavigationEvents) ? debug.pageNavigationEvents : [];
+    recordDebugAstra(tabId, 'astra_debug_page_navigation_observed', {
+      pageNavigationEvents: [...recent, event].slice(-8),
+    });
+  }
   if (changeInfo.url
     && tabStates.get(tabId)?.contextKey !== contextKey(changeInfo.url)) {
     originSceneByTab.delete(tabId);

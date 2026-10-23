@@ -16,7 +16,7 @@
     <section class="panel">
       <div class="heading"><span class="pill">插件内运行</span><h2>直接使用 gpt-6-astra-wm 请求</h2></div>
       <p>点击后，GPTWork 会在所选 ChatGPT 标签页发送一条固定测试消息，仅对该次正式 POST 尝试将顶层模型改为 <code>gpt-6-astra-wm</code>。不会永久修改模型锁定或原生模型选择。</p>
-      <p class="warning">此操作会真实发送一条消息到当前会话，可能消耗账户额度。HTTP 成功不等于 Astra 模型确认。</p>
+      <p class="warning">此操作会真实发送一条消息到当前会话，可能消耗账户额度。HTTP 200、SSE 结束标记或默认模型字段都不等于 Astra 执行成功。建议先在已存在的 ChatGPT 会话中测试，排除新聊天建立时的页面导航干扰。</p>
       <label for="targetTab">目标 ChatGPT 标签页</label>
       <select id="targetTab"><option value="">正在读取…</option></select>
       <p id="targetTabInfo" class="caption">标签页 ID 由 Chrome 分配，选择后可定位对应标签页。</p>
@@ -37,6 +37,8 @@
         <div><dt>HTTP 状态</dt><dd id="probeHttp">—</dd></div>
         <div><dt>网络 / 流终态</dt><dd id="probeTerminal">—</dd></div>
         <div><dt>网络错误</dt><dd id="probeNetworkError">—</dd></div>
+        <div><dt>CDP 浏览器取消标记</dt><dd id="probeNetworkCanceled">—</dd></div>
+        <div><dt>网络请求耗时</dt><dd id="probeTransportElapsed">—</dd></div>
         <div><dt>流证据阶段</dt><dd id="probeStreamStage">—</dd></div>
         <div><dt>SSE 结束标记</dt><dd id="probeSseDone">—</dd></div>
         <div><dt>响应模型字段（中断流仅供参考）</dt><dd id="probeServed">未获取权威证据</dd></div>
@@ -47,6 +49,9 @@
         <div><dt>实际回复（最多 300 字）</dt><dd id="probeReply">—</dd></div>
         <div><dt>页面回复是否稳定结束</dt><dd id="probeAssistantSettled">—</dd></div>
         <div><dt>回复观察原因</dt><dd id="probeAssistantReason">—</dd></div>
+        <div><dt>页面回复观察状态</dt><dd id="probeWitnessState">—</dd></div>
+        <div><dt>Chrome 页面导航事件（脱敏）</dt><dd id="probeNavigation">—</dd></div>
+        <div><dt>页面回复导航轨迹（脱敏）</dt><dd id="probeReplyRoute">—</dd></div>
       </dl>
       <div class="controls"><button id="exportResults" class="secondary" type="button">导出 Astra 调试结果 JSON</button></div>
     </section>

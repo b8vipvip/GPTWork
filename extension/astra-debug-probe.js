@@ -87,6 +87,16 @@ export function astraDebugVerdict(probe) {
   };
 }
 
+// Close a diagnostic observation only after BOTH the network evidence callback
+// and the independent page reply observer have finished. The network terminal
+// alone can precede SSE decoding and a legitimate rendered assistant reply.
+export function astraDebugObservationComplete(probe) {
+  return Boolean(probe
+    && ['conversation_response_finished', 'conversation_response_failed'].includes(probe.terminalEvent)
+    && probe.responseEvidenceSettled === true
+    && probe.assistantObservationComplete === true);
+}
+
 export function publicAstraDebugProbe(probe) {
   if (!probe) return null;
   const fields = [
@@ -95,7 +105,9 @@ export function publicAstraDebugProbe(probe) {
     'forwardedTransportModel', 'httpStatus', 'mimeType', 'terminalEvent',
     'responseModel', 'responseModelField', 'responseDefaultModel',
     'responseEvidenceSource', 'streamStage', 'sseTerminalObserved', 'networkError',
-    'sendMethod', 'assistantSettled', 'assistantObservationReason', 'responseTextSnippet', 'error',
+    'sendMethod', 'assistantSettled', 'assistantObservationReason', 'assistantNavigation',
+    'assistantNavigationCount', 'pageNavigationEvents', 'networkCanceled', 'transportElapsedMs',
+    'responseEvidenceSettled', 'assistantObservationComplete', 'responseTextSnippet', 'error',
   ];
   const safe = Object.fromEntries(fields.map((key) => [key, probe[key] ?? null]));
   return { ...safe, targetTransportModel: ASTRA_DEBUG_TRANSPORT, ...astraDebugVerdict(probe) };

@@ -58,8 +58,8 @@ test('aborted network lifecycle retains the debug probe until response evidence 
   assert.doesNotMatch(protocol, /void endDebugAstra\(tabId\)/,
     'protocol failure cannot remove probe before asynchronous SSE decoding');
   assert.match(evidence, /astra_debug_response_model_evidence/);
-  assert.match(evidence, /debug\.terminalEvent === 'conversation_response_failed'/);
-  assert.match(evidence, /void endDebugAstra\(tabId\)/);
+  assert.match(evidence, /responseEvidenceSettled: true/);
+  assert.match(evidence, /finalizeDebugAstraObservation\(tabId\)/);
   assert.match(background, /probe\.phase === 'failed'/,
     'fallback alarm must preserve failed outcome rather than overwrite timeout');
 });

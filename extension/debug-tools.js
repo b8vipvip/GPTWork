@@ -55,6 +55,10 @@ function presentProbe(probe) {
   text('probeHttp', probe?.httpStatus);
   text('probeTerminal', probe?.terminalEvent || probe?.networkError);
   text('probeNetworkError', probe?.networkError);
+  text('probeNetworkCanceled', probe?.networkCanceled === true ? 'Chrome 标记为已取消'
+    : probe?.networkCanceled === false ? 'Chrome 未标记取消' : '—');
+  text('probeTransportElapsed', Number.isFinite(probe?.transportElapsedMs)
+    ? probe.transportElapsedMs + ' ms' : '—');
   text('probeStreamStage', probe?.streamStage);
   text('probeSseDone', probe?.sseTerminalObserved === true ? '已观察到' : '未观察到 / 不适用');
   text('probeServed', probe?.responseModel
@@ -79,7 +83,18 @@ function presentProbe(probe) {
   text('probeReply', probe?.responseTextSnippet);
   text('probeAssistantSettled', probe?.assistantSettled === true ? '是' : probe?.assistantSettled === false ? '未确认' : '等待中');
   text('probeAssistantReason', probe?.assistantObservationReason);
-  const active = ['dispatching', 'forwarded', 'responding', 'response_finished'].includes(probe?.phase);
+  text('probeNavigation', Array.isArray(probe?.pageNavigationEvents)
+    ? probe.pageNavigationEvents.join(' → ') : null);
+  text('probeReplyRoute', probe?.assistantNavigation
+    ? probe.assistantNavigation + ' · ' + (probe.assistantNavigationCount || 0) + ' 次切换'
+    : null);
+  text('probeWitnessState', probe?.phase === 'failed' && probe?.responseEvidenceSettled === true
+    && probe?.assistantObservationComplete !== true ? '网络已失败，仍在观察页面回复'
+    : probe?.assistantObservationComplete === true ? '页面观察已结束'
+    : probe?.phase === 'failed' ? '网络已失败，页面观察尚未确认' : '—');
+  const active = ['dispatching', 'forwarded', 'responding', 'response_finished'].includes(probe?.phase)
+    || (probe?.phase === 'failed' && probe?.responseEvidenceSettled === true
+      && probe?.assistantObservationComplete !== true);
   $('runAstra').disabled = active || !$('targetTab').value;
   $('cancelAstra').disabled = !active;
 }
