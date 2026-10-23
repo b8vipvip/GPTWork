@@ -46,6 +46,15 @@ test('debug request ownership matches only the exact fixed prompt', () => {
   assert.equal(isAstraDebugRequest(JSON.stringify({
     messages: [{ author: { role: 'assistant' }, content: { parts: [ASTRA_DEBUG_PROMPT] } }],
   })), false);
+  assert.equal(isAstraDebugRequest(JSON.stringify({
+    messages: [
+      { author: { role: 'user' }, content: { parts: [ASTRA_DEBUG_PROMPT] } },
+      { author: { role: 'user' }, content: { parts: ['Different new message'] } },
+    ],
+  })), false, 'historical prompt cannot claim a new turn');
+  assert.equal(isAstraDebugRequest(JSON.stringify({
+    messages: [{ author: { role: 'user' }, content: { parts: [ASTRA_DEBUG_PROMPT, 'attachment'] } }],
+  })), false, 'additional parts must not claim a fixed-message test');
 });
 
 test('SSE done detection distinguishes a true terminal marker from plain HTTP completion', () => {
@@ -169,5 +178,5 @@ test('popup debug entry, tools catalog, message authorization and release metada
     await access(new URL('../../tools/windows/' + file, import.meta.url));
   }
   const manifest = JSON.parse(manifestText);
-  assert.equal(manifest.version, '0.5.242');
+  assert.equal(manifest.version, '0.5.243');
 });
