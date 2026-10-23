@@ -81,8 +81,8 @@ test('one shared composer surface is loaded before send compatibility and conten
   const scripts = manifest.content_scripts[0].js;
   assert.ok(scripts.indexOf('composer-surface.js') < scripts.indexOf('composer-send-compat.js'));
   assert.ok(scripts.indexOf('composer-surface.js') < scripts.indexOf('content.js'));
-  assert.match(content, /GPTWorkComposerSurfaceV1\?\.getActiveComposer/);
-  assert.match(compat, /GPTWorkComposerSurfaceV1\?\.getActiveComposer/);
+  assert.match(content, /globalThis\.GPTWorkComposerSurfaceV1/);
+  assert.match(compat, /globalThis\.GPTWorkComposerSurfaceV1/);
   assert.match(content, /visibleEditable/);
   assert.match(background, /tabIndex: Number\.isInteger\(tab\.index\)/);
   assert.match(background, /title: String\(tab\.title/);
