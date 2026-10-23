@@ -19,6 +19,10 @@
       <p class="warning">此操作会真实发送一条消息到当前会话，可能消耗账户额度。HTTP 成功不等于 Astra 模型确认。</p>
       <label for="targetTab">目标 ChatGPT 标签页</label>
       <select id="targetTab"><option value="">正在读取…</option></select>
+      <p id="targetTabInfo" class="caption">标签页 ID 由 Chrome 分配，选择后可定位对应标签页。</p>
+      <div class="controls">
+        <button id="locateTab" class="secondary" type="button">定位标签页（不发送请求）</button>
+      </div>
       <div class="controls">
         <button id="runAstra" class="primary" type="button">发送单次 Astra 测试请求</button>
         <button id="cancelAstra" class="secondary" type="button">停止等待 / 取消</button>
