@@ -109,7 +109,8 @@ export function publicAstraDebugProbe(probe) {
     'assistantNavigationCount', 'pageNavigationEvents', 'networkCanceled', 'transportElapsedMs',
     'responseEvidenceSettled', 'assistantObservationComplete',
     'sseTerminalKind', 'sseDataEvents', 'sseJsonEvents', 'sseApplicationErrorSeen',
-    'sseAssistantMessageSeen', 'sseAssistantFinalSeen', 'sseAssistantStatus',
+    'sseAssistantMessageSeen', 'sseAssistantFinalSeen', 'sseAssistantEndTurnSeen',
+    'sseAssistantStatus', 'sseAssistantStatusSequence',
     'sseCaptureTruncated', 'streamCaptureBytes', 'conversationDetail404Count',
     'responseTextSnippet', 'error',
   ];
