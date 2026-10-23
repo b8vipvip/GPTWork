@@ -92,7 +92,7 @@
 
   Object.defineProperty(globalThis, 'GPTWorkComposerSurfaceV1', {
     value: Object.freeze({ getActiveComposer: activeComposer, diagnosticSnapshot }),
-    configurable: false,
+    configurable: true,
     writable: false,
   });
 })();
