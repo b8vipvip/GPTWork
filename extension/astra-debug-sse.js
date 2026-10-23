@@ -92,3 +92,33 @@ export function analyzeAstraDebugSse(body) {
   if (!result.sseCaptureTruncated) flush();
   return result;
 }
+
+
+// Read-only same-protocol comparator for regular ChatGPT conversations. Keep
+// this on the response path only; never change request routing or verification.
+// It returns a bounded allowlist, never a raw response body or user content.
+export function normalChatSseBaseline(evidence, debugRequestId = null) {
+  const stage = evidence?.diagnostics?.stage;
+  const requestId = evidence?.streamContext?.initialRequestId || evidence?.requestId || null;
+  if (!requestId || requestId === debugRequestId
+    || !['initial_conversation', 'initial_conversation_aborted'].includes(stage)
+    || typeof evidence?.rawResponseBody !== 'string') return null;
+  const sse = analyzeAstraDebugSse(evidence.rawResponseBody);
+  return {
+    requestId: String(requestId).slice(0, 100),
+    stage,
+    httpStatus: Number.isFinite(evidence.status) ? evidence.status
+      : Number.isFinite(evidence.diagnostics?.httpStatus) ? evidence.diagnostics.httpStatus : null,
+    networkError: evidence.diagnostics?.networkError === 'net::ERR_ABORTED'
+      ? 'net::ERR_ABORTED' : evidence.diagnostics?.networkError ? 'other_network_error' : null,
+    transportEndedNormally: stage === 'initial_conversation'
+      && !evidence.diagnostics?.networkError,
+    servedModel: typeof evidence?.model === 'string'
+      && /^gpt-[a-z0-9.:-]{1,90}$/i.test(evidence.model)
+      ? evidence.model : null,
+    streamHandoffSeen: Boolean(evidence.diagnostics?.streamHandoff),
+    streamCaptureBytes: Number.isFinite(evidence.diagnostics?.streamCaptureBytes)
+      ? evidence.diagnostics.streamCaptureBytes : null,
+    ...sse,
+  };
+}

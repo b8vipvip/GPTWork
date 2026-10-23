@@ -1,4 +1,4 @@
-# GPTWork v0.5.247 · 调试工具与 Astra 单次请求实验
+# GPTWork v0.5.248 · 调试工具与 Astra 单次请求实验
 
 打开 GPTWork 插件弹窗，点击 **调试工具**，进入独立工具页。
 
@@ -55,6 +55,13 @@
 - 额外计数结构化 SSE 数据段及 JSON 事件，记录助手最终状态和应用层错误存在性，不保存错误消息原文、用户提示词或 SSE 流内容。
 - 正式调试标签页内会话详情请求若返回 HTTP 404，统计其次数但不据此推导与模型失败的因果关系。
 - 优先与用户在相同会话手动发送的官方模型请求做对照；如果普通请求也失败，不能归咎于 Astra ID。
+
+## v0.5.248 · 普通模型对照 SSE 诊断
+
+- 原生 ChatGPT 普通 POST 的浏览器 `Network.loadingFailed` 与模型身份 `verified` 是两条独立证据。模型字段精确匹配不等于 SSE 已经完整传输。
+- 运行时 JSONL 新增 `normal_conversation_sse_baseline_observed`：仅正式普通对话捕获到 SSE 时，按 Astra 同一分类器记录 `sseTerminalKind`、`sseAssistantFinalSeen`、`sseApplicationErrorSeen`、网络终态及计数，不导出普通聊天正文。
+- Astra 固定请求仍使用 `astra_debug_response_model_evidence`；两者可在相同会话/浏览器环境中对比 `[DONE]` 与明确助手完成状态，不对普通请求施加 Astra 特殊改写。
+- 当前多次初始 POST 网络中止及会话详情 404 还不能证明是 Astra ID 导致；请在更新后用普通模型和 Astra 做同环境对照。
 
 ## 自动追踪工具
 
