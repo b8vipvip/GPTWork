@@ -101,12 +101,32 @@ export function normalChatSseBaseline(evidence, debugRequestId = null) {
   const stage = evidence?.diagnostics?.stage;
   const requestId = evidence?.streamContext?.initialRequestId || evidence?.requestId || null;
   if (!requestId || requestId === debugRequestId
-    || !['initial_conversation', 'initial_conversation_aborted'].includes(stage)
-    || typeof evidence?.rawResponseBody !== 'string') return null;
-  const sse = analyzeAstraDebugSse(evidence.rawResponseBody);
+    || !['initial_conversation', 'initial_conversation_aborted'].includes(stage)) return null;
+  // Some normal-response paths provide parsed model evidence but do not pass
+  // the raw SSE buffer through to the observer. Do not silently drop the
+  // baseline, and do not fabricate negative application/final evidence.
+  const bodyAvailable = typeof evidence?.rawResponseBody === 'string'
+    && evidence.rawResponseBody.length > 0;
+  const sse = bodyAvailable ? analyzeAstraDebugSse(evidence.rawResponseBody) : {
+    sseDataEvents: null,
+    sseJsonEvents: null,
+    sseTerminalKind: null,
+    sseApplicationErrorSeen: null,
+    sseAssistantMessageSeen: null,
+    sseAssistantFinalSeen: null,
+    sseAssistantStatus: null,
+    sseCaptureTruncated: null,
+  };
   return {
     requestId: String(requestId).slice(0, 100),
     stage,
+    sseEvidenceAvailable: bodyAvailable,
+    sseUnavailableReason: bodyAvailable ? null
+      : Number(evidence?.diagnostics?.streamCaptureBytes || 0) > 0
+        ? 'response_body_not_exposed_to_observer' : 'response_body_not_captured',
+    networkTerminal: ['loadingFailed', 'loadingFinished'].includes(evidence?.diagnostics?.terminalEvent)
+      ? evidence.diagnostics.terminalEvent
+      : stage === 'initial_conversation_aborted' ? 'loadingFailed' : null,
     httpStatus: Number.isFinite(evidence.status) ? evidence.status
       : Number.isFinite(evidence.diagnostics?.httpStatus) ? evidence.diagnostics.httpStatus : null,
     networkError: evidence.diagnostics?.networkError === 'net::ERR_ABORTED'
