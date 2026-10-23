@@ -67,10 +67,16 @@ function presentProbe(probe) {
     : '—');
   text('probeSseAppError', probe?.sseApplicationErrorSeen === true ? '已检测到流内错误事件'
     : probe?.sseApplicationErrorSeen === false ? '未观察到（不代表不存在）' : '—');
-  text('probeSseAssistant', probe?.sseAssistantFinalSeen === true ? '已观察到助手 final 状态（不代表实际模型确认）'
-    : probe?.sseAssistantMessageSeen === true ? '发现助手消息，未观察到明确成功终态'
+  text('probeSseAssistant', probe?.sseAssistantFinalSeen === true
+    ? '至少一条助手消息曾 finished_successfully（不代表整轮完成）'
+    : probe?.sseAssistantMessageSeen === true ? '发现助手消息，未观察到 finished_successfully'
     : probe?.sseAssistantMessageSeen === false ? '未发现助手消息' : '—');
+  text('probeSseEndTurn', probe?.sseAssistantEndTurnSeen === true
+    ? '已观察到 finished_successfully + end_turn=true（仍需网络与页面验证）'
+    : probe?.sseAssistantEndTurnSeen === false ? '未观察到明确轮次完成信号' : '—');
   text('probeSseStatus', probe?.sseAssistantStatus);
+  text('probeSseStatusSequence', Array.isArray(probe?.sseAssistantStatusSequence)
+    ? probe.sseAssistantStatusSequence.join(' → ') : null);
   text('probeCaptureBytes', Number.isFinite(probe?.streamCaptureBytes)
     ? probe.streamCaptureBytes + ' bytes' : '—');
   text('probeConversation404', Number.isFinite(probe?.conversationDetail404Count)
