@@ -2422,24 +2422,43 @@ document.addEventListener('pointerdown', (event) => {
     const before = Math.max(0, Number(options.assistantCountBefore || 0));
     const deadline = Date.now() + Math.min(120000, Math.max(5000, Number(options.timeoutMs || 90000)));
     const initialUrl = location.href;
-    const initialPath = location.pathname;
+    const normalizePath = (path) => String(path || '/').replace(/\/+$/, '') || '/';
+    const routeKind = (path) => {
+      if (path === '/') return 'new_chat';
+      if (path === '/c/local-chatgpt') return 'placeholder';
+      return /^\/c\/[a-zA-Z0-9_-]+$/.test(path) ? 'conversation' : 'other';
+    };
+    const initialPath = normalizePath(location.pathname);
     const startedInNewChat = initialPath === '/' || initialPath === '/c/local-chatgpt';
+    let previousPath = initialPath;
     let firstConcreteConversation = null;
+    let navigationCount = 0;
+    let lastNavigation = null;
     let lastFingerprint = '';
     let stableSince = 0;
     while (Date.now() < deadline) {
       if (location.href !== initialUrl) {
-        const currentPath = location.pathname;
-        // The normal first-turn route is / -> /c/local-chatgpt -> /c/:id.
-        // It must not invalidate the same visible reply observation.
-        const expectedNewChatHandoff = startedInNewChat
-          && /^\/c\/[a-zA-Z0-9_-]+$/.test(currentPath)
-          && (currentPath === '/c/local-chatgpt'
-            || !firstConcreteConversation || firstConcreteConversation === currentPath);
-        if (currentPath !== initialPath && !expectedNewChatHandoff) {
-          return { settled: false, reason: 'conversation_navigated' };
+        const currentPath = normalizePath(location.pathname);
+        if (currentPath !== previousPath) {
+          navigationCount += 1;
+          lastNavigation = routeKind(previousPath) + '->' + routeKind(currentPath);
+          previousPath = currentPath;
         }
-        if (expectedNewChatHandoff && currentPath !== '/c/local-chatgpt') {
+        // A first Chat turn can briefly bounce between home and the local
+        // placeholder before a concrete conversation URL is committed. Once
+        // committed, a different conversation is never an owned reply.
+        const knownPlaceholder = currentPath === '/' || currentPath === '/c/local-chatgpt';
+        const expectedNewChatHandoff = startedInNewChat
+          && ((knownPlaceholder && !firstConcreteConversation)
+            || (routeKind(currentPath) === 'conversation'
+              && (!firstConcreteConversation || firstConcreteConversation === currentPath)));
+        if (currentPath !== initialPath && !expectedNewChatHandoff) {
+          return {
+            settled: false, reason: 'conversation_navigated',
+            navigation: lastNavigation, navigationCount,
+          };
+        }
+        if (expectedNewChatHandoff && routeKind(currentPath) === 'conversation') {
           firstConcreteConversation = currentPath;
         }
       }
@@ -2453,11 +2472,12 @@ document.addEventListener('pointerdown', (event) => {
       } else if (response && stableSince && Date.now() - stableSince >= 1700
         && !visibleGeneratingControl()) {
         return { settled: true, responseTextSnippet: response.slice(0, 300),
-          responseTextLength: response.length };
+          responseTextLength: response.length, navigation: lastNavigation, navigationCount };
       }
       await new Promise((resolve) => window.setTimeout(resolve, 250));
     }
-    return { settled: false, reason: 'assistant_reply_timeout' };
+    return { settled: false, reason: 'assistant_reply_timeout',
+      navigation: lastNavigation, navigationCount };
   }
 
   async function autoSendProbe(options = {}) {
