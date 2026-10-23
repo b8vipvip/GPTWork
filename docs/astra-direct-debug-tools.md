@@ -1,4 +1,4 @@
-# GPTWork v0.5.248 · 调试工具与 Astra 单次请求实验
+# GPTWork v0.5.249 · 调试工具与 Astra 单次请求实验
 
 打开 GPTWork 插件弹窗，点击 **调试工具**，进入独立工具页。
 
@@ -62,6 +62,11 @@
 - 运行时 JSONL 新增 `normal_conversation_sse_baseline_observed`：仅正式普通对话捕获到 SSE 时，按 Astra 同一分类器记录 `sseTerminalKind`、`sseAssistantFinalSeen`、`sseApplicationErrorSeen`、网络终态及计数，不导出普通聊天正文。
 - Astra 固定请求仍使用 `astra_debug_response_model_evidence`；两者可在相同会话/浏览器环境中对比 `[DONE]` 与明确助手完成状态，不对普通请求施加 Astra 特殊改写。
 - 当前多次初始 POST 网络中止及会话详情 404 还不能证明是 Astra ID 导致；请在更新后用普通模型和 Astra 做同环境对照。
+
+## v0.5.249 · 普通 SSE 对照不会无声丢失
+
+- 当普通正式请求的网络响应有 HTTP / 模型字段但缺少原始 SSE 缓冲区时，仍记录 `normal_conversation_sse_baseline_observed`，并携带 `sseEvidenceAvailable=false`、`sseUnavailableReason` 及 `networkTerminal`；原始流内应用错误与助手状态记为 **未知（null）**，不伪造“无错误”或“未完成”结论。
+- v0.5.248 实机普通 GPT-6 和 Astra 在同一标签页均出现 `HTTP 200` 后的 `net::ERR_ABORTED`；Astra 仅收到助手 `in_progress` 数据，尚无真实执行的终态证明。新诊断用于定位 ordinary 对照样本为何缺少 SSE 分类，而非绕过浏览器网络取消。
 
 ## 自动追踪工具
 

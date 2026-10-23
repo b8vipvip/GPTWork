@@ -53,7 +53,18 @@ test('excluded Astra request, unrelated stages, missing body and untrusted error
   const body = assistant('in_progress');
   assert.equal(normalChatSseBaseline(evidence(body), 'normal.17'), null);
   assert.equal(normalChatSseBaseline(evidence(body, {stage:'downstream_websocket'})), null);
-  assert.equal(normalChatSseBaseline({...evidence(body),rawResponseBody:null}), null);
+  const bodyMissing = normalChatSseBaseline({...evidence(body), rawResponseBody: null});
+  assert.ok(bodyMissing, 'an aborted ordinary request must not silently disappear from the baseline');
+  assert.equal(bodyMissing.requestId, 'normal.17');
+  assert.equal(bodyMissing.networkTerminal, 'loadingFailed');
+  assert.equal(bodyMissing.networkError, 'net::ERR_ABORTED');
+  assert.equal(bodyMissing.transportEndedNormally, false);
+  assert.equal(bodyMissing.sseEvidenceAvailable, false);
+  assert.equal(bodyMissing.sseUnavailableReason, 'response_body_not_exposed_to_observer');
+  assert.equal(bodyMissing.sseAssistantFinalSeen, null, 'unknown is not false');
+  assert.equal(bodyMissing.sseApplicationErrorSeen, null, 'unknown is not a clean server response');
+  assert.equal(bodyMissing.sseJsonEvents, null);
+  assert.equal(bodyMissing.sseTerminalKind, null);
   const outcome = normalChatSseBaseline(evidence(body, {networkError:'very-private-error: SECRET'}));
   assert.equal(outcome.networkError,'other_network_error');
   assert.equal(JSON.stringify(outcome).includes('SECRET'), false);
@@ -67,5 +78,5 @@ test('normal baseline has no path to mutate request model or terminate verifier'
   assert.match(background,/normal_conversation_sse_baseline_observed/);
   assert.match(source,/transportEndedNormally/);
   assert.doesNotMatch(source,/Fetch\.continueRequest|Fetch\.failRequest|chrome\.debugger\.sendCommand/);
-  assert.equal(JSON.parse(manifestText).version,'0.5.248');
+  assert.equal(JSON.parse(manifestText).version,'0.5.249');
 });
