@@ -359,6 +359,7 @@ async function startDebugAstra(tabId) {
     networkError: null,
     sendMethod: null,
     assistantSettled: null,
+    assistantObservationReason: null,
     responseTextSnippet: null,
     error: null,
   };
@@ -391,6 +392,7 @@ async function startDebugAstra(tabId) {
       const settled = reply?.settled === true;
       recordDebugAstra(tabId, 'astra_debug_assistant_reply_observed', {
         assistantSettled: settled,
+        assistantObservationReason: settled ? null : String(reply?.reason || 'assistant_reply_unconfirmed').slice(0, 120),
         responseTextSnippet: settled ? String(reply.responseTextSnippet || '').slice(0, 300) : null,
         phase: settled && probe.terminalEvent === 'conversation_response_finished'
           ? 'finished' : probe.phase,
@@ -400,7 +402,9 @@ async function startDebugAstra(tabId) {
       }
     }).catch(() => {
       if (debugAstraProbes.get(tabId)?.id === probe.id) {
-        recordDebugAstra(tabId, 'astra_debug_assistant_reply_unavailable', { assistantSettled: false });
+        recordDebugAstra(tabId, 'astra_debug_assistant_reply_unavailable', {
+          assistantSettled: false, assistantObservationReason: 'content_message_failed',
+        });
       }
     });
     // A successful DOM click is NOT a successful HTTP request.
