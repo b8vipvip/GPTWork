@@ -342,6 +342,12 @@ async function startDebugAstra(tabId) {
   if (state.autoVerification?.running || verificationTransactionForTab(tabId)) {
     throw new Error('model_discovery_in_progress');
   }
+  const priorDebug = debugAstraProbes.get(tabId);
+  if (priorDebug?.phase === 'failed'
+    && priorDebug.responseEvidenceSettled === true
+    && priorDebug.assistantObservationComplete !== true) {
+    throw new Error('astra_debug_probe_observation_pending');
+  }
   if (debugAstraProbes.has(tabId)
     && ['finished', 'failed', 'timed_out', 'canceled'].includes(debugAstraProbes.get(tabId).phase)) {
     await endDebugAstra(tabId);
