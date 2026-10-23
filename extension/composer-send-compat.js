@@ -15,6 +15,8 @@
   }
 
   function promptElement() {
+    const shared = globalThis.GPTWorkComposerSurfaceV1?.getActiveComposer?.();
+    if (shared) return shared;
     return PROMPT_SELECTORS
       .map((selector) => document.querySelector(selector))
       .find((element) => visible(element)) || null;
