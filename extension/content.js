@@ -1932,8 +1932,8 @@ document.addEventListener('pointerdown', (event) => {
   }
 
   function findComposer() {
-    const shared = globalThis.GPTWorkComposerSurfaceV1?.getActiveComposer?.();
-    if (shared) return shared;
+    const owner = globalThis.GPTWorkComposerSurfaceV1;
+    if (owner?.getActiveComposer) return owner.getActiveComposer();
     return COMPOSER_SELECTORS
       .map((selector) => document.querySelector(selector))
       .find((element) => element && visible(element)) || null;
