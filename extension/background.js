@@ -16,7 +16,7 @@ import { ASTRA_DEBUG_TRANSPORT, ASTRA_DEBUG_PROMPT, ASTRA_DEBUG_TIMEOUT_MS, ASTR
   astraDebugObservationComplete } from './astra-debug-probe.js';
 import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { isActiveNewChatRequestHandoff } from './chat-context-handoff.js';
-import { analyzeAstraDebugSse } from './astra-debug-sse.js';
+import { analyzeAstraDebugSse, normalChatSseBaseline } from './astra-debug-sse.js';
 import { evaluateGuard } from './guard.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
@@ -1897,6 +1897,16 @@ const networkMonitor = new ChatGptNetworkMonitor({
   onEvidence(tabId, evidence) {
     const debug = debugAstraProbes.get(tabId);
     const initialRequestId = evidence?.streamContext?.initialRequestId || evidence?.requestId || null;
+    const baseline = normalChatSseBaseline(evidence, debug?.requestId || null);
+    if (baseline) {
+      // Same exact SSE classifier as the Astra probe, with no model rewrite,
+      // request mutation, transport suppression, or persisted response body.
+      // An exact model slug from a canceled stream only verifies identity;
+      // transportEndedNormally stays false for net::ERR_ABORTED.
+      logRuntime('info', 'network', 'normal_conversation_sse_baseline_observed', {
+        tabId, ...baseline,
+      });
+    }
     if (debug && debug.requestId && initialRequestId === debug.requestId) {
       const sse = analyzeAstraDebugSse(evidence?.rawResponseBody);
       recordDebugAstra(tabId, 'astra_debug_response_model_evidence', {
