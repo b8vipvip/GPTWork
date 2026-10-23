@@ -2437,8 +2437,8 @@ document.addEventListener('pointerdown', (event) => {
     let lastFingerprint = '';
     let stableSince = 0;
     while (Date.now() < deadline) {
-      if (location.href !== initialUrl) {
-        const currentPath = normalizePath(location.pathname);
+      const currentPath = normalizePath(location.pathname);
+      if (currentPath !== previousPath || location.href !== initialUrl) {
         if (currentPath !== previousPath) {
           navigationCount += 1;
           lastNavigation = routeKind(previousPath) + '->' + routeKind(currentPath);
