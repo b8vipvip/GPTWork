@@ -9,6 +9,15 @@ from pathlib import Path
 PROTECTED_WORDS = ("release", "deploy", "publish", "store package", "store-package")
 DEBUG_WORDS = ("debug", "diagnostic", "one-shot", "oneshot", "tmp-")
 
+# GPTAuto control-plane workflows hold task/merge leases. Cancelling a running
+# Executor or Reconcile when a duplicate event arrives interrupts the owner of
+# that lease and can re-run CI, merge, or release side effects.
+NON_CANCELABLE_GPTAUTO = {
+    "gptauto-observer.yml": "GPTAuto Observer",
+    "gptauto-executor.yml": "GPTAuto Executor",
+    "gptauto-reconcile.yml": "GPTAuto Reconcile",
+}
+
 
 def top_level_block(text: str, key: str) -> str | None:
     lines = text.splitlines(keepends=True)
@@ -96,6 +105,9 @@ def validate(path: Path) -> list[str]:
     elif protected:
         if "cancel-in-progress: false" not in concurrency:
             errors.append("release/deploy/publish workflow must use cancel-in-progress: false")
+    elif NON_CANCELABLE_GPTAUTO.get(path.name) == name:
+        if "cancel-in-progress: false" not in concurrency:
+            errors.append("GPTAuto lease owner workflow must use cancel-in-progress: false")
     elif "cancel-in-progress: true" not in concurrency:
         errors.append("ordinary workflow must use cancel-in-progress: true")
     blocks = job_blocks(text)
