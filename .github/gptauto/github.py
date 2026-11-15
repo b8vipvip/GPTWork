@@ -47,6 +47,28 @@ class GitHubClient:
         except GitHubError:
             return None
 
+    def tag_commit_sha(self, tag: str) -> str:
+        """Resolve lightweight or annotated Git tags to their final commit SHA."""
+        try:
+            ref = self._api(f"repos/{self.repository}/git/ref/tags/{quote(tag, safe='')}")
+            obj = ref.get("object") or {}
+            for _ in range(8):
+                object_type = str(obj.get("type") or "")
+                object_sha = str(obj.get("sha") or "")
+                if not object_sha:
+                    return ""
+                if object_type == "commit":
+                    return object_sha
+                if object_type != "tag":
+                    return ""
+                annotated = self._api(
+                    f"repos/{self.repository}/git/tags/{quote(object_sha, safe='')}"
+                )
+                obj = annotated.get("object") or {}
+            return ""
+        except (GitHubError, OSError, ValueError, TypeError, KeyError):
+            return ""
+
     def latest_run(
         self,
         *,
