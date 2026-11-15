@@ -87,6 +87,19 @@ test('diagnostic export omits raw stream payload and reports privacy boundary', 
   assert.equal(report.modelVerification.latest.results[0].rawRequestModel, 'gpt-5.5-thinking');
 });
 
+test('disabled model history is not surfaced in the exported latest snapshot', () => {
+  const report = createDiagnosticsReport({
+    bundle: {},
+    runtimeLogs: [],
+    history: [reportB],
+    historyEnabled: false,
+    generatedAt: '2026-11-15T12:00:00.000Z',
+  });
+  assert.equal(report.modelVerification.historyCount, null);
+  assert.equal(report.modelVerification.history.length, 0);
+  assert.equal(report.modelVerification.latest, null);
+});
+
 test('storage keys match the existing background runtime exports', async () => {
   assert.deepEqual(DIAGNOSTICS_STORAGE_KEYS, {
     history: 'modelVerificationHistoryV1',
