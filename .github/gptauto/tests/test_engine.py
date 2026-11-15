@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from gptauto.engine import gate
-from gptauto.model import Gate, GateStatus, GateStep, State, Task
+from gptauto.model import Criterion, Gate, GateStatus, GateStep, State, Task
 
 
 def make_task(*, max_repair_attempts: int = 3, required: bool = True) -> Task:
@@ -11,7 +11,7 @@ def make_task(*, max_repair_attempts: int = 3, required: bool = True) -> Task:
         "GA-gate-idempotency",
         "verify gate retry accounting",
         "example/GPTWork",
-        ["failed CI is repaired"],
+        [Criterion("failed CI is repaired")],
         state=State.EXECUTE,
         plan=[GateStep(Gate.PR_CI, required=required)],
         max_repair_attempts=max_repair_attempts,
@@ -45,6 +45,25 @@ class GateFailureAccountingTests(unittest.TestCase):
         gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 101 failed")
 
         self.assertEqual(task.repair_attempts, 2)
+
+    def test_same_failure_after_waiting_does_not_consume_budget_twice(self) -> None:
+        task = make_task()
+        gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+        gate(task, Gate.PR_CI, GateStatus.WAITING, "CI run 100 temporarily unavailable")
+        gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+
+        self.assertEqual(task.repair_attempts, 1)
+        self.assertEqual(task.state, State.EXECUTE)
+
+    def test_failure_evidence_ledger_survives_task_serialization(self) -> None:
+        task = make_task()
+        gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+        restored = Task.from_dict(task.to_dict())
+        gate(restored, Gate.PR_CI, GateStatus.WAITING, "temporary API timeout")
+        gate(restored, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+
+        self.assertEqual(restored.repair_attempts, 1)
+        self.assertEqual(restored.state, State.EXECUTE)
 
     def test_optional_gate_failure_does_not_consume_repair_budget(self) -> None:
         task = make_task(required=False)
