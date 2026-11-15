@@ -147,8 +147,12 @@ def capture(
     pr_ci_status_lc = str(pr_ci_status or "").lower()
     approval_required = workflow_conclusion_lc == "action_required" or pr_ci_conclusion_lc == "action_required"
     effective_blocked_reason = str(blocked_reason or "")
+    pr_state_lc = str(pr_state or "").strip().lower()
+    pr_closed_unmerged = bool(pr_number and pr_state_lc == "closed" and not merged)
     if approval_required and not effective_blocked_reason:
         effective_blocked_reason = "workflow_approval_required"
+    elif pr_closed_unmerged and not effective_blocked_reason:
+        effective_blocked_reason = "pull_request_closed_without_merge"
 
     release_event_published = _release_event_published_for_merge(event, release_state, release_tag, release_tag_target_sha, merge_sha)
     explicit_release_published = str(release_published or "").strip().lower() in {"true", "1", "yes"}
@@ -273,7 +277,7 @@ def capture(
                 )
             )
 
-    if approval_required and pr_number and not merged:
+    if pr_number and not merged and (approval_required or pr_closed_unmerged):
         state = State.BLOCKED
     elif pr_number and not merged:
         state = State.EXECUTE
@@ -308,6 +312,8 @@ def capture(
             "event_head_sha": head_sha,
             "current_pr_head_sha": current_pr_head_sha or head_sha,
             "pr_number": pr_number,
+            "pr_state": str(pr_state or ""),
+            "pr_merged": merged if pr_state_lc else None,
             "merge_sha": merge_sha,
             "run_id": run_id,
             "artifact_name": "gptauto-" + tid,
@@ -383,9 +389,12 @@ def capture(
                 "pr_ci_conclusion",
                 "pr_ci_actor",
                 "pr_ci_run_attempt",
-                "blocked_reason",
             ):
                 merged_metadata[key] = t.metadata.get(key, "")
+            if effective_blocked_reason:
+                merged_metadata["blocked_reason"] = effective_blocked_reason
+            elif pr_state_lc == "open" or merged:
+                merged_metadata["blocked_reason"] = ""
             t.metadata = merged_metadata
             seen = {(e.at, e.kind, e.reason, e.gate, e.status, e.evidence) for e in previous.history}
             current = [e for e in t.history if (e.at, e.kind, e.reason, e.gate, e.status, e.evidence) not in seen]

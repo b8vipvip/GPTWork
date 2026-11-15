@@ -22,6 +22,15 @@ def canonical_phase(task: Task) -> str:
     event_head = str(task.metadata.get("event_head_sha") or "")
     current_head = str(task.metadata.get("current_pr_head_sha") or task.metadata.get("head_sha") or "")
     current_event = not (event_head and current_head and event_head != current_head)
+    pr_state = str(task.metadata.get("pr_state") or "").strip().lower()
+    pr_merged_value = task.metadata.get("pr_merged")
+    pr_merged = pr_merged_value is True or str(pr_merged_value or "").strip().lower() in {"true", "1", "yes"}
+
+    # A closed, unmerged PR cannot be repaired or merged by an automatic
+    # executor. Require an explicit maintainer decision (reopen or replace it)
+    # before any stale workflow failure can schedule another repair generation.
+    if pr_state == "closed" and not pr_merged:
+        return "USER_ACTION_REQUIRED"
 
     # GitHub uses action_required for an approval/actor intervention gate. It is
     # not product-code failure evidence and must never spend a repair generation.
