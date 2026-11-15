@@ -1,6 +1,6 @@
 #define MyAppName "GPTWork"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.5.251"
+  #define MyAppVersion "0.5.252"
 #endif
 #ifndef PrivateEnginePath
   #define PrivateEnginePath ""
