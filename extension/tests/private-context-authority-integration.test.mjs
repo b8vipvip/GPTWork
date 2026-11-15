@@ -14,8 +14,9 @@ const [manifestText, budgetText, authorityText, indicatorText, packageText, synt
 test('extension loads the private context budget authority instead of the old shadow', () => {
   assert.match(manifestText, /private-context-budget-authority\.js/);
   assert.doesNotMatch(manifestText, /private-context-budget-shadow\.js/);
-  assert.match(packageText, /node --check private-context-budget-authority\.js/);
-  assert.doesNotMatch(packageText, /node --check private-context-budget-shadow\.js/);
+  assert.match(packageText, /node scripts\\/check-syntax\\.mjs/);
+  assert.match(syntaxCheckText, /private-context-budget-authority\\.js/);
+  assert.doesNotMatch(syntaxCheckText, /private-context-budget-shadow\\.js/);
 });
 
 test('send-time guard continues to delegate exact private decisions to the private authority', () => {
