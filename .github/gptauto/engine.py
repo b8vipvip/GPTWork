@@ -13,8 +13,12 @@ def gate(task,name,status,evidence=""):
     if task.state!=State.EXECUTE:raise ProtocolError("gates can only be updated while EXECUTE")
     step=next((x for x in task.plan if x.gate==name),None)
     if not step:raise ProtocolError(f"gate {name.value} is not part of this task")
+    # Repeated observations of the same gate result are idempotent. Without
+    # this guard, polling one failed Actions run consumes the repair budget
+    # repeatedly even though no new failure or repair attempt occurred.
+    if step.status==status and step.evidence==evidence:return task
     step.status=status;step.evidence=evidence;task.record(f"{name.value}={status.value}: {evidence}".rstrip(),kind="gate",gate=name.value,status=status.value,evidence=evidence)
-    if status==GateStatus.FAILED:
+    if status==GateStatus.FAILED and step.required:
         task.repair_attempts+=1
         if task.repair_attempts>task.max_repair_attempts:task.state=State.BLOCKED;task.record("repair budget exhausted",kind="blocked")
     return task
