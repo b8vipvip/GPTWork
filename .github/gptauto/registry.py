@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from .model import Task, utcnow
 
-REF_KEYS={"branch","head_sha","pr_number","merge_sha","run_id","artifact_name"}
+REF_KEYS={"branch","head_sha","pr_number","merge_sha","run_id","artifact_name","release_tag_target_sha"}
 def registry_path(root=".gptauto"): return Path(root)/"tasks"/"index.json"
 def register(task:Task, root=".gptauto", **refs):
     path=registry_path(root);path.parent.mkdir(parents=True,exist_ok=True)
