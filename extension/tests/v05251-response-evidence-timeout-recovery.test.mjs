@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+// Regression coverage for the browser-runtime response watchdog.
+
 const [background, contentScript] = await Promise.all([
   readFile(new URL('../background.js', import.meta.url), 'utf8'),
   readFile(new URL('../content.js', import.meta.url), 'utf8'),
