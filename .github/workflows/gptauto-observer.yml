@@ -161,7 +161,20 @@ jobs:
           stale_runs="$(gh api "repos/$REPOSITORY/actions/runs?event=pull_request&branch=$HEAD_REF&per_page=100" --paginate --slurp |
             jq -r --argjson pr "$PR_NUMBER" --arg head "$current_head" \
               '.[].workflow_runs[] | select(.head_sha != $head) | select(.status != "completed") | select(any(.pull_requests[]?; .number == $pr)) | select(.name | startswith("GPTAuto ") | not) | [.id, .head_sha] | @tsv')"
-          while IFS=
+          while read -r run_id run_head; do
+            [[ -n "$run_id" ]] || continue
+            # Re-check the live head immediately before each cancellation. If
+            # another push arrived during this pass, stop rather than cancel
+            # workflows for the newly current commit.
+            live_head="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
+            if [[ "$live_head" != "$current_head" ]]; then
+              echo "PR head moved during cancellation pass; stopping. previous=$current_head live=$live_head"
+              break
+            fi
+            [[ "$run_head" != "$live_head" ]] || continue
+            echo "Cancelling superseded PR run $run_id (head $run_head); current head is $live_head"
+            gh api --method POST "repos/$REPOSITORY/actions/runs/$run_id/cancel" >/dev/null 2>&1 || true
+          done <<< "$stale_runs"
 
       - uses: actions/checkout@v4
         if: ${{ steps.ingress.outputs.actionable == 'true' }}
