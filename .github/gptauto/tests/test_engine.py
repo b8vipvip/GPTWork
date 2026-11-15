@@ -46,6 +46,25 @@ class GateFailureAccountingTests(unittest.TestCase):
 
         self.assertEqual(task.repair_attempts, 2)
 
+    def test_same_failure_after_waiting_does_not_consume_budget_twice(self) -> None:
+        task = make_task()
+        gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+        gate(task, Gate.PR_CI, GateStatus.WAITING, "CI run 100 temporarily unavailable")
+        gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+
+        self.assertEqual(task.repair_attempts, 1)
+        self.assertEqual(task.state, State.EXECUTE)
+
+    def test_failure_evidence_ledger_survives_task_serialization(self) -> None:
+        task = make_task()
+        gate(task, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+        restored = Task.from_dict(task.to_dict())
+        gate(restored, Gate.PR_CI, GateStatus.WAITING, "temporary API timeout")
+        gate(restored, Gate.PR_CI, GateStatus.FAILED, "CI run 100 failed")
+
+        self.assertEqual(restored.repair_attempts, 1)
+        self.assertEqual(restored.state, State.EXECUTE)
+
     def test_optional_gate_failure_does_not_consume_repair_budget(self) -> None:
         task = make_task(required=False)
         gate(task, Gate.PR_CI, GateStatus.FAILED, "optional CI run 100 failed")
