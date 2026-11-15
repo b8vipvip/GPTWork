@@ -7,22 +7,24 @@ const [background, contentScript] = await Promise.all([
   readFile(new URL('../content.js', import.meta.url), 'utf8'),
 ]);
 
-test('ordinary request schedules a bounded response-evidence deadline', () => {
+test('ordinary request schedules a bounded response-evidence deadline scoped to its request ID', () => {
   assert.match(background, /const RESPONSE_EVIDENCE_TIMEOUT_MS = 120000;/);
   assert.match(background, /RESPONSE_EVIDENCE_TIMEOUT_PREFIX = 'gptwork-response-evidence-timeout:'/);
-  assert.match(background, /if \(currentSettings\.networkVerificationEnabled && !verificationTransactionForTab\(tabId\)\) \{\s*scheduleResponseEvidenceTimeout\(tabId\);/);
-  assert.match(background, /function scheduleResponseEvidenceTimeout\(tabId\)/);
+  assert.match(background, /scheduleResponseEvidenceTimeout\(tabId, request\.requestId\)/);
+  assert.match(background, /function scheduleResponseEvidenceTimeout\(tabId, requestId\)/);
+  assert.match(background, /clearResponseEvidenceTimeout\(tabId, previousRequestId\)/);
 });
 
-test('missing response terminal cannot leave normal chat in waiting forever', () => {
+test('missing response terminal cannot leave the matching request waiting forever', () => {
   assert.match(background, /alarm\.name\.startsWith\(RESPONSE_EVIDENCE_TIMEOUT_PREFIX\)/);
-  assert.match(background, /state\?\.phase === 'waiting' && state\.lastRequest\?\.requestId/);
+  assert.match(background, /state\?\.phase === 'waiting' && requestId && state\.lastRequest\?\.requestId === requestId/);
   assert.match(background, /state\.phase = 'unverified';\s*state\.evidenceIssue = 'response_evidence_timeout';\s*state\.lastError = 'response_evidence_timeout';/);
   assert.match(background, /void broadcastTabState\(tabId\);/);
 });
 
-test('active downstream stream gets a short idle grace and terminal evidence clears the alarm', () => {
+test('active downstream stream gets a short idle grace and terminal evidence clears its alarm', () => {
   assert.match(background, /streamRecentlyActive/);
+  assert.match(background, /responseEvidenceAlarmName\(tabId, requestId\)/);
   assert.match(background, /lastActivityAt \+ RESPONSE_STREAM_IDLE_GRACE_MS/);
   assert.match(background, /if \(evidence\?\.streamContext\?\.isDownstream === true \|\| !evidence\?\.diagnostics\?\.streamHandoff\) \{\s*clearResponseEvidenceTimeout\(tabId\);/);
   assert.match(background, /if \(detachedWhileWaiting\) \{\s*clearResponseEvidenceTimeout\(tabId\);/);
