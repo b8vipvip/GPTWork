@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
 from gptauto.github import GitHubClient, GitHubError
 from gptauto.model import Criterion, Gate, GateStep, Task
-from gptauto.observer import _release_event_published_for_merge
+from gptauto.observer import _release_event_published_for_merge, capture
 from gptauto.orchestrator import Orchestrator
 
 
@@ -51,6 +54,47 @@ class ReleaseEventEvidenceTests(unittest.TestCase):
                 "release", "created", TAG, MERGE_SHA, MERGE_SHA
             )
         )
+
+
+class ReleaseCaptureFailClosedTests(unittest.TestCase):
+    def capture_state(self, *, resolved_tag_sha: str):
+        with tempfile.TemporaryDirectory() as root:
+            result = capture(
+                "example/GPTWork",
+                "release",
+                default_branch="main",
+                branch="main",
+                head_sha=MERGE_SHA,
+                pr_merged="true",
+                merge_sha=MERGE_SHA,
+                release_tag=TAG,
+                release_state="published",
+                release_tag_target_sha=resolved_tag_sha,
+                release_required_override="true",
+                main_ci_conclusion="success",
+                main_ci_run_id="123",
+                log_root=root,
+            )
+            state_path = Path(result["paths"]["state"])
+            return json.loads(state_path.read_text(encoding="utf-8"))
+
+    def test_default_branch_sha_cannot_substitute_for_unresolved_release_tag(self) -> None:
+        state = self.capture_state(resolved_tag_sha="")
+        release_gate = next(gate for gate in state["plan"] if gate["gate"] == Gate.RELEASE.value)
+        self.assertEqual(release_gate["status"], "waiting")
+        self.assertFalse(state["metadata"]["release_published"])
+
+    def test_release_gate_passes_only_with_explicit_exact_tag_target(self) -> None:
+        state = self.capture_state(resolved_tag_sha=MERGE_SHA)
+        release_gate = next(gate for gate in state["plan"] if gate["gate"] == Gate.RELEASE.value)
+        self.assertEqual(release_gate["status"], "passed")
+        self.assertEqual(state["metadata"]["release_tag_target_sha"], MERGE_SHA)
+
+    def test_release_gate_rejects_tag_targeting_different_commit(self) -> None:
+        state = self.capture_state(resolved_tag_sha=OTHER_SHA)
+        release_gate = next(gate for gate in state["plan"] if gate["gate"] == Gate.RELEASE.value)
+        self.assertEqual(release_gate["status"], "waiting")
+        self.assertFalse(state["metadata"]["release_published"])
 
 
 class GitTagResolutionTests(unittest.TestCase):
