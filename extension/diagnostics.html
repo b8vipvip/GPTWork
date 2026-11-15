@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPTWork · 诊断中心</title>
+  <link rel="stylesheet" href="diagnostics.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <span class="eyebrow">GPTWORK · DIAGNOSTICS</span>
+        <h1>诊断中心</h1>
+        <p>将模型选择、请求改写、响应身份和流式传输证据分开呈现。缺失的证据保持未知，不推断为成功。</p>
+      </div>
+      <div class="header-actions">
+        <button id="refresh" type="button" class="primary">刷新诊断</button>
+        <button id="export" type="button" class="secondary" disabled>导出脱敏摘要</button>
+      </div>
+    </header>
+
+    <div id="status" class="status" role="status" aria-live="polite">正在读取本地诊断数据…</div>
+
+    <section class="summary-grid" aria-label="诊断摘要">
+      <article class="summary-card"><span>扩展版本</span><strong id="version">—</strong><small id="platform">平台未知</small></article>
+      <article class="summary-card"><span>最近一次验证</span><strong id="outcome">—</strong><small id="verificationTime">暂无完成记录</small></article>
+      <article class="summary-card"><span>模型结果</span><strong id="verificationCount">—</strong><small id="verificationReason">尚无可用证据</small></article>
+      <article class="summary-card"><span>流捕获</span><strong id="streamCount">—</strong><small id="streamBytes">尚未捕获自动验证流</small></article>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div><span class="eyebrow">MODEL VERIFICATION</span><h2>模型验证证据</h2></div>
+        <span id="historyState" class="pill">历史记录状态未知</span>
+      </div>
+      <p id="historyNotice" class="notice">正在读取模型验证历史…</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>目标模型</th><th>Picker</th><th>请求确认</th><th>请求模型 / 原始模型</th>
+            <th>响应确认</th><th>响应模型 / 原始模型</th><th>响应问题</th><th>Request ID</th>
+          </tr></thead>
+          <tbody id="models"><tr><td colspan="8" class="empty">暂无模型结果</td></tr></tbody>
+        </table>
+      </div>
+      <p class="footnote">请求确认与响应确认是不同证据。只有数据源明确提供时才显示原始模型、响应请求 ID 和各阶段门禁；未提供字段显示为“未暴露”。</p>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div><span class="eyebrow">RUNTIME LOG</span><h2>运行时事件</h2></div>
+        <span id="logCount" class="pill">0 条相关事件</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>级别</th><th>组件</th><th>事件</th><th>摘要</th></tr></thead>
+          <tbody id="logs"><tr><td colspan="5" class="empty">暂无相关事件</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div><span class="eyebrow">STREAM CAPTURE</span><h2>自动验证流捕获</h2></div>
+        <span id="streamState" class="pill">未捕获</span>
+      </div>
+      <div id="streamNotice" class="notice">这里只展示元数据和请求关联信息，不显示 SSE 正文或 WebSocket 原始帧。</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>捕获时间</th><th>Request ID</th><th>传输</th><th>方向 / 阶段</th><th>HTTP</th><th>请求模型</th><th>字节</th></tr></thead>
+          <tbody id="streams"><tr><td colspan="7" class="empty">暂无流捕获条目</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div><span class="eyebrow">EVIDENCE BOUNDARIES</span><h2>证据与隐私边界</h2></div>
+      </div>
+      <ul class="boundary-list">
+        <li>HTTP 200、SSE [DONE]、页面模型选择和请求改写成功，均不能单独证明服务端实际使用了目标模型。</li>
+        <li>响应模型身份必须来自同一请求的权威响应证据；缺失或冲突时保留未验证状态。</li>
+        <li>本页不会读取或展示 Cookie、Authorization、聊天正文、原始 SSE 内容或 WebSocket 帧。</li>
+        <li>模型验证历史默认可能关闭；关闭时不补造历史记录，实时诊断和运行日志仍可查看。</li>
+      </ul>
+      <div class="footer-actions">
+        <a href="settings-v0521.html">模型验证历史设置 ↗</a>
+        <a href="debug-tools.html">打开 Astra 调试工具 ↗</a>
+      </div>
+    </section>
+    <footer>诊断摘要只保留模型身份、请求关联、状态与传输元数据。导出摘要不会包含原始流正文。</footer>
+  </main>
+  <script type="module" src="diagnostics.js"></script>
+</body>
+</html>
