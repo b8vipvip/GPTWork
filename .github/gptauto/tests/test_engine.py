@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from gptauto.engine import gate
-from gptauto.model import Gate, GateStatus, GateStep, State, Task
+from gptauto.model import Criterion, Gate, GateStatus, GateStep, State, Task
 
 
 def make_task(*, max_repair_attempts: int = 3, required: bool = True) -> Task:
@@ -11,7 +11,7 @@ def make_task(*, max_repair_attempts: int = 3, required: bool = True) -> Task:
         "GA-gate-idempotency",
         "verify gate retry accounting",
         "example/GPTWork",
-        ["failed CI is repaired"],
+        [Criterion("failed CI is repaired")],
         state=State.EXECUTE,
         plan=[GateStep(Gate.PR_CI, required=required)],
         max_repair_attempts=max_repair_attempts,
