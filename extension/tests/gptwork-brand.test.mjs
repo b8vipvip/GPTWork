@@ -10,6 +10,8 @@ const read = (p) => fs.readFileSync(path.join(repo, p), 'utf8');
 test('GPTWork is canonical product metadata', () => {
   const manifest = JSON.parse(read('extension/manifest.json'));
   assert.equal(manifest.name, 'GPTWork');
+  const readmeVersion = read('README.md').match(/当前正式版本：\*\*([^*]+)\*\*/)?.[1];
+  assert.equal(readmeVersion, manifest.version, 'README must advertise the actual packaged release version');
   assert.equal(manifest.action.default_title, 'GPTWork');
   assert.equal(JSON.parse(read('extension/package.json')).name, 'gptwork-extension');
   assert.match(read('native-core/Cargo.toml'), /name = "gptwork-core"/);

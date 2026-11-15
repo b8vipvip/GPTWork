@@ -1058,9 +1058,26 @@ export class ChatGptNetworkMonitor {
   }
 
   handleDataReceived(tabId, params) {
-    if (typeof params.data !== 'string' || !params.data) return;
     const record = this.requests.get(this.key(tabId, String(params.requestId)));
-    if (!record?.streamCaptureStarted) return;
+    if (!record) return;
+    const initialRequestId = record.downstream
+      ? (record.handoffId ? this.handoffs.get(record.handoffId)?.initialRequestId ?? null : null)
+      : record.requestId;
+    if (initialRequestId) {
+      this.onProtocolEvent?.(tabId, {
+        event: 'conversation_response_activity',
+        requestId: initialRequestId,
+        transportRequestId: record.requestId,
+        endpoint: record.endpoint,
+        transport: /event-stream/i.test(record.mimeType || '') ? 'sse' : 'http',
+        downstream: Boolean(record.downstream),
+        dataLength: Number.isFinite(params.dataLength) ? params.dataLength : null,
+        encodedDataLength: Number.isFinite(params.encodedDataLength) ? params.encodedDataLength : null,
+      });
+    }
+    // Network.dataReceived may contain byte counts without an exposed body chunk.
+    // Activity is still valid for timeout recovery; body capture remains optional.
+    if (typeof params.data !== 'string' || !params.data || !record.streamCaptureStarted) return;
     this.appendResponseStreamChunk(record, params.data);
   }
 
@@ -1377,7 +1394,24 @@ export class ChatGptNetworkMonitor {
     socket.lastActivityAt = Date.now();
     const payload = typeof params.response?.payloadData === 'string' ? params.response.payloadData : '';
     const exact = this.matchHandoff(tabId, payload);
-    if (!exact) return;
+    if (!exact) {
+      // Once a socket is associated with a handoff, later server frames need not
+      // repeat the conversation/topic marker. They still prove transport activity,
+      // but never become model evidence unless their own payload contains metadata.
+      const associated = socket?.handoffId ? this.handoffs.get(socket.handoffId) : null;
+      if (direction === 'received' && associated?.initialRequestId) {
+        this.onProtocolEvent?.(tabId, {
+          event: 'conversation_response_activity',
+          requestId: associated.initialRequestId,
+          transportRequestId: requestId,
+          endpoint: socket.endpoint || 'websocket',
+          transport: 'websocket',
+          httpStatus: 101,
+          downstream: true,
+        });
+      }
+      return;
+    }
 
     const handoff = exact;
     socket.handoffId = exact.id;
@@ -1390,6 +1424,15 @@ export class ChatGptNetworkMonitor {
       matchBasis: socket.matchBasis,
     });
     if (direction === 'sent') return;
+    this.onProtocolEvent?.(tabId, {
+      event: 'conversation_response_activity',
+      requestId: handoff.initialRequestId,
+      transportRequestId: requestId,
+      endpoint: socket.endpoint || 'websocket',
+      transport: 'websocket',
+      httpStatus: 101,
+      downstream: true,
+    });
     const frameId = `ws-${requestId}-${++this.webSocketSequence}`;
     const evidence = extractResponseEvidence({ body: payload, headers: {}, mimeType: 'application/json' });
     const diagnostics = {

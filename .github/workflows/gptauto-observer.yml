@@ -144,18 +144,37 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          CURRENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          gh api "repos/$REPOSITORY/actions/runs?event=pull_request&branch=$HEAD_REF&per_page=100" --paginate --slurp |
-          jq -r --argjson pr "$PR_NUMBER" --arg head "$CURRENT_HEAD" \
-            '.[].workflow_runs[] | select(.head_sha != $head) | select(.status != "completed") | select(any(.pull_requests[]?; .number == $pr)) | select(.name | startswith("GPTAuto ") | not) | .id' |
-          while read -r run_id; do
+          # A synchronize event can be queued and start after a newer push. The
+          # event payload SHA is then stale; never use it to cancel the newer
+          # head's CI. Read the live PR head before considering any cancellation.
+          current_head="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
+          [[ -n "$current_head" ]] || { echo "::error::Unable to resolve live PR head; refusing cancellation"; exit 1; }
+          if [[ "$current_head" != "$EVENT_HEAD" ]]; then
+            echo "Skipping stale synchronize event: event head=$EVENT_HEAD, live PR head=$current_head"
+            exit 0
+          fi
+
+          stale_runs="$(gh api "repos/$REPOSITORY/actions/runs?event=pull_request&branch=$HEAD_REF&per_page=100" --paginate --slurp |
+            jq -r --argjson pr "$PR_NUMBER" --arg head "$current_head" \
+              '.[].workflow_runs[] | select(.head_sha != $head) | select(.status != "completed") | select(any(.pull_requests[]?; .number == $pr)) | select(.name | startswith("GPTAuto ") | not) | [.id, .head_sha] | @tsv')"
+          while read -r run_id run_head; do
             [[ -n "$run_id" ]] || continue
-            echo "Cancelling superseded PR run $run_id; current head is $CURRENT_HEAD"
+            # Re-check the live head immediately before each cancellation. If
+            # another push arrived during this pass, stop rather than cancel
+            # workflows for the newly current commit.
+            live_head="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
+            if [[ "$live_head" != "$current_head" ]]; then
+              echo "PR head moved during cancellation pass; stopping. previous=$current_head live=$live_head"
+              break
+            fi
+            [[ "$run_head" != "$live_head" ]] || continue
+            echo "Cancelling superseded PR run $run_id (head $run_head); current head is $live_head"
             gh api --method POST "repos/$REPOSITORY/actions/runs/$run_id/cancel" >/dev/null 2>&1 || true
-          done
+          done <<< "$stale_runs"
 
       - uses: actions/checkout@v4
         if: ${{ steps.ingress.outputs.actionable == 'true' }}
