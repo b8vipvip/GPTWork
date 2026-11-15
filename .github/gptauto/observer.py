@@ -75,6 +75,20 @@ def _passed(value):
 def _release_workflow(name):
     return bool(_RELEASE_WORKFLOW_RE.search(str(name or "")))
 
+def _release_event_published_for_merge(event, release_state, release_tag, head_sha, merge_sha):
+    """Accept a release event only when its tag resolves to this task's merge commit."""
+    tag = str(release_tag or "").strip()
+    observed_sha = str(head_sha or "").strip().lower()
+    expected_sha = str(merge_sha or "").strip().lower()
+    return (
+        event == "release"
+        and str(release_state or "").strip().lower() in {"published", "released"}
+        and bool(tag)
+        and bool(re.fullmatch(r"[0-9a-f]{40}", observed_sha))
+        and bool(re.fullmatch(r"[0-9a-f]{40}", expected_sha))
+        and observed_sha == expected_sha
+    )
+
 
 def _release_required_with_override(override, *texts):
     value = str(override or "").strip().lower()
@@ -134,7 +148,7 @@ def capture(
     if approval_required and not effective_blocked_reason:
         effective_blocked_reason = "workflow_approval_required"
 
-    release_event_published = event == "release" and str(release_state or "").lower() in {"published", "released"}
+    release_event_published = _release_event_published_for_merge(event, release_state, release_tag, head_sha, merge_sha)
     explicit_release_published = str(release_published or "").strip().lower() in {"true", "1", "yes"}
     release_done = release_event_published or (explicit_release_published and _passed(release_conclusion))
     main_ci_done = _passed(main_ci_conclusion) or (
