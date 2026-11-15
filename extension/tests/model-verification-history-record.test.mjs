@@ -118,5 +118,20 @@ test('missing gate evidence remains null instead of being converted into a negat
   assert.equal(result.chatLockRequestConfirmed, null);
   assert.equal(result.chatLockResponseConfirmed, null);
   assert.equal(result.rawResponseModel, null);
+  assert.equal(result.responseConfirmed, null);
+  assert.equal(result.responseModelIdentity, null);
+  assert.equal(record.failed, 1);
 });
 
+
+test('history preserves native evidence without filling missing Chat response fields', () => {
+  const { results: [item] } = createModelVerificationHistoryRecord(17, {
+    catalogVerification: { results: [{
+      model: 'gpt-6', selectorKey: '__picker_a_chat_lock__',
+      nativeResponseModel: 'gpt-6', responseHttpStatus: 0,
+    }] },
+  });
+  assert.equal(item.nativeResponseModel, 'gpt-6');
+  assert.equal(item.rawResponseModel, null);
+  assert.equal(item.responseHttpStatus, null);
+});

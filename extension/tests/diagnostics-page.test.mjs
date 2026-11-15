@@ -71,7 +71,7 @@ test('autoVerify attempt summaries are used when the background leaves catalogVe
   assert.equal(snapshot.results[0].requestModel, 'gpt-6-astra');
 });
 
-test('runtime request and response events enrich an attempt with exact request correlation', () => {
+test('runtime events enrich only their matching probe and execution tab', () => {
   const snapshot = selectLatestVerification({
     tabs: [{
       autoVerification: {
@@ -80,7 +80,7 @@ test('runtime request and response events enrich an attempt with exact request c
         executionTabId: 29,
         maxAttempts: 1,
         outcome: 'partial',
-        attempts: [{ attempt: 1, requestLockConfirmed: true,
+        attempts: [{ attempt: 1, requestId: 'req-exact-1', requestLockConfirmed: true,
           requestModel: 'gpt-6-astra', responseModel: 'gpt-6',
           responseConfirmed: false, outcome: 'unverified' }],
       },
@@ -90,8 +90,12 @@ test('runtime request and response events enrich an attempt with exact request c
     { timestamp: '2026-11-15T10:00:20.000Z', component: 'network',
       event: 'formal_conversation_request_detected',
       details: { tabId: 29, requestId: 'req-exact-1', model: 'gpt-6-astra',
-        observedModel: 'gpt-6-astra-wm' } },
-    { timestamp: '2026-11-15T10:00:30.000Z', component: 'verification',
+        observedModel: 'gpt-6-astra' } },
+    { timestamp: '2026-11-15T10:00:29.000Z', component: 'network',
+      event: 'conversation_response_metadata_observed',
+      details: { tabId: 29, requestId: 'req-exact-1', transportRequestId: 'downstream-1',
+        rawResponseModel: 'gpt-6', httpStatus: 200 } },
+    { timestamp: '2026-11-15T10:00:30.000Z', component: 'discovery',
       event: 'response_evaluated',
       details: { tabId: 29, requestId: 'req-exact-1', requestModel: 'gpt-6-astra',
         originalResponseModel: 'gpt-6', rawResponseModel: 'gpt-6',
@@ -101,10 +105,23 @@ test('runtime request and response events enrich an attempt with exact request c
           observedModel: 'gpt-6', responseField: 'message.metadata.resolved_model_slug',
           variantConfirmed: false, definitiveMismatch: false } } },
   ];
+  logs.push(
+    { timestamp: '2026-11-15T10:00:40.000Z', component: 'network',
+      event: 'formal_conversation_request_detected',
+      details: { tabId: 29, requestId: 'baseline', model: 'gpt-6-astra', observedModel: 'wrong-request' } },
+    { timestamp: '2026-11-15T10:00:41.000Z', component: 'discovery',
+      event: 'response_evaluated',
+      details: { tabId: 29, requestModel: 'gpt-6-astra', rawResponseModel: 'missing-request-id' } },
+    { timestamp: '2026-11-15T10:00:42.000Z', component: 'network',
+      event: 'conversation_response_metadata_observed',
+      details: { tabId: 30, requestId: 'req-exact-1', rawResponseModel: 'wrong-tab' } },
+  );
   const enriched = enrichVerificationSnapshot(snapshot, logs);
   assert.equal(enriched.results[0].requestId, 'req-exact-1');
   assert.equal(enriched.results[0].responseRequestId, 'req-exact-1');
-  assert.equal(enriched.results[0].rawRequestModel, 'gpt-6-astra-wm');
+  assert.equal(enriched.results[0].rawRequestModel, '');
+  assert.equal(enriched.results[0].networkObservedRequestModel, 'gpt-6-astra');
+  assert.equal(enriched.results[0].transportResponseRequestId, 'downstream-1');
   assert.equal(enriched.results[0].rawResponseModel, 'gpt-6');
   assert.equal(enriched.results[0].responseModelField, 'message.metadata.resolved_model_slug');
   assert.equal(enriched.results[0].responseHttpStatus, 200);
@@ -210,3 +227,67 @@ test('the diagnostics route resolves to a real standalone page and does not edit
   assert.doesNotMatch(script, /rawSse|rawFrame|responseBody/);
 });
 
+test('exports both stages from the full catalog completion log for the matching execution tab', () => {
+  const runtimeLogs = [
+    {
+      component: 'discovery', event: 'model_discovery_started', timestamp: '2026-11-15T10:00:00Z',
+      details: { tabId: 29 },
+    },
+    {
+      component: 'network', event: 'conversation_response_metadata_observed', timestamp: '2026-11-15T09:59:59Z',
+      details: { tabId: 29, requestId: 'chat-1', rawResponseModel: 'stale-response' },
+    },
+    {
+      component: 'discovery', event: 'model_discovery_completed', timestamp: '2026-11-15T10:00:30Z',
+      details: { tabId: 29, total: 2, requestConfirmed: 2, verified: 1, failed: 1, results: [
+        { model: 'gpt-6', pickerMode: 'A', selectorKey: 'native', requestId: 'native-1',
+          selected: true, verified: true, requestConfirmed: true, responseConfirmed: true, rawResponseModel: 'gpt-6' },
+        { model: 'gpt-6', pickerMode: 'A', selectorKey: '__picker_a_chat_lock__', requestId: 'chat-1',
+          requestConfirmed: true, responseConfirmed: false, nativeResponseModel: 'gpt-6', responseHttpStatus: 0 },
+      ] },
+    },
+    {
+      component: 'discovery', event: 'model_discovery_completed', timestamp: '2026-11-15T10:00:31Z',
+      details: { tabId: 30, results: [{ model: 'unrelated' }] },
+    },
+    {
+      component: 'discovery', event: 'auto_verify_completed', timestamp: '2026-11-15T10:00:32Z',
+      details: { tabId: 17, executionTabId: 29, outcome: 'partial', models: [{ model: 'gpt-6' }] },
+    },
+  ];
+  const report = createDiagnosticsReport({ runtimeLogs });
+  const { latest } = report.modelVerification;
+  assert.equal(latest.resultSource, 'catalog');
+  assert.equal(latest.verified, 1);
+  assert.equal(latest.failed, 1);
+  assert.deepEqual(latest.results.map((item) => item.requestId), ['native-1', 'chat-1']);
+  assert.equal(latest.results[0].selectionAttempted, true);
+  assert.equal(latest.results[1].selectorKey, '__picker_a_chat_lock__');
+  assert.equal(latest.results[1].rawResponseModel, '');
+  assert.equal(latest.results[1].responseHttpStatus, null);
+  assert.equal(latest.results[1].responseConfirmed, false);
+});
+
+test('legacy summaries without request IDs leave correlation fields unknown', () => {
+  const snapshot = { startedAt: '2026-11-15T10:00:00Z', executionTabId: 29, results: [{ model: 'gpt-6' }] };
+  const logs = [
+    { timestamp: '2026-11-15T10:00:20Z', event: 'formal_conversation_request_detected',
+      details: { tabId: 29, requestId: 'unrelated-request', model: 'gpt-6' } },
+    { timestamp: '2026-11-15T10:00:21Z', event: 'response_evaluated',
+      details: { tabId: 29, requestId: 'unrelated-request', requestModel: 'gpt-6', rawResponseModel: 'gpt-6' } },
+  ];
+  const { results: [row] } = enrichVerificationSnapshot(snapshot, logs);
+  assert.equal(row.requestId, '');
+  assert.equal(row.rawResponseModel, '');
+  assert.equal(row.responseConfirmed, null);
+  assert.equal(row.responseModelIdentity, null);
+});
+
+test('older publication events preserve missing counts and explicit zero', () => {
+  const gate = latestGatePublication([{
+    component: 'discovery', event: 'shared_model_catalog_published',
+    timestamp: '2026-11-15T10:00:32Z', details: { submitted: 2, fourGateEligible: 0 },
+  }]);
+  assert.equal(gate.fourGateEligible, 0);
+  assert.equal(gate.chatLockSupported, null);
+});
