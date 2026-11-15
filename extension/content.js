@@ -545,6 +545,10 @@ document.addEventListener('pointerdown', (event) => {
   function reasonText(guard) {
     const messages = {
       waiting_for_response_metadata: '请求已锁定，正在等待响应确认 / Request locked; waiting for response metadata',
+      formal_request_not_observed: '消息已发送，但未捕获到正式聊天请求；未确认模型 / Message sent, but no formal chat request was observed',
+      response_evidence_timeout: '响应确认超时；未取得权威模型证据，不能视为已确认 / Response evidence timed out; served model is not confirmed',
+      page_reloaded_before_response_confirmation: '页面刷新中断了响应捕获；本次请求未确认 / Page reload interrupted response capture; this request is unverified',
+      response_monitor_detached: '响应确认期间网络监控器断开；本次请求未确认 / Network monitor detached during response verification',
       page_selection_not_allowed: '页面选择与策略不同；正式请求仍会尝试锁定 / UI differs; the formal request will still be locked',
       page_selection_missing: '页面未暴露完整选择；网络请求锁仍已就绪 / UI selection is incomplete; network request lock remains ready',
       response_verification_disabled: '响应确认已关闭；请求锁定仍启用 / Response verification is off; request locking remains active',
@@ -664,6 +668,8 @@ document.addEventListener('pointerdown', (event) => {
       preflight_unknown: ['页面未知', 'wait'],
       waiting: ['等待确认', 'wait'],
       unverified: ['确认不足', 'wait'],
+      response_timeout: ['响应超时', 'wait'],
+      request_not_observed: ['请求未捕获', 'wait'],
       error: ['确认错误', 'wait'],
       monitor_offline: ['锁定器离线', 'wait'],
       verification_disabled: ['仅请求锁', 'lock'],
