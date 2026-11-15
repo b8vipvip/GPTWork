@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const extensionRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sourceFiles = [
+  "scripts/check-syntax.mjs",
   "background-entry.js",
   "background-local-error-capture.js",
   "runtime-generation.js",
