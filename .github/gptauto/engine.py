@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import hashlib
 from .model import CriterionStatus, Gate, GateStatus, State, Task
 class ProtocolError(RuntimeError):pass
 @dataclass(frozen=True)
@@ -13,14 +14,24 @@ def gate(task,name,status,evidence=""):
     if task.state!=State.EXECUTE:raise ProtocolError("gates can only be updated while EXECUTE")
     step=next((x for x in task.plan if x.gate==name),None)
     if not step:raise ProtocolError(f"gate {name.value} is not part of this task")
-    # Repeated observations of the same gate result are idempotent. Without
-    # this guard, polling one failed Actions run consumes the repair budget
-    # repeatedly even though no new failure or repair attempt occurred.
+    # Repeated observations of the same gate result are idempotent.
     if step.status==status and step.evidence==evidence:return task
     step.status=status;step.evidence=evidence;task.record(f"{name.value}={status.value}: {evidence}".rstrip(),kind="gate",gate=name.value,status=status.value,evidence=evidence)
     if status==GateStatus.FAILED and step.required:
-        task.repair_attempts+=1
-        if task.repair_attempts>task.max_repair_attempts:task.state=State.BLOCKED;task.record("repair budget exhausted",kind="blocked")
+        # Deduplicate by stable evidence identity, not only by the immediately
+        # previous status. A transient WAITING observation must not make the
+        # same failed Actions run consume the repair budget again.
+        evidence_key=hashlib.sha256(str(evidence or "").encode("utf-8")).hexdigest()
+        ledger=task.metadata.setdefault("repair_failure_evidence_sha256",{})
+        if not isinstance(ledger,dict):
+            ledger={};task.metadata["repair_failure_evidence_sha256"]=ledger
+        gate_ledger=ledger.setdefault(name.value,[])
+        if not isinstance(gate_ledger,list):
+            gate_ledger=[];ledger[name.value]=gate_ledger
+        if evidence_key not in gate_ledger:
+            gate_ledger.append(evidence_key)
+            task.repair_attempts+=1
+            if task.repair_attempts>task.max_repair_attempts:task.state=State.BLOCKED;task.record("repair budget exhausted",kind="blocked")
     return task
 def begin_verify(task):
     if task.state!=State.EXECUTE:raise ProtocolError("task is not executing")
