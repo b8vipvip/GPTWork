@@ -31,6 +31,8 @@ const sourceFiles = [
   "response-stream-activity.js",
   "background.js",
   "runtime-log.js",
+  "model-evidence-diagnostic-report.js",
+  "diagnostics.js",
   "request-history.js",
   "request-history-options.js",
   "page-model-evidence.js",
