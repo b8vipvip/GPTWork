@@ -1,6 +1,8 @@
 import {
   createDiagnosticsReport,
   DIAGNOSTICS_STORAGE_KEYS,
+  enrichVerificationSnapshot,
+  latestGatePublication,
   selectLatestVerification,
   summarizeModelResult,
   summarizeStreamCapture,
@@ -84,26 +86,66 @@ function renderModels(snapshot) {
   for (const item of results) {
     const model = summarizeModelResult(item);
     const row = document.createElement('tr');
-    addCell(row, model.model, model.pickerMode ? 'Picker ' + model.pickerMode : '');
-    addCell(row, model.pickerMode ? 'Picker ' + model.pickerMode : '未记录',
-      [model.selectionConfirmed == null ? '' : '选择 ' + yesNo(model.selectionConfirmed),
-        model.nativeStageComplete == null ? '' : 'Native ' + yesNo(model.nativeStageComplete)].filter(Boolean).join(' · '));
+    addCell(row, model.model, model.attempt ? 'Attempt ' + model.attempt : '');
+    addCell(row, model.pickerMode || '未记录',
+      [model.selectionAttempted ? '已尝试选择' : '',
+        model.selectionConfirmed == null ? '' : '选择 ' + yesNo(model.selectionConfirmed)].filter(Boolean).join(' · '));
     addCell(row, yesNo(model.requestConfirmed),
-      model.requestId ? '请求 ID ' + model.requestId : '');
-    addCell(row, model.requestModel || '未暴露',
-      model.rawRequestModel ? 'Raw: ' + model.rawRequestModel
-        : model.networkObservedRequestModel ? 'Network: ' + model.networkObservedRequestModel : '');
+      [model.requestModel ? 'Model: ' + model.requestModel : '',
+        model.rawRequestModel ? 'Raw: ' + model.rawRequestModel : '',
+        model.networkObservedRequestModel ? 'Network: ' + model.networkObservedRequestModel : ''].filter(Boolean).join(' · '));
     addCell(row, yesNo(model.responseConfirmed),
-      model.responseVerdict || model.evidenceSource || '');
-    addCell(row, model.responseModel || '未暴露',
-      [model.rawResponseModel ? 'Raw: ' + model.rawResponseModel : '',
+      [model.responseModel ? 'Model: ' + model.responseModel : '',
+        model.rawResponseModel ? 'Raw: ' + model.rawResponseModel : '',
         model.responseModelField ? 'Field: ' + model.responseModelField : '',
-        model.responseRequestId ? 'Response ID: ' + model.responseRequestId : ''].filter(Boolean).join(' · '));
-    addCell(row, model.responseIssue || model.error || '—',
-      model.responseHttpStatus == null ? '' : 'HTTP ' + model.responseHttpStatus);
+        model.responseHttpStatus == null ? '' : 'HTTP ' + model.responseHttpStatus].filter(Boolean).join(' · '));
+    addCell(row, model.nativeStageComplete == null ? '未提供' : yesNo(model.nativeStageComplete),
+      ['Request ' + yesNo(model.nativeRequestConfirmed),
+        'Stream ' + yesNo(model.nativeResponseObserved),
+        'Served ID ' + yesNo(model.nativeResponseConfirmed),
+        model.nativeResponseModel ? model.nativeResponseModel : ''].filter(Boolean).join(' · '));
+    addCell(row, model.chatLockStageComplete == null ? '未提供' : yesNo(model.chatLockStageComplete),
+      ['Supported ' + yesNo(model.chatLockSupported),
+        'Request ' + yesNo(model.chatLockRequestConfirmed),
+        'Response ' + yesNo(model.chatLockResponseConfirmed)].join(' · '));
+    addCell(row, model.responseIssue || model.nativeRequestIssue || model.nativeTransportFailure || model.error || '—',
+      model.responseVerdict || model.evidenceSource || '');
     addCell(row, model.requestId || '未暴露',
-      model.timedOut ? '超时' : model.turnSettled ? '轮次已结束' : '');
+      [model.responseRequestId ? 'Response ID: ' + model.responseRequestId : '',
+        model.chatAttemptRequestId ? 'Chat ID: ' + model.chatAttemptRequestId : '',
+        model.chatAttemptResponseRequestId ? 'Chat Response ID: ' + model.chatAttemptResponseRequestId : ''].filter(Boolean).join(' · '));
     root.append(row);
+  }
+}
+
+function renderGatePublication(logs) {
+  const gate = latestGatePublication(logs);
+  const root = $('gatePublication');
+  if (!gate) {
+    root.textContent = '当前运行日志中没有 shared_model_catalog_published 记录；四门资格数量保持未知，不从逐模型请求/响应结果推算。';
+    root.classList.add('warning');
+    return;
+  }
+  root.classList.remove('warning');
+  root.replaceChildren();
+  const metrics = [
+    ['提交模型', gate.submitted],
+    ['Native 响应身份确认', gate.nativeResponseConfirmed],
+    ['Work 流完成观察', gate.workNativeResponseObserved],
+    ['Work 响应模型确认', gate.workNativeResponseMetadataConfirmed],
+    ['Chat Lock 支持', gate.chatLockSupported],
+    ['四门可发布', gate.fourGateEligible],
+    ['共享目录数量', gate.shared],
+  ];
+  for (const [label, value] of metrics) {
+    const item = document.createElement('div');
+    item.className = 'gate-metric';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const number = document.createElement('strong');
+    number.textContent = String(value);
+    item.append(name, number);
+    root.append(item);
   }
 }
 
@@ -191,18 +233,20 @@ async function refresh() {
     const streamCapture = stored[DIAGNOSTICS_STORAGE_KEYS.streamCapture]
       || bundle.autoVerificationStream || null;
     const stream = summarizeStreamCapture(streamCapture);
-    const snapshot = selectLatestVerification({
+    const selected = selectLatestVerification({
       tabs: Array.isArray(bundle.tabs) ? bundle.tabs : [],
       history: historyEnabled ? history : [],
       runtimeLogs: logs,
     });
+    const snapshot = enrichVerificationSnapshot(selected, logs);
     renderSummary(bundle, snapshot, stream);
     renderModels(snapshot);
+    renderGatePublication(logs);
     renderLogs(logs);
     renderStreams(stream);
     $('historyState').textContent = historyEnabled ? '已启用 · ' + history.length + ' 条' : '已关闭';
     $('historyNotice').textContent = historyEnabled
-      ? `已读取 ${history.length} 条模型验证历史。当前结果来源：${snapshot?.source || '暂无'}。`
+      ? `已读取 ${history.length} 条模型验证历史。当前结果来源：${snapshot?.source || '暂无'}。旧记录未保存的原始字段无法追溯回填。`
       : '模型验证历史持久化当前处于关闭状态；本页不会自动开启。仍可查看当前标签页诊断状态、运行时日志和流捕获元数据。';
     $('historyNotice').classList.toggle('warning', !historyEnabled);
     currentReport = createDiagnosticsReport({
