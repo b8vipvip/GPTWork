@@ -389,9 +389,12 @@ def capture(
                 "pr_ci_conclusion",
                 "pr_ci_actor",
                 "pr_ci_run_attempt",
-                "blocked_reason",
             ):
                 merged_metadata[key] = t.metadata.get(key, "")
+            if effective_blocked_reason:
+                merged_metadata["blocked_reason"] = effective_blocked_reason
+            elif pr_state_lc == "open" or merged:
+                merged_metadata["blocked_reason"] = ""
             t.metadata = merged_metadata
             seen = {(e.at, e.kind, e.reason, e.gate, e.status, e.evidence) for e in previous.history}
             current = [e for e in t.history if (e.at, e.kind, e.reason, e.gate, e.status, e.evidence) not in seen]
