@@ -60,7 +60,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.251';
+const RUNTIME_CODE_VERSION = '0.5.252';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -796,15 +796,28 @@ function responseEvidenceAlarmName(tabId, requestId) {
   return RESPONSE_EVIDENCE_TIMEOUT_PREFIX + Number(tabId) + ':' + encodeURIComponent(String(requestId));
 }
 
-function scheduleResponseEvidenceTimeout(tabId, requestId) {
-  if (!Number.isInteger(tabId) || !requestId) return;
-  void chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), {
-    when: Date.now() + RESPONSE_EVIDENCE_TIMEOUT_MS,
-  }).catch((error) => {
+function createResponseEvidenceAlarm(tabId, requestId, when) {
+  if (!Number.isInteger(tabId) || !requestId || !Number.isFinite(when)) return;
+  try {
+    // chrome.alarms.create() gained Promise support in Chrome 111. The
+    // extension still supports Chrome 110, where the API returns undefined.
+    const result = chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), { when });
+    if (result && typeof result.catch === 'function') {
+      void result.catch((error) => {
+        logRuntime('warn', 'network', 'response_evidence_timeout_schedule_failed', {
+          tabId, error: errorText(error),
+        });
+      });
+    }
+  } catch (error) {
     logRuntime('warn', 'network', 'response_evidence_timeout_schedule_failed', {
       tabId, error: errorText(error),
     });
-  });
+  }
+}
+
+function scheduleResponseEvidenceTimeout(tabId, requestId) {
+  createResponseEvidenceAlarm(tabId, requestId, Date.now() + RESPONSE_EVIDENCE_TIMEOUT_MS);
 }
 
 function clearResponseEvidenceTimeout(tabId, requestId = tabStates.get(tabId)?.lastRequest?.requestId) {
@@ -5368,9 +5381,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       const streamRecentlyActive = lastActivityAt > 0
         && Date.now() - lastActivityAt < RESPONSE_STREAM_IDLE_GRACE_MS;
       if (streamRecentlyActive) {
-        void chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), {
-          when: lastActivityAt + RESPONSE_STREAM_IDLE_GRACE_MS,
-        }).catch(() => {});
+        createResponseEvidenceAlarm(tabId, requestId, lastActivityAt + RESPONSE_STREAM_IDLE_GRACE_MS);
       } else {
         state.phase = 'unverified';
         state.evidenceIssue = 'response_evidence_timeout';
