@@ -192,11 +192,17 @@ export function evaluateGuard({ state, policy, settings, inScope = true }) {
     };
   }
   if (state.phase === 'unverified') {
+    const reason = state.evidenceIssue || state.lastVerification?.reason || 'metadata_missing';
+    const status = reason === 'formal_request_not_observed'
+      ? 'request_not_observed'
+      : ['response_evidence_timeout', 'page_reloaded_before_response_confirmation'].includes(reason)
+        ? 'response_timeout'
+        : 'unverified';
     return {
       ...base,
       allowKind: 'warning',
-      status: 'unverified',
-      reason: state.lastVerification?.reason || 'metadata_missing',
+      status,
+      reason,
     };
   }
   if (state.phase === 'error') {
