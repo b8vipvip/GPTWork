@@ -126,10 +126,39 @@ jobs:
             sleep 10
           done
 
-          gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
-            -f merge_method=squash -f sha="$EXPECTED_HEAD" | tee /tmp/gptauto-merge.json
-          jq -e '.merged == true' /tmp/gptauto-merge.json >/dev/null
-          merge_sha="$(jq -r '.sha' /tmp/gptauto-merge.json)"
+          merge_response=""
+          if merge_response="$(gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f merge_method=squash -f sha="$EXPECTED_HEAD" 2>&1)"; then
+            printf '%s\n' "$merge_response" > /tmp/gptauto-merge.json
+            jq -e '.merged == true' /tmp/gptauto-merge.json >/dev/null
+            merge_sha="$(jq -r '.sha' /tmp/gptauto-merge.json)"
+          else
+            if PYTHONPATH=.github python -c 'from gptauto.merge import is_merge_in_progress_error; import sys; sys.exit(0 if is_merge_in_progress_error(sys.stdin.read()) else 1)' <<<"$merge_response"; then
+              echo "::notice::GitHub reports that another executor is already merging PR #$PR_NUMBER; waiting for the exact expected head to become merged."
+              merge_sha=""
+              for attempt in $(seq 1 12); do
+                pr="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+                actual_head="$(jq -r '.head.sha // ""' <<<"$pr")"
+                [[ "$actual_head" == "$EXPECTED_HEAD" ]] || {
+                  echo "::error::PR head moved while another merge was in progress; refusing to adopt a different commit."
+                  exit 1
+                }
+                merge_sha="$(printf '%s' "$pr" | PYTHONPATH=.github python -m gptauto.merge resolve-merged-sha --expected-head "$EXPECTED_HEAD")"
+                if [[ -n "$merge_sha" ]]; then
+                  echo "::notice::Adopted confirmed merge SHA $merge_sha for expected PR head $EXPECTED_HEAD."
+                  break
+                fi
+                sleep 5
+              done
+              [[ -n "$merge_sha" ]] || {
+                echo "::error::GitHub reported a merge in progress but PR #$PR_NUMBER did not reach a confirmed merged state within 60 seconds."
+                exit 1
+              }
+            else
+              printf '%s\n' "$merge_response" >&2
+              exit 1
+            fi
+          fi
           marker="<!-- gptauto-reconcile-dispatched:$TASK_ID:$merge_sha -->"
           existing="$(gh api --paginate "repos/$REPOSITORY/issues/$PR_NUMBER/comments?per_page=100" --jq '.[].body' 2>/dev/null || true)"
           if grep -Fq "$marker" <<<"$existing"; then
