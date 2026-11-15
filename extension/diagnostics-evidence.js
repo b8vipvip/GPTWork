@@ -12,8 +12,9 @@ function timeValue(value) {
 
 function resultRows(value) {
   const catalog = value?.catalogVerification;
-  if (Array.isArray(catalog?.results)) return catalog.results;
-  if (Array.isArray(value?.results)) return value.results;
+  if (Array.isArray(catalog?.results) && catalog.results.length) return catalog.results;
+  if (Array.isArray(value?.results) && value.results.length) return value.results;
+  if (Array.isArray(value?.attempts) && value.attempts.length) return value.attempts;
   if (Array.isArray(value?.models)) return value.models;
   return [];
 }
@@ -26,6 +27,9 @@ function makeSnapshot(value, source, fallbackTime = null) {
   const startedAt = value.startedAt || null;
   const results = resultRows(value);
   if (!completedAt && !startedAt && !results.length && !value.outcome) return null;
+  const total = Number(catalog.total ?? value.total ?? value.catalogTotal ?? value.maxAttempts ?? results.length);
+  const verifiedCount = results.filter((item) => item?.verified === true || item?.outcome === 'verified').length;
+  const requestCount = results.filter((item) => item?.requestConfirmed === true || item?.requestLockConfirmed === true).length;
   return {
     id: asText(value.id || value.startedAt || completedAt || source),
     source,
@@ -34,10 +38,13 @@ function makeSnapshot(value, source, fallbackTime = null) {
     timestamp: completedAt || startedAt || fallbackTime || '',
     outcome: asText(value.outcome || value.finalOutcome || 'unknown'),
     reason: asText(value.reason || value.finalReason || ''),
-    total: Number(catalog.total ?? value.total ?? value.catalogTotal ?? 0),
-    requestConfirmed: Number(catalog.requestConfirmed ?? value.requestConfirmed ?? value.catalogRequestConfirmed ?? 0),
-    verified: Number(catalog.verified ?? value.verified ?? value.catalogVerified ?? 0),
-    failed: Number(catalog.failed ?? value.failed ?? value.catalogFailed ?? 0),
+    sourceTabId: value.sourceTabId ?? value.tabId ?? null,
+    executionTabId: value.executionTabId ?? null,
+    total,
+    requestConfirmed: Number(catalog.requestConfirmed ?? value.requestConfirmed ?? value.catalogRequestConfirmed ?? requestCount),
+    verified: Number(catalog.verified ?? value.verified ?? value.catalogVerified ?? verifiedCount),
+    failed: Number(catalog.failed ?? value.failed ?? value.catalogFailed ?? Math.max(0, total - verifiedCount)),
+    resultSource: asText(value.resultSource || (Array.isArray(value.attempts) ? 'attempts' : 'catalog')),
     pageContext: asText(value.pageContext),
     pickerModes: asArray(catalog.pickerModes || value.pickerModes),
     results,
@@ -63,36 +70,72 @@ export function selectLatestVerification({ tabs = [], history = [], runtimeLogs 
   return candidates[0] || null;
 }
 
+function safeModelIdentity(identity) {
+  if (!identity || typeof identity !== 'object') return null;
+  return {
+    status: asText(identity.status),
+    requestedModel: asText(identity.requestedModel),
+    observedModel: asText(identity.observedModel),
+    responseField: asText(identity.responseField),
+    incompleteStream: identity.incompleteStream === true,
+    terminalEvent: asText(identity.terminalEvent),
+    networkError: asText(identity.networkError),
+    streamCaptureOverflowed: identity.streamCaptureOverflowed === true,
+    variantConfirmed: identity.variantConfirmed === true,
+    definitiveMismatch: identity.definitiveMismatch === true,
+  };
+}
+
 export function summarizeModelResult(item = {}) {
   return {
+    attempt: item.attempt == null ? null : Number(item.attempt),
     model: asText(item.model || item.label || item.rawModel || 'unknown'),
     pickerMode: asText(item.pickerMode),
-    selectionConfirmed: item.selectionConfirmed === true
-      ? true : item.selectionConfirmed === false ? false : null,
-    nativeStageComplete: item.nativeStageComplete === true
-      ? true : item.nativeStageComplete === false ? false : null,
-    nativeRequestConfirmed: item.nativeRequestConfirmed === true
-      ? true : item.nativeRequestConfirmed === false ? false : null,
-    nativeResponseConfirmed: item.nativeResponseConfirmed === true
-      ? true : item.nativeResponseConfirmed === false ? false : null,
-    requestConfirmed: item.requestConfirmed === true,
+    selectionAttempted: item.selectionAttempted === true,
+    selectionConfirmed: typeof item.selectionConfirmed === 'boolean' ? item.selectionConfirmed : null,
+    nativeStageComplete: typeof item.nativeStageComplete === 'boolean' ? item.nativeStageComplete : null,
+    nativeRequestConfirmed: typeof item.nativeRequestConfirmed === 'boolean' ? item.nativeRequestConfirmed : null,
+    nativeRequestIssue: asText(item.nativeRequestIssue),
+    nativeRequestModel: asText(item.nativeRequestModel),
+    nativeResponseObserved: typeof item.nativeResponseObserved === 'boolean' ? item.nativeResponseObserved : null,
+    nativeResponseConfirmed: typeof item.nativeResponseConfirmed === 'boolean' ? item.nativeResponseConfirmed : null,
+    nativeResponseMetadataConfirmed: typeof item.nativeResponseMetadataConfirmed === 'boolean'
+      ? item.nativeResponseMetadataConfirmed : null,
+    nativeResponseModel: asText(item.nativeResponseModel),
+    nativeResponseCompatible: typeof item.nativeResponseCompatible === 'boolean' ? item.nativeResponseCompatible : null,
+    nativeVerificationBasis: asText(item.nativeVerificationBasis),
+    nativeTransportFailure: asText(item.nativeTransportFailure),
+    requestConfirmed: item.requestConfirmed === true || item.requestLockConfirmed === true,
     requestModel: asText(item.requestModel),
     rawRequestModel: asText(item.rawRequestModel),
     networkObservedRequestModel: asText(item.networkObservedRequestModel),
     responseConfirmed: item.responseConfirmed === true,
     responseModel: asText(item.responseModel),
     rawResponseModel: asText(item.rawResponseModel || item.nativeResponseModel),
-    responseModelField: asText(item.responseModelField),
+    responseModelField: asText(item.responseModelField || item.responseField),
     responseRequestId: asText(item.responseRequestId),
     requestId: asText(item.requestId),
     responseIssue: asText(item.responseIssue),
     responseHttpStatus: item.responseHttpStatus == null ? null : Number(item.responseHttpStatus),
     evidenceSource: asText(item.evidenceSource),
-    responseVerdict: asText(item.responseVerdict),
+    responseVerdict: asText(item.responseVerdict || item.verdict),
+    chatLockStageComplete: typeof item.chatLockStageComplete === 'boolean' ? item.chatLockStageComplete : null,
+    chatLockSupported: typeof item.chatLockSupported === 'boolean' ? item.chatLockSupported : null,
+    chatLockRequestConfirmed: typeof item.chatLockRequestConfirmed === 'boolean' ? item.chatLockRequestConfirmed : null,
+    chatLockResponseConfirmed: typeof item.chatLockResponseConfirmed === 'boolean' ? item.chatLockResponseConfirmed : null,
+    chatAttemptTransport: asText(item.chatAttemptTransport),
+    chatAttemptResponseModel: asText(item.chatAttemptResponseModel),
+    chatTransportModel: asText(item.chatTransportModel),
+    chatResponseModel: asText(item.chatResponseModel),
+    chatAttemptRequestId: asText(item.chatAttemptRequestId),
+    chatAttemptResponseRequestId: asText(item.chatAttemptResponseRequestId),
+    chatAttemptResponseIssue: asText(item.chatAttemptResponseIssue),
+    fourGateEligible: typeof item.fourGateEligible === 'boolean' ? item.fourGateEligible : null,
+    responseModelIdentity: safeModelIdentity(item.responseModelIdentity || item.modelIdentity),
     timedOut: item.timedOut === true,
     turnSettled: item.turnSettled === true,
-    verified: item.verified === true,
-    error: asText(item.error),
+    verified: item.verified === true || item.outcome === 'verified',
+    error: asText(item.error || item.reason),
   };
 }
 
