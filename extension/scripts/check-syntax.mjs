@@ -96,14 +96,14 @@ for (const file of sourceFiles) {
   if (result.error || result.status !== 0) {
     const detail = [result.error?.message, result.stdout, result.stderr]
       .filter(Boolean)
-      .join("\\n")
+      .join("\n")
       .trim();
-    failures.push(`${file}:\\n${detail || `node --check exited with status ${result.status}`}`);
+    failures.push(`${file}:\n${detail || `node --check exited with status ${result.status}`}`);
   }
 }
 
 if (failures.length > 0) {
-  console.error(failures.join("\\n\\n"));
+  console.error(failures.join("\n\n"));
   process.exitCode = 1;
 } else {
   console.log(`Syntax check passed for ${sourceFiles.length} JavaScript files.`);
