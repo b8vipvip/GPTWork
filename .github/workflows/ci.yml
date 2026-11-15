@@ -114,6 +114,8 @@ jobs:
           data=json.loads(Path("/tmp/gptauto-init.json").read_text())
           with open(os.environ["GITHUB_ENV"],"a") as f: f.write("GPTAUTO_TASK_ID="+Path(data["directory"]).name+"\n")
           PY
+      - name: Test GPTAuto reconciliation run selection
+        run: PYTHONPATH=.github python -m unittest discover -s .github/gptauto/tests -p 'test_*.py' -v
       - name: Upload GPTAuto diagnostic artifact
         uses: ./.github/actions/upload-gptauto-log
         with:
