@@ -792,13 +792,13 @@ const RESPONSE_EVIDENCE_TIMEOUT_MS = 120000;
 const RESPONSE_EVIDENCE_TIMEOUT_PREFIX = 'gptwork-response-evidence-timeout:';
 const RESPONSE_STREAM_IDLE_GRACE_MS = 30000;
 
-function responseEvidenceAlarmName(tabId) {
-  return RESPONSE_EVIDENCE_TIMEOUT_PREFIX + Number(tabId);
+function responseEvidenceAlarmName(tabId, requestId) {
+  return RESPONSE_EVIDENCE_TIMEOUT_PREFIX + Number(tabId) + ':' + encodeURIComponent(String(requestId));
 }
 
-function scheduleResponseEvidenceTimeout(tabId) {
-  if (!Number.isInteger(tabId)) return;
-  void chrome.alarms.create(responseEvidenceAlarmName(tabId), {
+function scheduleResponseEvidenceTimeout(tabId, requestId) {
+  if (!Number.isInteger(tabId) || !requestId) return;
+  void chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), {
     when: Date.now() + RESPONSE_EVIDENCE_TIMEOUT_MS,
   }).catch((error) => {
     logRuntime('warn', 'network', 'response_evidence_timeout_schedule_failed', {
@@ -807,9 +807,9 @@ function scheduleResponseEvidenceTimeout(tabId) {
   });
 }
 
-function clearResponseEvidenceTimeout(tabId) {
-  if (!Number.isInteger(tabId)) return;
-  void chrome.alarms.clear(responseEvidenceAlarmName(tabId)).catch(() => {});
+function clearResponseEvidenceTimeout(tabId, requestId = tabStates.get(tabId)?.lastRequest?.requestId) {
+  if (!Number.isInteger(tabId) || !requestId) return;
+  void chrome.alarms.clear(responseEvidenceAlarmName(tabId, requestId)).catch(() => {});
 }
 
 function accountAllowsState(state) {
@@ -1795,7 +1795,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
       || state.lastRewrite;
     state.lastRequest = withForwardedRequestEvidence(observedRequest, forwarded);
     if (currentSettings.networkVerificationEnabled && !verificationTransactionForTab(tabId)) {
-      scheduleResponseEvidenceTimeout(tabId);
+      scheduleResponseEvidenceTimeout(tabId, request.requestId);
     } else {
       clearResponseEvidenceTimeout(tabId);
     }
@@ -5353,14 +5353,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void syncRuntimeLogsToNative().catch(() => {});
   }
   if (alarm.name.startsWith(RESPONSE_EVIDENCE_TIMEOUT_PREFIX)) {
-    const tabId = Number(alarm.name.slice(RESPONSE_EVIDENCE_TIMEOUT_PREFIX.length));
+    const identity = alarm.name.slice(RESPONSE_EVIDENCE_TIMEOUT_PREFIX.length);
+    const separator = identity.indexOf(':');
+    const tabId = Number(separator >= 0 ? identity.slice(0, separator) : NaN);
+    let requestId = null;
+    try { requestId = separator >= 0 ? decodeURIComponent(identity.slice(separator + 1)) : null; } catch {}
     const state = Number.isInteger(tabId) ? tabStates.get(tabId) : null;
-    if (state?.phase === 'waiting' && state.lastRequest?.requestId) {
+    if (state?.phase === 'waiting' && requestId && state.lastRequest?.requestId === requestId) {
       const lastActivityAt = Number(state.streamTracking?.lastActivityAt || 0);
       const streamRecentlyActive = lastActivityAt > 0
         && Date.now() - lastActivityAt < RESPONSE_STREAM_IDLE_GRACE_MS;
       if (streamRecentlyActive) {
-        void chrome.alarms.create(responseEvidenceAlarmName(tabId), {
+        void chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), {
           when: lastActivityAt + RESPONSE_STREAM_IDLE_GRACE_MS,
         }).catch(() => {});
       } else {
@@ -5369,7 +5373,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         state.lastError = 'response_evidence_timeout';
         logRuntime('warn', 'network', 'response_evidence_timeout', {
           tabId,
-          requestId: state.lastRequest.requestId,
+          requestId,
           timeoutMs: RESPONSE_EVIDENCE_TIMEOUT_MS,
           downstreamEvidenceCount: state.streamTracking?.downstreamEvidenceCount || 0,
           transports: state.streamTracking?.transports || [],
