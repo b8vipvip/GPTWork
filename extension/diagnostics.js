@@ -1,11 +1,6 @@
 import {
   createDiagnosticsReport,
   DIAGNOSTICS_STORAGE_KEYS,
-  enrichVerificationSnapshot,
-  latestGatePublication,
-  selectLatestVerification,
-  summarizeModelResult,
-  summarizeStreamCapture,
 } from './diagnostics-evidence.js';
 
 const $ = (id) => document.getElementById(id);
@@ -83,10 +78,11 @@ function renderModels(snapshot) {
     return;
   }
   root.replaceChildren();
-  for (const item of results) {
-    const model = summarizeModelResult(item);
+  for (const model of results) {
     const row = document.createElement('tr');
-    addCell(row, model.model, model.attempt ? 'Attempt ' + model.attempt : '');
+    const stage = model.selectorKey === '__picker_a_chat_lock__' || model.selectorKey === '__picker_b_chat_lock__'
+      ? 'Chat Lock' : model.discoverySource || '';
+    addCell(row, model.model, stage);
     addCell(row, model.pickerMode || '未记录',
       [model.selectionAttempted ? '已尝试选择' : '',
         model.selectionConfirmed == null ? '' : '选择 ' + yesNo(model.selectionConfirmed)].filter(Boolean).join(' · '));
@@ -112,14 +108,14 @@ function renderModels(snapshot) {
       model.responseVerdict || model.evidenceSource || '');
     addCell(row, model.requestId || '未暴露',
       [model.responseRequestId ? 'Response ID: ' + model.responseRequestId : '',
+        model.transportResponseRequestId ? 'Transport ID: ' + model.transportResponseRequestId : '',
         model.chatAttemptRequestId ? 'Chat ID: ' + model.chatAttemptRequestId : '',
         model.chatAttemptResponseRequestId ? 'Chat Response ID: ' + model.chatAttemptResponseRequestId : ''].filter(Boolean).join(' · '));
     root.append(row);
   }
 }
 
-function renderGatePublication(logs) {
-  const gate = latestGatePublication(logs);
+function renderGatePublication(gate) {
   const root = $('gatePublication');
   if (!gate) {
     root.textContent = '当前运行日志中没有 shared_model_catalog_published 记录；四门资格数量保持未知，不从逐模型请求/响应结果推算。';
@@ -127,7 +123,11 @@ function renderGatePublication(logs) {
     return;
   }
   root.classList.remove('warning');
-  root.replaceChildren();
+  const publishedAt = document.createElement('time');
+  publishedAt.dateTime = gate.timestamp;
+  publishedAt.textContent = '最近一次共享目录发布 · ' + time(gate.timestamp);
+  publishedAt.style.gridColumn = '1 / -1';
+  root.replaceChildren(publishedAt);
   const metrics = [
     ['提交模型', gate.submitted],
     ['Native 响应身份确认', gate.nativeResponseConfirmed],
@@ -143,7 +143,7 @@ function renderGatePublication(logs) {
     const name = document.createElement('span');
     name.textContent = label;
     const number = document.createElement('strong');
-    number.textContent = String(value);
+    number.textContent = value == null ? '未提供' : String(value);
     item.append(name, number);
     root.append(item);
   }
@@ -232,30 +232,19 @@ async function refresh() {
       ? stored[DIAGNOSTICS_STORAGE_KEYS.history] : [];
     const streamCapture = stored[DIAGNOSTICS_STORAGE_KEYS.streamCapture]
       || bundle.autoVerificationStream || null;
-    const stream = summarizeStreamCapture(streamCapture);
-    const selected = selectLatestVerification({
-      tabs: Array.isArray(bundle.tabs) ? bundle.tabs : [],
-      history: historyEnabled ? history : [],
-      runtimeLogs: logs,
-    });
-    const snapshot = enrichVerificationSnapshot(selected, logs);
+    currentReport = createDiagnosticsReport({ bundle, runtimeLogs: logs, history, historyEnabled, streamCapture });
+    const snapshot = currentReport.modelVerification.latest;
+    const stream = currentReport.streamCapture;
     renderSummary(bundle, snapshot, stream);
     renderModels(snapshot);
-    renderGatePublication(logs);
+    renderGatePublication(currentReport.fourGatePublication);
     renderLogs(logs);
     renderStreams(stream);
     $('historyState').textContent = historyEnabled ? '已启用 · ' + history.length + ' 条' : '已关闭';
     $('historyNotice').textContent = historyEnabled
-      ? `已读取 ${history.length} 条模型验证历史。当前结果来源：${snapshot?.source || '暂无'}。旧记录未保存的原始字段无法追溯回填。`
+      ? `已读取 ${history.length} 条模型验证历史。当前结果来源：${snapshot?.source || '暂无'}。`
       : '模型验证历史持久化当前处于关闭状态；本页不会自动开启。仍可查看当前标签页诊断状态、运行时日志和流捕获元数据。';
     $('historyNotice').classList.toggle('warning', !historyEnabled);
-    currentReport = createDiagnosticsReport({
-      bundle,
-      runtimeLogs: logs,
-      history,
-      historyEnabled,
-      streamCapture,
-    });
     $('export').disabled = false;
     setStatus(bundleResult.status === 'rejected'
       ? '已读取本地运行日志与存储数据；完整诊断包不可用：' + bundleResult.reason.message

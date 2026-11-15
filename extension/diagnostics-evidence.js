@@ -10,22 +10,20 @@ function timeValue(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function resultRows(value) {
-  const catalog = value?.catalogVerification;
-  if (Array.isArray(catalog?.results) && catalog.results.length) return catalog.results;
-  if (Array.isArray(value?.results) && value.results.length) return value.results;
-  if (Array.isArray(value?.attempts) && value.attempts.length) return value.attempts;
-  if (Array.isArray(value?.models)) return value.models;
-  return [];
-}
-
 function makeSnapshot(value, source, fallbackTime = null) {
   if (!value || typeof value !== 'object') return null;
   const catalog = value.catalogVerification && typeof value.catalogVerification === 'object'
     ? value.catalogVerification : value;
   const completedAt = value.completedAt || value.generatedAt || fallbackTime || null;
   const startedAt = value.startedAt || null;
-  const results = resultRows(value);
+  const catalogResults = asArray(catalog.results);
+  const savedResults = asArray(value.results);
+  const attempts = asArray(value.attempts);
+  const models = asArray(value.models);
+  const results = catalogResults.length ? catalogResults : savedResults.length ? savedResults
+    : attempts.length ? attempts : models;
+  const resultSource = catalogResults.length || savedResults.length ? 'catalog'
+    : attempts.length ? 'attempts' : models.length ? 'runtime-log' : 'none';
   if (!completedAt && !startedAt && !results.length && !value.outcome) return null;
   const total = Number(catalog.total ?? value.total ?? value.catalogTotal ?? value.maxAttempts ?? results.length);
   const verifiedCount = results.filter((item) => item?.verified === true || item?.outcome === 'verified').length;
@@ -43,8 +41,8 @@ function makeSnapshot(value, source, fallbackTime = null) {
     total,
     requestConfirmed: Number(catalog.requestConfirmed ?? value.requestConfirmed ?? value.catalogRequestConfirmed ?? requestCount),
     verified: Number(catalog.verified ?? value.verified ?? value.catalogVerified ?? verifiedCount),
-    failed: Number(catalog.failed ?? value.failed ?? value.catalogFailed ?? Math.max(0, total - verifiedCount)),
-    resultSource: asText(value.resultSource || (Array.isArray(value.attempts) ? 'attempts' : 'catalog')),
+    failed: Number(catalog.failed ?? value.failed ?? value.catalogFailed ?? Math.max(0, results.length - verifiedCount)),
+    resultSource: asText(value.resultSource || resultSource),
     pageContext: asText(value.pageContext),
     pickerModes: asArray(catalog.pickerModes || value.pickerModes),
     results,
@@ -61,9 +59,28 @@ export function selectLatestVerification({ tabs = [], history = [], runtimeLogs 
     const snapshot = makeSnapshot(record, 'model-history');
     if (snapshot) candidates.push(snapshot);
   }
-  for (const entry of asArray(runtimeLogs)) {
-    if (entry?.component !== 'discovery' || entry?.event !== 'auto_verify_completed') continue;
-    const snapshot = makeSnapshot(entry.details, 'runtime-log', entry.timestamp);
+  // The catalog completion event retains per-probe IDs and stage evidence.
+  // Pair it with the final summary from the same isolated execution tab.
+  const discoveryByTab = new Map();
+  const orderedLogs = asArray(runtimeLogs).slice().sort((a, b) => timeValue(a?.timestamp) - timeValue(b?.timestamp));
+  for (const entry of orderedLogs) {
+    if (entry?.component !== 'discovery') continue;
+    const details = entry.details || {};
+    if (entry.event === 'model_discovery_started' && Number.isInteger(details.tabId)) {
+      discoveryByTab.set(details.tabId, { startedAt: entry.timestamp });
+    }
+    if (entry.event === 'model_discovery_completed' && Number.isInteger(details.tabId)) {
+      discoveryByTab.set(details.tabId, { ...discoveryByTab.get(details.tabId), catalog: details });
+    }
+    if (!['auto_verify_completed', 'auto_verify_infrastructure_failed'].includes(entry.event)) continue;
+    const discovery = discoveryByTab.get(details.executionTabId);
+    discoveryByTab.delete(details.executionTabId);
+    const snapshot = makeSnapshot({
+      ...details,
+      startedAt: details.startedAt ?? discovery?.startedAt,
+      outcome: details.outcome ?? 'unverified',
+      catalogVerification: entry.event === 'auto_verify_completed' ? discovery?.catalog : null,
+    }, 'runtime-log', entry.timestamp);
     if (snapshot) candidates.push(snapshot);
   }
   candidates.sort((left, right) => timeValue(right.timestamp) - timeValue(left.timestamp));
@@ -71,7 +88,7 @@ export function selectLatestVerification({ tabs = [], history = [], runtimeLogs 
 }
 
 function safeModelIdentity(identity) {
-  if (!identity || typeof identity !== 'object') return null;
+  if (!identity || typeof identity !== 'object' || !Object.keys(identity).length) return null;
   return {
     status: asText(identity.status),
     requestedModel: asText(identity.requestedModel),
@@ -89,9 +106,11 @@ function safeModelIdentity(identity) {
 export function summarizeModelResult(item = {}) {
   return {
     attempt: item.attempt == null ? null : Number(item.attempt),
-    model: asText(item.model || item.label || item.rawModel || 'unknown'),
+    model: asText(item.model || item.label || item.rawModel || item.requestModel || 'unknown'),
+    selectorKey: asText(item.selectorKey),
+    discoverySource: asText(item.discoverySource),
     pickerMode: asText(item.pickerMode),
-    selectionAttempted: item.selectionAttempted === true,
+    selectionAttempted: item.selectionAttempted ?? item.selected ?? null,
     selectionConfirmed: typeof item.selectionConfirmed === 'boolean' ? item.selectionConfirmed : null,
     nativeStageComplete: typeof item.nativeStageComplete === 'boolean' ? item.nativeStageComplete : null,
     nativeRequestConfirmed: typeof item.nativeRequestConfirmed === 'boolean' ? item.nativeRequestConfirmed : null,
@@ -105,18 +124,18 @@ export function summarizeModelResult(item = {}) {
     nativeResponseCompatible: typeof item.nativeResponseCompatible === 'boolean' ? item.nativeResponseCompatible : null,
     nativeVerificationBasis: asText(item.nativeVerificationBasis),
     nativeTransportFailure: asText(item.nativeTransportFailure),
-    requestConfirmed: item.requestConfirmed === true || item.requestLockConfirmed === true,
+    requestConfirmed: item.requestConfirmed ?? item.requestLockConfirmed ?? null,
     requestModel: asText(item.requestModel),
     rawRequestModel: asText(item.rawRequestModel),
     networkObservedRequestModel: asText(item.networkObservedRequestModel),
-    responseConfirmed: item.responseConfirmed === true,
+    responseConfirmed: item.responseConfirmed ?? null,
     responseModel: asText(item.responseModel),
-    rawResponseModel: asText(item.rawResponseModel || item.nativeResponseModel),
+    rawResponseModel: asText(item.rawResponseModel),
     responseModelField: asText(item.responseModelField || item.responseField),
     responseRequestId: asText(item.responseRequestId),
     requestId: asText(item.requestId),
     responseIssue: asText(item.responseIssue),
-    responseHttpStatus: item.responseHttpStatus == null ? null : Number(item.responseHttpStatus),
+    responseHttpStatus: Number(item.responseHttpStatus) || null,
     evidenceSource: asText(item.evidenceSource),
     responseVerdict: asText(item.responseVerdict || item.verdict),
     chatLockStageComplete: typeof item.chatLockStageComplete === 'boolean' ? item.chatLockStageComplete : null,
@@ -139,81 +158,47 @@ export function summarizeModelResult(item = {}) {
   };
 }
 
-function withinVerificationWindow(entry, snapshot) {
-  const timestamp = timeValue(entry?.timestamp);
-  const start = timeValue(snapshot?.startedAt);
-  const end = timeValue(snapshot?.completedAt);
-  if (start && timestamp && timestamp < start - 15000) return false;
-  if (end && timestamp && timestamp > end + 15000) return false;
-  const expectedTab = snapshot?.executionTabId;
-  const actualTab = entry?.details?.tabId;
-  if (expectedTab != null && actualTab != null && Number(expectedTab) !== Number(actualTab)) return false;
-  return true;
-}
-
-function intersectsModel(values, item) {
-  const wanted = new Set([item?.model, item?.requestModel, item?.rawModel]
-    .map((value) => asText(value).trim().toLowerCase()).filter(Boolean));
-  return values.some((value) => wanted.has(asText(value).trim().toLowerCase()));
-}
-
 export function enrichVerificationSnapshot(snapshot, runtimeLogs = []) {
   if (!snapshot) return null;
-  const logs = asArray(runtimeLogs);
+  const requests = new Map();
+  const responses = new Map();
+  const evaluations = new Map();
+  const start = timeValue(snapshot.startedAt);
+  const end = timeValue(snapshot.completedAt);
+  const orderedLogs = asArray(runtimeLogs).slice().sort((a, b) => timeValue(a?.timestamp) - timeValue(b?.timestamp));
+  for (const entry of orderedLogs) {
+    const details = entry?.details;
+    const timestamp = timeValue(entry?.timestamp);
+    if (snapshot.executionTabId == null || details?.tabId !== snapshot.executionTabId
+      || !details.requestId || !start || !timestamp || timestamp < start || (end && timestamp > end)) continue;
+    if (entry.event === 'formal_conversation_request_detected') requests.set(details.requestId, details);
+    if (entry.event === 'conversation_response_metadata_observed') responses.set(details.requestId, details);
+    if (entry.event === 'response_evaluated') evaluations.set(details.requestId, details);
+  }
+
   const results = snapshot.results.map((sourceItem) => {
     const item = summarizeModelResult(sourceItem);
-    const relevant = logs.filter((entry) => withinVerificationWindow(entry, snapshot));
-    const requestEvents = relevant.filter((entry) => entry?.event === 'formal_conversation_request_detected'
-      && intersectsModel([
-        entry?.details?.model,
-        entry?.details?.observedModel,
-        entry?.details?.forwardedModel,
-      ], item));
-    const requestEvent = requestEvents.sort((a, b) => timeValue(b.timestamp) - timeValue(a.timestamp))[0] || null;
-    const requestId = item.requestId || asText(requestEvent?.details?.requestId);
-    const responseEvents = relevant.filter((entry) => [
-      'response_evaluated',
-      'conversation_response_metadata_observed',
-    ].includes(entry?.event));
-    const responseEvent = responseEvents
-      .filter((entry) => {
-        const detailId = asText(entry?.details?.requestId || entry?.details?.transportRequestId);
-        if (requestId && detailId) return detailId === requestId;
-        return intersectsModel([
-          entry?.details?.requestModel,
-          entry?.details?.modelIdentity?.requestedModel,
-          entry?.details?.rawResponseModel,
-          entry?.details?.originalResponseModel,
-          entry?.details?.observedModel,
-        ], item);
-      })
-      .sort((a, b) => {
-        const aExact = requestId && asText(a?.details?.requestId || a?.details?.transportRequestId) === requestId ? 1 : 0;
-        const bExact = requestId && asText(b?.details?.requestId || b?.details?.transportRequestId) === requestId ? 1 : 0;
-        return bExact - aExact || timeValue(b.timestamp) - timeValue(a.timestamp);
-      })[0] || null;
-    const requestDetails = requestEvent?.details || {};
-    const responseDetails = responseEvent?.details || {};
-    const identity = responseDetails.modelIdentity || {};
-    const diagnostics = responseDetails.diagnostics || {};
+    const request = requests.get(item.requestId);
+    const metadata = responses.get(item.requestId);
+    const evaluation = evaluations.get(item.requestId);
+    const rawResponseModel = item.rawResponseModel || asText(evaluation?.rawResponseModel || metadata?.rawResponseModel);
+    // A later partial event may describe a different response or lack a model field.
+    const modelEvidence = [evaluation, metadata].find((event) =>
+      rawResponseModel && event?.rawResponseModel === rawResponseModel && event.responseModelField);
     return {
       ...item,
-      requestId: item.requestId || requestId,
-      responseRequestId: item.responseRequestId || asText(responseDetails.requestId || responseDetails.transportRequestId),
-      rawRequestModel: item.rawRequestModel
-        || asText(requestDetails.observedModel || requestDetails.forwardedModel || requestDetails.model),
-      rawResponseModel: item.rawResponseModel
-        || asText(responseDetails.rawResponseModel || responseDetails.originalResponseModel || responseDetails.observedModel),
-      responseModel: item.responseModel || asText(responseDetails.model || responseDetails.originalResponseModel),
-      responseModelField: item.responseModelField || asText(responseDetails.responseModelField || identity.responseField),
-      responseHttpStatus: item.responseHttpStatus ?? (diagnostics.httpStatus == null
-        ? responseDetails.httpStatus == null ? null : Number(responseDetails.httpStatus)
-        : Number(diagnostics.httpStatus)),
-      responseIssue: item.responseIssue || asText(responseDetails.evidenceIssue),
-      evidenceSource: item.evidenceSource || asText(responseDetails.evidenceSource),
-      responseVerdict: item.responseVerdict || asText(responseDetails.verdict),
-      responseModelIdentity: item.responseModelIdentity || safeModelIdentity(identity),
-      requestEvidenceSource: asText(requestDetails.requestEvidenceSource),
+      responseRequestId: item.responseRequestId || (metadata || evaluation ? item.requestId : ''),
+      transportResponseRequestId: asText(metadata?.transportRequestId),
+      rawRequestModel: item.rawRequestModel || asText(request?.rawRequestModel),
+      networkObservedRequestModel: item.networkObservedRequestModel || asText(request?.observedModel),
+      rawResponseModel,
+      responseModelField: item.responseModelField || asText(modelEvidence?.responseModelField),
+      responseHttpStatus: item.responseHttpStatus ?? metadata?.httpStatus ?? evaluation?.diagnostics?.httpStatus ?? null,
+      responseIssue: item.responseIssue || asText(evaluation?.evidenceIssue),
+      evidenceSource: item.evidenceSource || asText(evaluation?.evidenceSource),
+      responseVerdict: item.responseVerdict || asText(evaluation?.verdict),
+      responseModelIdentity: item.responseModelIdentity || safeModelIdentity(evaluation?.modelIdentity),
+      requestEvidenceSource: asText(request?.requestEvidenceSource),
     };
   });
   return { ...snapshot, results };
@@ -227,14 +212,14 @@ export function latestGatePublication(runtimeLogs = []) {
   const details = entry.details || {};
   return {
     timestamp: asText(entry.timestamp),
-    submitted: Number(details.submitted || 0),
-    nativeResponseConfirmed: Number(details.nativeResponseConfirmed || 0),
-    workNativeResponseObserved: Number(details.workNativeResponseObserved || 0),
-    workNativeResponseMetadataConfirmed: Number(details.workNativeResponseMetadataConfirmed || 0),
-    chatLockSupported: Number(details.chatLockSupported || 0),
-    fourGateEligible: Number(details.fourGateEligible || 0),
-    shared: Number(details.shared || 0),
-    generation: Number(details.generation || 0),
+    submitted: Number.isInteger(details.submitted) ? details.submitted : null,
+    nativeResponseConfirmed: Number.isInteger(details.nativeResponseConfirmed) ? details.nativeResponseConfirmed : null,
+    workNativeResponseObserved: Number.isInteger(details.workNativeResponseObserved) ? details.workNativeResponseObserved : null,
+    workNativeResponseMetadataConfirmed: Number.isInteger(details.workNativeResponseMetadataConfirmed) ? details.workNativeResponseMetadataConfirmed : null,
+    chatLockSupported: Number.isInteger(details.chatLockSupported) ? details.chatLockSupported : null,
+    fourGateEligible: Number.isInteger(details.fourGateEligible) ? details.fourGateEligible : null,
+    shared: Number.isInteger(details.shared) ? details.shared : null,
+    generation: Number.isInteger(details.generation) ? details.generation : null,
   };
 }
 
@@ -288,11 +273,11 @@ function safeRuntimeEvent(entry) {
     'tabId', 'sourceTabId', 'executionTabId', 'outcome', 'reason',
     'catalogTotal', 'catalogRequestConfirmed', 'catalogVerified', 'catalogFailed',
     'requestId', 'responseRequestId', 'requestModel', 'rawRequestModel',
-    'networkObservedRequestModel', 'responseModel', 'rawResponseModel',
+    'networkObservedRequestModel', 'responseModel', 'rawResponseModel', 'requestEvidenceSource',
     'responseIssue', 'responseHttpStatus', 'pickerMode', 'model',
     'streamCaptureBytes', 'streamCaptureOverflowed',
     'observedModel', 'forwardedModel', 'originalResponseModel', 'responseModelField',
-    'responseVerdict', 'verdict', 'decision', 'responseHttpStatus', 'httpStatus',
+    'responseVerdict', 'verdict', 'decision', 'httpStatus', 'transportRequestId',
     'nativeResponseConfirmed', 'workNativeResponseObserved',
     'workNativeResponseMetadataConfirmed', 'chatLockSupported',
     'fourGateEligible', 'shared', 'submitted', 'generation',
@@ -302,6 +287,7 @@ function safeRuntimeEvent(entry) {
     if (Object.hasOwn(details, key)) selected[key] = details[key];
   }
   if (Array.isArray(details.models)) selected.models = details.models.map(summarizeModelResult);
+  if (entry?.event === 'model_discovery_completed') selected.results = asArray(details.results).map(summarizeModelResult);
   if (details.modelIdentity && typeof details.modelIdentity === 'object') {
     selected.modelIdentity = safeModelIdentity(details.modelIdentity);
   }
@@ -357,7 +343,8 @@ export function createDiagnosticsReport({
     },
     fourGatePublication: gatePublication,
     runtimeEvents: logs
-      .filter((entry) => entry?.component === 'discovery'
+      .filter((entry) => ['formal_conversation_request_detected', 'conversation_response_metadata_observed'].includes(entry?.event)
+        || entry?.component === 'discovery'
         || /model|verification|response/i.test(String(entry?.component || '')))
       .slice(-100)
       .map(safeRuntimeEvent),

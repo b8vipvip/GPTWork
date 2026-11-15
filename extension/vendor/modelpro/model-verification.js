@@ -181,10 +181,7 @@ export function createModelVerificationHistoryRecord(
     ? autoVerification.catalogVerification : {};
   const attempts = Array.isArray(autoVerification?.attempts) ? autoVerification.attempts : [];
   const catalogResults = Array.isArray(catalog.results) ? catalog.results : [];
-  // The current background autoVerify flow stores per-model attempts but leaves
-  // autoVerification.catalogVerification null. Prefer a real catalog when one is
-  // supplied, otherwise persist the attempt summaries instead of writing an
-  // empty 0-model history record.
+  // A run interrupted before the catalog is attached may only have attempt summaries.
   const sourceResults = catalogResults.length ? catalogResults : attempts;
   const total = Number(catalog.total) > 0
     ? Number(catalog.total)
@@ -197,7 +194,7 @@ export function createModelVerificationHistoryRecord(
     : sourceResults.filter((item) => item?.requestConfirmed === true || item?.requestLockConfirmed === true).length;
   const failed = Number.isFinite(Number(catalog.failed)) && catalogResults.length
     ? Number(catalog.failed)
-    : Math.max(0, total - verified);
+    : sourceResults.filter((item) => item?.verified === false || item?.outcome === 'unverified').length;
   const results = sourceResults.map((item) => {
     const identity = item?.responseModelIdentity || item?.modelIdentity || null;
     const responseModelIdentity = identity && typeof identity === 'object' && Object.keys(identity).length ? {
@@ -220,24 +217,25 @@ export function createModelVerificationHistoryRecord(
       selectorKey: item?.selectorKey ?? null,
       label: item?.label ?? item?.model ?? item?.requestModel ?? 'Unknown model',
       verified: item?.verified === true || item?.outcome === 'verified',
-      requestConfirmed: item?.requestConfirmed === true || item?.requestLockConfirmed === true,
-      responseConfirmed: item?.responseConfirmed === true,
+      requestConfirmed: item?.requestConfirmed ?? item?.requestLockConfirmed ?? null,
+      responseConfirmed: item?.responseConfirmed ?? null,
       requestId: item?.requestId ?? null,
       responseRequestId: item?.responseRequestId ?? null,
       requestModel: item?.requestModel ?? null,
       rawRequestModel: item?.rawRequestModel ?? null,
       networkObservedRequestModel: item?.networkObservedRequestModel ?? null,
       responseModel: item?.responseModel ?? null,
-      rawResponseModel: item?.rawResponseModel ?? item?.nativeResponseModel ?? null,
+      rawResponseModel: item?.rawResponseModel ?? null,
       responseModelField: item?.responseModelField ?? item?.responseField ?? null,
-      responseHttpStatus: item?.responseHttpStatus == null ? null : Number(item.responseHttpStatus),
+      responseHttpStatus: Number(item?.responseHttpStatus) || null,
       evidenceModel: item?.evidenceModel ?? null,
       responseReasoning: item?.responseReasoning ?? null,
       responseVerdict: item?.responseVerdict ?? item?.verdict ?? null,
       responseIssue: item?.responseIssue ?? null,
       evidenceSource: item?.evidenceSource ?? null,
       pickerMode: item?.pickerMode ?? null,
-      selectionAttempted: item?.selectionAttempted === true,
+      discoverySource: item?.discoverySource ?? null,
+      selectionAttempted: item?.selectionAttempted ?? item?.selected ?? null,
       selectionConfirmed: typeof item?.selectionConfirmed === 'boolean' ? item.selectionConfirmed : null,
       nativeStageComplete: typeof item?.nativeStageComplete === 'boolean' ? item.nativeStageComplete : null,
       nativeRequestConfirmed: typeof item?.nativeRequestConfirmed === 'boolean' ? item.nativeRequestConfirmed : null,
