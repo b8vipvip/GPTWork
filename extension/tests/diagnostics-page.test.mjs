@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import {
   createDiagnosticsReport,
   DIAGNOSTICS_STORAGE_KEYS,
+  enrichVerificationSnapshot,
+  latestGatePublication,
   selectLatestVerification,
   summarizeModelResult,
   summarizeStreamCapture,
@@ -41,6 +43,88 @@ test('latest verification is selected by evidence timestamp across live tabs, hi
   assert.equal(selected.source, 'runtime-log');
   assert.equal(selected.total, 3);
   assert.equal(selected.results[0].model, 'gpt-5.6-sol');
+});
+
+test('autoVerify attempt summaries are used when the background leaves catalogVerification null', () => {
+  const snapshot = selectLatestVerification({
+    tabs: [{
+      autoVerification: {
+        startedAt: '2026-11-15T10:00:00.000Z',
+        completedAt: '2026-11-15T10:01:00.000Z',
+        executionTabId: 29,
+        maxAttempts: 2,
+        outcome: 'partial',
+        catalogVerification: null,
+        attempts: [
+          { attempt: 1, requestLockConfirmed: true, requestModel: 'gpt-6-astra',
+            responseModel: 'gpt-6', responseConfirmed: false, outcome: 'unverified' },
+          { attempt: 2, requestLockConfirmed: true, requestModel: 'gpt-5.6-sol',
+            responseModel: 'gpt-5.6-sol', responseConfirmed: true, outcome: 'verified' },
+        ],
+      },
+    }],
+  });
+  assert.equal(snapshot.total, 2);
+  assert.equal(snapshot.requestConfirmed, 2);
+  assert.equal(snapshot.verified, 1);
+  assert.equal(snapshot.results.length, 2);
+  assert.equal(snapshot.results[0].requestModel, 'gpt-6-astra');
+});
+
+test('runtime request and response events enrich an attempt with exact request correlation', () => {
+  const snapshot = selectLatestVerification({
+    tabs: [{
+      autoVerification: {
+        startedAt: '2026-11-15T10:00:00.000Z',
+        completedAt: '2026-11-15T10:01:00.000Z',
+        executionTabId: 29,
+        maxAttempts: 1,
+        outcome: 'partial',
+        attempts: [{ attempt: 1, requestLockConfirmed: true,
+          requestModel: 'gpt-6-astra', responseModel: 'gpt-6',
+          responseConfirmed: false, outcome: 'unverified' }],
+      },
+    }],
+  });
+  const logs = [
+    { timestamp: '2026-11-15T10:00:20.000Z', component: 'network',
+      event: 'formal_conversation_request_detected',
+      details: { tabId: 29, requestId: 'req-exact-1', model: 'gpt-6-astra',
+        observedModel: 'gpt-6-astra-wm' } },
+    { timestamp: '2026-11-15T10:00:30.000Z', component: 'verification',
+      event: 'response_evaluated',
+      details: { tabId: 29, requestId: 'req-exact-1', requestModel: 'gpt-6-astra',
+        originalResponseModel: 'gpt-6', rawResponseModel: 'gpt-6',
+        responseModelField: 'message.metadata.resolved_model_slug',
+        diagnostics: { httpStatus: 200 },
+        modelIdentity: { status: 'family_only', requestedModel: 'gpt-6-astra',
+          observedModel: 'gpt-6', responseField: 'message.metadata.resolved_model_slug',
+          variantConfirmed: false, definitiveMismatch: false } } },
+  ];
+  const enriched = enrichVerificationSnapshot(snapshot, logs);
+  assert.equal(enriched.results[0].requestId, 'req-exact-1');
+  assert.equal(enriched.results[0].responseRequestId, 'req-exact-1');
+  assert.equal(enriched.results[0].rawRequestModel, 'gpt-6-astra-wm');
+  assert.equal(enriched.results[0].rawResponseModel, 'gpt-6');
+  assert.equal(enriched.results[0].responseModelField, 'message.metadata.resolved_model_slug');
+  assert.equal(enriched.results[0].responseHttpStatus, 200);
+  assert.equal(enriched.results[0].responseModelIdentity.status, 'family_only');
+  assert.equal(enriched.results[0].responseConfirmed, false);
+});
+
+test('four-gate publication summary comes only from the explicit shared catalog publication event', () => {
+  const summary = latestGatePublication([{
+    timestamp: '2026-11-15T10:05:00.000Z',
+    component: 'discovery',
+    event: 'shared_model_catalog_published',
+    details: { submitted: 4, nativeResponseConfirmed: 2,
+      workNativeResponseObserved: 3, workNativeResponseMetadataConfirmed: 1,
+      chatLockSupported: 2, fourGateEligible: 1, shared: 1, generation: 42 },
+  }]);
+  assert.equal(summary.fourGateEligible, 1);
+  assert.equal(summary.chatLockSupported, 2);
+  assert.equal(summary.workNativeResponseObserved, 3);
+  assert.equal(latestGatePublication([]), null);
 });
 
 test('request and response identities remain separate and missing raw fields stay missing', () => {
