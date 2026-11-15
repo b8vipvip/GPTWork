@@ -18,6 +18,12 @@ import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { isActiveNewChatRequestHandoff } from './chat-context-handoff.js';
 import { analyzeAstraDebugSse, normalChatSseBaseline } from './astra-debug-sse.js';
 import { evaluateGuard } from './guard.js';
+import {
+  DEFAULT_RESPONSE_EVIDENCE_TIMEOUT_MS,
+  createResponseEvidenceWatchdog,
+  touchResponseEvidenceWatchdog,
+  isResponseEvidenceWatchdogExpired,
+} from './response-watchdog.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
 import {
@@ -60,11 +66,15 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.250';
+const RUNTIME_CODE_VERSION = '0.5.251';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
 const AUTO_VERIFY_RESPONSE_TIMEOUT_MS = 120000;
+const RESPONSE_EVIDENCE_TIMEOUT_MS = DEFAULT_RESPONSE_EVIDENCE_TIMEOUT_MS;
+const FORMAL_REQUEST_DETECTION_TIMEOUT_MS = 45000;
+const RESPONSE_EVIDENCE_ALARM_PREFIX = 'gptwork-response-evidence-timeout:';
+const RESPONSE_EVIDENCE_ALARM_RESCHEDULE_MIN_MS = 15000;
 const AUTO_VERIFY_POLL_MS = 200;
 const AUTO_VERIFY_HANDOFF_MIN_WAIT_MS = 9000;
 const AUTO_VERIFY_HANDOFF_IDLE_MS = 1200;
@@ -732,6 +742,9 @@ function createTabState(tabId, url = '') {
     lastKnownPageModel: null,
     lastRewrite: null,
     lastRequest: null,
+    pendingSend: null,
+    pendingSendGeneration: 0,
+    responseWatchdog: null,
     lastVerification: null,
     lastResponseEvidence: null,
     responseModelIdentity: null,
@@ -777,6 +790,7 @@ function ensureTabState(tabId, url = '') {
           running: Boolean(state.autoVerification?.running),
         });
     } else {
+      clearResponseEvidenceWatchdog(tabId);
       const monitor = state.monitor;
       state = createTabState(tabId, url);
       state.monitor = monitor;
@@ -902,6 +916,8 @@ function publicTabState(state) {
     pageObservation: state.pageObservation,
     lastRewrite: state.lastRewrite,
     lastRequest: state.lastRequest,
+    pendingSend: state.pendingSend,
+    responseWatchdog: state.responseWatchdog,
     lastVerification: state.lastVerification,
     lastResponseEvidence: state.lastResponseEvidence,
     responseModelIdentity: state.responseModelIdentity,
@@ -930,7 +946,7 @@ async function updateTabBadge(state) {
   } else if (guard.status === 'waiting') {
     text = '…';
     color = '#b45309';
-  } else if (['monitor_offline', 'core_offline', 'error', 'unverified'].includes(guard.status)) {
+  } else if (['monitor_offline', 'core_offline', 'error', 'unverified', 'response_timeout', 'request_not_observed'].includes(guard.status)) {
     text = '?';
     color = '#b45309';
   } else if (guard.status === 'disabled') {
@@ -964,6 +980,224 @@ async function broadcastTabState(tabId) {
   } catch {
     // A content script may not exist yet while a tab is loading.
   }
+}
+
+function responseEvidenceAlarmName(tabId) {
+  return `${RESPONSE_EVIDENCE_ALARM_PREFIX}${Number(tabId)}`;
+}
+
+function clearResponseEvidenceWatchdog(tabId, key = null) {
+  const normalizedTabId = Number(tabId);
+  const state = tabStates.get(normalizedTabId);
+  if (key && state?.responseWatchdog?.key !== String(key)) return false;
+  if (state) state.responseWatchdog = null;
+  try {
+    const result = chrome.alarms.clear(responseEvidenceAlarmName(normalizedTabId));
+    if (result && typeof result.catch === 'function') void result.catch(() => {});
+  } catch {}
+  return true;
+}
+
+function armResponseEvidenceWatchdog(tabId, {
+  key,
+  kind,
+  requestId = null,
+  generation = null,
+  stage = 'request',
+  timeoutMs = RESPONSE_EVIDENCE_TIMEOUT_MS,
+} = {}) {
+  const normalizedTabId = Number(tabId);
+  const state = tabStates.get(normalizedTabId);
+  const normalizedKey = String(key ?? '').trim();
+  if (!state || !normalizedKey) return false;
+
+  const now = Date.now();
+  const previous = state.responseWatchdog;
+  const base = previous?.key === normalizedKey
+    ? touchResponseEvidenceWatchdog(previous, normalizedKey, now, timeoutMs)
+    : createResponseEvidenceWatchdog(normalizedKey, now, timeoutMs);
+  if (!base) return false;
+
+  const previousAlarmDeadlineAt = previous?.key === normalizedKey
+    ? Number(previous.alarmDeadlineAt || 0) : 0;
+  const shouldReschedule = !previous
+    || previous.key !== normalizedKey
+    || !previousAlarmDeadlineAt
+    || base.deadlineAt - previousAlarmDeadlineAt >= RESPONSE_EVIDENCE_ALARM_RESCHEDULE_MIN_MS
+    || previousAlarmDeadlineAt <= now;
+  const watchdog = {
+    ...base,
+    kind,
+    requestId: requestId === null ? null : String(requestId),
+    generation: Number.isInteger(generation) ? generation : null,
+    stage,
+    alarmDeadlineAt: shouldReschedule ? base.deadlineAt : previousAlarmDeadlineAt,
+  };
+  state.responseWatchdog = watchdog;
+
+  if (shouldReschedule) {
+    try {
+      const result = chrome.alarms.create(responseEvidenceAlarmName(normalizedTabId), {
+        when: watchdog.deadlineAt,
+      });
+      if (result && typeof result.catch === 'function') {
+        void result.catch((error) => logRuntime('warn', 'network', 'response_watchdog_alarm_schedule_failed', {
+          tabId: normalizedTabId,
+          requestId: watchdog.requestId,
+          kind: watchdog.kind,
+          error: errorText(error),
+        }));
+      }
+    } catch (error) {
+      logRuntime('warn', 'network', 'response_watchdog_alarm_schedule_failed', {
+        tabId: normalizedTabId,
+        requestId: watchdog.requestId,
+        kind: watchdog.kind,
+        error: errorText(error),
+      });
+    }
+  }
+  return true;
+}
+
+function beginSendResponseWatchdog(tabId, state) {
+  const generation = Math.max(0, Number(state.pendingSendGeneration || 0)) + 1;
+  const startedAt = Date.now();
+  state.pendingSendGeneration = generation;
+  state.pendingSend = {
+    generation,
+    startedAt: new Date(startedAt).toISOString(),
+    previousRequestId: state.lastRequest?.requestId ?? null,
+  };
+  return armResponseEvidenceWatchdog(tabId, {
+    key: `send:${Number(tabId)}:${generation}`,
+    kind: 'send',
+    generation,
+    stage: 'awaiting_formal_request',
+    timeoutMs: FORMAL_REQUEST_DETECTION_TIMEOUT_MS,
+  });
+}
+
+function beginRequestResponseWatchdog(tabId, requestId, stage = 'request_detected') {
+  const state = tabStates.get(Number(tabId));
+  const normalizedRequestId = String(requestId ?? '');
+  if (!state || !normalizedRequestId
+    || String(state.lastRequest?.requestId ?? '') !== normalizedRequestId) return false;
+  return armResponseEvidenceWatchdog(tabId, {
+    key: `request:${normalizedRequestId}`,
+    kind: 'request',
+    requestId: normalizedRequestId,
+    stage,
+    timeoutMs: RESPONSE_EVIDENCE_TIMEOUT_MS,
+  });
+}
+
+function touchRequestResponseWatchdog(tabId, requestId, stage = 'response_activity') {
+  const state = tabStates.get(Number(tabId));
+  const normalizedRequestId = String(requestId ?? '');
+  const watchdog = state?.responseWatchdog;
+  if (!state || state.phase !== 'waiting' || watchdog?.kind !== 'request'
+    || watchdog.requestId !== normalizedRequestId) return false;
+  return armResponseEvidenceWatchdog(tabId, {
+    key: watchdog.key,
+    kind: 'request',
+    requestId: normalizedRequestId,
+    stage,
+    timeoutMs: RESPONSE_EVIDENCE_TIMEOUT_MS,
+  });
+}
+
+function settleResponseWatchdog(tabId, watchdog, reason) {
+  const normalizedTabId = Number(tabId);
+  const state = tabStates.get(normalizedTabId);
+  if (!state || !watchdog || state.responseWatchdog?.key !== watchdog.key
+    || state.phase !== 'waiting') return false;
+  if (watchdog.kind === 'request'
+    && String(state.lastRequest?.requestId ?? '') !== String(watchdog.requestId ?? '')) return false;
+  if (watchdog.kind === 'send'
+    && state.pendingSend?.generation !== watchdog.generation) return false;
+
+  const now = Date.now();
+  const settledAt = new Date(now).toISOString();
+  state.phase = 'unverified';
+  state.evidenceIssue = reason;
+  state.lastError = null;
+  if (watchdog.kind === 'request') {
+    state.lastVerification = {
+      verdict: 'unverified',
+      reason,
+      reasons: [reason],
+      model: null,
+      reasoning: null,
+      evidenceSource: 'network_response_metadata',
+      requestId: `cdp-${normalizedTabId}-${watchdog.requestId}`,
+      verifiedAt: settledAt,
+    };
+    state.lastEvidenceDiagnostics = {
+      ...(state.lastEvidenceDiagnostics || {}),
+      responseEvidenceResolution: reason,
+      responseEvidenceTimeoutMs: RESPONSE_EVIDENCE_TIMEOUT_MS,
+      responseEvidenceStage: watchdog.stage,
+      responseEvidenceLastActivityAt: new Date(watchdog.lastActivityAt).toISOString(),
+    };
+  } else {
+    state.lastVerification = null;
+    state.lastResponseEvidence = null;
+    state.responseModelIdentity = null;
+    state.lastEvidenceDiagnostics = {
+      ...(state.lastEvidenceDiagnostics || {}),
+      responseEvidenceResolution: reason,
+      requestDetectionTimeoutMs: FORMAL_REQUEST_DETECTION_TIMEOUT_MS,
+      responseEvidenceStage: watchdog.stage,
+    };
+  }
+  state.pendingSend = null;
+  clearResponseEvidenceWatchdog(normalizedTabId, watchdog.key);
+  logRuntime('warn', 'network',
+    watchdog.kind === 'send' ? 'formal_request_not_observed' : 'response_evidence_timeout', {
+      tabId: normalizedTabId,
+      requestId: watchdog.requestId,
+      watchdogKind: watchdog.kind,
+      stage: watchdog.stage,
+      reason,
+      timeoutMs: watchdog.kind === 'send'
+        ? FORMAL_REQUEST_DETECTION_TIMEOUT_MS : RESPONSE_EVIDENCE_TIMEOUT_MS,
+      lastActivityAt: new Date(watchdog.lastActivityAt).toISOString(),
+    });
+  void broadcastTabState(normalizedTabId);
+  return true;
+}
+
+function handleResponseEvidenceWatchdogAlarm(alarm) {
+  const tabId = Number(String(alarm?.name || '').slice(RESPONSE_EVIDENCE_ALARM_PREFIX.length));
+  if (!Number.isInteger(tabId)) return;
+  const state = tabStates.get(tabId);
+  const watchdog = state?.responseWatchdog;
+  if (!watchdog) {
+    clearResponseEvidenceWatchdog(tabId);
+    return;
+  }
+  const current = watchdog.kind === 'send'
+    ? state.pendingSend?.generation === watchdog.generation
+    : String(state.lastRequest?.requestId ?? '') === String(watchdog.requestId ?? '');
+  if (!current || state.phase !== 'waiting') {
+    clearResponseEvidenceWatchdog(tabId, watchdog.key);
+    return;
+  }
+  const now = Date.now();
+  if (!isResponseEvidenceWatchdogExpired(watchdog, watchdog.key, now)) {
+    state.responseWatchdog = { ...watchdog, alarmDeadlineAt: watchdog.deadlineAt };
+    try {
+      const result = chrome.alarms.create(responseEvidenceAlarmName(tabId), { when: watchdog.deadlineAt });
+      if (result && typeof result.catch === 'function') void result.catch(() => {});
+    } catch {}
+    return;
+  }
+  settleResponseWatchdog(
+    tabId,
+    watchdog,
+    watchdog.kind === 'send' ? 'formal_request_not_observed' : 'response_evidence_timeout',
+  );
 }
 
 async function ensureConfiguration() {
@@ -1338,6 +1572,21 @@ async function applyNetworkEvidence(tabId, evidence) {
     evidence.rawResponseBody = null;
     return;
   }
+  const pendingSend = state.pendingSend;
+  const previousRequestCapturedAt = Date.parse(state.lastRequest?.capturedAt || '');
+  const pendingSendStartedAt = Date.parse(pendingSend?.startedAt || '');
+  if (pendingSend && state.lastRequest?.requestId === evidenceRequestId
+    && Number.isFinite(previousRequestCapturedAt)
+    && Number.isFinite(pendingSendStartedAt)
+    && previousRequestCapturedAt <= pendingSendStartedAt) {
+    logRuntime('info', 'network', 'response_evidence_ignored_previous_turn_during_pending_send', {
+      tabId,
+      evidenceRequestId,
+      pendingSendGeneration: pendingSend.generation,
+    });
+    evidence.rawResponseBody = null;
+    return;
+  }
   const handoff = evidence?.diagnostics?.streamHandoff;
   if (handoff) {
     state.streamTracking = {
@@ -1369,6 +1618,9 @@ async function applyNetworkEvidence(tabId, evidence) {
     logRuntime('warn', 'diagnostics', 'auto_verify_stream_capture_failed', { tabId, error: errorText(error) });
   } finally {
     evidence.rawResponseBody = null;
+  }
+  if (evidenceRequestId && String(state.lastRequest?.requestId ?? '') === String(evidenceRequestId)) {
+    clearResponseEvidenceWatchdog(tabId, `request:${String(evidenceRequestId)}`);
   }
   const responseEvidence = mergeResponseEvidence(state, evidence);
   state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
@@ -1425,6 +1677,7 @@ async function applyNetworkEvidence(tabId, evidence) {
     ? normalizePolicy(requestPolicy)
     : runtimePolicyForTabSync(tabId);
   if (normalPolicy.lockedModels.length === 0) {
+    if (evidenceRequestId) clearResponseEvidenceWatchdog(tabId, `request:${String(evidenceRequestId)}`);
     state.lastVerification = null;
     state.evidenceIssue = null;
     state.lastError = null;
@@ -1503,6 +1756,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       ? 'conflicting_response_metadata'
       : null);
     state.phase = result.verdict;
+    if (evidenceRequestId) clearResponseEvidenceWatchdog(tabId, `request:${String(evidenceRequestId)}`);
     logRuntime(result.verdict === 'verified' ? 'info' : 'warn', 'discovery', 'response_evaluated', {
       tabId,
       policySource: requestPolicy ? 'request-snapshot' : 'live-tab-policy',
@@ -1524,6 +1778,7 @@ async function applyNetworkEvidence(tabId, evidence) {
       diagnostics: responseEvidence.diagnostics ?? null,
     });
   } catch (error) {
+    if (evidenceRequestId) clearResponseEvidenceWatchdog(tabId, `request:${String(evidenceRequestId)}`);
     state.phase = 'error';
     state.evidenceIssue = 'verification_request_failed';
     state.lastError = errorText(error);
@@ -1603,7 +1858,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
     state.monitor = monitor;
     const detachedWhileWaiting = !monitor.attached && state.phase === 'waiting';
     if (detachedWhileWaiting) {
+      clearResponseEvidenceWatchdog(tabId);
+      state.pendingSend = null;
       state.phase = 'error';
+      state.evidenceIssue = 'response_monitor_detached';
       state.lastError = monitor.error || 'request_lock_monitor_detached';
     }
     // Picker/navigation transitions can detach CDP cleanly. Keep those lifecycle
@@ -1763,6 +2021,8 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // observes the same request, leaving forwardedFetchRequestId null.
     const forwarded = forwardedRequestLedger.find(tabId, request.requestId)
       || state.lastRewrite;
+    clearResponseEvidenceWatchdog(tabId);
+    state.pendingSend = null;
     state.lastRequest = withForwardedRequestEvidence(observedRequest, forwarded);
     state.probeUsed = true;
     state.probeArmed = false;
@@ -1774,6 +2034,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
     state.lastResponseEvidence = null;
     state.responseModelIdentity = null;
     state.lastEvidenceDiagnostics = null;
+    if (currentSettings.networkVerificationEnabled
+      && !verificationTransactionForTab(tabId)
+      && !state.autoVerification?.running) {
+      beginRequestResponseWatchdog(tabId, request.requestId);
+    }
     if (networkMonitor.hasOriginTrace(tabId)) {
       logRuntime('info', 'astra-origin-trace', 'astra_origin_conversation_request', {
         tabId,
@@ -1806,6 +2071,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
     void broadcastTabState(tabId);
   },
   onProtocolEvent(tabId, protocol) {
+    if (['conversation_response_activity', 'conversation_response_headers',
+      'conversation_response_finished', 'conversation_response_failed'].includes(protocol?.event)) {
+      touchRequestResponseWatchdog(tabId, protocol?.requestId,
+        protocol?.event === 'conversation_response_activity' ? 'response_stream_activity' : protocol.event);
+    }
     const debug = debugAstraProbes.get(tabId);
     if (debug && debug.requestId && protocol?.requestId === debug.requestId
       && protocol?.downstream !== true
@@ -1996,6 +2266,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
       });
     }
     const state = ensureTabState(tabId);
+    const streamRequestId = streamData?.streamContext?.initialRequestId || streamData?.requestId || null;
+    if (streamRequestId) {
+      touchRequestResponseWatchdog(tabId, streamRequestId,
+        streamData?.streamContext?.isDownstream ? 'downstream_stream_data' : 'response_stream_data');
+    }
     if (streamData?.streamContext?.isDownstream) {
       const tracking = state.streamTracking || {
         detectedAt: Date.now(),
@@ -2390,6 +2665,8 @@ function sleep(ms) {
 }
 
 function resetVerificationAttempt(state) {
+  clearResponseEvidenceWatchdog(state.tabId);
+  state.pendingSend = null;
   state.phase = 'initial';
   state.probeUsed = false;
   state.probeArmed = false;
@@ -5302,6 +5579,10 @@ chrome.runtime.onInstalled.addListener(() => void initialize());
 chrome.runtime.onStartup.addListener(() => void initialize());
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name.startsWith(RESPONSE_EVIDENCE_ALARM_PREFIX)) {
+    handleResponseEvidenceWatchdogAlarm(alarm);
+    return;
+  }
   if (alarm.name === RECONNECT_ALARM) {
     void masterStorageEnabled().then((enabled) => {
       if (enabled) return initialize();
@@ -5350,7 +5631,18 @@ chrome.windows.onRemoved.addListener(() => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'loading') {
+    const state = tabStates.get(tabId);
+    const nextContextKey = contextKey(tab.url ?? state?.url ?? '');
+    if (state?.phase === 'waiting'
+      && state.contextKey.startsWith('conversation:')
+      && nextContextKey === state.contextKey
+      && state.responseWatchdog) {
+      settleResponseWatchdog(tabId, state.responseWatchdog, 'page_reloaded_before_response_confirmation');
+    }
+  }
   if (changeInfo.url && !isChatGptUrl(changeInfo.url)) {
+    clearResponseEvidenceWatchdog(tabId);
     tabStates.delete(tabId);
     originSceneByTab.delete(tabId);
     originArmedTabIds.delete(tabId);
@@ -5414,6 +5706,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  clearResponseEvidenceWatchdog(tabId);
   if (debugAstraProbes.has(tabId)) {
     recordDebugAstra(tabId, 'astra_debug_tab_closed', { phase: 'failed', error: 'target_tab_closed' });
     void endDebugAstra(tabId);
@@ -5454,6 +5747,8 @@ function applyConfigurationChange({ policyChanged = false, settingsChanged = fal
     strictMode: currentPolicy.strictMode,
   });
   for (const state of tabStates.values()) {
+    clearResponseEvidenceWatchdog(state.tabId);
+    state.pendingSend = null;
     state.phase = 'initial';
     state.probeUsed = false;
     state.probeArmed = false;
@@ -6007,6 +6302,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return { accepted: true, guard };
         }
         if (currentSettings.networkVerificationEnabled) state.phase = 'waiting';
+        if (currentSettings.networkVerificationEnabled && !verification
+          && !state.autoVerification?.running) {
+          clearResponseEvidenceWatchdog(sender.tab.id);
+          state.evidenceIssue = null;
+          state.lastError = null;
+          state.lastVerification = null;
+          state.lastResponseEvidence = null;
+          state.responseModelIdentity = null;
+          state.lastEvidenceDiagnostics = null;
+          state.streamTracking = null;
+          beginSendResponseWatchdog(sender.tab.id, state);
+        }
         state.probeUsed = true;
         state.probeArmed = false;
         state.lastError = null;
@@ -6023,6 +6330,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const tabId = Number.isInteger(message.tabId) ? message.tabId : await activeTabId();
         if (tabId === null) throw new Error('No active tab');
         const state = ensureTabState(tabId);
+        clearResponseEvidenceWatchdog(tabId);
+        state.pendingSend = null;
         state.phase = 'initial';
         state.probeArmed = false;
         state.lastVerification = null;
