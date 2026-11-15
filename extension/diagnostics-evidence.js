@@ -175,7 +175,7 @@ export function createDiagnosticsReport({
   const logs = asArray(runtimeLogs);
   const latest = selectLatestVerification({
     tabs: asArray(bundle.tabs),
-    history: asArray(history),
+    history: historyEnabled === true ? asArray(history) : [],
     runtimeLogs: logs,
   });
   const stream = summarizeStreamCapture(streamCapture || bundle.autoVerificationStream);
