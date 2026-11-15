@@ -107,6 +107,7 @@ def next_action(task: Task) -> dict:
                     "pr_ci_run_id": str(meta.get("pr_ci_run_id") or ""),
                     "main_ci_run_id": str(meta.get("main_ci_run_id") or ""),
                     "release_run_id": str(meta.get("release_run_id") or ""),
+                    "release_tag_target_sha": str(meta.get("release_tag_target_sha") or ""),
                 },
             },
         )
