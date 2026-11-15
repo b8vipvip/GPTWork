@@ -161,7 +161,12 @@ export function createModelEvidenceDiagnosticReport(bundle = {}, { modelVerifica
       omittedBytes: Number(streamCapture?.omittedBytes || 0),
       entries: streamEntries.map(summarizeStreamEntry),
     },
-    privacy: bundle?.privacy ?? null,
+    privacy: {
+      summaryIncludesRawStreamPayloads: false,
+      fullBundleIncludesRawStreamPayloads: streamEntries.length > 0,
+      fullBundlePrivacyNotice: bundle?.privacy?.noteZhCn ?? null,
+      note: 'This summary contains parsed stream metadata only. Raw SSE/WebSocket payloads are excluded; use the separately confirmed full-bundle export only when necessary.',
+    },
     evidencePolicy: {
       requestCorrelation: 'Stream entries are joined to model results only by exact requestId / responseRequestId.',
       parsedStreamAuthority: false,
