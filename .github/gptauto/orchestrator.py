@@ -182,6 +182,6 @@ class Orchestrator:
             task.state = State.BLOCKED
             task.record(d.reason)
         elif d.action == "wait":
-            step.status = GateStatus.WAITING
+            gate(task, step.gate, GateStatus.WAITING, d.reason)
         canonicalize_task(task)
         return d
