@@ -94,7 +94,7 @@ test('content errors are persisted to the same bounded local runtime log buffer'
 });
 
 test('runtime logs stay out of settings while diagnostics use a separate evidence page', () => {
-  assert.doesNotMatch(settings, /Local runtime logs|exportLocalLogs|clearLocalLogs|settings-local-logs\\.js/);
+  assert.doesNotMatch(settings, /Local runtime logs|exportLocalLogs|clearLocalLogs|settings-local-logs\.js/);
   assert.equal(fs.existsSync(new URL('../diagnostics.html', import.meta.url)), true);
   assert.equal(fs.existsSync(new URL('../diagnostics.js', import.meta.url)), true);
   const diagnostics = fs.readFileSync(new URL('../diagnostics.js', import.meta.url), 'utf8');
