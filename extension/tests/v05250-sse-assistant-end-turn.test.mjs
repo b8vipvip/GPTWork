@@ -80,5 +80,5 @@ test('probe and UI display distinct assistant turn and per-message signals', asy
   assert.match(probe, /'sseAssistantStatusSequence'/);
   assert.match(ui, /probeSseEndTurn/);
   assert.match(html, /id="probeSseStatusSequence"/);
-  assert.equal(JSON.parse(manifest).version, '0.5.251');
+  assert.equal(JSON.parse(manifest).version, '0.5.252');
 });
