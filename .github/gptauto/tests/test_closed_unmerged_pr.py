@@ -46,7 +46,7 @@ class ClosedUnmergedPullRequestTests(unittest.TestCase):
 
             task = read_task(result)
             self.assertEqual(result["phase"], "USER_ACTION_REQUIRED")
-            self.assertEqual(result["completion_lease"], "BLOCKED")
+            self.assertEqual(task.metadata["completion_lease"], "BLOCKED")
             self.assertTrue(result["allow_foreground_exit"])
             self.assertEqual(task.state, State.BLOCKED)
             self.assertEqual(task.metadata["pr_state"], "closed")
@@ -61,7 +61,7 @@ class ClosedUnmergedPullRequestTests(unittest.TestCase):
 
             task = read_task(result)
             self.assertEqual(result["phase"], "USER_ACTION_REQUIRED")
-            self.assertEqual(result["completion_lease"], "BLOCKED")
+            self.assertEqual(task.metadata["completion_lease"], "BLOCKED")
             self.assertEqual(task.state, State.BLOCKED)
             self.assertEqual(task.metadata["pr_state"], "closed")
             self.assertFalse(task.metadata["pr_merged"])
@@ -75,7 +75,7 @@ class ClosedUnmergedPullRequestTests(unittest.TestCase):
 
             task = read_task(result)
             self.assertNotEqual(result["phase"], "USER_ACTION_REQUIRED")
-            self.assertEqual(result["completion_lease"], "ACTIVE")
+            self.assertEqual(task.metadata["completion_lease"], "ACTIVE")
             self.assertEqual(task.state, State.EXECUTE)
             self.assertEqual(task.metadata["pr_state"], "open")
             self.assertEqual(task.metadata["blocked_reason"], "")
@@ -87,7 +87,7 @@ class ClosedUnmergedPullRequestTests(unittest.TestCase):
 
             task = read_task(result)
             self.assertNotEqual(result["phase"], "USER_ACTION_REQUIRED")
-            self.assertNotEqual(result["completion_lease"], "BLOCKED")
+            self.assertNotEqual(task.metadata["completion_lease"], "BLOCKED")
             self.assertEqual(task.metadata["pr_state"], "closed")
             self.assertTrue(task.metadata["pr_merged"])
             self.assertEqual(task.metadata["merge_sha"], MERGE)
