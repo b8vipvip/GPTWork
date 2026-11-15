@@ -1793,7 +1793,11 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // observes the same request, leaving forwardedFetchRequestId null.
     const forwarded = forwardedRequestLedger.find(tabId, request.requestId)
       || state.lastRewrite;
+    const previousRequestId = state.lastRequest?.requestId;
     state.lastRequest = withForwardedRequestEvidence(observedRequest, forwarded);
+    if (previousRequestId && previousRequestId !== request.requestId) {
+      clearResponseEvidenceTimeout(tabId, previousRequestId);
+    }
     if (currentSettings.networkVerificationEnabled && !verificationTransactionForTab(tabId)) {
       scheduleResponseEvidenceTimeout(tabId, request.requestId);
     } else {
