@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPTWork Diagnostics</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; }
+    body { margin: 0; background: Canvas; color: CanvasText; }
+    main { width: min(1120px, calc(100% - 36px)); margin: 28px auto 64px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; }
+    .sub { margin: 8px 0 0; color: GrayText; line-height: 1.6; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button { border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); border-radius: 9px; padding: 9px 13px; background: ButtonFace; color: ButtonText; font: inherit; cursor: pointer; }
+    button.primary { background: #2563eb; border-color: #2563eb; color: white; }
+    button:disabled { opacity: .55; cursor: wait; }
+    .status { margin: 18px 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 10px; color: GrayText; }
+    .warning { margin: 18px 0; padding: 14px 16px; border: 1px solid #b7791f; border-radius: 10px; background: color-mix(in srgb, #b7791f 10%, Canvas); line-height: 1.65; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 18px 0; }
+    .card { border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 12px; padding: 15px; min-width: 0; }
+    .metric { display: block; font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    .metric-label { color: GrayText; font-size: 12px; margin-top: 5px; }
+    h2 { font-size: 17px; margin: 28px 0 10px; }
+    .muted { color: GrayText; }
+    .table-wrap { overflow-x: auto; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 820px; }
+    th, td { padding: 10px 11px; border-bottom: 1px solid color-mix(in srgb, CanvasText 12%, transparent); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { color: GrayText; font-weight: 600; background: color-mix(in srgb, CanvasText 5%, Canvas); }
+    tr:last-child td { border-bottom: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+    .empty { padding: 18px; color: GrayText; text-align: center; }
+    details { margin-top: 18px; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 10px; padding: 12px 14px; }
+    details p { color: GrayText; line-height: 1.65; }
+    @media (max-width: 640px) { main { width: calc(100% - 24px); margin-top: 18px; } h1 { font-size: 22px; } header { display: block; } .actions { margin-top: 14px; } .actions button { flex: 1; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>GPTWork 诊断中心 <span class="muted">/ Diagnostics</span></h1>
+        <p class="sub">收集模型验证、请求关联、响应身份与传输诊断。报告只读，不会修改模型锁定或验证状态。</p>
+      </div>
+      <div class="actions">
+        <button id="refreshDiagnostics" type="button">刷新诊断</button>
+        <button id="exportSummary" class="primary" type="button" disabled>导出脱敏摘要</button>
+        <button id="exportFull" type="button" disabled>导出完整诊断包</button>
+      </div>
+    </header>
+
+    <div id="diagnosticStatus" class="status" role="status" aria-live="polite">正在读取 GPTWork 诊断信息…</div>
+
+    <section class="warning" aria-label="Privacy notice">
+      <strong>隐私提示 / Privacy notice</strong><br>
+      脱敏摘要不包含原始 SSE/WebSocket 正文。完整诊断包可能包含自动验证固定测试消息的短期 resume token、消息/会话 ID 和服务端元数据；不会采集 Cookie、Authorization 或请求/响应头。请只通过可信渠道分享完整诊断包。
+    </section>
+
+    <section class="grid" aria-label="Diagnostic overview">
+      <article class="card"><span id="metricVersion" class="metric">—</span><div class="metric-label">扩展版本 / Extension version</div></article>
+      <article class="card"><span id="metricRuns" class="metric">—</span><div class="metric-label">自动验证轮次 / Verification runs</div></article>
+      <article class="card"><span id="metricModels" class="metric">—</span><div class="metric-label">模型结果 / Model results</div></article>
+      <article class="card"><span id="metricStreams" class="metric">—</span><div class="metric-label">捕获流量 / Captured stream data</div></article>
+      <article class="card"><span id="metricHistory" class="metric">—</span><div class="metric-label">持久化历史 / Saved history</div></article>
+    </section>
+
+    <section>
+      <h2>模型验证证据 / Model verification evidence</h2>
+      <div id="verificationTable" class="table-wrap"><div class="empty">尚无验证记录</div></div>
+    </section>
+
+    <section>
+      <h2>响应流诊断候选 / Parsed response-stream candidates</h2>
+      <p class="muted">下表只展示从已捕获流量解析出的诊断候选，不会把候选提升为已验证模型。</p>
+      <div id="streamTable" class="table-wrap"><div class="empty">尚无捕获流量</div></div>
+    </section>
+
+    <details>
+      <summary>诊断包包含什么？ / What is included?</summary>
+      <p>脱敏摘要包含自动验证结果、Picker 模式、请求 ID、请求/响应模型身份、响应字段路径、失败原因、相关运行日志和流捕获统计。完整诊断包额外包含自动验证专用 SSE/WebSocket 捕获及 Native Core 诊断记录。模型验证历史默认关闭；若希望持久保存历史，请先在设置页开启“发现模型记录”。</p>
+    </details>
+  </main>
+  <script type="module" src="diagnostics.js"></script>
+</body>
+</html>
