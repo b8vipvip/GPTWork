@@ -199,8 +199,8 @@ export function createModelVerificationHistoryRecord(
     ? Number(catalog.failed)
     : Math.max(0, total - verified);
   const results = sourceResults.map((item) => {
-    const identity = item?.responseModelIdentity || item?.modelIdentity || {};
-    const responseModelIdentity = identity && typeof identity === 'object' ? {
+    const identity = item?.responseModelIdentity || item?.modelIdentity || null;
+    const responseModelIdentity = identity && typeof identity === 'object' && Object.keys(identity).length ? {
       status: identity.status ?? null,
       requestedModel: identity.requestedModel ?? null,
       observedModel: identity.observedModel ?? null,
