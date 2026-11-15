@@ -38,13 +38,21 @@
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>目标模型</th><th>Picker</th><th>请求确认</th><th>请求模型 / 原始模型</th>
-            <th>响应确认</th><th>响应模型 / 原始模型</th><th>响应问题</th><th>Request ID</th>
+            <th>目标模型</th><th>Picker / 选择</th><th>请求改写</th><th>响应身份</th>
+            <th>Native 阶段</th><th>Chat Lock</th><th>证据问题</th><th>请求关联 ID</th>
           </tr></thead>
           <tbody id="models"><tr><td colspan="8" class="empty">暂无模型结果</td></tr></tbody>
         </table>
       </div>
-      <p class="footnote">请求确认与响应确认是不同证据。只有数据源明确提供时才显示原始模型、响应请求 ID 和各阶段门禁；未提供字段显示为“未暴露”。</p>
+      <p class="footnote">请求改写、响应身份、Native 阶段和 Chat Lock 是独立门禁。未提供字段显示为“未暴露”，不会用流完成或 HTTP 200 推断服务端模型身份。</p>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div><span class="eyebrow">FOUR-GATE PUBLICATION</span><h2>四门资格 / 共享目录</h2></div>
+      </div>
+      <div id="gatePublication" class="gate-grid notice">等待共享目录发布记录…</div>
+      <p class="footnote">这里读取共享模型目录发布事件中的实际计数。没有发布事件时显示未知，不会用单个模型验证结果推算四门资格。</p>
     </section>
 
     <section class="panel">

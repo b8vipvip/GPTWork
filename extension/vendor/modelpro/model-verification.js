@@ -177,41 +177,121 @@ export function createModelVerificationHistoryRecord(
   autoVerification,
   { reportType = 'modelpro-model-verification-report' } = {},
 ) {
-  const catalog = autoVerification?.catalogVerification || {};
+  const catalog = autoVerification?.catalogVerification && typeof autoVerification.catalogVerification === 'object'
+    ? autoVerification.catalogVerification : {};
+  const attempts = Array.isArray(autoVerification?.attempts) ? autoVerification.attempts : [];
+  const catalogResults = Array.isArray(catalog.results) ? catalog.results : [];
+  // The current background autoVerify flow stores per-model attempts but leaves
+  // autoVerification.catalogVerification null. Prefer a real catalog when one is
+  // supplied, otherwise persist the attempt summaries instead of writing an
+  // empty 0-model history record.
+  const sourceResults = catalogResults.length ? catalogResults : attempts;
+  const total = Number(catalog.total) > 0
+    ? Number(catalog.total)
+    : Math.max(Number(autoVerification?.maxAttempts || 0), sourceResults.length);
+  const verified = Number.isFinite(Number(catalog.verified)) && catalogResults.length
+    ? Number(catalog.verified)
+    : sourceResults.filter((item) => item?.verified === true || item?.outcome === 'verified').length;
+  const requestConfirmed = Number.isFinite(Number(catalog.requestConfirmed)) && catalogResults.length
+    ? Number(catalog.requestConfirmed)
+    : sourceResults.filter((item) => item?.requestConfirmed === true || item?.requestLockConfirmed === true).length;
+  const failed = Number.isFinite(Number(catalog.failed)) && catalogResults.length
+    ? Number(catalog.failed)
+    : Math.max(0, total - verified);
+  const results = sourceResults.map((item) => {
+    const identity = item?.responseModelIdentity || item?.modelIdentity || null;
+    const responseModelIdentity = identity && typeof identity === 'object' && Object.keys(identity).length ? {
+      status: identity.status ?? null,
+      requestedModel: identity.requestedModel ?? null,
+      observedModel: identity.observedModel ?? null,
+      responseField: identity.responseField ?? null,
+      incompleteStream: identity.incompleteStream === true,
+      terminalEvent: identity.terminalEvent ?? null,
+      networkError: identity.networkError ?? null,
+      streamCaptureOverflowed: identity.streamCaptureOverflowed === true,
+      variantConfirmed: identity.variantConfirmed === true,
+      definitiveMismatch: identity.definitiveMismatch === true,
+    } : null;
+    return {
+      attempt: Number(item?.attempt || 0) || null,
+      sent: item?.sent === true || Boolean(item?.requestId),
+      model: item?.model ?? null,
+      rawModel: item?.rawModel ?? null,
+      selectorKey: item?.selectorKey ?? null,
+      label: item?.label ?? item?.model ?? item?.requestModel ?? 'Unknown model',
+      verified: item?.verified === true || item?.outcome === 'verified',
+      requestConfirmed: item?.requestConfirmed === true || item?.requestLockConfirmed === true,
+      responseConfirmed: item?.responseConfirmed === true,
+      requestId: item?.requestId ?? null,
+      responseRequestId: item?.responseRequestId ?? null,
+      requestModel: item?.requestModel ?? null,
+      rawRequestModel: item?.rawRequestModel ?? null,
+      networkObservedRequestModel: item?.networkObservedRequestModel ?? null,
+      responseModel: item?.responseModel ?? null,
+      rawResponseModel: item?.rawResponseModel ?? item?.nativeResponseModel ?? null,
+      responseModelField: item?.responseModelField ?? item?.responseField ?? null,
+      responseHttpStatus: item?.responseHttpStatus == null ? null : Number(item.responseHttpStatus),
+      evidenceModel: item?.evidenceModel ?? null,
+      responseReasoning: item?.responseReasoning ?? null,
+      responseVerdict: item?.responseVerdict ?? item?.verdict ?? null,
+      responseIssue: item?.responseIssue ?? null,
+      evidenceSource: item?.evidenceSource ?? null,
+      pickerMode: item?.pickerMode ?? null,
+      selectionAttempted: item?.selectionAttempted === true,
+      selectionConfirmed: typeof item?.selectionConfirmed === 'boolean' ? item.selectionConfirmed : null,
+      nativeStageComplete: typeof item?.nativeStageComplete === 'boolean' ? item.nativeStageComplete : null,
+      nativeRequestConfirmed: typeof item?.nativeRequestConfirmed === 'boolean' ? item.nativeRequestConfirmed : null,
+      nativeRequestIssue: item?.nativeRequestIssue ?? null,
+      nativeRequestModel: item?.nativeRequestModel ?? null,
+      nativeResponseObserved: typeof item?.nativeResponseObserved === 'boolean' ? item.nativeResponseObserved : null,
+      nativeResponseConfirmed: typeof item?.nativeResponseConfirmed === 'boolean' ? item.nativeResponseConfirmed : null,
+      nativeResponseMetadataConfirmed: typeof item?.nativeResponseMetadataConfirmed === 'boolean'
+        ? item.nativeResponseMetadataConfirmed : null,
+      nativeResponseModel: item?.nativeResponseModel ?? null,
+      nativeResponseCompatible: typeof item?.nativeResponseCompatible === 'boolean' ? item.nativeResponseCompatible : null,
+      nativeVerificationBasis: item?.nativeVerificationBasis ?? null,
+      nativeTransportFailure: item?.nativeTransportFailure ?? null,
+      chatLockStageComplete: typeof item?.chatLockStageComplete === 'boolean' ? item.chatLockStageComplete : null,
+      chatLockSupported: typeof item?.chatLockSupported === 'boolean' ? item.chatLockSupported : null,
+      chatLockRequestConfirmed: typeof item?.chatLockRequestConfirmed === 'boolean' ? item.chatLockRequestConfirmed : null,
+      chatLockResponseConfirmed: typeof item?.chatLockResponseConfirmed === 'boolean' ? item.chatLockResponseConfirmed : null,
+      chatAttemptTransport: item?.chatAttemptTransport ?? null,
+      chatAttemptResponseModel: item?.chatAttemptResponseModel ?? null,
+      chatTransportModel: item?.chatTransportModel ?? null,
+      chatResponseModel: item?.chatResponseModel ?? null,
+      chatAttemptRequestId: item?.chatAttemptRequestId ?? null,
+      chatAttemptResponseRequestId: item?.chatAttemptResponseRequestId ?? null,
+      chatAttemptResponseIssue: item?.chatAttemptResponseIssue ?? null,
+      fourGateEligible: typeof item?.fourGateEligible === 'boolean' ? item.fourGateEligible : null,
+      responseModelIdentity,
+      timedOut: item?.timedOut === true,
+      turnSettled: item?.turnSettled === true,
+      outcome: item?.outcome ?? null,
+      reason: item?.reason ?? null,
+      error: item?.error ?? null,
+    };
+  });
   const record = {
     id: `${autoVerification?.startedAt || new Date().toISOString()}:${tabId}`,
     tabId,
+    sourceTabId: autoVerification?.sourceTabId ?? tabId,
+    executionTabId: autoVerification?.executionTabId ?? null,
     startedAt: autoVerification?.startedAt ?? null,
     completedAt: autoVerification?.completedAt ?? null,
     outcome: autoVerification?.outcome ?? 'unverified',
     reason: autoVerification?.reason ?? null,
-    total: Number(catalog.total || 0),
-    verified: Number(catalog.verified || 0),
-    failed: Number(catalog.failed || 0),
+    total,
+    requestConfirmed,
+    verified,
+    failed,
+    resultSource: catalogResults.length ? 'catalog' : attempts.length ? 'attempts' : 'none',
     pageContext: autoVerification?.pageContext ?? null,
-    pickerModes: Array.isArray(catalog.pickerModes) ? [...catalog.pickerModes] : [],
-    results: (Array.isArray(catalog.results) ? catalog.results : []).map((item) => ({
-      model: item.model ?? null,
-      rawModel: item.rawModel ?? null,
-      selectorKey: item.selectorKey ?? null,
-      label: item.label ?? item.model ?? item.requestModel ?? 'Unknown model',
-      verified: item.verified === true,
-      requestConfirmed: item.requestConfirmed === true,
-      responseConfirmed: item.responseConfirmed === true,
-      requestId: item.requestId ?? null,
-      requestModel: item.requestModel ?? null,
-      networkObservedRequestModel: item.networkObservedRequestModel ?? null,
-      responseModel: item.responseModel ?? null,
-      evidenceModel: item.evidenceModel ?? null,
-      responseReasoning: item.responseReasoning ?? null,
-      responseVerdict: item.responseVerdict ?? null,
-      responseIssue: item.responseIssue ?? null,
-      evidenceSource: item.evidenceSource ?? null,
-      pickerMode: item.pickerMode ?? null,
-      timedOut: item.timedOut === true,
-      turnSettled: item.turnSettled === true,
-      error: item.error ?? null,
-    })),
+    verificationSurface: autoVerification?.verificationSurface ?? null,
+    infrastructureFailure: autoVerification?.infrastructureFailure === true,
+    pickerModes: Array.isArray(catalog.pickerModes) && catalog.pickerModes.length
+      ? [...catalog.pickerModes]
+      : [...new Set(results.map((item) => item.pickerMode).filter(Boolean))],
+    results,
   };
   record.report = {
     schemaVersion: MODELPRO_VERIFICATION_SCHEMA_VERSION,
