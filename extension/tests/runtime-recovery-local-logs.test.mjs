@@ -93,12 +93,15 @@ test('content errors are persisted to the same bounded local runtime log buffer'
   assert.match(contentErrorCapture, /slice\(-LIMIT\)/);
 });
 
-test('runtime logs no longer expose a browser diagnostics UI', () => {
-  assert.doesNotMatch(settings, /Local runtime logs|exportLocalLogs|clearLocalLogs|settings-local-logs\.js/);
-  assert.equal(fs.existsSync(new URL('../diagnostics.html', import.meta.url)), false);
-  assert.equal(fs.existsSync(new URL('../diagnostics.js', import.meta.url)), false);
+test('runtime logs stay out of settings while diagnostics use a separate evidence page', () => {
+  assert.doesNotMatch(settings, /Local runtime logs|exportLocalLogs|clearLocalLogs|settings-local-logs\\.js/);
+  assert.equal(fs.existsSync(new URL('../diagnostics.html', import.meta.url)), true);
+  assert.equal(fs.existsSync(new URL('../diagnostics.js', import.meta.url)), true);
+  const diagnostics = fs.readFileSync(new URL('../diagnostics.js', import.meta.url), 'utf8');
+  assert.match(diagnostics, /GPTLOCK_EXPORT_DIAGNOSTICS/);
+  assert.match(diagnostics, /GPTLOCK_GET_RUNTIME_LOGS/);
+  assert.doesNotMatch(diagnostics, /rawSse|rawFrame|responseBody/);
 });
-
 test('model verification copy is account-based and legacy authorization-code copy stays absent', () => {
   assert.match(popup, /验证当前 ChatGPT 账户可用模型/);
   for (const source of [popup, popupShell, settings]) {
