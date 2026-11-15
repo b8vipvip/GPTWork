@@ -2,7 +2,7 @@
 
 GPTWork 是面向 ChatGPT 官方网页聊天的模型与推理偏好管理工具，支持 Windows / Linux 上的 Chrome、Chromium 和 Edge。
 
-当前正式版本：**0.5.28**。
+当前正式版本：**0.5.253**。
 
 ## 用户可以做什么
 
