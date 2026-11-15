@@ -20,10 +20,10 @@ test('ordinary request schedules a bounded response-evidence deadline scoped to 
 
 test('alarm scheduling supports Chrome 110 void returns and Chrome 111+ promises', () => {
   assert.match(manifest, /"minimum_chrome_version": "110"/);
-  assert.match(background, /function createResponseEvidenceAlarm\\(tabId, requestId, when\\)/);
-  assert.match(background, /const result = chrome\\.alarms\\.create/);
-  assert.match(background, /if \\(result && typeof result\\.catch === 'function'\\)/);
-  assert.match(background, /createResponseEvidenceAlarm\\(tabId, requestId, lastActivityAt \\+ RESPONSE_STREAM_IDLE_GRACE_MS\\)/);
+  assert.match(background, /function createResponseEvidenceAlarm\(tabId, requestId, when\)/);
+  assert.match(background, /const result = chrome\.alarms\.create/);
+  assert.match(background, /if \(result && typeof result\.catch === 'function'\)/);
+  assert.match(background, /createResponseEvidenceAlarm\(tabId, requestId, lastActivityAt \+ RESPONSE_STREAM_IDLE_GRACE_MS\)/);
 });
 
 test('missing response terminal cannot leave the matching request waiting forever', () => {
