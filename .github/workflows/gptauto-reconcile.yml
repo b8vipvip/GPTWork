@@ -75,17 +75,24 @@ jobs:
 
           # Reuse successful exact-SHA evidence or wait for an already-running
           # main-branch CI run. Dispatch only when no reusable run exists.
-          gh workflow view "$primary_path" --repo "$REPOSITORY" --yaml > /tmp/gptauto-product-workflow.yml
-          grep -Eq '^[[:space:]]*workflow_dispatch:' /tmp/gptauto-product-workflow.yml || {
-            echo "::error::Canonical post-merge workflow $primary_path has no workflow_dispatch trigger. Add workflow_dispatch or configure GPTAUTO_POST_MERGE_WORKFLOW to a dispatchable product workflow."
-            exit 1
-          }
-
-          # The helper repeats the exact workflow/SHA/default-branch checks and
-          # accepts only push or workflow_dispatch evidence, never PR CI.
           runs_before="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$MERGE_SHA&per_page=100")"
           selection="$(printf '%s' "$runs_before" | PYTHONPATH=.github python -m gptauto.reconcile select-run --workflow "$primary" --merge-sha "$MERGE_SHA" --default-branch "$DEFAULT_BRANCH")"
           selection_action="$(jq -r '.action' <<<"$selection")"
+
+          if [[ "$selection_action" == "dispatch" ]]; then
+            # Only require workflow_dispatch when we actually need a new run.
+            gh workflow view "$primary_path" --repo "$REPOSITORY" --yaml > /tmp/gptauto-product-workflow.yml
+            grep -Eq '^[[:space:]]*workflow_dispatch:' /tmp/gptauto-product-workflow.yml || {
+              echo "::error::Canonical post-merge workflow $primary_path has no workflow_dispatch trigger. Add workflow_dispatch or configure GPTAUTO_POST_MERGE_WORKFLOW to a dispatchable product workflow."
+              exit 1
+            }
+
+            # Recheck after resolving workflow metadata to catch a push run that
+            # registered while this reconcile job was preparing the dispatch.
+            runs_before="$(gh api "repos/$REPOSITORY/actions/runs?head_sha=$MERGE_SHA&per_page=100")"
+            selection="$(printf '%s' "$runs_before" | PYTHONPATH=.github python -m gptauto.reconcile select-run --workflow "$primary" --merge-sha "$MERGE_SHA" --default-branch "$DEFAULT_BRANCH")"
+            selection_action="$(jq -r '.action' <<<"$selection")"
+          fi
 
           if [[ "$selection_action" == "reuse" || "$selection_action" == "wait" ]]; then
             validation_run_id="$(jq -r '.run_id // empty' <<<"$selection")"
