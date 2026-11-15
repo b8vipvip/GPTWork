@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from gptauto.github import GitHubClient, GitHubError
-from gptauto.model import Criterion, Gate, GateStep, Task
+from gptauto.model import Criterion, Gate, GateStatus, GateStep, Task
 from gptauto.observer import _release_event_published_for_merge, capture
 from gptauto.orchestrator import Orchestrator
 
