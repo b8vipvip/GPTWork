@@ -139,6 +139,105 @@ export function summarizeModelResult(item = {}) {
   };
 }
 
+function withinVerificationWindow(entry, snapshot) {
+  const timestamp = timeValue(entry?.timestamp);
+  const start = timeValue(snapshot?.startedAt);
+  const end = timeValue(snapshot?.completedAt);
+  if (start && timestamp && timestamp < start - 15000) return false;
+  if (end && timestamp && timestamp > end + 15000) return false;
+  const expectedTab = snapshot?.executionTabId;
+  const actualTab = entry?.details?.tabId;
+  if (expectedTab != null && actualTab != null && Number(expectedTab) !== Number(actualTab)) return false;
+  return true;
+}
+
+function intersectsModel(values, item) {
+  const wanted = new Set([item?.model, item?.requestModel, item?.rawModel]
+    .map((value) => asText(value).trim().toLowerCase()).filter(Boolean));
+  return values.some((value) => wanted.has(asText(value).trim().toLowerCase()));
+}
+
+export function enrichVerificationSnapshot(snapshot, runtimeLogs = []) {
+  if (!snapshot) return null;
+  const logs = asArray(runtimeLogs);
+  const results = snapshot.results.map((sourceItem) => {
+    const item = summarizeModelResult(sourceItem);
+    const relevant = logs.filter((entry) => withinVerificationWindow(entry, snapshot));
+    const requestEvents = relevant.filter((entry) => entry?.event === 'formal_conversation_request_detected'
+      && intersectsModel([
+        entry?.details?.model,
+        entry?.details?.observedModel,
+        entry?.details?.forwardedModel,
+      ], item));
+    const requestEvent = requestEvents.sort((a, b) => timeValue(b.timestamp) - timeValue(a.timestamp))[0] || null;
+    const requestId = item.requestId || asText(requestEvent?.details?.requestId);
+    const responseEvents = relevant.filter((entry) => [
+      'response_evaluated',
+      'conversation_response_metadata_observed',
+    ].includes(entry?.event));
+    const responseEvent = responseEvents
+      .filter((entry) => {
+        const detailId = asText(entry?.details?.requestId || entry?.details?.transportRequestId);
+        if (requestId && detailId) return detailId === requestId;
+        return intersectsModel([
+          entry?.details?.requestModel,
+          entry?.details?.modelIdentity?.requestedModel,
+          entry?.details?.rawResponseModel,
+          entry?.details?.originalResponseModel,
+          entry?.details?.observedModel,
+        ], item);
+      })
+      .sort((a, b) => {
+        const aExact = requestId && asText(a?.details?.requestId || a?.details?.transportRequestId) === requestId ? 1 : 0;
+        const bExact = requestId && asText(b?.details?.requestId || b?.details?.transportRequestId) === requestId ? 1 : 0;
+        return bExact - aExact || timeValue(b.timestamp) - timeValue(a.timestamp);
+      })[0] || null;
+    const requestDetails = requestEvent?.details || {};
+    const responseDetails = responseEvent?.details || {};
+    const identity = responseDetails.modelIdentity || {};
+    const diagnostics = responseDetails.diagnostics || {};
+    return {
+      ...item,
+      requestId: item.requestId || requestId,
+      responseRequestId: item.responseRequestId || asText(responseDetails.requestId || responseDetails.transportRequestId),
+      rawRequestModel: item.rawRequestModel
+        || asText(requestDetails.observedModel || requestDetails.forwardedModel || requestDetails.model),
+      rawResponseModel: item.rawResponseModel
+        || asText(responseDetails.rawResponseModel || responseDetails.originalResponseModel || responseDetails.observedModel),
+      responseModel: item.responseModel || asText(responseDetails.model || responseDetails.originalResponseModel),
+      responseModelField: item.responseModelField || asText(responseDetails.responseModelField || identity.responseField),
+      responseHttpStatus: item.responseHttpStatus ?? (diagnostics.httpStatus == null
+        ? responseDetails.httpStatus == null ? null : Number(responseDetails.httpStatus)
+        : Number(diagnostics.httpStatus)),
+      responseIssue: item.responseIssue || asText(responseDetails.evidenceIssue),
+      evidenceSource: item.evidenceSource || asText(responseDetails.evidenceSource),
+      responseVerdict: item.responseVerdict || asText(responseDetails.verdict),
+      responseModelIdentity: item.responseModelIdentity || safeModelIdentity(identity),
+      requestEvidenceSource: asText(requestDetails.requestEvidenceSource),
+    };
+  });
+  return { ...snapshot, results };
+}
+
+export function latestGatePublication(runtimeLogs = []) {
+  const entry = asArray(runtimeLogs).filter((item) => item?.component === 'discovery'
+    && item?.event === 'shared_model_catalog_published')
+    .sort((a, b) => timeValue(b.timestamp) - timeValue(a.timestamp))[0];
+  if (!entry) return null;
+  const details = entry.details || {};
+  return {
+    timestamp: asText(entry.timestamp),
+    submitted: Number(details.submitted || 0),
+    nativeResponseConfirmed: Number(details.nativeResponseConfirmed || 0),
+    workNativeResponseObserved: Number(details.workNativeResponseObserved || 0),
+    workNativeResponseMetadataConfirmed: Number(details.workNativeResponseMetadataConfirmed || 0),
+    chatLockSupported: Number(details.chatLockSupported || 0),
+    fourGateEligible: Number(details.fourGateEligible || 0),
+    shared: Number(details.shared || 0),
+    generation: Number(details.generation || 0),
+  };
+}
+
 export function summarizeStreamCapture(capture) {
   const entries = asArray(capture?.entries).map((entry) => ({
     attempt: entry?.attempt ?? null,
@@ -192,12 +291,20 @@ function safeRuntimeEvent(entry) {
     'networkObservedRequestModel', 'responseModel', 'rawResponseModel',
     'responseIssue', 'responseHttpStatus', 'pickerMode', 'model',
     'streamCaptureBytes', 'streamCaptureOverflowed',
+    'observedModel', 'forwardedModel', 'originalResponseModel', 'responseModelField',
+    'responseVerdict', 'verdict', 'decision', 'responseHttpStatus', 'httpStatus',
+    'nativeResponseConfirmed', 'workNativeResponseObserved',
+    'workNativeResponseMetadataConfirmed', 'chatLockSupported',
+    'fourGateEligible', 'shared', 'submitted', 'generation',
   ];
   const selected = {};
   for (const key of allowed) {
     if (Object.hasOwn(details, key)) selected[key] = details[key];
   }
   if (Array.isArray(details.models)) selected.models = details.models.map(summarizeModelResult);
+  if (details.modelIdentity && typeof details.modelIdentity === 'object') {
+    selected.modelIdentity = safeModelIdentity(details.modelIdentity);
+  }
   return {
     timestamp: asText(entry?.timestamp),
     level: asText(entry?.level),
@@ -216,12 +323,14 @@ export function createDiagnosticsReport({
   generatedAt = new Date().toISOString(),
 } = {}) {
   const logs = asArray(runtimeLogs);
-  const latest = selectLatestVerification({
+  const selected = selectLatestVerification({
     tabs: asArray(bundle.tabs),
     history: historyEnabled === true ? asArray(history) : [],
     runtimeLogs: logs,
   });
+  const latest = enrichVerificationSnapshot(selected, logs);
   const stream = summarizeStreamCapture(streamCapture || bundle.autoVerificationStream);
+  const gatePublication = latestGatePublication(logs);
   return {
     schemaVersion: 1,
     type: 'gptwork-diagnostics-summary',
@@ -238,17 +347,15 @@ export function createDiagnosticsReport({
     modelVerification: {
       historyEnabled: historyEnabled === true,
       historyCount: historyEnabled === true ? asArray(history).length : null,
-      latest: latest ? {
-        ...latest,
-        results: latest.results.map(summarizeModelResult),
-      } : null,
+      latest,
       history: historyEnabled === true
         ? asArray(history).slice(0, 50).map((record) => {
           const snapshot = makeSnapshot(record, 'model-history');
-          return snapshot ? { ...snapshot, results: snapshot.results.map(summarizeModelResult) } : null;
+          return snapshot ? enrichVerificationSnapshot(snapshot, logs) : null;
         }).filter(Boolean)
         : [],
     },
+    fourGatePublication: gatePublication,
     runtimeEvents: logs
       .filter((entry) => entry?.component === 'discovery'
         || /model|verification|response/i.test(String(entry?.component || '')))
