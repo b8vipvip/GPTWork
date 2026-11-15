@@ -143,7 +143,20 @@ class Orchestrator:
             if not tag:
                 return Decision("blocked", "release_tag is required")
             rel = self.github.release_by_tag(tag)
-            return Decision("passed", f"release {tag} exists") if rel and not rel.get("draft") else Decision("wait", f"release {tag} missing")
+            if not rel or rel.get("draft") or not rel.get("published_at"):
+                return Decision("wait", f"published release {tag} is not available")
+            expected_sha = str(m.get("merge_sha") or "").strip().lower()
+            if not expected_sha:
+                return Decision("blocked", "merge_sha is required to verify the release target")
+            actual_sha = str(self.github.tag_commit_sha(tag) or "").strip().lower()
+            if not actual_sha:
+                return Decision("wait", f"release tag {tag} target SHA could not be resolved")
+            if actual_sha != expected_sha:
+                return Decision(
+                    "wait",
+                    f"release tag {tag} points to {actual_sha}, expected merge SHA {expected_sha}",
+                )
+            return Decision("passed", f"published release {tag} targets merge SHA {expected_sha}")
         if g == Gate.RUNTIME_VERIFY:
             v = m.get("verification", {})
             if v.get("passed") is True:
