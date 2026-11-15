@@ -788,6 +788,30 @@ function ensureTabState(tabId, url = '') {
   return state;
 }
 
+const RESPONSE_EVIDENCE_TIMEOUT_MS = 120000;
+const RESPONSE_EVIDENCE_TIMEOUT_PREFIX = 'gptwork-response-evidence-timeout:';
+const RESPONSE_STREAM_IDLE_GRACE_MS = 30000;
+
+function responseEvidenceAlarmName(tabId, requestId) {
+  return RESPONSE_EVIDENCE_TIMEOUT_PREFIX + Number(tabId) + ':' + encodeURIComponent(String(requestId));
+}
+
+function scheduleResponseEvidenceTimeout(tabId, requestId) {
+  if (!Number.isInteger(tabId) || !requestId) return;
+  void chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), {
+    when: Date.now() + RESPONSE_EVIDENCE_TIMEOUT_MS,
+  }).catch((error) => {
+    logRuntime('warn', 'network', 'response_evidence_timeout_schedule_failed', {
+      tabId, error: errorText(error),
+    });
+  });
+}
+
+function clearResponseEvidenceTimeout(tabId, requestId = tabStates.get(tabId)?.lastRequest?.requestId) {
+  if (!Number.isInteger(tabId) || !requestId) return;
+  void chrome.alarms.clear(responseEvidenceAlarmName(tabId, requestId)).catch(() => {});
+}
+
 function accountAllowsState(state) {
   if (!accountState?.authenticated || !accountState?.entitlement?.active) return false;
   const windowKey = Number.isInteger(state?.windowId) ? `chrome:${state.windowId}` : null;
@@ -1372,6 +1396,11 @@ async function applyNetworkEvidence(tabId, evidence) {
   }
   const responseEvidence = mergeResponseEvidence(state, evidence);
   state.lastEvidenceDiagnostics = responseEvidence.diagnostics ?? null;
+  // Initial handoff metadata is provisional: keep the deadline alive while the
+  // downstream SSE/WebSocket is expected to provide served-model evidence.
+  if (evidence?.streamContext?.isDownstream === true || !evidence?.diagnostics?.streamHandoff) {
+    clearResponseEvidenceTimeout(tabId);
+  }
   if (!masterRuntimeEnabled()) return;
 
   const discoveryTransaction = verificationTransactionForTab(tabId);
@@ -1603,6 +1632,7 @@ const networkMonitor = new ChatGptNetworkMonitor({
     state.monitor = monitor;
     const detachedWhileWaiting = !monitor.attached && state.phase === 'waiting';
     if (detachedWhileWaiting) {
+      clearResponseEvidenceTimeout(tabId);
       state.phase = 'error';
       state.lastError = monitor.error || 'request_lock_monitor_detached';
     }
@@ -1763,7 +1793,16 @@ const networkMonitor = new ChatGptNetworkMonitor({
     // observes the same request, leaving forwardedFetchRequestId null.
     const forwarded = forwardedRequestLedger.find(tabId, request.requestId)
       || state.lastRewrite;
+    const previousRequestId = state.lastRequest?.requestId;
     state.lastRequest = withForwardedRequestEvidence(observedRequest, forwarded);
+    if (previousRequestId && previousRequestId !== request.requestId) {
+      clearResponseEvidenceTimeout(tabId, previousRequestId);
+    }
+    if (currentSettings.networkVerificationEnabled && !verificationTransactionForTab(tabId)) {
+      scheduleResponseEvidenceTimeout(tabId, request.requestId);
+    } else {
+      clearResponseEvidenceTimeout(tabId);
+    }
     state.probeUsed = true;
     state.probeArmed = false;
     if (currentSettings.networkVerificationEnabled) state.phase = 'waiting';
@@ -5317,6 +5356,36 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === RUNTIME_LOG_UPLOAD_ALARM) {
     void syncRuntimeLogsToNative().catch(() => {});
   }
+  if (alarm.name.startsWith(RESPONSE_EVIDENCE_TIMEOUT_PREFIX)) {
+    const identity = alarm.name.slice(RESPONSE_EVIDENCE_TIMEOUT_PREFIX.length);
+    const separator = identity.indexOf(':');
+    const tabId = Number(separator >= 0 ? identity.slice(0, separator) : NaN);
+    let requestId = null;
+    try { requestId = separator >= 0 ? decodeURIComponent(identity.slice(separator + 1)) : null; } catch {}
+    const state = Number.isInteger(tabId) ? tabStates.get(tabId) : null;
+    if (state?.phase === 'waiting' && requestId && state.lastRequest?.requestId === requestId) {
+      const lastActivityAt = Number(state.streamTracking?.lastActivityAt || 0);
+      const streamRecentlyActive = lastActivityAt > 0
+        && Date.now() - lastActivityAt < RESPONSE_STREAM_IDLE_GRACE_MS;
+      if (streamRecentlyActive) {
+        void chrome.alarms.create(responseEvidenceAlarmName(tabId, requestId), {
+          when: lastActivityAt + RESPONSE_STREAM_IDLE_GRACE_MS,
+        }).catch(() => {});
+      } else {
+        state.phase = 'unverified';
+        state.evidenceIssue = 'response_evidence_timeout';
+        state.lastError = 'response_evidence_timeout';
+        logRuntime('warn', 'network', 'response_evidence_timeout', {
+          tabId,
+          requestId,
+          timeoutMs: RESPONSE_EVIDENCE_TIMEOUT_MS,
+          downstreamEvidenceCount: state.streamTracking?.downstreamEvidenceCount || 0,
+          transports: state.streamTracking?.transports || [],
+        });
+        void broadcastTabState(tabId);
+      }
+    }
+  }
   if (alarm.name.startsWith(ASTRA_DEBUG_ALARM_PREFIX)) {
     const tabId = Number(alarm.name.slice(ASTRA_DEBUG_ALARM_PREFIX.length));
     if (debugAstraProbes.has(tabId)) {
@@ -5414,6 +5483,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
+  clearResponseEvidenceTimeout(tabId);
   if (debugAstraProbes.has(tabId)) {
     recordDebugAstra(tabId, 'astra_debug_tab_closed', { phase: 'failed', error: 'target_tab_closed' });
     void endDebugAstra(tabId);

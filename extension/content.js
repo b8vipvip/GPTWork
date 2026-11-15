@@ -548,6 +548,7 @@ document.addEventListener('pointerdown', (event) => {
       page_selection_not_allowed: '页面选择与策略不同；正式请求仍会尝试锁定 / UI differs; the formal request will still be locked',
       page_selection_missing: '页面未暴露完整选择；网络请求锁仍已就绪 / UI selection is incomplete; network request lock remains ready',
       response_verification_disabled: '响应确认已关闭；请求锁定仍启用 / Response verification is off; request locking remains active',
+      response_evidence_timeout: '响应确认超时；请求未被阻断，但模型尚未确认 / Response evidence timed out; chat remains available, model unverified',
       network_monitor_not_attached: '请求锁定器未连接；聊天不会因此被阻断 / Request lock is not attached; chat remains fail-open',
       native_core_offline: '本地核心离线；请求锁定仍由扩展尝试执行 / Native Core is offline; extension request locking remains active',
       metadata_missing: '响应确认元数据不完整；不会因此阻断聊天 / Response metadata is incomplete; chat remains available',
