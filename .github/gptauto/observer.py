@@ -61,6 +61,7 @@ def observation_dispatch_key(task: Task, phase: str) -> str:
         "main_ci_run_id": m.get("main_ci_run_id") or "",
         "release_run_id": m.get("release_run_id") or "",
         "release_published": bool(m.get("release_published")),
+        "release_tag_target_sha": m.get("release_tag_target_sha") or "",
         "release_required": bool(m.get("release_required")),
         "blocked_reason": m.get("blocked_reason") or "",
     }
@@ -75,10 +76,10 @@ def _passed(value):
 def _release_workflow(name):
     return bool(_RELEASE_WORKFLOW_RE.search(str(name or "")))
 
-def _release_event_published_for_merge(event, release_state, release_tag, head_sha, merge_sha):
-    """Accept a release event only when its tag resolves to this task's merge commit."""
+def _release_event_published_for_merge(event, release_state, release_tag, release_tag_target_sha, merge_sha):
+    """Accept release evidence only with an explicitly resolved tag target SHA."""
     tag = str(release_tag or "").strip()
-    observed_sha = str(head_sha or "").strip().lower()
+    observed_sha = str(release_tag_target_sha or "").strip().lower()
     expected_sha = str(merge_sha or "").strip().lower()
     return (
         event == "release"
@@ -118,6 +119,7 @@ def capture(
     workflow_conclusion="",
     release_tag="",
     release_state="",
+    release_tag_target_sha="",
     pr_ci_conclusion="",
     pr_ci_run_id="",
     main_ci_conclusion="",
@@ -148,7 +150,7 @@ def capture(
     if approval_required and not effective_blocked_reason:
         effective_blocked_reason = "workflow_approval_required"
 
-    release_event_published = _release_event_published_for_merge(event, release_state, release_tag, head_sha, merge_sha)
+    release_event_published = _release_event_published_for_merge(event, release_state, release_tag, release_tag_target_sha, merge_sha)
     explicit_release_published = str(release_published or "").strip().lower() in {"true", "1", "yes"}
     release_done = release_event_published or (explicit_release_published and _passed(release_conclusion))
     main_ci_done = _passed(main_ci_conclusion) or (
@@ -315,6 +317,7 @@ def capture(
             "workflow_name": workflow_name,
             "workflow_conclusion": workflow_conclusion,
             "release_tag": release_tag,
+            "release_tag_target_sha": release_tag_target_sha,
             "release_required": release_required,
             "completion_gate": completion_gate,
             "pr_ci_status": pr_ci_status,
@@ -345,6 +348,7 @@ def capture(
                     "pr_ci_status": pr_ci_status,
                     "pr_ci_conclusion": pr_ci_conclusion,
                     "release_tag": release_tag,
+                    "release_tag_target_sha": release_tag_target_sha,
                     "completion_gate": completion_gate,
                     "blocked_reason": effective_blocked_reason,
                 },
@@ -447,6 +451,7 @@ def main():
         "workflow-conclusion",
         "release-tag",
         "release-state",
+        "release-tag-target-sha",
         "pr-ci-conclusion",
         "pr-ci-run-id",
         "main-ci-conclusion",
@@ -485,6 +490,7 @@ def main():
                 workflow_conclusion=a.workflow_conclusion,
                 release_tag=a.release_tag,
                 release_state=a.release_state,
+                release_tag_target_sha=a.release_tag_target_sha,
                 pr_ci_conclusion=a.pr_ci_conclusion,
                 pr_ci_run_id=a.pr_ci_run_id,
                 main_ci_conclusion=a.main_ci_conclusion,
