@@ -18,6 +18,7 @@ import { classifyResponseModelIdentity } from './response-model-identity.js';
 import { isActiveNewChatRequestHandoff } from './chat-context-handoff.js';
 import { analyzeAstraDebugSse, normalChatSseBaseline } from './astra-debug-sse.js';
 import { evaluateGuard } from './guard.js';
+import { recordResponseStreamActivity } from './response-stream-activity.js';
 import { ForwardedRequestLedger, withForwardedRequestEvidence } from './request-evidence-correlation.js';
 import { classifyNativeError } from './native-status.js';
 import {
@@ -60,7 +61,7 @@ import {
   shouldRetryOfficialWorkNativeTransport,
 } from './vendor/modelpro/model-verification.js';
 
-const RUNTIME_CODE_VERSION = '0.5.252';
+const RUNTIME_CODE_VERSION = '0.5.253';
 const NATIVE_HOST = 'com.gptlock.core';
 const RECONNECT_ALARM = 'gptlock-native-reconnect';
 const REQUEST_TIMEOUT_MS = 7000;
@@ -1808,6 +1809,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
       || state.lastRewrite;
     const previousRequestId = state.lastRequest?.requestId;
     state.lastRequest = withForwardedRequestEvidence(observedRequest, forwarded);
+    // Stream activity and handoff evidence belong to one formal request only.
+    // Reset before accepting the next request so a previous turn cannot extend
+    // this request's response-evidence timeout or settle its auto-verify wait.
+    state.streamTracking = null;
     if (previousRequestId && previousRequestId !== request.requestId) {
       clearResponseEvidenceTimeout(tabId, previousRequestId);
     }
@@ -1858,6 +1863,12 @@ const networkMonitor = new ChatGptNetworkMonitor({
     void broadcastTabState(tabId);
   },
   onProtocolEvent(tabId, protocol) {
+    if (protocol?.event === 'conversation_response_activity') {
+      recordResponseStreamActivity(tabStates.get(tabId), protocol);
+      // This is high-frequency, byte-count-only telemetry. Keep it out of
+      // persistent logs; only the bounded last-activity snapshot is retained.
+      return;
+    }
     const debug = debugAstraProbes.get(tabId);
     if (debug && debug.requestId && protocol?.requestId === debug.requestId
       && protocol?.downstream !== true
@@ -2048,7 +2059,10 @@ const networkMonitor = new ChatGptNetworkMonitor({
       });
     }
     const state = ensureTabState(tabId);
-    if (streamData?.streamContext?.isDownstream) {
+    if (streamData?.streamContext?.isDownstream
+      && initialRequestId
+      && state.phase === 'waiting'
+      && initialRequestId === state.lastRequest?.requestId) {
       const tracking = state.streamTracking || {
         detectedAt: Date.now(),
         lastActivityAt: Date.now(),
